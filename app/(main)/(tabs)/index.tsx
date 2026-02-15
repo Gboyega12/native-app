@@ -61,9 +61,19 @@ export default function Home() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scroll}>
-      <Text style={styles.greeting}>
-        {userName ? `Hey, ${userName}` : 'Welcome back'}
-      </Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.greeting}>
+          {userName ? `Hey, ${userName}` : 'Welcome back'}
+        </Text>
+        <TouchableOpacity
+          style={styles.profileButton}
+          onPress={() => router.push('/(main)/profile')}
+        >
+          <Text style={styles.profileInitials}>
+            {userName ? userName.charAt(0).toUpperCase() : '?'}
+          </Text>
+        </TouchableOpacity>
+      </View>
 
       {!analysis ? (
         <View style={styles.emptyState}>
@@ -166,12 +176,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
   greeting: {
     fontFamily: fonts.mono,
     fontSize: 22,
     color: colors.text,
     fontWeight: '700',
-    marginBottom: spacing.lg,
+  },
+  profileButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileInitials: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: colors.bg,
+    fontWeight: '700',
   },
   sectionTitle: {
     fontFamily: fonts.mono,
