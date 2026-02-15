@@ -36,33 +36,60 @@ export interface CategoryBreakdown {
   [category: string]: number;
 }
 
+export interface BudgetCategory {
+  category: string;
+  monthly: number;
+  txs: number;
+}
+
+export interface BudgetSection {
+  total: number;
+  items: BudgetCategory[];
+}
+
 export interface IncomeSource {
-  name: string;
-  amount: number;
+  source: string;
   frequency: string;
+  avgAmount: number;
+  monthly: number;
+  isSalary: boolean;
 }
 
 export interface FinancialProfile {
-  monthlyIncome: number;
-  monthlySpending: number;
-  surplus: number;
-  categoryBreakdown: CategoryBreakdown;
-  discretionary: CategoryBreakdown;
-  nonDiscretionary: CategoryBreakdown;
+  monthly: {
+    income: number;
+    spending: number;
+    surplus: number;
+    subscriptions: number;
+    foodDelivery: number;
+    transport: number;
+    groceries: number;
+    shopping: number;
+    eatingOut: number;
+    entertainment: number;
+    debtPayments: number;
+  };
+  budgetReality: {
+    nonDiscretionary: BudgetSection;
+    discretionary: BudgetSection;
+  };
   incomeSources: IncomeSource[];
-  subscriptionTotal: number;
+  subscriptions: RecurringItem[];
   metrics: {
     savingsRate: number;
-    debtAccounts: number;
-    bnplUsage: number;
+    creditCardCount: number;
+    bnplCount: number;
+    debtAccountCount: number;
     subscriptionCount: number;
-    streamingServices: number;
-    deliverySpend: number;
-    eatingOutSpend: number;
-    transportSpend: number;
-    shoppingSpend: number;
-    grocerySpend: number;
-    coffeeSpend: number;
+    streamingCount: number;
+    foodDelivery: number;
+    transport: number;
+    groceries: number;
+    shopping: number;
+    eatingOut: number;
+    coffeeAndCafes: number;
+    entertainment: number;
+    debtPayments: number;
   };
 }
 
@@ -118,8 +145,8 @@ export interface Analysis {
   monthly_income: number;
   monthly_spending: number;
   surplus: number;
-  non_discretionary: CategoryBreakdown;
-  discretionary: CategoryBreakdown;
+  non_discretionary: BudgetSection;
+  discretionary: BudgetSection;
   income_sources: IncomeSource[];
   top_move: Move;
   all_moves: Move[];

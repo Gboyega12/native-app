@@ -195,7 +195,7 @@ const EnrichmentEngine = {
     return recurring;
   },
 
-  buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): any {
+  buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): FinancialProfile {
     const spending = transactions.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
     const income = transactions.filter((t) => t.isIncome && !t.isRefund);
 
