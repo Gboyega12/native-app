@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
   const redirectUri =
     process.env.TRUELAYER_REDIRECT_URI ||
-    'https://native-app-blush.vercel.app/api/truelayer/callback';
+    'https://native-app-ashy.vercel.app/api/truelayer/callback';
 
   try {
     // Exchange code for access token

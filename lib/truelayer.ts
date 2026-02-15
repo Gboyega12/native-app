@@ -2,7 +2,7 @@ const AUTH_URL = 'https://auth.truelayer.com';
 const CLIENT_ID = 'bocymoneypersonality-a01ae4';
 const REDIRECT_URI =
   process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
-  'https://native-app-blush.vercel.app/api/truelayer/callback';
+  'https://native-app-ashy.vercel.app/api/truelayer/callback';
 const SCOPES = ['accounts', 'balance', 'transactions', 'cards'];
 const PROVIDERS = ['uk-ob-all', 'uk-cs-mock'];
 
