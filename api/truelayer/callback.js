@@ -5,11 +5,18 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { code, state: connectionId } = req.query;
+  const { code, state } = req.query;
   if (!code) return res.status(400).json({ error: 'Missing authorization code' });
-  if (!connectionId) return res.status(400).json({ error: 'Missing connection_id (state)' });
+  if (!state) return res.status(400).json({ error: 'Missing connection_id (state)' });
 
-  const redirectUri = 'https://native-app-blush.vercel.app/api/truelayer/callback';
+  // Parse state: "connectionId" (mobile) or "connectionId|https://origin" (web)
+  const pipeIdx = state.indexOf('|');
+  const connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
+  const webOrigin = pipeIdx === -1 ? null : state.slice(pipeIdx + 1);
+
+  const redirectUri =
+    process.env.TRUELAYER_REDIRECT_URI ||
+    'https://native-app-blush.vercel.app/api/truelayer/callback';
 
   try {
     // Exchange code for access token
@@ -89,7 +96,12 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Failed to save bank data' });
     }
 
-    // Redirect back to app via deep link
+    // Redirect back to app: web URL for browsers, deep link for mobile
+    if (webOrigin) {
+      const redirectTo = `${webOrigin}/connect?connection_id=${encodeURIComponent(connectionId)}&status=success`;
+      return res.redirect(302, redirectTo);
+    }
+
     const redirectTo = `bocy://callback?connection_id=${connectionId}&status=success`;
     return res.redirect(302, redirectTo);
   } catch (err) {
