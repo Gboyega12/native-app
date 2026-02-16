@@ -115,6 +115,8 @@ export interface Move {
   steps: string[];
   effect: string;
   timeline?: string;
+  category?: 'break_even' | 'buffer' | 'debt' | 'spending' | 'savings' | 'invest';
+  merchants?: string[];
 }
 
 // ── Decision Score ──
@@ -206,4 +208,5 @@ export interface ChatContext {
 export interface FlowchartPosition {
   level: number;
   label: string;
+  priority: 'break_even' | 'buffer' | 'debt' | 'spending' | 'savings' | 'invest';
 }
