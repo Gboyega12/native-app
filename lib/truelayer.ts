@@ -1,5 +1,5 @@
 const AUTH_URL = 'https://auth.truelayer-sandbox.com';
-const CLIENT_ID = 'bocymoneypersonality-a01ae4';
+const CLIENT_ID = process.env.EXPO_PUBLIC_TRUELAYER_CLIENT_ID || 'bocy-9c3edc';
 const REDIRECT_URI =
   process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
   'https://native-app-ashy.vercel.app/';
