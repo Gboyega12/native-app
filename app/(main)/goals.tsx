@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -50,19 +50,24 @@ export default function Goals() {
 
     // Final step — save goals
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      await supabase.from('goals').upsert({
-        user_id: user.id,
-        current_situation: situation,
-        one_year_goal: oneYearGoal,
-        two_year_goal: twoYearGoal,
-        target_amount: targetAmount ? parseFloat(targetAmount) : null,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { error } = await supabase.from('goals').upsert({
+          user_id: user.id,
+          current_situation: situation,
+          one_year_goal: oneYearGoal,
+          two_year_goal: twoYearGoal,
+          target_amount: targetAmount ? parseFloat(targetAmount) : null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+        if (error) console.warn('[goals] upsert failed:', error.message);
+      }
+      router.push({ pathname: '/(main)/processing', params: { csvData } });
+    } catch {
+      setLoading(false);
+      Alert.alert('Error', 'Could not save your goals. Please try again.');
     }
-    setLoading(false);
-    router.push({ pathname: '/(main)/processing', params: { csvData } });
   };
 
   const currentSelection = step === 0 ? situation : step === 1 ? oneYearGoal : twoYearGoal;

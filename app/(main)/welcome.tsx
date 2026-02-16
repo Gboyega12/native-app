@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView,
-  Platform, ScrollView, ActivityIndicator,
+  Platform, ScrollView, ActivityIndicator, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -17,10 +17,15 @@ export default function Welcome() {
   const handleContinue = async () => {
     if (!firstName.trim()) return;
     setLoading(true);
-    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
-    await supabase.auth.updateUser({ data: { full_name: fullName } });
-    setLoading(false);
-    router.replace('/(main)/connect');
+    try {
+      const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
+      const { error } = await supabase.auth.updateUser({ data: { full_name: fullName } });
+      if (error) throw error;
+      router.replace('/(main)/connect');
+    } catch {
+      setLoading(false);
+      Alert.alert('Error', 'Could not save your name. Please try again.');
+    }
   };
 
   if (step === 0) {
