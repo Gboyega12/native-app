@@ -129,12 +129,21 @@ export default async function handler(req, res) {
 
     if (dbError) {
       console.error('Failed to save bank data:', dbError);
-      return res.status(500).json({ error: 'Failed to save bank data' });
+      return res.status(500).json({
+        error: 'Failed to save bank data',
+        details: dbError.message || dbError.code || JSON.stringify(dbError),
+      });
     }
 
     // POST → return JSON to the client
     if (req.method === 'POST') {
-      return res.json({ success: true, connection_id: connectionId });
+      return res.json({
+        success: true,
+        connection_id: connectionId,
+        accounts_found: accounts.length,
+        cards_found: cards.length,
+        transactions_found: allTx.length,
+      });
     }
 
     // GET → redirect back to app (legacy flow)

@@ -9,6 +9,19 @@ import { supabase } from '@/lib/supabase';
 
 SplashScreen.preventAutoHideAsync();
 
+// Capture OAuth code+state at module load time — before any component renders.
+// This is critical because app/index.tsx's <Redirect> fires during render and
+// clears the URL params before useEffect can read them.
+let _pendingOAuth: { code: string; state: string } | null = null;
+if (typeof window !== 'undefined') {
+  const p = new URLSearchParams(window.location.search);
+  const code = p.get('code');
+  const state = p.get('state');
+  if (code && state) {
+    _pendingOAuth = { code, state };
+  }
+}
+
 function AuthGate({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
@@ -27,15 +40,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (!ready) return;
     const inAuth = segments[0] === '(auth)';
 
-    // If TrueLayer redirected to the root with ?code=...&state=..., forward to connect
-    if (session && Platform.OS === 'web') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const code = urlParams.get('code');
-      const state = urlParams.get('state');
-      if (code && state) {
-        router.replace({ pathname: '/(main)/connect', params: { code, state } });
-        return;
-      }
+    // Forward captured OAuth code+state to the connect screen
+    if (session && _pendingOAuth) {
+      const { code, state } = _pendingOAuth;
+      _pendingOAuth = null; // consume so it doesn't fire again
+      router.replace({ pathname: '/(main)/connect', params: { code, state } });
+      return;
     }
 
     if (!session && !inAuth) {
