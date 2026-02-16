@@ -155,13 +155,96 @@ export function matchMerchant(description: string): MerchantMatch | null {
   return null;
 }
 
+// ── Salary / employer keyword detection ──
+const SALARY_KEYWORDS = [
+  'salary', 'wages', 'payroll', 'pay', 'payday',
+  'stipend', 'commission', 'pension',
+];
+
+const EMPLOYER_KEYWORDS = [
+  'ltd', 'plc', 'limited', 'inc', 'corp',
+  'group', 'services', 'solutions', 'holdings',
+  'council', 'nhs', 'trust', 'university',
+  'academy', 'associates', 'partners',
+];
+
+const BENEFIT_KEYWORDS = [
+  'hmrc', 'dwp', 'universal credit', 'tax credit',
+  'tax refund', 'child benefit', 'jobseekers',
+  'housing benefit', 'pip', 'esa', 'working tax',
+  'state pension', 'disability', 'carers allowance',
+];
+
+// ── Person name detection ──
+// Matches 1-3 alpha-only words with no brand/company indicators.
+// e.g. "John Smith", "Sarah Jane Williams", "Mr David Brown"
+// Excludes descriptions containing company suffixes, numbers, or brand patterns.
+
+const BRAND_INDICATORS = [
+  'ltd', 'plc', 'limited', 'inc', 'corp', 'co.', 'co ',
+  '.com', '.co.uk', '.org', 'www.',
+  'store', 'shop', 'online', 'direct', 'club', 'plus',
+  'pay', 'bill', 'fee', 'charge',
+];
+
 export function isPersonTransfer(description: string): boolean {
-  const lower = description.toLowerCase();
-  const personPatterns = [
+  const lower = description.toLowerCase().trim();
+
+  // Explicit transfer method patterns
+  const transferPatterns = [
     /^(mr|mrs|miss|ms|dr)\s/,
     /\bfaster payment\b/,
     /\bbank transfer\b/,
     /\bstanding order\b/,
+    /\btransfer to\b/,
+    /\btransfer from\b/,
+    /\bpayment to\b/,
   ];
-  return personPatterns.some((p) => p.test(lower));
+  if (transferPatterns.some((p) => p.test(lower))) return true;
+
+  // If it contains any brand/company indicators, it's NOT a person
+  if (BRAND_INDICATORS.some((b) => lower.includes(b))) return false;
+
+  // If it contains digits, it's likely a reference number — not a person name
+  if (/\d/.test(lower)) return false;
+
+  // Clean the description: strip common prefixes
+  const cleaned = lower
+    .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
+    .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b/g, '')
+    .trim();
+
+  // Match 1-3 purely alphabetic words (typical person name pattern)
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length >= 1 && words.length <= 3) {
+    const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w) && w.length >= 2);
+    if (allAlpha) return true;
+  }
+
+  return false;
+}
+
+// ── Company / employer credit detection ──
+// Checks if a credit transaction description looks like it comes from
+// a company (salary, employer, government benefit, etc.)
+
+export function matchesSalaryKeywords(description: string): boolean {
+  const lower = description.toLowerCase();
+  return SALARY_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+export function matchesEmployerPattern(description: string): boolean {
+  const lower = description.toLowerCase();
+  return EMPLOYER_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+export function matchesBenefitKeywords(description: string): boolean {
+  const lower = description.toLowerCase();
+  return BENEFIT_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+export function isLikelyIncomeCredit(description: string): boolean {
+  return matchesSalaryKeywords(description)
+    || matchesEmployerPattern(description)
+    || matchesBenefitKeywords(description);
 }

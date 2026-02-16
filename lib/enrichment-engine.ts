@@ -1,4 +1,7 @@
-import { matchMerchant, isPersonTransfer } from './merchant-db';
+import {
+  matchMerchant, isPersonTransfer,
+  isLikelyIncomeCredit, matchesSalaryKeywords,
+} from './merchant-db';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
 import { UK_BENCHMARKS, ESSENTIAL_CATEGORIES } from './constants';
 import type {
@@ -117,19 +120,28 @@ const EnrichmentEngine = {
   enrichTransaction(tx: RawTransaction): EnrichedTransaction {
     const match = matchMerchant(tx.description);
     const isPerson = isPersonTransfer(tx.description);
-    const isIncome = tx.amount > 0;
-    const isRefund = isIncome && tx.description.toLowerCase().includes('refund');
+    const isCredit = tx.amount > 0;
+    const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
     const isSavings = !!(tx.description.toLowerCase().match(/\bsaving|isa\b/i) && tx.amount < 0);
 
+    // ── Income decision tree ──
+    // Credit comes in → determine if it's real income or a person transfer
+    //   1. Known merchant flagged as income (salary/HMRC/DWP) → income
+    //   2. Matches salary/employer/benefit keywords → income
+    //   3. Person name pattern (1-3 alpha words, no brand) → EXCLUDED (transfer)
+    //   4. Refund → not income
+    //   5. Other credit → tentative income (validated in buildProfile via regularity check)
+
     if (match) {
+      const isIncome = match.isIncome || (isCredit && !isPerson && !isRefund && isLikelyIncomeCredit(tx.description));
       return {
         ...tx,
         merchant: match.merchant,
-        category: isIncome && !match.isIncome ? 'Refunds' : match.category,
+        category: isIncome ? match.category : (isCredit && !match.isIncome ? 'Refunds' : match.category),
         isSubscription: match.isSubscription,
         isBNPL: match.isBNPL,
         isDebt: match.isDebt,
-        isIncome: match.isIncome || isIncome,
+        isIncome,
         isTransfer: isPerson,
         isRefund,
         isSavings,
@@ -137,10 +149,31 @@ const EnrichmentEngine = {
       };
     }
 
+    // No merchant match — apply the decision tree
+    let isIncome = false;
     let category = 'Other';
-    if (isIncome) category = isRefund ? 'Refunds' : 'Income';
-    else if (isPerson) category = 'Transfers';
-    else if (isSavings) category = 'Savings';
+
+    if (isCredit) {
+      if (isRefund) {
+        category = 'Refunds';
+      } else if (isPerson) {
+        // Person-to-person transfer — NOT income
+        category = 'Transfers';
+      } else if (isLikelyIncomeCredit(tx.description)) {
+        // Matches salary/employer/benefit keywords — income
+        isIncome = true;
+        category = 'Income';
+      } else {
+        // Unknown credit — mark as tentative income
+        // buildProfile will validate via regularity (>£500, monthly pattern)
+        isIncome = true;
+        category = 'Income';
+      }
+    } else if (isPerson) {
+      category = 'Transfers';
+    } else if (isSavings) {
+      category = 'Savings';
+    }
 
     return {
       ...tx,
@@ -153,7 +186,7 @@ const EnrichmentEngine = {
       isTransfer: isPerson,
       isRefund,
       isSavings,
-      confidence: 'low',
+      confidence: isIncome && isLikelyIncomeCredit(tx.description) ? 'high' : 'low',
     };
   },
 
@@ -197,7 +230,8 @@ const EnrichmentEngine = {
 
   buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): FinancialProfile {
     const spending = transactions.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
-    const income = transactions.filter((t) => t.isIncome && !t.isRefund);
+    // Income: only credits explicitly marked as income, excluding person transfers
+    const income = transactions.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer);
 
     const dates = transactions.map((t) => new Date(t.date).getTime()).filter(Boolean);
     const span = dates.length >= 2
@@ -238,7 +272,7 @@ const EnrichmentEngine = {
     const incomeSources = Object.entries(incomeGroups).map(([source, txs]) => {
       const monthly = txs.reduce((s, t) => s + t.amount, 0) / months;
       const avgAmount = txs.reduce((s, t) => s + t.amount, 0) / txs.length;
-      const isSalary = source.toLowerCase().includes('salary') || source.toLowerCase().includes('payroll');
+      const isSalary = matchesSalaryKeywords(source);
       const sorted = txs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       const intervals: number[] = [];
       for (let i = 1; i < sorted.length; i++) {
@@ -250,7 +284,26 @@ const EnrichmentEngine = {
       else if (avgInt >= 12 && avgInt <= 17) frequency = 'fortnightly';
       else if (avgInt >= 5 && avgInt <= 9) frequency = 'weekly';
       return { source, frequency, avgAmount, monthly, isSalary };
-    });
+    })
+    // Filter out low-confidence unknown credits that aren't regular or substantial enough
+    // Keep: salary/employer/benefit matches, OR large regular credits (avg >£100, regular frequency)
+    .filter((src) => {
+      // Always keep explicitly identified sources
+      if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
+      // Keep if regular (weekly/fortnightly/monthly) and meaningful amount
+      if (src.frequency !== 'irregular' && src.avgAmount >= 100) return true;
+      // Keep if large one-off credit (>£500) — likely a salary even without keywords
+      if (src.avgAmount >= 500) return true;
+      // Drop small/irregular unknown credits (likely refunds, cashback, etc.)
+      return false;
+    })
+    // Sort by total monthly amount — highest income source first (= primary)
+    .sort((a, b) => b.monthly - a.monthly);
+
+    // Mark the highest-total source as primary if no salary keyword was found
+    if (incomeSources.length > 0 && !incomeSources.some((s) => s.isSalary)) {
+      incomeSources[0].isSalary = true;
+    }
 
     const catMonthly = (name: string) => (catTotals[name]?.total || 0) / months;
     const subscriptions = recurring.filter((r) => r.isSubscription);
