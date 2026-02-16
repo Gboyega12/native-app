@@ -3,7 +3,7 @@ import {
   isLikelyIncomeCredit, matchesSalaryKeywords,
 } from './merchant-db';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
-import { UK_BENCHMARKS, ESSENTIAL_CATEGORIES } from './constants';
+import { UK_BENCHMARKS, ESSENTIAL_CATEGORIES, MOVE_THRESHOLDS, INCOME_THRESHOLDS } from './constants';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -13,6 +13,7 @@ import type {
   DecisionScore,
   Move,
   EnrichmentResult,
+  BudgetCategory,
 } from './types';
 
 function splitCSVLine(line: string): string[] {
@@ -85,6 +86,17 @@ const EnrichmentEngine = {
     const amountIdx = cols.findIndex((c) => c === 'amount' || c.includes('amount'));
     const debitIdx = cols.findIndex((c) => c.includes('debit'));
     const creditIdx = cols.findIndex((c) => c.includes('credit'));
+
+    // Validate that we found at least a date and description column.
+    // Without these, positional fallback is unreliable and may misalign data.
+    const hasDateCol = dateIdx >= 0;
+    const hasDescCol = descIdx >= 0;
+    const hasAmountCol = amountIdx >= 0 || (debitIdx >= 0 && creditIdx >= 0);
+
+    if (!hasDateCol && !hasDescCol && !hasAmountCol) {
+      // CSV headers are unrecognised — return empty rather than silently misparse
+      return [];
+    }
 
     const transactions: RawTransaction[] = [];
     const now = new Date();
@@ -259,12 +271,12 @@ const EnrichmentEngine = {
       });
     }
 
-    const nonDiscItems: any[] = [];
-    const discItems: any[] = [];
+    const nonDiscItems: BudgetCategory[] = [];
+    const discItems: BudgetCategory[] = [];
     for (const [cat, d] of Object.entries(catTotals)) {
       // Sort transactions by date descending (most recent first)
       const sortedTxs = d.transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      const item = { category: cat, monthly: d.total / months, txs: d.count, transactions: sortedTxs };
+      const item: BudgetCategory = { category: cat, monthly: d.total / months, txs: d.count, transactions: sortedTxs };
       if (ESSENTIAL_CATEGORIES.has(cat)) nonDiscItems.push(item);
       else discItems.push(item);
     }
@@ -299,9 +311,14 @@ const EnrichmentEngine = {
       // Always keep explicitly identified sources
       if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
       // Keep if regular (weekly/fortnightly/monthly) and meaningful amount
-      if (src.frequency !== 'irregular' && src.avgAmount >= 100) return true;
-      // Keep large regular credits: >£500 avg, 2+ occurrences, 20-45 day interval
-      if (src.avgAmount >= 500 && src.count >= 2 && src.avgInterval >= 20 && src.avgInterval <= 45) return true;
+      if (src.frequency !== 'irregular' && src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount) return true;
+      // Keep large regular credits
+      if (
+        src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin &&
+        src.count >= INCOME_THRESHOLDS.largeCreditMinCount &&
+        src.avgInterval >= INCOME_THRESHOLDS.largeCreditIntervalMin &&
+        src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax
+      ) return true;
       // Drop small/irregular unknown credits (likely refunds, cashback, etc.)
       return false;
     })
@@ -351,8 +368,8 @@ const EnrichmentEngine = {
         debtPayments: metrics.debtPayments,
       },
       budgetReality: {
-        nonDiscretionary: { total: nonDiscTotal, items: nonDiscItems.sort((a: any, b: any) => b.monthly - a.monthly) },
-        discretionary: { total: discTotal, items: discItems.sort((a: any, b: any) => b.monthly - a.monthly) },
+        nonDiscretionary: { total: nonDiscTotal, items: nonDiscItems.sort((a, b) => b.monthly - a.monthly) },
+        discretionary: { total: discTotal, items: discItems.sort((a, b) => b.monthly - a.monthly) },
       },
       incomeSources,
       subscriptions,
@@ -360,7 +377,7 @@ const EnrichmentEngine = {
     };
   },
 
-  determineArchetype(profile: any): Archetype {
+  determineArchetype(profile: FinancialProfile): Archetype {
     const m = profile.metrics;
     const ordered = [
       'debt_juggler', 'edge_walker', 'subscription_collector',
@@ -392,7 +409,7 @@ const EnrichmentEngine = {
     };
   },
 
-  detectBehavioralPatterns(profile: any): { pattern: string; detail: string }[] {
+  detectBehavioralPatterns(profile: FinancialProfile): { pattern: string; detail: string }[] {
     const patterns: { pattern: string; detail: string }[] = [];
     const m = profile.metrics;
     if (m.foodDelivery > UK_BENCHMARKS.foodDelivery) {
@@ -422,7 +439,7 @@ const EnrichmentEngine = {
     return patterns;
   },
 
-  calcDecisionScore(profile: any): DecisionScore {
+  calcDecisionScore(profile: FinancialProfile): DecisionScore {
     const m = profile.metrics;
     let score = 50;
     const breakdown: { factor: string; impact: number }[] = [];
@@ -441,7 +458,7 @@ const EnrichmentEngine = {
       score -= 5; breakdown.push({ factor: 'High delivery spend', impact: -5 });
     }
 
-    const hasSalary = profile.incomeSources.some((s: any) => s.isSalary);
+    const hasSalary = profile.incomeSources.some((s) => s.isSalary);
     if (hasSalary) { score += 8; breakdown.push({ factor: 'Stable salary', impact: +8 }); }
 
     if (m.bnplCount >= 2) { score -= 8; breakdown.push({ factor: 'BNPL usage', impact: -8 }); }
@@ -456,18 +473,19 @@ const EnrichmentEngine = {
     return { score, verdict, breakdown };
   },
 
-  genDecisionStack(profile: any, enrichedTxs?: EnrichedTransaction[]): Move[] {
+  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[]): Move[] {
     const moves: Move[] = [];
     const m = profile.metrics;
     const p = profile.monthly;
     const subs = profile.subscriptions || [];
     const txs = enrichedTxs || [];
+    const T = MOVE_THRESHOLDS;
 
     // Subscriptions — attach actual merchant names
-    if (m.subscriptionCount >= 4) {
-      const subNames = subs.map((s: any) => s.merchant).filter(Boolean);
-      const cutCount = Math.max(2, Math.round(m.subscriptionCount * 0.3));
-      const saving = Math.round(p.subscriptions * 0.3);
+    if (m.subscriptionCount >= T.subscriptionMinCount) {
+      const subNames = subs.map((s) => s.merchant).filter(Boolean);
+      const cutCount = Math.max(2, Math.round(m.subscriptionCount * T.subscriptionCutPct));
+      const saving = Math.round(p.subscriptions * T.subscriptionCutPct);
       moves.push({
         action: `Cancel or downgrade ${cutCount} subscriptions to free \u00a3${saving}/month`,
         annualImpact: saving * 12,
@@ -482,8 +500,8 @@ const EnrichmentEngine = {
     }
 
     // Food delivery — attach delivery merchant names
-    if (m.foodDelivery > 50) {
-      const saving = Math.round(m.foodDelivery * 0.4);
+    if (m.foodDelivery > T.foodDeliveryMin) {
+      const saving = Math.round(m.foodDelivery * T.foodDeliveryCutPct);
       const deliveryMerchants = this._getMerchantsByCategory(txs, 'Food Delivery');
       moves.push({
         action: `Cut delivery spend from \u00a3${Math.round(m.foodDelivery)} to \u00a3${Math.round(m.foodDelivery - saving)}/month`,
@@ -499,8 +517,8 @@ const EnrichmentEngine = {
     }
 
     // Eating out
-    if (m.eatingOut > 80) {
-      const saving = Math.round(m.eatingOut * 0.25);
+    if (m.eatingOut > T.eatingOutMin) {
+      const saving = Math.round(m.eatingOut * T.eatingOutCutPct);
       const eatingMerchants = this._getMerchantsByCategory(txs, 'Eating Out');
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       moves.push({
@@ -517,8 +535,8 @@ const EnrichmentEngine = {
     }
 
     // Shopping
-    if (m.shopping > 150) {
-      const saving = Math.round(m.shopping * 0.25);
+    if (m.shopping > T.shoppingMin) {
+      const saving = Math.round(m.shopping * T.shoppingCutPct);
       const shopMerchants = this._getMerchantsByCategory(txs, 'Shopping');
       moves.push({
         action: `Cap non-essential shopping at \u00a3${Math.round(m.shopping - saving)}/month`,
@@ -535,7 +553,7 @@ const EnrichmentEngine = {
 
     // Debt snowball
     if (m.debtAccountCount >= 2) {
-      const debtSaving = Math.round(p.debtPayments * 0.15);
+      const debtSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       moves.push({
         action: `Attack ${m.debtAccountCount} debts with snowball method`,
@@ -552,10 +570,11 @@ const EnrichmentEngine = {
 
     // Single debt account
     if (m.debtAccountCount === 1) {
-      const debtSaving = Math.round(p.debtPayments * 0.1);
+      const debtSaving = Math.round(p.debtPayments * T.singleDebtOverpayPct);
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
+      const overpay = Math.round(Math.min(p.surplus * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
       moves.push({
-        action: `Overpay debt by \u00a3${Math.round(Math.min(p.surplus * 0.5, 200))}/month to clear faster`,
+        action: `Overpay debt by \u00a3${overpay}/month to clear faster`,
         annualImpact: debtSaving * 12,
         monthlyImpact: debtSaving,
         effort: 'medium',
@@ -568,8 +587,8 @@ const EnrichmentEngine = {
     }
 
     // Transport
-    if (m.transport > 100) {
-      const saving = Math.round(m.transport * 0.2);
+    if (m.transport > T.transportMin) {
+      const saving = Math.round(m.transport * T.transportCutPct);
       const transportMerchants = this._getMerchantsByCategory(txs, 'Transport');
       moves.push({
         action: `Cut transport from \u00a3${Math.round(m.transport)} to \u00a3${Math.round(m.transport - saving)}/month`,
@@ -585,9 +604,9 @@ const EnrichmentEngine = {
     }
 
     // Emergency buffer — this is a BUFFER move, not spending
-    if (m.savingsRate < 10 && p.surplus > 0) {
-      const autoSave = Math.round(p.surplus * 0.5);
-      const bufferTarget = Math.max(500, Math.round(p.spending));
+    if (m.savingsRate < T.bufferSavingsRateThreshold && p.surplus > 0) {
+      const autoSave = Math.round(p.surplus * T.bufferAutoSavePct);
+      const bufferTarget = Math.max(T.bufferMinTarget, Math.round(p.spending));
       const monthsToTarget = autoSave > 0 ? Math.ceil(bufferTarget / autoSave) : 0;
       moves.push({
         action: `Auto-save \u00a3${autoSave}/month to build \u00a3${bufferTarget} buffer in ${monthsToTarget} months`,
@@ -603,11 +622,11 @@ const EnrichmentEngine = {
     }
 
     // High savers — SAVINGS/INVEST move
-    if (m.savingsRate >= 15) {
+    if (m.savingsRate >= T.highSaverThreshold) {
       const surplusAnnual = Math.round(p.surplus * 12);
-      const interestGain = Math.round(surplusAnnual * 0.045);
+      const interestGain = Math.round(surplusAnnual * T.highSaverInterestRate);
       moves.push({
-        action: `Move \u00a3${Math.round(p.surplus)}/month surplus to 4.5% savings account`,
+        action: `Move \u00a3${Math.round(p.surplus)}/month surplus to ${(T.highSaverInterestRate * 100).toFixed(1)}% savings account`,
         annualImpact: interestGain,
         monthlyImpact: Math.round(interestGain / 12),
         effort: 'low',
@@ -620,8 +639,8 @@ const EnrichmentEngine = {
     }
 
     // Coffee
-    if (m.coffeeAndCafes > 40) {
-      const saving = Math.round(m.coffeeAndCafes * 0.5);
+    if (m.coffeeAndCafes > T.coffeeMin) {
+      const saving = Math.round(m.coffeeAndCafes * T.coffeeCutPct);
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       moves.push({
         action: `Halve caf\u00e9 spending from \u00a3${Math.round(m.coffeeAndCafes)} to \u00a3${Math.round(m.coffeeAndCafes - saving)}/month`,
@@ -640,8 +659,8 @@ const EnrichmentEngine = {
     if (p.surplus < 0) {
       const deficit = Math.abs(Math.round(p.surplus));
       // Find the biggest discretionary categories to cut
-      const discItems = profile.budgetReality?.discretionary?.items || [];
-      const topCuts = discItems.slice(0, 3).map((i: any) => i.category);
+      const topDiscItems = profile.budgetReality?.discretionary?.items || [];
+      const topCuts = topDiscItems.slice(0, 3).map((i) => i.category);
       moves.push({
         action: `Close \u00a3${deficit}/month deficit by cutting discretionary spending`,
         annualImpact: deficit * 12,
@@ -661,12 +680,12 @@ const EnrichmentEngine = {
 
   // Helper: get unique merchant names by category from enriched transactions
   _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {
-    const matching = txs
-      .filter((t) => t.category === category && !t.isIncome && !t.isTransfer && !t.isRefund)
-      .map((t) => t.merchant);
-    // Deduplicate and take top merchants by frequency
     const counts: Record<string, number> = {};
-    for (const m of matching) { counts[m] = (counts[m] || 0) + 1; }
+    for (const t of txs) {
+      if (t.category === category && !t.isIncome && !t.isTransfer && !t.isRefund) {
+        counts[t.merchant] = (counts[t.merchant] || 0) + 1;
+      }
+    }
     return Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)

@@ -91,10 +91,25 @@ export default function Home() {
   const discFlex = discTotal / barTotal;
   const leftFlex = leftToDecide / barTotal;
 
-  // Percentages of income
-  const nonDiscPct = income > 0 ? Math.round((nonDiscTotal / income) * 100) : 0;
-  const discPct = income > 0 ? Math.round((discTotal / income) * 100) : 0;
-  const leftPct = income > 0 ? Math.round((leftToDecide / income) * 100) : 0;
+  // Percentages of income — use largest-remainder method so they always sum to 100%
+  const [nonDiscPct, discPct, leftPct] = (() => {
+    if (income <= 0) return [0, 0, 0];
+    const rawPcts = [
+      (nonDiscTotal / income) * 100,
+      (discTotal / income) * 100,
+      (leftToDecide / income) * 100,
+    ];
+    const floored = rawPcts.map(Math.floor);
+    const remainders = rawPcts.map((r, i) => r - floored[i]);
+    let gap = 100 - floored.reduce((a, b) => a + b, 0);
+    const indices = [0, 1, 2].sort((a, b) => remainders[b] - remainders[a]);
+    for (const idx of indices) {
+      if (gap <= 0) break;
+      floored[idx]++;
+      gap--;
+    }
+    return floored as [number, number, number];
+  })();
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>

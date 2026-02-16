@@ -4,6 +4,20 @@
 //   Before: "Review your low-cost subscriptions"
 //   After: "Cancel Netflix, Spotify, Adobe Creative Cloud to free £47/mo → reach 1-month buffer in 4 months"
 
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Strip control characters and limit length to prevent prompt injection
+function sanitize(str, maxLen = 200) {
+  if (typeof str !== 'string') return '';
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/[\x00-\x1f\x7f]/g, '').slice(0, maxLen);
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -14,38 +28,47 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'moves array required' });
   }
 
+  const model = process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
   const prompt = buildRefinementPrompt(moves, context);
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.CLAUDE_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    const data = await response.json();
-    const text = data.content?.[0]?.text || '';
-
-    // Parse the JSON response
+  let lastError = null;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const refined = JSON.parse(text);
-      return res.json({ success: true, moves: refined });
-    } catch {
-      // If Claude returns non-JSON, return original moves unchanged
-      return res.json({ success: false, moves: moves, error: 'parse_failed' });
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.CLAUDE_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 2048,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+
+      const data = await response.json();
+      const text = data.content?.[0]?.text || '';
+
+      // Parse the JSON response
+      try {
+        const refined = JSON.parse(text);
+        return res.json({ success: true, moves: refined });
+      } catch {
+        // If Claude returns non-JSON, return original moves unchanged
+        return res.json({ success: false, moves: moves, error: 'parse_failed' });
+      }
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_RETRIES) {
+        await sleep(RETRY_DELAY_MS * (attempt + 1));
+      }
     }
-  } catch (err) {
-    // Graceful fallback — return original moves
-    return res.json({ success: false, moves: moves, error: err.message });
   }
+
+  // All retries exhausted — graceful fallback with original moves
+  return res.json({ success: false, moves: moves, error: lastError?.message || 'request_failed' });
 }
 
 function buildRefinementPrompt(moves, context) {
@@ -65,12 +88,12 @@ RULES:
 - NEVER give regulated financial advice — suggest consulting a qualified advisor for investment decisions
 
 USER CONTEXT:
-- UKPF priority: ${ukpf_label || 'unknown'} (${ukpf_priority || 'unknown'})`;
+- UKPF priority: ${sanitize(ukpf_label || 'unknown')} (${sanitize(ukpf_priority || 'unknown')})`;
 
   if (monthly_income) prompt += `\n- Monthly income: £${Math.round(monthly_income)}`;
   if (monthly_spending) prompt += `\n- Monthly spending: £${Math.round(monthly_spending)}`;
   if (surplus != null) prompt += `\n- Monthly surplus: £${Math.round(surplus)}`;
-  if (goals?.one_year_goal) prompt += `\n- 1-year goal: ${goals.one_year_goal}`;
+  if (goals?.one_year_goal) prompt += `\n- 1-year goal: ${sanitize(goals.one_year_goal)}`;
   if (goals?.target_amount) prompt += `\n- Target amount: £${goals.target_amount}`;
 
   prompt += `\n\nMOVES TO REFINE (${moves.length} moves):`;
@@ -78,19 +101,19 @@ USER CONTEXT:
   for (let i = 0; i < moves.length; i++) {
     const m = moves[i];
     prompt += `\n\n--- Move ${i + 1} ---`;
-    prompt += `\nAction: ${m.action}`;
-    prompt += `\nCategory: ${m.category || 'spending'}`;
+    prompt += `\nAction: ${sanitize(m.action, 120)}`;
+    prompt += `\nCategory: ${sanitize(m.category || 'spending', 30)}`;
     prompt += `\nMonthly impact: £${m.monthlyImpact}`;
     prompt += `\nAnnual impact: £${m.annualImpact}`;
-    prompt += `\nEffort: ${m.effort}`;
-    prompt += `\nMerchants: ${(m.merchants || []).join(', ') || 'none detected'}`;
-    prompt += `\nStrategy: ${m.strategy}`;
-    prompt += `\nSteps: ${(m.steps || []).join('; ')}`;
-    prompt += `\nEffect: ${m.effect}`;
+    prompt += `\nEffort: ${sanitize(m.effort, 10)}`;
+    prompt += `\nMerchants: ${(m.merchants || []).map((s) => sanitize(s, 50)).join(', ') || 'none detected'}`;
+    prompt += `\nStrategy: ${sanitize(m.strategy, 300)}`;
+    prompt += `\nSteps: ${(m.steps || []).map((s) => sanitize(s, 100)).join('; ')}`;
+    prompt += `\nEffect: ${sanitize(m.effect, 200)}`;
     if (m.trajectory) {
-      prompt += `\nGoal trajectory: ${m.trajectory.insight}`;
+      prompt += `\nGoal trajectory: ${sanitize(m.trajectory.insight, 200)}`;
       if (m.trajectory.newMonths > 0) {
-        prompt += ` (reach ${m.trajectory.goalLabel} in ${m.trajectory.newMonths} months)`;
+        prompt += ` (reach ${sanitize(m.trajectory.goalLabel, 50)} in ${m.trajectory.newMonths} months)`;
       }
     }
   }

@@ -136,11 +136,20 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['moneybox'], merchant: 'Moneybox', category: 'Savings' },
 ];
 
+// Short patterns (<=3 chars) use word-boundary matching to avoid false positives.
+// e.g. "ee" must not match "coffee", "bp" must not match "ebook purchase".
+function patternMatches(text: string, pattern: string): boolean {
+  if (pattern.length <= 3) {
+    return new RegExp(`\\b${pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text);
+  }
+  return text.includes(pattern);
+}
+
 export function matchMerchant(description: string): MerchantMatch | null {
   const lower = description.toLowerCase().trim();
   for (const entry of MERCHANTS) {
     for (const pattern of entry.patterns) {
-      if (lower.includes(pattern)) {
+      if (patternMatches(lower, pattern)) {
         return {
           merchant: entry.merchant,
           category: entry.category,
