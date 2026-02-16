@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
 } from 'react-native';
@@ -7,12 +7,15 @@ import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { ARCHETYPES } from '@/lib/archetypes';
 import { colors, fonts, spacing, radius } from '@/theme';
-import type { Analysis, Goals } from '@/lib/types';
+import type { Analysis } from '@/lib/types';
+
+function effortColor(effort: string) {
+  return effort === 'low' ? colors.accent : effort === 'medium' ? colors.sky : colors.coral;
+}
 
 export default function Home() {
   const router = useRouter();
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [goals, setGoals] = useState<Goals | null>(null);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState('');
 
@@ -29,23 +32,15 @@ export default function Home() {
 
     setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
 
-    const [analysisRes, goalsRes] = await Promise.all([
-      supabase
-        .from('analyses')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single(),
-      supabase
-        .from('goals')
-        .select('*')
-        .eq('user_id', user.id)
-        .single(),
-    ]);
+    const { data } = await supabase
+      .from('analyses')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
 
-    setAnalysis(analysisRes.data);
-    setGoals(goalsRes.data);
+    setAnalysis(data);
     setLoading(false);
   };
 
@@ -57,10 +52,15 @@ export default function Home() {
     );
   }
 
+  const topMove = analysis?.top_move;
   const archetype = analysis ? ARCHETYPES[analysis.archetype] : null;
+  const score = analysis?.decision_score ?? 0;
+  const scoreColor = score >= 75 ? colors.accent : score >= 55 ? colors.sky : colors.coral;
+  const scoreVerdict = score >= 75 ? 'Strong' : score >= 55 ? 'Balanced' : score >= 35 ? 'Needs Attention' : 'At Risk';
 
   return (
-    <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scroll}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+      {/* Header */}
       <View style={styles.headerRow}>
         <Text style={styles.greeting}>
           {userName ? `Hey, ${userName}` : 'Welcome back'}
@@ -77,57 +77,83 @@ export default function Home() {
 
       {!analysis ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>No analysis yet</Text>
+          <Text style={styles.emptyBrand}>{'{ B }'}</Text>
+          <Text style={styles.emptyTitle}>Discover your #1 move</Text>
           <Text style={styles.emptyDesc}>
-            Connect your bank or upload a CSV to get your personalised financial profile.
+            Connect your bank to identify the most material financial move available to you right now.
           </Text>
           <TouchableOpacity
-            style={styles.button}
+            style={styles.ctaButton}
             onPress={() => router.push('/(main)/connect')}
           >
-            <Text style={styles.buttonText}>Get started</Text>
+            <Text style={styles.ctaText}>Get started</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <>
-          {/* Financial Overview */}
-          <Text style={styles.sectionTitle}>OVERVIEW</Text>
-          <View style={styles.card}>
-            <MetricRow label="Income" value={`\u00a3${analysis.monthly_income}`} color={colors.mint} />
-            <MetricRow label="Spending" value={`\u00a3${analysis.monthly_spending}`} color={colors.coral} />
-            <MetricRow
-              label="Surplus"
-              value={`\u00a3${analysis.surplus}`}
-              color={analysis.surplus >= 0 ? colors.mint : colors.coral}
-            />
-          </View>
-
-          {/* Archetype */}
-          {archetype && (
+          {/* Hero: Top Move */}
+          {topMove?.action && (
             <>
-              <Text style={styles.sectionTitle}>YOUR TYPE</Text>
-              <View style={styles.card}>
-                <View style={styles.archetypeRow}>
-                  <Text style={styles.archetypeEmoji}>{archetype.emoji}</Text>
-                  <Text style={[styles.archetypeName, { color: archetype.color }]}>
-                    {archetype.name}
+              <Text style={styles.sectionLabel}>YOUR #1 MOVE</Text>
+              <View style={styles.heroCard}>
+                <Text style={styles.heroAction}>{topMove.action}</Text>
+                <View style={styles.heroImpactRow}>
+                  <Text style={styles.heroImpact}>
+                    {'\u00a3'}{topMove.monthlyImpact || (topMove as any).monthlySaving}/mo
                   </Text>
+                  <Text style={styles.heroAnnual}>
+                    {'\u00a3'}{topMove.annualImpact || ((topMove.monthlyImpact || 0) * 12)}/yr
+                  </Text>
+                  {topMove.effort && (
+                    <View style={[styles.effortBadge, { borderColor: effortColor(topMove.effort) }]}>
+                      <Text style={[styles.effortText, { color: effortColor(topMove.effort) }]}>
+                        {topMove.effort}
+                      </Text>
+                    </View>
+                  )}
                 </View>
+                <TouchableOpacity
+                  style={styles.ctaButton}
+                  onPress={() => router.push('/(main)/(tabs)/plan')}
+                >
+                  <Text style={styles.ctaText}>Start this move</Text>
+                </TouchableOpacity>
               </View>
             </>
           )}
 
-          {/* Top Move */}
-          {analysis.top_move?.action && (
-            <>
-              <Text style={styles.sectionTitle}>TOP MOVE</Text>
-              <View style={[styles.card, styles.accentCard]}>
-                <Text style={styles.moveAction}>{analysis.top_move.action}</Text>
-                <Text style={styles.moveSaving}>
-                  \u00a3{analysis.top_move.monthlyImpact || (analysis.top_move as any).monthlySaving}/month
+          {/* Decision Score */}
+          <View style={styles.card}>
+            <View style={styles.scoreRow}>
+              <Text style={styles.scoreLabel}>Decision Score</Text>
+              <View style={styles.scoreRight}>
+                <Text style={[styles.scoreValue, { color: scoreColor }]}>{score}</Text>
+                <Text style={styles.scoreMax}>/100</Text>
+                <Text style={[styles.scoreVerdict, { color: scoreColor }]}>{scoreVerdict}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Surplus */}
+          <View style={styles.card}>
+            <View style={styles.metricRow}>
+              <Text style={styles.metricLabel}>Monthly surplus</Text>
+              <Text style={[styles.metricValue, { color: analysis.surplus >= 0 ? colors.accent : colors.coral }]}>
+                {'\u00a3'}{analysis.surplus}
+              </Text>
+            </View>
+          </View>
+
+          {/* Archetype */}
+          {archetype && (
+            <View style={styles.card}>
+              <View style={styles.metricRow}>
+                <Text style={styles.metricLabel}>Financial type</Text>
+                <Text style={[styles.archetypeValue, { color: archetype.color }]}>
+                  {archetype.name}
                 </Text>
               </View>
-            </>
+            </View>
           )}
 
           {/* Quick Actions */}
@@ -151,17 +177,8 @@ export default function Home() {
   );
 }
 
-function MetricRow({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <View style={styles.metricRow}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={[styles.metricValue, { color }]}>{value}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
-  scrollContainer: {
+  container: {
     flex: 1,
     backgroundColor: colors.bg,
   },
@@ -202,13 +219,93 @@ const styles = StyleSheet.create({
     color: colors.bg,
     fontWeight: '700',
   },
-  sectionTitle: {
+  emptyState: {
+    marginTop: spacing.xxl,
+    alignItems: 'center',
+  },
+  emptyBrand: {
+    fontFamily: fonts.mono,
+    fontSize: 32,
+    color: colors.accent,
+    marginBottom: spacing.lg,
+  },
+  emptyTitle: {
+    fontFamily: fonts.mono,
+    fontSize: 20,
+    color: colors.text,
+    fontWeight: '700',
+    marginBottom: spacing.sm,
+  },
+  emptyDesc: {
+    fontSize: 14,
+    color: colors.dim,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: spacing.xl,
+    paddingHorizontal: spacing.md,
+  },
+  sectionLabel: {
     fontFamily: fonts.mono,
     fontSize: 11,
     letterSpacing: 1.5,
     color: colors.accent,
     marginBottom: spacing.sm,
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
+  },
+  heroCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  heroAction: {
+    fontFamily: fonts.mono,
+    fontSize: 17,
+    color: colors.text,
+    fontWeight: '700',
+    lineHeight: 24,
+    marginBottom: spacing.sm,
+  },
+  heroImpactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  heroImpact: {
+    fontFamily: fonts.mono,
+    fontSize: 20,
+    color: colors.accent,
+    fontWeight: '700',
+  },
+  heroAnnual: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+  },
+  effortBadge: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+  },
+  effortText: {
+    fontSize: 10,
+    fontFamily: fonts.mono,
+  },
+  ctaButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  ctaText: {
+    fontFamily: fonts.mono,
+    fontSize: 15,
+    color: colors.bg,
+    fontWeight: '700',
   },
   card: {
     backgroundColor: colors.surface,
@@ -218,13 +315,39 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
-  accentCard: {
-    borderColor: colors.accentDim,
+  scoreRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  scoreLabel: {
+    fontSize: 14,
+    color: colors.dim,
+  },
+  scoreRight: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing.xs,
+  },
+  scoreValue: {
+    fontFamily: fonts.mono,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  scoreMax: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.muted,
+  },
+  scoreVerdict: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    marginLeft: spacing.xs,
   },
   metricRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: spacing.xs,
+    alignItems: 'center',
   },
   metricLabel: {
     fontSize: 14,
@@ -232,38 +355,18 @@ const styles = StyleSheet.create({
   },
   metricValue: {
     fontFamily: fonts.mono,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  archetypeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  archetypeEmoji: {
-    fontSize: 24,
-  },
-  archetypeName: {
-    fontFamily: fonts.mono,
     fontSize: 16,
     fontWeight: '700',
   },
-  moveAction: {
+  archetypeValue: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    color: colors.text,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
-  },
-  moveSaving: {
-    fontFamily: fonts.mono,
-    fontSize: 13,
-    color: colors.mint,
+    fontWeight: '700',
   },
   actions: {
     flexDirection: 'row',
     gap: spacing.sm,
-    marginTop: spacing.xl,
+    marginTop: spacing.lg,
   },
   actionButton: {
     flex: 1,
@@ -277,34 +380,5 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 13,
     color: colors.text,
-  },
-  emptyState: {
-    marginTop: spacing.xxl,
-    alignItems: 'center',
-  },
-  emptyTitle: {
-    fontFamily: fonts.mono,
-    fontSize: 18,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  emptyDesc: {
-    fontSize: 14,
-    color: colors.dim,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: spacing.xl,
-  },
-  button: {
-    backgroundColor: colors.accent,
-    paddingVertical: 14,
-    paddingHorizontal: spacing.xl,
-    borderRadius: radius.md,
-  },
-  buttonText: {
-    fontFamily: fonts.mono,
-    fontSize: 15,
-    color: colors.bg,
-    fontWeight: '700',
   },
 });

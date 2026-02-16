@@ -83,7 +83,7 @@ export default function SignUp() {
       >
         <View style={styles.header}>
           <Text style={styles.title}>Create account</Text>
-          <Text style={styles.subtitle}>Join Bocy to understand your money</Text>
+          <Text style={styles.subtitle}>AI-powered financial strategy</Text>
         </View>
 
         <View style={styles.form}>

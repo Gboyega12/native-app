@@ -14,9 +14,21 @@ export default async function handler(req, res) {
   const connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
   const webOrigin = pipeIdx === -1 ? null : state.slice(pipeIdx + 1);
 
+  // Check both env var names — client uses EXPO_PUBLIC_ prefix, server may use either
   const redirectUri =
     process.env.TRUELAYER_REDIRECT_URI ||
+    process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
     'https://native-app-ashy.vercel.app/api/truelayer/callback';
+
+  const clientId = process.env.TRUELAYER_CLIENT_ID;
+  const clientSecret = process.env.TRUELAYER_CLIENT_SECRET;
+
+  if (!clientId || !clientSecret) {
+    return res.status(500).json({
+      error: 'Server misconfigured',
+      details: 'TRUELAYER_CLIENT_ID or TRUELAYER_CLIENT_SECRET not set',
+    });
+  }
 
   try {
     // Exchange code for access token
@@ -25,8 +37,8 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        client_id: process.env.TRUELAYER_CLIENT_ID,
-        client_secret: process.env.TRUELAYER_CLIENT_SECRET,
+        client_id: clientId,
+        client_secret: clientSecret,
         redirect_uri: redirectUri,
         code,
       }),
@@ -34,7 +46,16 @@ export default async function handler(req, res) {
 
     const tokenData = await tokenRes.json();
     if (!tokenData.access_token) {
-      return res.status(400).json({ error: 'Token exchange failed', details: tokenData });
+      console.error('Token exchange failed:', JSON.stringify({
+        status: tokenRes.status,
+        redirect_uri_used: redirectUri,
+        response: tokenData,
+      }));
+      return res.status(400).json({
+        error: 'Token exchange failed',
+        details: tokenData.error || tokenData,
+        hint: `redirect_uri sent: ${redirectUri}`,
+      });
     }
 
     const token = tokenData.access_token;
@@ -105,6 +126,7 @@ export default async function handler(req, res) {
     const redirectTo = `bocy://callback?connection_id=${connectionId}&status=success`;
     return res.redirect(302, redirectTo);
   } catch (err) {
+    console.error('Callback error:', err);
     return res.status(500).json({ error: err.message });
   }
 }

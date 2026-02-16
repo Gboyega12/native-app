@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Linking,
 } from 'react-native';
@@ -7,10 +7,15 @@ import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, Move } from '@/lib/types';
 
+function effortColor(effort: string) {
+  return effort === 'low' ? colors.accent : effort === 'medium' ? colors.sky : colors.coral;
+}
+
 export default function Plan() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [completed, setCompleted] = useState<Set<number>>(new Set());
 
   useFocusEffect(
     useCallback(() => {
@@ -35,6 +40,15 @@ export default function Plan() {
     setLoading(false);
   };
 
+  const toggleComplete = (index: number) => {
+    setCompleted((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -46,49 +60,66 @@ export default function Plan() {
   if (!analysis) {
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>Run an analysis to see your money moves.</Text>
+        <Text style={styles.emptyText}>Run an analysis to see your action plan.</Text>
       </View>
     );
   }
 
   const moves: Move[] = analysis.all_moves || [];
+  const completedCount = completed.size;
+  const totalMonthly = moves.reduce((s, m) => s + (m.monthlyImpact || 0), 0);
+  const unlockedMonthly = moves.reduce((s, m, i) => completed.has(i) ? s + (m.monthlyImpact || 0) : s, 0);
+  const progress = moves.length > 0 ? completedCount / moves.length : 0;
 
   return (
-    <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scroll}>
-      <Text style={styles.heading}>Your money moves</Text>
-      <Text style={styles.subheading}>Ranked by annual impact</Text>
+    <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+      <Text style={styles.heading}>Action Plan</Text>
 
-      {analysis.surplus != null && (
-        <View style={styles.surplusRow}>
-          <Text style={styles.surplusLabel}>Monthly surplus</Text>
-          <Text style={[styles.surplusValue, { color: analysis.surplus >= 0 ? colors.mint : colors.coral }]}>
-            {'\u00a3'}{analysis.surplus}
-          </Text>
+      {/* Progress summary */}
+      <View style={styles.progressCard}>
+        <Text style={styles.progressText}>
+          {completedCount} of {moves.length} moves completed
+        </Text>
+        <Text style={styles.progressAmount}>
+          {'\u00a3'}{unlockedMonthly} of {'\u00a3'}{totalMonthly}/mo unlocked
+        </Text>
+        <View style={styles.progressBar}>
+          <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
         </View>
-      )}
+      </View>
 
+      {/* Moves */}
       {moves.map((move, i) => {
         const isExpanded = expanded === i;
-        const effortColor = move.effort === 'low' ? colors.mint : move.effort === 'medium' ? colors.accent : colors.coral;
+        const isDone = completed.has(i);
 
         return (
           <TouchableOpacity
             key={i}
-            style={styles.card}
+            style={[styles.card, isDone && styles.cardDone]}
             onPress={() => setExpanded(isExpanded ? null : i)}
             activeOpacity={0.8}
           >
             <View style={styles.cardHeader}>
-              <Text style={styles.moveNumber}>{i + 1}</Text>
+              <Text style={[styles.moveNumber, isDone && styles.doneText]}>{i + 1}</Text>
               <View style={styles.cardContent}>
-                <Text style={styles.moveAction}>{move.action}</Text>
+                <Text style={[styles.moveAction, isDone && styles.doneText]}>{move.action}</Text>
                 <View style={styles.moveStats}>
-                  <Text style={styles.moveSaving}>
-                    {'\u00a3'}{move.monthlyImpact}/month ({'\u00a3'}{move.annualImpact}/year)
+                  <Text style={[styles.moveImpact, isDone && styles.doneText]}>
+                    {'\u00a3'}{move.monthlyImpact}/mo
                   </Text>
-                  <View style={[styles.effortBadge, { borderColor: effortColor }]}>
-                    <Text style={[styles.effortText, { color: effortColor }]}>{move.effort}</Text>
+                  <View style={[styles.effortBadge, { borderColor: effortColor(move.effort) }]}>
+                    <Text style={[styles.effortText, { color: effortColor(move.effort) }]}>{move.effort}</Text>
                   </View>
+                  <TouchableOpacity
+                    style={[styles.checkButton, isDone && styles.checkButtonDone]}
+                    onPress={() => toggleComplete(i)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={[styles.checkIcon, isDone && styles.checkIconDone]}>
+                      {isDone ? '\u2713' : ' '}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             </View>
@@ -105,6 +136,14 @@ export default function Plan() {
                 {move.effect && (
                   <Text style={styles.effect}>{move.effect}</Text>
                 )}
+                <TouchableOpacity
+                  style={isDone ? styles.undoButton : styles.markDoneButton}
+                  onPress={() => toggleComplete(i)}
+                >
+                  <Text style={isDone ? styles.undoButtonText : styles.markDoneText}>
+                    {isDone ? 'Mark as not done' : 'Mark as done'}
+                  </Text>
+                </TouchableOpacity>
               </View>
             )}
           </TouchableOpacity>
@@ -112,7 +151,7 @@ export default function Plan() {
       })}
 
       {/* Debt Resources */}
-      <Text style={styles.sectionTitle}>NEED HELP WITH DEBT?</Text>
+      <Text style={styles.sectionLabel}>NEED HELP WITH DEBT?</Text>
       <View style={styles.card}>
         <TouchableOpacity onPress={() => Linking.openURL('https://www.stepchange.org')}>
           <Text style={styles.resourceLink}>StepChange - Free debt advice</Text>
@@ -126,7 +165,7 @@ export default function Plan() {
 }
 
 const styles = StyleSheet.create({
-  scrollContainer: {
+  container: {
     flex: 1,
     backgroundColor: colors.bg,
   },
@@ -158,16 +197,9 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: colors.text,
     fontWeight: '700',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.md,
   },
-  subheading: {
-    fontSize: 13,
-    color: colors.dim,
-    marginBottom: spacing.lg,
-  },
-  surplusRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  progressCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
@@ -175,14 +207,29 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.lg,
   },
-  surplusLabel: {
-    fontSize: 14,
-    color: colors.dim,
-  },
-  surplusValue: {
+  progressText: {
     fontFamily: fonts.mono,
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 13,
+    color: colors.text2,
+    marginBottom: spacing.xs,
+  },
+  progressAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.accent,
+    marginBottom: spacing.sm,
+  },
+  progressBar: {
+    height: 4,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+    borderRadius: 2,
+    minWidth: 2,
   },
   card: {
     backgroundColor: colors.surface,
@@ -191,6 +238,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
+  },
+  cardDone: {
+    opacity: 0.5,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -219,10 +269,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  moveSaving: {
+  moveImpact: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.mint,
+    color: colors.accent,
   },
   effortBadge: {
     borderWidth: 1,
@@ -233,6 +283,32 @@ const styles = StyleSheet.create({
   effortText: {
     fontSize: 10,
     fontFamily: fonts.mono,
+  },
+  doneText: {
+    color: colors.muted,
+    textDecorationLine: 'line-through',
+  },
+  checkButton: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: colors.muted,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 'auto',
+  },
+  checkButtonDone: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accentDim,
+  },
+  checkIcon: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.muted,
+  },
+  checkIconDone: {
+    color: colors.accent,
   },
   expandedSection: {
     marginTop: spacing.sm,
@@ -256,11 +332,37 @@ const styles = StyleSheet.create({
   },
   effect: {
     fontSize: 12,
-    color: colors.mint,
+    color: colors.accent,
     marginTop: spacing.sm,
     fontStyle: 'italic',
   },
-  sectionTitle: {
+  markDoneButton: {
+    borderWidth: 1,
+    borderColor: colors.accent,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  markDoneText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.accent,
+  },
+  undoButton: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  undoButtonText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+  },
+  sectionLabel: {
     fontFamily: fonts.mono,
     fontSize: 11,
     letterSpacing: 1.5,

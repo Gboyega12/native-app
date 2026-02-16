@@ -128,7 +128,7 @@ export default function Connect() {
       <View style={styles.content}>
         <Text style={styles.title}>Connect your bank</Text>
         <Text style={styles.subtitle}>
-          We need your transaction data to analyse your spending and build your financial profile.
+          We need your transaction data to identify your most material financial move.
         </Text>
 
         <TouchableOpacity
@@ -230,14 +230,14 @@ const styles = StyleSheet.create({
   badge: {
     paddingVertical: 6,
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(114,232,176,0.06)',
+    backgroundColor: 'rgba(122,239,199,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(114,232,176,0.15)',
+    borderColor: colors.accentDim,
     borderRadius: 20,
   },
   badgeText: {
     fontSize: 11,
-    color: colors.mint,
+    color: colors.accent,
     fontFamily: fonts.mono,
   },
   divider: {

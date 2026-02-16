@@ -9,11 +9,11 @@ import { colors, fonts, spacing } from '@/theme';
 import type { Analysis, Goals } from '@/lib/types';
 
 const STEPS = [
-  'Reading your transactions',
-  'Recognising merchants',
-  'Spotting patterns in your spending',
-  'Aligning with your goals',
-  'Building your recommendations',
+  'Scanning transactions',
+  'Identifying merchants',
+  'Detecting spending patterns',
+  'Modelling financial impact',
+  'Ranking your moves',
 ];
 
 // Global holder so results screen can pick it up without re-fetching
@@ -158,7 +158,7 @@ function ProcessingInner() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Analysing your finances</Text>
+      <Text style={styles.title}>Analysing your data</Text>
       <View style={styles.steps}>
         {STEPS.map((step, i) => (
           <Animated.View key={i} style={[styles.stepRow, { opacity: fadeAnims[i] }]}>

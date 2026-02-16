@@ -1,25 +1,55 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { ChatMessage, ChatContext, Analysis, Goals } from '@/lib/types';
 
-const SUGGESTED_QUESTIONS = [
-  'How can I save more?',
-  'Am I spending too much on food?',
-  'What should I prioritise first?',
-  'How do I build an emergency fund?',
-];
+function getContextualQuestions(analysis: Analysis | null, goals: Goals | null): string[] {
+  if (!analysis) {
+    return [
+      'What can Bocy help me with?',
+      'How does financial analysis work?',
+    ];
+  }
+
+  const questions: string[] = [];
+  questions.push('What happens if I follow my full action plan?');
+
+  const patterns = analysis.behavioral_patterns || [];
+  if (patterns.some((p: string) => p.toLowerCase().includes('debt'))) {
+    questions.push('Should I focus on debt or savings first?');
+  } else {
+    questions.push('How can I optimise my savings rate?');
+  }
+
+  const moves = analysis.all_moves || [];
+  if (moves.some((m: any) => m.action?.toLowerCase().includes('subscription'))) {
+    questions.push('Which subscriptions should I cut first?');
+  } else {
+    questions.push('Where are my biggest spending leaks?');
+  }
+
+  if (goals?.one_year_goal) {
+    const goalName = goals.one_year_goal.replace(/_/g, ' ');
+    questions.push(`How fast can I reach my ${goalName} goal?`);
+  } else {
+    questions.push('What financial goal should I set first?');
+  }
+
+  return questions;
+}
 
 export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [context, setContext] = useState<ChatContext>({});
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [goals, setGoals] = useState<Goals | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   useFocusEffect(
@@ -49,6 +79,8 @@ export default function Chat() {
 
     const a: Analysis | null = analysisRes.data;
     const g: Goals | null = goalsRes.data;
+    setAnalysis(a);
+    setGoals(g);
 
     setContext({
       monthly_income: a?.monthly_income,
@@ -98,6 +130,8 @@ export default function Chat() {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
+  const suggestedQuestions = getContextualQuestions(analysis, goals);
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -111,8 +145,9 @@ export default function Chat() {
       >
         {messages.length === 0 && (
           <View style={styles.suggestedContainer}>
-            <Text style={styles.suggestedTitle}>Ask Bocy anything</Text>
-            {SUGGESTED_QUESTIONS.map((q, i) => (
+            <Text style={styles.suggestedTitle}>Ask Bocy</Text>
+            <Text style={styles.suggestedSubtitle}>Your AI financial strategist</Text>
+            {suggestedQuestions.map((q, i) => (
               <TouchableOpacity
                 key={i}
                 style={styles.suggestedButton}
@@ -192,9 +227,15 @@ const styles = StyleSheet.create({
   },
   suggestedTitle: {
     fontFamily: fonts.mono,
-    fontSize: 16,
+    fontSize: 18,
     color: colors.text,
+    fontWeight: '700',
+  },
+  suggestedSubtitle: {
+    fontSize: 13,
+    color: colors.dim,
     marginBottom: spacing.lg,
+    marginTop: spacing.xs,
   },
   suggestedButton: {
     backgroundColor: colors.surface,

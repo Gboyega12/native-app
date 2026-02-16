@@ -44,7 +44,7 @@ export default function SignIn() {
       >
         <View style={styles.header}>
           <Text style={styles.logo}>Bocy</Text>
-          <Text style={styles.subtitle}>Your personal money advisor</Text>
+          <Text style={styles.subtitle}>AI financial strategist</Text>
         </View>
 
         <View style={styles.form}>

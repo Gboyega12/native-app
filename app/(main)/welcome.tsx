@@ -29,12 +29,12 @@ export default function Welcome() {
         <View style={styles.centerContent}>
           <Text style={styles.brandEmoji}>{'{ B }'}</Text>
           <Text style={styles.title}>Welcome to Bocy</Text>
-          <Text style={styles.subtitle}>Your personal money advisor</Text>
+          <Text style={styles.subtitle}>Your AI financial strategist</Text>
 
           <View style={styles.benefits}>
-            <BenefitItem text="See where your money really goes" />
-            <BenefitItem text="Get a personalised financial profile" />
-            <BenefitItem text="Actionable moves to improve your finances" />
+            <BenefitItem text="Your most material financial move \u2014 identified" />
+            <BenefitItem text="Data-driven action plan \u2014 built" />
+            <BenefitItem text="One-tap execution \u2014 enabled" />
           </View>
 
           <TouchableOpacity style={styles.button} onPress={() => setStep(1)}>
