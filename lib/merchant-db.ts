@@ -156,23 +156,26 @@ export function matchMerchant(description: string): MerchantMatch | null {
 }
 
 // ── Salary / employer keyword detection ──
-const SALARY_KEYWORDS = [
-  'salary', 'wages', 'payroll', 'pay', 'payday',
-  'stipend', 'commission', 'pension',
+// Uses word-boundary regex to avoid false positives
+// e.g. 'pay' must not match 'payment', 'paypoint', 'apple pay'
+
+const SALARY_PATTERNS: RegExp[] = [
+  /\bsalary\b/, /\bwages\b/, /\bpayroll\b/, /\bpayday\b/,
+  /\bstipend\b/, /\bcommission\b/, /\bpension\b/,
 ];
 
-const EMPLOYER_KEYWORDS = [
-  'ltd', 'plc', 'limited', 'inc', 'corp',
-  'group', 'services', 'solutions', 'holdings',
-  'council', 'nhs', 'trust', 'university',
-  'academy', 'associates', 'partners',
+const EMPLOYER_PATTERNS: RegExp[] = [
+  /\bltd\b/, /\bplc\b/, /\blimited\b/, /\binc\b/, /\bcorp\b/,
+  /\bgroup\b/, /\bholdings\b/,
+  /\bcouncil\b/, /\bnhs\b/, /\buniversity\b/,
+  /\bacademy\b/, /\bassociates\b/, /\bpartners\b/,
 ];
 
-const BENEFIT_KEYWORDS = [
-  'hmrc', 'dwp', 'universal credit', 'tax credit',
-  'tax refund', 'child benefit', 'jobseekers',
-  'housing benefit', 'pip', 'esa', 'working tax',
-  'state pension', 'disability', 'carers allowance',
+const BENEFIT_PATTERNS: RegExp[] = [
+  /\bhmrc\b/, /\bdwp\b/, /\buniversal credit\b/, /\btax credit\b/,
+  /\btax refund\b/, /\bchild benefit\b/, /\bjobseekers?\b/,
+  /\bhousing benefit\b/, /\bpip\b/, /\besa\b/, /\bworking tax\b/,
+  /\bstate pension\b/, /\bdisability\b/, /\bcarers? allowance\b/,
 ];
 
 // ── Person name detection ──
@@ -230,17 +233,17 @@ export function isPersonTransfer(description: string): boolean {
 
 export function matchesSalaryKeywords(description: string): boolean {
   const lower = description.toLowerCase();
-  return SALARY_KEYWORDS.some((kw) => lower.includes(kw));
+  return SALARY_PATTERNS.some((rx) => rx.test(lower));
 }
 
 export function matchesEmployerPattern(description: string): boolean {
   const lower = description.toLowerCase();
-  return EMPLOYER_KEYWORDS.some((kw) => lower.includes(kw));
+  return EMPLOYER_PATTERNS.some((rx) => rx.test(lower));
 }
 
 export function matchesBenefitKeywords(description: string): boolean {
   const lower = description.toLowerCase();
-  return BENEFIT_KEYWORDS.some((kw) => lower.includes(kw));
+  return BENEFIT_PATTERNS.some((rx) => rx.test(lower));
 }
 
 export function isLikelyIncomeCredit(description: string): boolean {
