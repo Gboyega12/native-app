@@ -114,6 +114,7 @@ export interface Move {
   strategy: string;
   steps: string[];
   effect: string;
+  timeline?: string;
 }
 
 // ── Decision Score ──

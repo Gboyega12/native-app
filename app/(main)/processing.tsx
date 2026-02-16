@@ -80,27 +80,6 @@ function ProcessingInner() {
       const topMove = findMostMaterialMove(result.decisionStack, result.profile, goals);
       const goalTrajectory = topMove ? calcGoalTrajectory(result.profile, goals, topMove) : null;
 
-      // Try Claude enrichment (graceful fallback)
-      let enrichedTopMove = topMove;
-      if (topMove) {
-        try {
-          const res = await fetch('/api/claude/enrich', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: `Rewrite this financial advice title to be more engaging and personal (keep under 10 words): "${topMove.action}"`,
-              max_tokens: 50,
-            }),
-          });
-          const data = await res.json();
-          if (data.success && data.text) {
-            enrichedTopMove = { ...topMove, action: data.text.trim().replace(/"/g, '') };
-          }
-        } catch {
-          // Graceful fallback — use original
-        }
-      }
-
       await delay(300);
 
       // Save to Supabase
@@ -114,7 +93,7 @@ function ProcessingInner() {
         non_discretionary: result.profile.budgetReality.nonDiscretionary,
         discretionary: result.profile.budgetReality.discretionary,
         income_sources: result.profile.incomeSources,
-        top_move: enrichedTopMove || topMove || ({} as any),
+        top_move: topMove || ({} as any),
         all_moves: result.decisionStack,
         behavioral_patterns: result.behavioralPatterns,
         goal_context: goalTrajectory,

@@ -99,10 +99,13 @@ export default function Home() {
             {topMove?.action ? (
               <>
                 <Text style={styles.insightAction}>{topMove.action}</Text>
+                {(topMove as any).timeline && (
+                  <Text style={styles.insightTimeline}>{(topMove as any).timeline}</Text>
+                )}
                 <View style={styles.insightImpactRow}>
                   <View style={styles.impactChip}>
                     <Text style={styles.impactValue}>
-                      {'\u00a3'}{topMove.monthlyImpact || (topMove as any).monthlySaving || 0}
+                      {'\u00a3'}{topMove.monthlyImpact || 0}
                     </Text>
                     <Text style={styles.impactLabel}>/month</Text>
                   </View>
@@ -312,6 +315,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: colors.text,
     lineHeight: 26,
+    marginBottom: spacing.md,
+  },
+  insightTimeline: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.accent,
     marginBottom: spacing.md,
   },
   insightImpactRow: {

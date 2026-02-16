@@ -400,105 +400,191 @@ const EnrichmentEngine = {
     const m = profile.metrics;
     const p = profile.monthly;
 
+    // Subscriptions: specific names, specific amounts
     if (m.subscriptionCount >= 4) {
+      const cutCount = Math.max(2, Math.round(m.subscriptionCount * 0.3));
       const saving = Math.round(p.subscriptions * 0.3);
+      const annualSave = saving * 12;
       moves.push({
-        action: `Audit your ${m.subscriptionCount} subscriptions`,
-        annualImpact: saving * 12,
+        action: `Cancel or downgrade ${cutCount} subscriptions to free \u00a3${saving}/month`,
+        annualImpact: annualSave,
         monthlyImpact: saving,
         effort: 'low',
-        strategy: 'Cancel unused, rotate streaming services month-to-month.',
-        steps: ['List all active subscriptions', 'Cancel any unused for 2+ weeks', 'Rotate streaming services'],
-        effect: 'Frees up cash for savings or debt repayment.',
+        timeline: `\u00a3${annualSave} back in your pocket this year`,
+        strategy: `You have ${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month. Cut ${cutCount} to reclaim \u00a3${saving}/month immediately.`,
+        steps: [
+          `Review all ${m.subscriptionCount} subscriptions — cancel any unused in the last 2 weeks`,
+          'Keep one streaming service at a time — rotate monthly',
+          `Set a hard cap of \u00a3${Math.round(p.subscriptions * 0.7)}/month on subscriptions`,
+        ],
+        effect: `Saves \u00a3${saving}/month (\u00a3${annualSave}/year) with 15 minutes of work.`,
       });
     }
 
+    // Food delivery: specific targets
     if (m.foodDelivery > 50) {
       const saving = Math.round(m.foodDelivery * 0.4);
+      const targetSpend = Math.round(m.foodDelivery - saving);
+      const annualSave = saving * 12;
       moves.push({
-        action: 'Reduce food delivery spending',
-        annualImpact: saving * 12,
+        action: `Cut delivery spend from \u00a3${Math.round(m.foodDelivery)} to \u00a3${targetSpend}/month`,
+        annualImpact: annualSave,
         monthlyImpact: saving,
         effort: 'medium',
-        strategy: 'Batch-cook 2 meals per week, set a delivery budget cap.',
-        steps: ['Plan 2 batch-cook sessions weekly', 'Delete delivery app payment cards', 'Set \u00a330/month delivery cap'],
-        effect: 'Healthier eating and significant monthly savings.',
+        timeline: `Save \u00a3${annualSave} over the next 12 months`,
+        strategy: `You're spending \u00a3${Math.round(m.foodDelivery)}/month on food delivery. Batch-cook twice a week and cap delivery at \u00a3${targetSpend}/month.`,
+        steps: [
+          'Batch-cook 2 meals every Sunday — covers 4 weeknight dinners',
+          'Delete saved payment cards from Deliveroo/UberEats/JustEat',
+          `Set a strict \u00a3${targetSpend}/month delivery budget — track it weekly`,
+        ],
+        effect: `Frees \u00a3${saving}/month (\u00a3${annualSave}/year) and improves your diet.`,
       });
     }
 
+    // Eating out: specific reduction
     if (m.eatingOut > 80) {
       const saving = Math.round(m.eatingOut * 0.25);
+      const targetSpend = Math.round(m.eatingOut - saving);
+      const annualSave = saving * 12;
       moves.push({
-        action: 'Cut back on dining out',
-        annualImpact: saving * 12,
+        action: `Reduce dining out from \u00a3${Math.round(m.eatingOut)} to \u00a3${targetSpend}/month`,
+        annualImpact: annualSave,
         monthlyImpact: saving,
         effort: 'medium',
-        strategy: 'One fewer restaurant meal per week. Swap for home-cooked.',
-        steps: ['Track cafe and restaurant visits', 'Replace one outing per week with a home meal', 'Bring coffee from home twice a week'],
-        effect: 'Keeps social life intact while reducing spend.',
+        timeline: `\u00a3${annualSave} saved over the next year`,
+        strategy: `You're spending \u00a3${Math.round(m.eatingOut)}/month eating out. Drop one meal out per week and bring coffee from home twice.`,
+        steps: [
+          'Replace one restaurant meal per week with a home-cooked alternative',
+          `Bring coffee from home 2x/week — saves ~\u00a3${Math.round(m.coffeeAndCafes * 0.4 || 15)}/month alone`,
+          `Cap restaurant/caf\u00e9 spending at \u00a3${targetSpend}/month`,
+        ],
+        effect: `Keeps your social life intact while saving \u00a3${saving}/month.`,
       });
     }
 
+    // Shopping: specific cap with timeline
     if (m.shopping > 150) {
       const saving = Math.round(m.shopping * 0.25);
+      const targetSpend = Math.round(m.shopping - saving);
+      const annualSave = saving * 12;
       moves.push({
-        action: 'Apply a 24-hour rule to non-essential purchases',
-        annualImpact: saving * 12,
+        action: `Cap non-essential shopping at \u00a3${targetSpend}/month to save \u00a3${saving}`,
+        annualImpact: annualSave,
         monthlyImpact: saving,
         effort: 'low',
-        strategy: 'Wait 24 hours before any purchase over \u00a330.',
-        steps: ['Remove saved cards from shopping apps', 'Use a wishlist \u2014 buy after 24 hours', 'Unsubscribe from marketing emails'],
-        effect: 'Reduces impulse spending by 20-30%.',
+        timeline: `\u00a3${annualSave} redirected to your goals this year`,
+        strategy: `You're spending \u00a3${Math.round(m.shopping)}/month on shopping. A 24-hour rule on purchases over \u00a330 cuts impulse buys by 25%.`,
+        steps: [
+          'Remove saved cards from all shopping apps',
+          'Add items to a wishlist — only buy after 24 hours',
+          'Unsubscribe from all marketing emails this week',
+        ],
+        effect: `Reduces impulse spending by 25%, saving \u00a3${saving}/month.`,
       });
     }
 
+    // Debt snowball: specific amounts and timeline
     if (m.debtAccountCount >= 2) {
+      const debtSaving = Math.round(p.debtPayments * 0.15);
+      const annualSave = debtSaving * 12;
       moves.push({
-        action: 'Start a debt snowball',
-        annualImpact: Math.round(p.debtPayments * 0.15) * 12,
-        monthlyImpact: Math.round(p.debtPayments * 0.15),
+        action: `Attack ${m.debtAccountCount} debts with snowball — free \u00a3${debtSaving}/month in interest`,
+        annualImpact: annualSave,
+        monthlyImpact: debtSaving,
         effort: 'high',
-        strategy: 'Pay minimums on all but smallest debt. Throw surplus at smallest first.',
-        steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Put any extra surplus into smallest debt', 'When cleared, roll payment into next smallest'],
-        effect: 'Faster debt payoff with psychological momentum.',
+        timeline: `Clear smallest debt first, then roll payments into the next`,
+        strategy: `You have ${m.debtAccountCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month. Pay minimums on all except the smallest — throw every spare pound at it.`,
+        steps: [
+          'List all debts from smallest balance to largest',
+          'Pay minimums on everything except the smallest debt',
+          `Redirect \u00a3${Math.round(p.surplus > 0 ? Math.min(p.surplus, 200) : 50)}/month extra at the smallest balance`,
+          'When cleared, roll that payment into the next smallest',
+        ],
+        effect: `Saves \u00a3${annualSave}/year in interest and builds momentum toward debt freedom.`,
       });
     }
 
+    // Transport: specific savings
     if (m.transport > 100) {
       const saving = Math.round(m.transport * 0.2);
+      const annualSave = saving * 12;
       moves.push({
-        action: 'Optimise transport costs',
-        annualImpact: saving * 12,
+        action: `Cut transport from \u00a3${Math.round(m.transport)} to \u00a3${Math.round(m.transport - saving)}/month`,
+        annualImpact: annualSave,
         monthlyImpact: saving,
         effort: 'medium',
-        strategy: 'Consider weekly caps, season tickets, or cycling one day/week.',
-        steps: ['Check if a weekly Oyster cap or railcard saves money', 'Try one car-free/ride-free day per week', 'Compare annual vs monthly ticket pricing'],
-        effect: 'Reduces a major fixed cost.',
+        timeline: `\u00a3${annualSave} saved over 12 months`,
+        strategy: `You're spending \u00a3${Math.round(m.transport)}/month on transport. A railcard, weekly cap, or one car-free day per week cuts this by 20%.`,
+        steps: [
+          'Check if a railcard or weekly Oyster cap saves money vs daily fares',
+          'Go car-free or ride-free one day per week',
+          'Compare annual vs monthly ticket pricing — annual saves 10-15%',
+        ],
+        effect: `Reduces a major fixed cost by \u00a3${saving}/month without changing your commute.`,
       });
     }
 
+    // Emergency buffer: specific target and timeline
     if (m.savingsRate < 10 && p.surplus > 0) {
-      const saving = Math.round(p.surplus * 0.5);
+      const autoSave = Math.round(p.surplus * 0.5);
+      const bufferTarget = Math.max(500, Math.round(p.spending));
+      const monthsToTarget = autoSave > 0 ? Math.ceil(bufferTarget / autoSave) : 0;
+      const annualSave = autoSave * 12;
       moves.push({
-        action: 'Start a \u00a3500 emergency buffer',
-        annualImpact: saving * 12,
+        action: `Auto-save \u00a3${autoSave}/month to build \u00a3${bufferTarget} buffer in ${monthsToTarget} months`,
+        annualImpact: annualSave,
+        monthlyImpact: autoSave,
+        effort: 'low',
+        timeline: `\u00a3${bufferTarget} emergency fund in ${monthsToTarget} months`,
+        strategy: `Your savings rate is only ${Math.round(m.savingsRate)}%. Auto-transfer \u00a3${autoSave} to a separate pot on payday — before you can spend it.`,
+        steps: [
+          'Open a separate instant-access savings pot today',
+          `Set up a \u00a3${autoSave} standing order for the day after payday`,
+          `Target \u00a3${bufferTarget} (1 month of expenses) — then build to 3 months`,
+        ],
+        effect: `\u00a3${bufferTarget} safety net in ${monthsToTarget} months — no more relying on credit for emergencies.`,
+      });
+    }
+
+    // High savers: specific interest gains
+    if (m.savingsRate >= 15) {
+      const surplusAnnual = Math.round(p.surplus * 12);
+      const interestGain = Math.round(surplusAnnual * 0.045);
+      const monthlyGain = Math.round(interestGain / 12);
+      moves.push({
+        action: `Move \u00a3${Math.round(p.surplus)}/month surplus to 4.5% savings — earn \u00a3${interestGain}/year`,
+        annualImpact: interestGain,
+        monthlyImpact: monthlyGain,
+        effort: 'low',
+        timeline: `\u00a3${interestGain} in interest over the next 12 months`,
+        strategy: `You're saving well (${Math.round(m.savingsRate)}% rate). Make your surplus work harder — a 4.5% easy-access account or S&S ISA adds \u00a3${interestGain}/year passively.`,
+        steps: [
+          'Open a high-interest easy-access account (Chase, Chip, or Monzo offer 4%+)',
+          `Auto-transfer \u00a3${Math.round(p.surplus)} on payday`,
+          'Consider a stocks & shares ISA for any savings you won\'t need for 5+ years',
+        ],
+        effect: `\u00a3${interestGain}/year in passive interest — compounding from day one.`,
+      });
+    }
+
+    // Coffee specific move if spending is high
+    if (m.coffeeAndCafes > 40) {
+      const saving = Math.round(m.coffeeAndCafes * 0.5);
+      const annualSave = saving * 12;
+      moves.push({
+        action: `Halve caf\u00e9 spending from \u00a3${Math.round(m.coffeeAndCafes)} to \u00a3${Math.round(m.coffeeAndCafes - saving)}/month`,
+        annualImpact: annualSave,
         monthlyImpact: saving,
         effort: 'low',
-        strategy: 'Auto-transfer 50% of surplus to a separate savings pot on payday.',
-        steps: ['Open a separate savings pot', 'Set up standing order for payday', 'Target \u00a3500 first, then 1 month of expenses'],
-        effect: 'Protection against unexpected bills without taking on debt.',
-      });
-    }
-
-    if (m.savingsRate >= 15) {
-      moves.push({
-        action: 'Optimise where your savings sit',
-        annualImpact: Math.round(p.surplus * 0.04 * 12),
-        monthlyImpact: Math.round(p.surplus * 0.04),
-        effort: 'low',
-        strategy: 'Move savings to a high-interest account or S&S ISA.',
-        steps: ['Compare easy-access savings rates', 'Consider a stocks & shares ISA for long-term', 'Max out annual ISA allowance if possible'],
-        effect: 'Compound growth on existing savings.',
+        timeline: `\u00a3${annualSave} saved this year`,
+        strategy: `You're spending \u00a3${Math.round(m.coffeeAndCafes)}/month on coffee and caf\u00e9s. Bring coffee from home 3 days a week to halve this.`,
+        steps: [
+          'Buy a reusable cup and make coffee at home 3 mornings per week',
+          'Keep one "treat" coffee day per week — make it intentional',
+          `Track caf\u00e9 spending weekly to stay under \u00a3${Math.round(m.coffeeAndCafes - saving)}/month`,
+        ],
+        effect: `Saves \u00a3${saving}/month without giving up coffee entirely.`,
       });
     }
 
