@@ -1,4 +1,4 @@
-const AUTH_URL = 'https://auth.truelayer.com';
+const AUTH_URL = 'https://auth.truelayer-sandbox.com';
 const CLIENT_ID = 'bocymoneypersonality-a01ae4';
 const REDIRECT_URI =
   process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
