@@ -29,12 +29,12 @@ export default function Welcome() {
         <View style={styles.centerContent}>
           <Text style={styles.brandEmoji}>{'{ B }'}</Text>
           <Text style={styles.title}>Welcome to Bocy</Text>
-          <Text style={styles.subtitle}>Your personal money advisor</Text>
+          <Text style={styles.subtitle}>Your AI financial strategist</Text>
 
           <View style={styles.benefits}>
-            <BenefitItem text="See where your money really goes" />
-            <BenefitItem text="Get a personalised financial profile" />
-            <BenefitItem text="Actionable moves to improve your finances" />
+            <BenefitItem text="Your most material financial move \u2014 identified" />
+            <BenefitItem text="Data-driven action plan \u2014 built" />
+            <BenefitItem text="One-tap execution \u2014 enabled" />
           </View>
 
           <TouchableOpacity style={styles.button} onPress={() => setStep(1)}>
@@ -112,21 +112,21 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
   },
   brandEmoji: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.heading,
     fontSize: 36,
     color: colors.accent,
     textAlign: 'center',
     marginBottom: spacing.lg,
   },
   title: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.heading,
     fontSize: 24,
     color: colors.text,
-    fontWeight: '700',
     textAlign: 'center',
     marginBottom: spacing.xs,
   },
   subtitle: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     textAlign: 'center',
@@ -141,13 +141,14 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   benefitBullet: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 14,
     color: colors.accent,
     marginRight: spacing.sm,
     marginTop: 2,
   },
   benefitText: {
+    fontFamily: fonts.regular,
     fontSize: 15,
     color: colors.text2,
     flex: 1,
@@ -157,6 +158,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   input: {
+    fontFamily: fonts.regular,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
@@ -176,9 +178,8 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
-    fontWeight: '700',
   },
 });

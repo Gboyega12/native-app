@@ -11,9 +11,16 @@ export default async function handler(req, res) {
   }
 
   const token = authHeader.replace('Bearer ', '');
-  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !serviceKey || !anonKey) {
+    return res.status(500).json({
+      error: 'Server misconfigured',
+      details: 'Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, or EXPO_PUBLIC_SUPABASE_ANON_KEY',
+    });
+  }
 
   // Verify user with anon client
   const anonClient = createClient(supabaseUrl, anonKey);

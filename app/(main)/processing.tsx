@@ -9,14 +9,14 @@ import { colors, fonts, spacing } from '@/theme';
 import type { Analysis, Goals } from '@/lib/types';
 
 const STEPS = [
-  'Reading your transactions',
-  'Recognising merchants',
-  'Spotting patterns in your spending',
-  'Aligning with your goals',
-  'Building your recommendations',
+  'Scanning transactions',
+  'Identifying merchants',
+  'Detecting spending patterns',
+  'Modelling financial impact',
+  'Ranking your moves',
 ];
 
-// Global holder so results screen can pick it up without re-fetching
+// Global holder so dashboard can pick it up without re-fetching
 let _lastResult: Analysis | null = null;
 export function getLastResult(): Analysis | null { return _lastResult; }
 
@@ -141,7 +141,7 @@ function ProcessingInner() {
         _decisionScore: result.decisionScore,
       } as any;
 
-      router.replace('/(main)/results');
+      router.replace('/(main)/(tabs)');
     } catch (err: any) {
       setError(err.message || 'Analysis failed. Please try again.');
     }
@@ -158,7 +158,7 @@ function ProcessingInner() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Analysing your finances</Text>
+      <Text style={styles.title}>Analysing your data</Text>
       <View style={styles.steps}>
         {STEPS.map((step, i) => (
           <Animated.View key={i} style={[styles.stepRow, { opacity: fadeAnims[i] }]}>
@@ -195,10 +195,9 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
   },
   title: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.heading,
     fontSize: 20,
     color: colors.text,
-    fontWeight: '700',
     marginBottom: spacing.xxl,
   },
   steps: {
@@ -209,7 +208,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   stepIcon: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.medium,
     fontSize: 14,
     color: colors.muted,
     width: 32,
@@ -218,6 +217,7 @@ const styles = StyleSheet.create({
     color: colors.accent,
   },
   stepText: {
+    fontFamily: fonts.regular,
     fontSize: 15,
     color: colors.muted,
   },
@@ -225,13 +225,14 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   errorIcon: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.medium,
     fontSize: 48,
     color: colors.coral,
     textAlign: 'center',
     marginBottom: spacing.lg,
   },
   errorText: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.coral,
     textAlign: 'center',

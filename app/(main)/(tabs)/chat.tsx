@@ -1,25 +1,55 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
+  KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { ChatMessage, ChatContext, Analysis, Goals } from '@/lib/types';
 
-const SUGGESTED_QUESTIONS = [
-  'How can I save more?',
-  'Am I spending too much on food?',
-  'What should I prioritise first?',
-  'How do I build an emergency fund?',
-];
+function getContextualQuestions(analysis: Analysis | null, goals: Goals | null): string[] {
+  if (!analysis) {
+    return [
+      'What can Bocy help me with?',
+      'How does the financial analysis work?',
+    ];
+  }
+
+  const questions: string[] = [];
+  questions.push('What happens if I follow my full action plan?');
+
+  const patterns = analysis.behavioral_patterns || [];
+  if (patterns.some((p: string) => p.toLowerCase().includes('debt'))) {
+    questions.push('Should I focus on debt or savings first?');
+  } else {
+    questions.push('How can I optimise my savings rate?');
+  }
+
+  const moves = analysis.all_moves || [];
+  if (moves.some((m: any) => m.action?.toLowerCase().includes('subscription'))) {
+    questions.push('Which subscriptions should I cut first?');
+  } else {
+    questions.push('Where are my biggest spending leaks?');
+  }
+
+  if (goals?.one_year_goal) {
+    const goalName = goals.one_year_goal.replace(/_/g, ' ');
+    questions.push(`How fast can I reach my ${goalName} goal?`);
+  } else {
+    questions.push('What financial goal should I set first?');
+  }
+
+  return questions;
+}
 
 export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [context, setContext] = useState<ChatContext>({});
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [goals, setGoals] = useState<Goals | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   useFocusEffect(
@@ -49,6 +79,8 @@ export default function Chat() {
 
     const a: Analysis | null = analysisRes.data;
     const g: Goals | null = goalsRes.data;
+    setAnalysis(a);
+    setGoals(g);
 
     setContext({
       monthly_income: a?.monthly_income,
@@ -98,6 +130,8 @@ export default function Chat() {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
+  const suggestedQuestions = getContextualQuestions(analysis, goals);
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -111,8 +145,9 @@ export default function Chat() {
       >
         {messages.length === 0 && (
           <View style={styles.suggestedContainer}>
-            <Text style={styles.suggestedTitle}>Ask Bocy anything</Text>
-            {SUGGESTED_QUESTIONS.map((q, i) => (
+            <Text style={styles.suggestedTitle}>Ask Bocy</Text>
+            <Text style={styles.suggestedSubtitle}>Your AI financial advisor</Text>
+            {suggestedQuestions.map((q, i) => (
               <TouchableOpacity
                 key={i}
                 style={styles.suggestedButton}
@@ -166,7 +201,7 @@ export default function Chat() {
           onPress={() => sendMessage(input)}
           disabled={!input.trim() || loading}
         >
-          <Text style={styles.sendText}>&gt;</Text>
+          <Text style={styles.sendText}>{'\u2191'}</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -191,22 +226,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   suggestedTitle: {
-    fontFamily: fonts.mono,
-    fontSize: 16,
+    fontFamily: fonts.heading,
+    fontSize: 20,
     color: colors.text,
+  },
+  suggestedSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
     marginBottom: spacing.lg,
+    marginTop: spacing.xs,
   },
   suggestedButton: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
     width: '100%',
   },
   suggestedText: {
+    fontFamily: fonts.medium,
     fontSize: 14,
     color: colors.text2,
     textAlign: 'center',
@@ -230,6 +272,7 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: radius.sm,
   },
   bubbleText: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     lineHeight: 22,
   },
@@ -240,7 +283,7 @@ const styles = StyleSheet.create({
     color: colors.text2,
   },
   thinkingText: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.medium,
     fontSize: 13,
     color: colors.dim,
     fontStyle: 'italic',
@@ -255,6 +298,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    fontFamily: fonts.regular,
     backgroundColor: colors.bg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -276,9 +320,8 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   sendText: {
-    fontFamily: fonts.mono,
-    fontSize: 18,
+    fontFamily: fonts.semibold,
+    fontSize: 20,
     color: colors.bg,
-    fontWeight: '700',
   },
 });

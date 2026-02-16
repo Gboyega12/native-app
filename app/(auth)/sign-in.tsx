@@ -44,7 +44,7 @@ export default function SignIn() {
       >
         <View style={styles.header}>
           <Text style={styles.logo}>Bocy</Text>
-          <Text style={styles.subtitle}>Your personal money advisor</Text>
+          <Text style={styles.subtitle}>AI financial strategist</Text>
         </View>
 
         <View style={styles.form}>
@@ -107,12 +107,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xxl,
   },
   logo: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.heading,
     fontSize: 36,
     color: colors.accent,
-    fontWeight: '700',
   },
   subtitle: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     marginTop: spacing.xs,
@@ -121,6 +121,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   input: {
+    fontFamily: fonts.regular,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
@@ -131,6 +132,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   error: {
+    fontFamily: fonts.regular,
     color: colors.coral,
     fontSize: 13,
     marginBottom: spacing.md,
@@ -147,12 +149,12 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
-    fontWeight: '700',
   },
   link: {
+    fontFamily: fonts.regular,
     textAlign: 'center',
     color: colors.dim,
     fontSize: 14,

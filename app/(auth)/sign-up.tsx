@@ -83,7 +83,7 @@ export default function SignUp() {
       >
         <View style={styles.header}>
           <Text style={styles.title}>Create account</Text>
-          <Text style={styles.subtitle}>Join Bocy to understand your money</Text>
+          <Text style={styles.subtitle}>AI-powered financial strategy</Text>
         </View>
 
         <View style={styles.form}>
@@ -152,24 +152,25 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xxl,
   },
   checkmark: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.heading,
     fontSize: 48,
     color: colors.accent,
     marginBottom: spacing.lg,
   },
   title: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.heading,
     fontSize: 24,
     color: colors.text,
-    fontWeight: '700',
     marginBottom: spacing.xs,
   },
   subtitle: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     marginTop: spacing.xs,
   },
   message: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     textAlign: 'center',
@@ -180,6 +181,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   input: {
+    fontFamily: fonts.regular,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
@@ -190,6 +192,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   error: {
+    fontFamily: fonts.regular,
     color: colors.coral,
     fontSize: 13,
     marginBottom: spacing.md,
@@ -206,10 +209,9 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
-    fontWeight: '700',
   },
   secondaryButton: {
     borderWidth: 1,
@@ -220,11 +222,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   secondaryButtonText: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.medium,
     fontSize: 14,
     color: colors.text,
   },
   link: {
+    fontFamily: fonts.regular,
     textAlign: 'center',
     color: colors.dim,
     fontSize: 14,
