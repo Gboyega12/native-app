@@ -91,22 +91,34 @@ export default function Connect() {
 
   const handleTrueLayer = async () => {
     setLoading(true);
+    setErrorMsg('');
+    setStatusMsg('Connecting to your bank...');
     try {
       const connectionId = `conn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       const authUrl = getTrueLayerAuthUrl(connectionId);
 
-      // TrueLayer redirects to the app root — match that as returnUrl
+      // Use /connect as returnUrl so the popup isn't closed prematurely
+      // when it hits /api/truelayer/callback (same origin, but not the final URL)
       const returnUrl = Platform.OS === 'web'
-        ? window.location.origin
-        : 'bocy://';
+        ? window.location.origin + '/connect'
+        : 'bocy://callback';
 
       const result = await WebBrowser.openAuthSessionAsync(authUrl, returnUrl);
 
       if (result.type === 'success' && result.url) {
         const url = new URL(result.url);
+
+        // Server redirect flow: callback processed data and redirected here
+        const connId = url.searchParams.get('connection_id');
+        const status = url.searchParams.get('status');
+        if (status === 'success' && connId) {
+          await fetchBankData(connId);
+          return;
+        }
+
+        // Fallback: client-side code+state flow
         const code = url.searchParams.get('code');
         const state = url.searchParams.get('state');
-
         if (code && state) {
           await exchangeTrueLayerCode(code, state);
           return;
