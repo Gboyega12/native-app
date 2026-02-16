@@ -14,6 +14,7 @@ export default function Connect() {
   const params = useLocalSearchParams<{ connection_id?: string; status?: string }>();
   const [loading, setLoading] = useState(false);
   const [loadingCSV, setLoadingCSV] = useState(false);
+  const [loadingPDF, setLoadingPDF] = useState(false);
 
   // Handle web OAuth callback (when redirected back from TrueLayer via query params)
   useEffect(() => {
@@ -123,6 +124,58 @@ export default function Connect() {
     }
   };
 
+  const handlePDFUpload = async () => {
+    setLoadingPDF(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: Platform.OS === 'web'
+          ? ['application/pdf', '.pdf']
+          : ['application/pdf'],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]) {
+        setLoadingPDF(false);
+        return;
+      }
+
+      const file = result.assets[0];
+
+      // Convert PDF to base64
+      const base64 = await fileToBase64(file);
+      if (!base64) {
+        Alert.alert('Error', 'Could not read the PDF file.');
+        setLoadingPDF(false);
+        return;
+      }
+
+      // Send to API for Claude-powered extraction
+      const res = await fetch('/api/parse-statement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf_base64: base64 }),
+      });
+      const data = await res.json();
+
+      if (!data.success || !data.csv_data) {
+        Alert.alert(
+          'Could not parse statement',
+          data.error || 'Please try a CSV export instead.',
+        );
+        setLoadingPDF(false);
+        return;
+      }
+
+      setLoadingPDF(false);
+      router.push({ pathname: '/(main)/goals', params: { csvData: data.csv_data } });
+    } catch (err) {
+      setLoadingPDF(false);
+      Alert.alert('Error', 'Could not process the PDF. Please try a CSV export instead.');
+    }
+  };
+
+  const anyLoading = loading || loadingCSV || loadingPDF;
+
   return (
     <View style={styles.container}>
       <View style={styles.content}>
@@ -134,7 +187,7 @@ export default function Connect() {
         <TouchableOpacity
           style={[styles.primaryButton, loading && styles.buttonDisabled]}
           onPress={handleTrueLayer}
-          disabled={loading || loadingCSV}
+          disabled={anyLoading}
         >
           {loading ? (
             <ActivityIndicator color={colors.bg} />
@@ -151,27 +204,100 @@ export default function Connect() {
 
         <View style={styles.divider}>
           <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or</Text>
+          <Text style={styles.dividerText}>or upload a statement</Text>
           <View style={styles.dividerLine} />
         </View>
 
-        <TouchableOpacity
-          style={[styles.secondaryButton, loadingCSV && styles.buttonDisabled]}
-          onPress={handleCSVUpload}
-          disabled={loading || loadingCSV}
-        >
-          {loadingCSV ? (
-            <ActivityIndicator color={colors.text} />
-          ) : (
-            <Text style={styles.secondaryButtonText}>Upload a CSV file</Text>
-          )}
-        </TouchableOpacity>
+        <View style={styles.uploadRow}>
+          <TouchableOpacity
+            style={[styles.uploadButton, loadingPDF && styles.buttonDisabled]}
+            onPress={handlePDFUpload}
+            disabled={anyLoading}
+          >
+            {loadingPDF ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <>
+                <Text style={styles.uploadIcon}>PDF</Text>
+                <Text style={styles.uploadButtonText}>PDF statement</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.uploadButton, loadingCSV && styles.buttonDisabled]}
+            onPress={handleCSVUpload}
+            disabled={anyLoading}
+          >
+            {loadingCSV ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <>
+                <Text style={styles.uploadIcon}>CSV</Text>
+                <Text style={styles.uploadButtonText}>CSV export</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
         <Text style={styles.hint}>
-          Export transactions from your banking app as CSV
+          Download your statement from your banking app as PDF or CSV
         </Text>
       </View>
     </View>
   );
+}
+
+// ── Helpers ──
+
+async function fileToBase64(
+  file: DocumentPicker.DocumentPickerAsset,
+): Promise<string | null> {
+  try {
+    // On web, use the File API directly
+    if (Platform.OS === 'web') {
+      const webFile = (file as any).file as File | undefined;
+      if (webFile) {
+        const buffer = await webFile.arrayBuffer();
+        return arrayBufferToBase64(buffer);
+      }
+    }
+
+    // On native (or web fallback), fetch the URI and convert
+    const response = await fetch(file.uri);
+    const blob = await response.blob();
+    return await blobToBase64(blob);
+  } catch {
+    return null;
+  }
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  // Process in chunks to avoid max call stack size
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    for (let j = 0; j < chunk.length; j++) {
+      binary += String.fromCharCode(chunk[j]);
+    }
+  }
+  return btoa(binary);
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      // Strip "data:application/pdf;base64," prefix
+      const base64 = dataUrl.split(',')[1] || '';
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 }
 
 function TrustBadge({ text }: { text: string }) {
@@ -255,17 +381,35 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginHorizontal: spacing.md,
   },
-  secondaryButton: {
+  uploadRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  uploadButton: {
+    flex: 1,
     borderWidth: 1,
     borderColor: colors.border,
     paddingVertical: 14,
     borderRadius: radius.md,
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    justifyContent: 'center',
+    minHeight: 52,
   },
-  secondaryButtonText: {
+  uploadIcon: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    color: colors.accent,
+    backgroundColor: colors.accentDim,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  uploadButtonText: {
     fontFamily: fonts.medium,
-    fontSize: 15,
+    fontSize: 14,
     color: colors.text,
   },
   hint: {

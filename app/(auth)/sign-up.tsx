@@ -30,6 +30,9 @@ export default function SignUp() {
     const { error: authError } = await supabase.auth.signUp({
       email: email.trim(),
       password,
+      options: {
+        emailRedirectTo: 'https://native-app-ashy.vercel.app/',
+      },
     });
     setLoading(false);
     if (authError) {
