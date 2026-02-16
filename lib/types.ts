@@ -9,6 +9,7 @@ export interface RawTransaction {
 export interface EnrichedTransaction extends RawTransaction {
   merchant: string;
   category: string;
+  isEssential: boolean;
   isSubscription: boolean;
   isBNPL: boolean;
   isDebt: boolean;
@@ -36,10 +37,18 @@ export interface CategoryBreakdown {
   [category: string]: number;
 }
 
+export interface TransactionDetail {
+  date: string;
+  merchant: string;
+  description: string;
+  amount: number;
+}
+
 export interface BudgetCategory {
   category: string;
   monthly: number;
   txs: number;
+  transactions: TransactionDetail[];
 }
 
 export interface BudgetSection {

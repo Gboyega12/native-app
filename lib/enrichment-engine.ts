@@ -1,6 +1,11 @@
-import { matchMerchant, isPersonTransfer } from './merchant-db';
+import {
+  matchMerchant, isPersonTransfer,
+  isLikelyIncomeCredit, matchesSalaryKeywords,
+} from './merchant-db';
+import { classifyTransaction } from './classifier';
+import { normaliseDescription } from './normalise';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
-import { UK_BENCHMARKS, ESSENTIAL_CATEGORIES } from './constants';
+import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS } from './constants';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -10,6 +15,7 @@ import type {
   DecisionScore,
   Move,
   EnrichmentResult,
+  BudgetCategory,
 } from './types';
 
 function splitCSVLine(line: string): string[] {
@@ -83,6 +89,16 @@ const EnrichmentEngine = {
     const debitIdx = cols.findIndex((c) => c.includes('debit'));
     const creditIdx = cols.findIndex((c) => c.includes('credit'));
 
+    // Validate that we found at least a date and description column.
+    // Without these, positional fallback is unreliable and may misalign data.
+    const hasDateCol = dateIdx >= 0;
+    const hasDescCol = descIdx >= 0;
+    const hasAmountCol = amountIdx >= 0 || (debitIdx >= 0 && creditIdx >= 0);
+
+    if (!hasDateCol && !hasDescCol && !hasAmountCol) {
+      return [];
+    }
+
     const transactions: RawTransaction[] = [];
     const now = new Date();
     const fourMonthsAgo = new Date(now);
@@ -115,21 +131,36 @@ const EnrichmentEngine = {
   },
 
   enrichTransaction(tx: RawTransaction): EnrichedTransaction {
-    const match = matchMerchant(tx.description);
+    const normalised = normaliseDescription(tx.description);
+    const merchantMatch = matchMerchant(tx.description, normalised);
     const isPerson = isPersonTransfer(tx.description);
-    const isIncome = tx.amount > 0;
-    const isRefund = isIncome && tx.description.toLowerCase().includes('refund');
+    const isCredit = tx.amount > 0;
+    const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
     const isSavings = !!(tx.description.toLowerCase().match(/\bsaving|isa\b/i) && tx.amount < 0);
 
-    if (match) {
+    // ── Income decision tree ──
+    // Credit comes in → determine if it's real income or a person transfer
+    //   1. Known merchant flagged as income (salary/HMRC/DWP) → income
+    //   2. Matches salary/employer/benefit keywords → income
+    //   3. Person name pattern (1-3 alpha words, no brand) → EXCLUDED (transfer)
+    //   4. Refund → not income
+    //   5. Other credit → tentative income (validated in buildProfile via regularity check)
+
+    if (merchantMatch) {
+      const isIncome = merchantMatch.isIncome || (isCredit && !isPerson && !isRefund && isLikelyIncomeCredit(tx.description));
+
+      // Use the classifier for category + essentiality
+      const classification = classifyTransaction(tx.description, merchantMatch);
+
       return {
         ...tx,
-        merchant: match.merchant,
-        category: isIncome && !match.isIncome ? 'Refunds' : match.category,
-        isSubscription: match.isSubscription,
-        isBNPL: match.isBNPL,
-        isDebt: match.isDebt,
-        isIncome: match.isIncome || isIncome,
+        merchant: merchantMatch.merchant,
+        category: isIncome ? merchantMatch.category : (isCredit && !merchantMatch.isIncome ? 'Refunds' : classification.category),
+        isEssential: classification.isEssential,
+        isSubscription: merchantMatch.isSubscription,
+        isBNPL: merchantMatch.isBNPL,
+        isDebt: merchantMatch.isDebt,
+        isIncome,
         isTransfer: isPerson,
         isRefund,
         isSavings,
@@ -137,15 +168,43 @@ const EnrichmentEngine = {
       };
     }
 
+    // No merchant match — classify via keyword fallback or default
+    let isIncome = false;
     let category = 'Other';
-    if (isIncome) category = isRefund ? 'Refunds' : 'Income';
-    else if (isPerson) category = 'Transfers';
-    else if (isSavings) category = 'Savings';
+    let isEssential = false;
+    let confidence: EnrichedTransaction['confidence'] = 'low';
+
+    if (isCredit) {
+      if (isRefund) {
+        category = 'Refunds';
+      } else if (isPerson) {
+        category = 'Transfers';
+      } else if (isLikelyIncomeCredit(tx.description)) {
+        isIncome = true;
+        category = 'Income';
+        confidence = 'high';
+      } else {
+        // Unknown credit — tentative income, validated in buildProfile
+        isIncome = true;
+        category = 'Income';
+      }
+    } else if (isPerson) {
+      category = 'Transfers';
+    } else if (isSavings) {
+      category = 'Savings';
+    } else {
+      // Spending transaction with no merchant match — run keyword classifier
+      const classification = classifyTransaction(tx.description, null, normalised);
+      category = classification.category;
+      isEssential = classification.isEssential;
+      confidence = classification.confidence;
+    }
 
     return {
       ...tx,
       merchant: tx.description,
       category,
+      isEssential,
       isSubscription: false,
       isBNPL: false,
       isDebt: false,
@@ -153,7 +212,7 @@ const EnrichmentEngine = {
       isTransfer: isPerson,
       isRefund,
       isSavings,
-      confidence: 'low',
+      confidence,
     };
   },
 
@@ -197,7 +256,7 @@ const EnrichmentEngine = {
 
   buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): FinancialProfile {
     const spending = transactions.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
-    const income = transactions.filter((t) => t.isIncome && !t.isRefund);
+    const income = transactions.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer);
 
     const dates = transactions.map((t) => new Date(t.date).getTime()).filter(Boolean);
     const span = dates.length >= 2
@@ -211,21 +270,43 @@ const EnrichmentEngine = {
     const monthlySpending = totalSpending / months;
     const surplus = monthlyIncome - monthlySpending;
 
-    const catTotals: Record<string, { total: number; count: number }> = {};
+    // Group spending by category for budget card display
+    const catTotals: Record<string, { total: number; count: number; transactions: { date: string; merchant: string; description: string; amount: number }[] }> = {};
     for (const tx of spending) {
       const cat = tx.category || 'Other';
-      if (!catTotals[cat]) catTotals[cat] = { total: 0, count: 0 };
+      if (!catTotals[cat]) catTotals[cat] = { total: 0, count: 0, transactions: [] };
       catTotals[cat].total += Math.abs(tx.amount);
       catTotals[cat].count++;
+      catTotals[cat].transactions.push({
+        date: tx.date,
+        merchant: tx.merchant || tx.description,
+        description: tx.description,
+        amount: tx.amount,
+      });
     }
 
-    const nonDiscItems: any[] = [];
-    const discItems: any[] = [];
+    // ── Essential vs discretionary split ──
+    // Uses per-transaction isEssential flag (description-first, category-fallback)
+    // instead of the old flat ESSENTIAL_CATEGORIES set.
+    const nonDiscItems: BudgetCategory[] = [];
+    const discItems: BudgetCategory[] = [];
+
     for (const [cat, d] of Object.entries(catTotals)) {
-      const item = { category: cat, monthly: d.total / months, txs: d.count };
-      if (ESSENTIAL_CATEGORIES.has(cat)) nonDiscItems.push(item);
+      const sortedTxs = d.transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const item: BudgetCategory = { category: cat, monthly: d.total / months, txs: d.count, transactions: sortedTxs };
+
+      // Determine essentiality from the transactions in this category.
+      // If the majority of spend in this category is from essential transactions,
+      // the whole category goes into non-discretionary.
+      const catSpending = spending.filter((t) => (t.category || 'Other') === cat);
+      const essentialSpend = catSpending.filter((t) => t.isEssential).reduce((s, t) => s + Math.abs(t.amount), 0);
+      const totalCatSpend = catSpending.reduce((s, t) => s + Math.abs(t.amount), 0);
+      const isEssentialCategory = totalCatSpend > 0 && (essentialSpend / totalCatSpend) > 0.5;
+
+      if (isEssentialCategory) nonDiscItems.push(item);
       else discItems.push(item);
     }
+
     const nonDiscTotal = nonDiscItems.reduce((s, i) => s + i.monthly, 0);
     const discTotal = discItems.reduce((s, i) => s + i.monthly, 0);
 
@@ -238,7 +319,7 @@ const EnrichmentEngine = {
     const incomeSources = Object.entries(incomeGroups).map(([source, txs]) => {
       const monthly = txs.reduce((s, t) => s + t.amount, 0) / months;
       const avgAmount = txs.reduce((s, t) => s + t.amount, 0) / txs.length;
-      const isSalary = source.toLowerCase().includes('salary') || source.toLowerCase().includes('payroll');
+      const isSalary = matchesSalaryKeywords(source);
       const sorted = txs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       const intervals: number[] = [];
       for (let i = 1; i < sorted.length; i++) {
@@ -249,8 +330,24 @@ const EnrichmentEngine = {
       if (avgInt >= 25 && avgInt <= 35) frequency = 'monthly';
       else if (avgInt >= 12 && avgInt <= 17) frequency = 'fortnightly';
       else if (avgInt >= 5 && avgInt <= 9) frequency = 'weekly';
-      return { source, frequency, avgAmount, monthly, isSalary };
-    });
+      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt };
+    })
+    .filter((src) => {
+      if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
+      if (src.frequency !== 'irregular' && src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount) return true;
+      if (
+        src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin &&
+        src.count >= INCOME_THRESHOLDS.largeCreditMinCount &&
+        src.avgInterval >= INCOME_THRESHOLDS.largeCreditIntervalMin &&
+        src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax
+      ) return true;
+      return false;
+    })
+    .sort((a, b) => b.monthly - a.monthly);
+
+    if (incomeSources.length > 0 && !incomeSources.some((s) => s.isSalary)) {
+      incomeSources[0].isSalary = true;
+    }
 
     const catMonthly = (name: string) => (catTotals[name]?.total || 0) / months;
     const subscriptions = recurring.filter((r) => r.isSubscription);
@@ -265,7 +362,7 @@ const EnrichmentEngine = {
       streamingCount: subscriptions.filter((r) =>
         ['Netflix', 'Spotify', 'Disney+', 'YouTube Premium', 'NOW TV', 'Crunchyroll', 'Audible', 'Apple Services'].includes(r.merchant)
       ).length,
-      foodDelivery: catMonthly('Food Delivery'),
+      foodDelivery: catMonthly('Delivery'),
       transport: catMonthly('Transport'),
       groceries: catMonthly('Groceries'),
       shopping: catMonthly('Shopping'),
@@ -290,8 +387,8 @@ const EnrichmentEngine = {
         debtPayments: metrics.debtPayments,
       },
       budgetReality: {
-        nonDiscretionary: { total: nonDiscTotal, items: nonDiscItems.sort((a: any, b: any) => b.monthly - a.monthly) },
-        discretionary: { total: discTotal, items: discItems.sort((a: any, b: any) => b.monthly - a.monthly) },
+        nonDiscretionary: { total: nonDiscTotal, items: nonDiscItems.sort((a, b) => b.monthly - a.monthly) },
+        discretionary: { total: discTotal, items: discItems.sort((a, b) => b.monthly - a.monthly) },
       },
       incomeSources,
       subscriptions,
@@ -299,7 +396,7 @@ const EnrichmentEngine = {
     };
   },
 
-  determineArchetype(profile: any): Archetype {
+  determineArchetype(profile: FinancialProfile): Archetype {
     const m = profile.metrics;
     const ordered = [
       'debt_juggler', 'edge_walker', 'subscription_collector',
@@ -331,7 +428,7 @@ const EnrichmentEngine = {
     };
   },
 
-  detectBehavioralPatterns(profile: any): { pattern: string; detail: string }[] {
+  detectBehavioralPatterns(profile: FinancialProfile): { pattern: string; detail: string }[] {
     const patterns: { pattern: string; detail: string }[] = [];
     const m = profile.metrics;
     if (m.foodDelivery > UK_BENCHMARKS.foodDelivery) {
@@ -361,7 +458,7 @@ const EnrichmentEngine = {
     return patterns;
   },
 
-  calcDecisionScore(profile: any): DecisionScore {
+  calcDecisionScore(profile: FinancialProfile): DecisionScore {
     const m = profile.metrics;
     let score = 50;
     const breakdown: { factor: string; impact: number }[] = [];
@@ -380,7 +477,7 @@ const EnrichmentEngine = {
       score -= 5; breakdown.push({ factor: 'High delivery spend', impact: -5 });
     }
 
-    const hasSalary = profile.incomeSources.some((s: any) => s.isSalary);
+    const hasSalary = profile.incomeSources.some((s) => s.isSalary);
     if (hasSalary) { score += 8; breakdown.push({ factor: 'Stable salary', impact: +8 }); }
 
     if (m.bnplCount >= 2) { score -= 8; breakdown.push({ factor: 'BNPL usage', impact: -8 }); }
@@ -395,18 +492,19 @@ const EnrichmentEngine = {
     return { score, verdict, breakdown };
   },
 
-  genDecisionStack(profile: any, enrichedTxs?: EnrichedTransaction[]): Move[] {
+  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[]): Move[] {
     const moves: Move[] = [];
     const m = profile.metrics;
     const p = profile.monthly;
     const subs = profile.subscriptions || [];
     const txs = enrichedTxs || [];
+    const T = MOVE_THRESHOLDS;
 
     // Subscriptions — attach actual merchant names
-    if (m.subscriptionCount >= 4) {
-      const subNames = subs.map((s: any) => s.merchant).filter(Boolean);
-      const cutCount = Math.max(2, Math.round(m.subscriptionCount * 0.3));
-      const saving = Math.round(p.subscriptions * 0.3);
+    if (m.subscriptionCount >= T.subscriptionMinCount) {
+      const subNames = subs.map((s) => s.merchant).filter(Boolean);
+      const cutCount = Math.max(2, Math.round(m.subscriptionCount * T.subscriptionCutPct));
+      const saving = Math.round(p.subscriptions * T.subscriptionCutPct);
       moves.push({
         action: `Cancel or downgrade ${cutCount} subscriptions to free \u00a3${saving}/month`,
         annualImpact: saving * 12,
@@ -420,10 +518,10 @@ const EnrichmentEngine = {
       });
     }
 
-    // Food delivery — attach delivery merchant names
-    if (m.foodDelivery > 50) {
-      const saving = Math.round(m.foodDelivery * 0.4);
-      const deliveryMerchants = this._getMerchantsByCategory(txs, 'Food Delivery');
+    // Food delivery
+    if (m.foodDelivery > T.foodDeliveryMin) {
+      const saving = Math.round(m.foodDelivery * T.foodDeliveryCutPct);
+      const deliveryMerchants = this._getMerchantsByCategory(txs, 'Delivery');
       moves.push({
         action: `Cut delivery spend from \u00a3${Math.round(m.foodDelivery)} to \u00a3${Math.round(m.foodDelivery - saving)}/month`,
         annualImpact: saving * 12,
@@ -438,8 +536,8 @@ const EnrichmentEngine = {
     }
 
     // Eating out
-    if (m.eatingOut > 80) {
-      const saving = Math.round(m.eatingOut * 0.25);
+    if (m.eatingOut > T.eatingOutMin) {
+      const saving = Math.round(m.eatingOut * T.eatingOutCutPct);
       const eatingMerchants = this._getMerchantsByCategory(txs, 'Eating Out');
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       moves.push({
@@ -456,8 +554,8 @@ const EnrichmentEngine = {
     }
 
     // Shopping
-    if (m.shopping > 150) {
-      const saving = Math.round(m.shopping * 0.25);
+    if (m.shopping > T.shoppingMin) {
+      const saving = Math.round(m.shopping * T.shoppingCutPct);
       const shopMerchants = this._getMerchantsByCategory(txs, 'Shopping');
       moves.push({
         action: `Cap non-essential shopping at \u00a3${Math.round(m.shopping - saving)}/month`,
@@ -474,7 +572,7 @@ const EnrichmentEngine = {
 
     // Debt snowball
     if (m.debtAccountCount >= 2) {
-      const debtSaving = Math.round(p.debtPayments * 0.15);
+      const debtSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       moves.push({
         action: `Attack ${m.debtAccountCount} debts with snowball method`,
@@ -491,10 +589,11 @@ const EnrichmentEngine = {
 
     // Single debt account
     if (m.debtAccountCount === 1) {
-      const debtSaving = Math.round(p.debtPayments * 0.1);
+      const debtSaving = Math.round(p.debtPayments * T.singleDebtOverpayPct);
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
+      const overpay = Math.round(Math.min(p.surplus * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
       moves.push({
-        action: `Overpay debt by \u00a3${Math.round(Math.min(p.surplus * 0.5, 200))}/month to clear faster`,
+        action: `Overpay debt by \u00a3${overpay}/month to clear faster`,
         annualImpact: debtSaving * 12,
         monthlyImpact: debtSaving,
         effort: 'medium',
@@ -507,8 +606,8 @@ const EnrichmentEngine = {
     }
 
     // Transport
-    if (m.transport > 100) {
-      const saving = Math.round(m.transport * 0.2);
+    if (m.transport > T.transportMin) {
+      const saving = Math.round(m.transport * T.transportCutPct);
       const transportMerchants = this._getMerchantsByCategory(txs, 'Transport');
       moves.push({
         action: `Cut transport from \u00a3${Math.round(m.transport)} to \u00a3${Math.round(m.transport - saving)}/month`,
@@ -523,10 +622,10 @@ const EnrichmentEngine = {
       });
     }
 
-    // Emergency buffer — this is a BUFFER move, not spending
-    if (m.savingsRate < 10 && p.surplus > 0) {
-      const autoSave = Math.round(p.surplus * 0.5);
-      const bufferTarget = Math.max(500, Math.round(p.spending));
+    // Emergency buffer
+    if (m.savingsRate < T.bufferSavingsRateThreshold && p.surplus > 0) {
+      const autoSave = Math.round(p.surplus * T.bufferAutoSavePct);
+      const bufferTarget = Math.max(T.bufferMinTarget, Math.round(p.spending));
       const monthsToTarget = autoSave > 0 ? Math.ceil(bufferTarget / autoSave) : 0;
       moves.push({
         action: `Auto-save \u00a3${autoSave}/month to build \u00a3${bufferTarget} buffer in ${monthsToTarget} months`,
@@ -541,12 +640,12 @@ const EnrichmentEngine = {
       });
     }
 
-    // High savers — SAVINGS/INVEST move
-    if (m.savingsRate >= 15) {
+    // High savers
+    if (m.savingsRate >= T.highSaverThreshold) {
       const surplusAnnual = Math.round(p.surplus * 12);
-      const interestGain = Math.round(surplusAnnual * 0.045);
+      const interestGain = Math.round(surplusAnnual * T.highSaverInterestRate);
       moves.push({
-        action: `Move \u00a3${Math.round(p.surplus)}/month surplus to 4.5% savings account`,
+        action: `Move \u00a3${Math.round(p.surplus)}/month surplus to ${(T.highSaverInterestRate * 100).toFixed(1)}% savings account`,
         annualImpact: interestGain,
         monthlyImpact: Math.round(interestGain / 12),
         effort: 'low',
@@ -559,8 +658,8 @@ const EnrichmentEngine = {
     }
 
     // Coffee
-    if (m.coffeeAndCafes > 40) {
-      const saving = Math.round(m.coffeeAndCafes * 0.5);
+    if (m.coffeeAndCafes > T.coffeeMin) {
+      const saving = Math.round(m.coffeeAndCafes * T.coffeeCutPct);
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       moves.push({
         action: `Halve caf\u00e9 spending from \u00a3${Math.round(m.coffeeAndCafes)} to \u00a3${Math.round(m.coffeeAndCafes - saving)}/month`,
@@ -578,9 +677,8 @@ const EnrichmentEngine = {
     // Break-even move if in deficit
     if (p.surplus < 0) {
       const deficit = Math.abs(Math.round(p.surplus));
-      // Find the biggest discretionary categories to cut
-      const discItems = profile.budgetReality?.discretionary?.items || [];
-      const topCuts = discItems.slice(0, 3).map((i: any) => i.category);
+      const topDiscItems = profile.budgetReality?.discretionary?.items || [];
+      const topCuts = topDiscItems.slice(0, 3).map((i) => i.category);
       moves.push({
         action: `Close \u00a3${deficit}/month deficit by cutting discretionary spending`,
         annualImpact: deficit * 12,
@@ -598,14 +696,45 @@ const EnrichmentEngine = {
     return moves;
   },
 
-  // Helper: get unique merchant names by category from enriched transactions
+  /**
+   * Rebuild the full analysis from updated enriched transactions.
+   * Used after Claude AI verification upgrades low-confidence "Other"
+   * transactions into proper categories — the profile, archetype, score,
+   * and moves all recompute with the improved data.
+   */
+  rebuild(enriched: EnrichedTransaction[]): EnrichmentResult {
+    const recurring = this.detectRecurring(enriched);
+    const profile = this.buildProfile(enriched, recurring);
+    const archetype = this.determineArchetype(profile);
+    const patterns = this.detectBehavioralPatterns(profile);
+    const score = this.calcDecisionScore(profile);
+    const stack = this.genDecisionStack(profile, enriched);
+
+    const metrics = profile.metrics;
+    const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
+    const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
+    const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
+
+    return {
+      profile,
+      archetype,
+      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
+      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
+      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
+      decisionScore: score,
+      decisionStack: stack,
+      behavioralPatterns: patterns.map((p: any) => p.pattern || p),
+      enrichedTransactions: enriched,
+    };
+  },
+
   _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {
-    const matching = txs
-      .filter((t) => t.category === category && !t.isIncome && !t.isTransfer && !t.isRefund)
-      .map((t) => t.merchant);
-    // Deduplicate and take top merchants by frequency
     const counts: Record<string, number> = {};
-    for (const m of matching) { counts[m] = (counts[m] || 0) + 1; }
+    for (const t of txs) {
+      if (t.category === category && !t.isIncome && !t.isTransfer && !t.isRefund) {
+        counts[t.merchant] = (counts[t.merchant] || 0) + 1;
+      }
+    }
     return Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)

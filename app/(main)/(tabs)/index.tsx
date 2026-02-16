@@ -1,18 +1,43 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
+  LayoutAnimation, Platform, UIManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
-import type { Analysis } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move } from '@/lib/types';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+// Extended palette matching the BOCY design
+const gold = '#E8C55A';
+const goldSoft = 'rgba(232, 197, 90, 0.15)';
 
 export default function Home() {
   const router = useRouter();
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState('');
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+
+  const toggleCategory = (key: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -47,37 +72,64 @@ export default function Home() {
     );
   }
 
-  const topMove = analysis?.top_move;
+  // ── Derived data ──
+  const moves = analysis?.all_moves ?? [];
   const income = analysis?.monthly_income ?? 0;
-  const spending = analysis?.monthly_spending ?? 0;
-  const surplus = analysis?.surplus ?? 0;
-  const nonDisc = analysis?.non_discretionary ?? 0;
-  const disc = analysis?.discretionary ?? 0;
-  const totalExpense = nonDisc + disc || spending;
-  const nonDiscPct = totalExpense > 0 ? Math.round((nonDisc / totalExpense) * 100) : 0;
-  const discPct = totalExpense > 0 ? Math.round((disc / totalExpense) * 100) : 0;
+  const incomeSources = analysis?.income_sources ?? [];
+
+  const nonDisc = analysis?.non_discretionary as any;
+  const disc = analysis?.discretionary as any;
+  const nonDiscTotal = nonDisc?.total ?? 0;
+  const discTotal = disc?.total ?? 0;
+  const nonDiscItems: BudgetCategory[] = nonDisc?.items ?? [];
+  const discItems: BudgetCategory[] = disc?.items ?? [];
+  const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
+
+  // Bar segment proportions
+  const barTotal = nonDiscTotal + discTotal + leftToDecide || 1;
+  const nonDiscFlex = nonDiscTotal / barTotal;
+  const discFlex = discTotal / barTotal;
+  const leftFlex = leftToDecide / barTotal;
+
+  // Percentages of income — use largest-remainder method so they always sum to 100%
+  const [nonDiscPct, discPct, leftPct] = (() => {
+    if (income <= 0) return [0, 0, 0];
+    const rawPcts = [
+      (nonDiscTotal / income) * 100,
+      (discTotal / income) * 100,
+      (leftToDecide / income) * 100,
+    ];
+    const floored = rawPcts.map(Math.floor);
+    const remainders = rawPcts.map((r, i) => r - floored[i]);
+    let gap = 100 - floored.reduce((a, b) => a + b, 0);
+    const indices = [0, 1, 2].sort((a, b) => remainders[b] - remainders[a]);
+    for (const idx of indices) {
+      if (gap <= 0) break;
+      floored[idx]++;
+      gap--;
+    }
+    return floored as [number, number, number];
+  })();
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
-      {/* Header */}
+      {/* ── Header ── */}
       <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.greeting}>
-            {userName ? `${userName}` : 'Welcome'}
-          </Text>
-          <Text style={styles.greetingSub}>Here's your financial overview</Text>
-        </View>
+        <Text style={styles.greeting}>
+          Hello, {userName || 'there'}
+        </Text>
         <TouchableOpacity
-          style={styles.profileButton}
+          style={styles.menuButton}
           onPress={() => router.push('/(main)/profile')}
         >
-          <Text style={styles.profileInitials}>
-            {userName ? userName.charAt(0).toUpperCase() : '?'}
-          </Text>
+          <View style={styles.menuLine} />
+          <View style={[styles.menuLine, styles.menuLineShort]} />
+          <View style={styles.menuLine} />
         </TouchableOpacity>
       </View>
 
       {!analysis ? (
+        /* ── Empty State ── */
         <View style={styles.emptyState}>
           <Text style={styles.emptyIcon}>B</Text>
           <Text style={styles.emptyTitle}>Your #1 financial move awaits</Text>
@@ -93,121 +145,294 @@ export default function Home() {
         </View>
       ) : (
         <>
-          {/* Card 1: Insight — #1 Move */}
-          <Text style={styles.sectionLabel}>YOUR #1 MOVE</Text>
-          <View style={styles.insightCard}>
-            {topMove?.action ? (
-              <>
-                <Text style={styles.insightAction}>{topMove.action}</Text>
-                {(topMove as any).timeline && (
-                  <Text style={styles.insightTimeline}>{(topMove as any).timeline}</Text>
-                )}
-                <View style={styles.insightImpactRow}>
-                  <View style={styles.impactChip}>
-                    <Text style={styles.impactValue}>
-                      {'\u00a3'}{topMove.monthlyImpact || 0}
-                    </Text>
-                    <Text style={styles.impactLabel}>/month</Text>
+          {/* ══════════════════════════════════════════════
+              CARD 1 — YOUR TOP MONEY MOVES
+              ══════════════════════════════════════════════ */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Your top money moves</Text>
+            <Text style={styles.cardSubtitle}>Ranked by impact. Start with #1.</Text>
+
+            {moves.length > 0 ? moves.slice(0, 3).map((move: Move, i: number) => (
+              <View key={i} style={styles.recCard}>
+                {/* Rank / effort / impact header */}
+                <View style={styles.recHeader}>
+                  <View style={styles.recMeta}>
+                    <View style={styles.rankBadge}>
+                      <Text style={styles.rankText}>#{i + 1}</Text>
+                    </View>
+                    {move.effort && (
+                      <Text style={styles.effortLabel}>
+                        {move.effort} effort
+                      </Text>
+                    )}
                   </View>
-                  <View style={styles.impactChip}>
-                    <Text style={styles.impactValue}>
-                      {'\u00a3'}{topMove.annualImpact || ((topMove.monthlyImpact || 0) * 12)}
-                    </Text>
-                    <Text style={styles.impactLabel}>/year</Text>
-                  </View>
+                  <Text style={styles.recImpact}>
+                    +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
+                  </Text>
                 </View>
-                <View style={styles.insightButtons}>
+
+                {/* Title + description */}
+                <Text style={styles.recTitle}>{move.action}</Text>
+                <Text style={styles.recDesc}>{move.strategy}</Text>
+
+                {/* Approve / Modify */}
+                <View style={styles.actionRow}>
                   <TouchableOpacity
-                    style={styles.approveButton}
+                    style={styles.approveBtn}
                     onPress={() => router.push('/(main)/(tabs)/plan')}
                   >
-                    <Text style={styles.approveText}>Approve</Text>
+                    <Text style={styles.approveBtnText}>Approve</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={styles.modifyButton}
+                    style={styles.modifyBtn}
                     onPress={() => router.push('/(main)/(tabs)/plan')}
                   >
-                    <Text style={styles.modifyText}>Modify</Text>
+                    <Text style={styles.modifyBtnText}>Modify</Text>
                   </TouchableOpacity>
                 </View>
-              </>
-            ) : (
-              <Text style={styles.noMoveText}>No actionable move identified yet. Connect more accounts for deeper analysis.</Text>
+              </View>
+            )) : (
+              <Text style={styles.noDataText}>
+                No actionable moves yet. Upload a statement to get started.
+              </Text>
             )}
           </View>
 
-          {/* Card 2: Income */}
-          <Text style={styles.sectionLabel}>INCOME</Text>
+          {/* ══════════════════════════════════════════════
+              CARD 2 — YOUR INCOME
+              ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <View style={styles.metricRow}>
-              <Text style={styles.metricLabel}>Monthly income</Text>
-              <Text style={[styles.metricValue, { color: colors.accent }]}>
+            <Text style={styles.cardTitle}>Your income</Text>
+
+            {/* Big centered number */}
+            <View style={styles.bigNumberWrap}>
+              <Text style={styles.bigNumber}>
                 {'\u00a3'}{Math.round(income).toLocaleString()}
               </Text>
+              <Text style={styles.bigNumberLabel}>total monthly income</Text>
             </View>
-            <View style={styles.metricRow}>
-              <Text style={styles.metricLabel}>Monthly spending</Text>
-              <Text style={[styles.metricValue, { color: colors.coral }]}>
-                {'\u00a3'}{Math.round(spending).toLocaleString()}
-              </Text>
-            </View>
+
             <View style={styles.divider} />
-            <View style={styles.metricRow}>
-              <Text style={styles.metricLabel}>Surplus</Text>
-              <Text style={[styles.metricValueBig, { color: surplus >= 0 ? colors.accent : colors.coral }]}>
-                {surplus >= 0 ? '+' : ''}{'\u00a3'}{Math.round(surplus).toLocaleString()}
-              </Text>
-            </View>
-            {analysis.income_sources && analysis.income_sources.length > 0 && (
-              <View style={styles.sourcesRow}>
-                {analysis.income_sources.map((src: any, i: number) => (
-                  <View key={i} style={styles.sourceChip}>
-                    <Text style={styles.sourceText}>
-                      {typeof src === 'string' ? src : src.name || src.source || 'Income'}
+
+            {/* Income sources */}
+            {incomeSources.map((src: IncomeSource, i: number) => (
+              <View key={i} style={styles.sourceCard}>
+                <View style={styles.sourceRow}>
+                  <View style={styles.sourceInfo}>
+                    <Text style={styles.sourceName}>{src.source}</Text>
+                    <View style={styles.sourceTagRow}>
+                      <Text style={styles.sourceFreq}>
+                        {src.frequency.charAt(0).toUpperCase() + src.frequency.slice(1)}
+                      </Text>
+                      {src.isSalary && (
+                        <View style={styles.primaryTag}>
+                          <Text style={styles.primaryTagText}>PRIMARY</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  <View style={styles.sourceAmountWrap}>
+                    <Text style={styles.sourceAmount}>
+                      {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
+                    </Text>
+                    <Text style={styles.sourceAmountPer}>
+                      per {src.frequency === 'weekly' ? 'week' : 'month'}
                     </Text>
                   </View>
-                ))}
+                </View>
               </View>
+            ))}
+
+            {incomeSources.length === 0 && (
+              <Text style={styles.noDataText}>No income sources detected.</Text>
             )}
           </View>
 
-          {/* Card 3: Budget Reality — Non-negotiable vs Negotiable */}
-          <Text style={styles.sectionLabel}>BUDGET REALITY</Text>
+          {/* ══════════════════════════════════════════════
+              CARD 3 — YOUR BUDGET REALITY
+              ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <View style={styles.budgetRow}>
-              <View style={styles.budgetItem}>
-                <Text style={styles.budgetLabel}>Non-negotiable</Text>
-                <Text style={[styles.budgetValue, { color: colors.coral }]}>
-                  {'\u00a3'}{Math.round(nonDisc).toLocaleString()}
+            <Text style={styles.cardTitle}>Your budget reality</Text>
+
+            {/* 3-segment stacked bar */}
+            <View style={styles.budgetBar}>
+              {nonDiscFlex > 0 && (
+                <View style={[styles.barSeg, { flex: nonDiscFlex, backgroundColor: colors.coral }]} />
+              )}
+              {discFlex > 0 && (
+                <View style={[styles.barSeg, { flex: discFlex, backgroundColor: gold }]} />
+              )}
+              {leftFlex > 0 && (
+                <View style={[styles.barSeg, { flex: leftFlex, backgroundColor: colors.accent }]} />
+              )}
+            </View>
+
+            {/* Summary row */}
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryItem}>
+                <Text style={[styles.summaryAmount, { color: colors.coral }]}>
+                  {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
                 </Text>
-                <Text style={styles.budgetPct}>{nonDiscPct}% of spending</Text>
+                <Text style={styles.summaryLabel}>Non-negotiable</Text>
+                <Text style={styles.summaryPct}>{nonDiscPct}%</Text>
               </View>
-              <View style={styles.budgetDivider} />
-              <View style={styles.budgetItem}>
-                <Text style={styles.budgetLabel}>Negotiable</Text>
-                <Text style={[styles.budgetValue, { color: colors.sky }]}>
-                  {'\u00a3'}{Math.round(disc).toLocaleString()}
+              <View style={styles.summaryItem}>
+                <Text style={[styles.summaryAmount, { color: gold }]}>
+                  {'\u00a3'}{Math.round(discTotal).toLocaleString()}
                 </Text>
-                <Text style={styles.budgetPct}>{discPct}% of spending</Text>
+                <Text style={styles.summaryLabel}>Lifestyle</Text>
+                <Text style={styles.summaryPct}>{discPct}%</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={[styles.summaryAmount, { color: colors.accent }]}>
+                  {'\u00a3'}{Math.round(leftToDecide).toLocaleString()}
+                </Text>
+                <Text style={styles.summaryLabel}>Left to decide</Text>
+                <Text style={styles.summaryPct}>{leftPct}%</Text>
               </View>
             </View>
-            <View style={styles.barContainer}>
-              <View style={[styles.barSegment, { flex: nonDiscPct || 1, backgroundColor: colors.coral }]} />
-              <View style={[styles.barSegment, { flex: discPct || 1, backgroundColor: colors.sky }]} />
-            </View>
-            <Text style={styles.budgetInsight}>
-              {nonDiscPct > 60
-                ? `${nonDiscPct}% of your spending is fixed. Focus on negotiable expenses for quick wins.`
-                : discPct > 50
-                  ? `${discPct}% of your spending is negotiable \u2014 significant room to optimise.`
-                  : 'Your fixed and flexible spending is relatively balanced.'}
-            </Text>
+
+            {/* Non-negotiable breakdown */}
+            {nonDiscItems.length > 0 && (
+              <>
+                <Text style={styles.breakdownHeader}>ESSENTIALS BREAKDOWN</Text>
+                <Text style={styles.breakdownSubtext}>
+                  Fixed costs and necessities — bills, groceries, transport
+                </Text>
+                {nonDiscItems.map((item: BudgetCategory, i: number) => {
+                  const key = `nd-${item.category}`;
+                  const isExpanded = expandedCategories.has(key);
+                  const txs: TransactionDetail[] = item.transactions ?? [];
+                  const pctOfSection = nonDiscTotal > 0 ? Math.round((item.monthly / nonDiscTotal) * 100) : 0;
+                  return (
+                    <View key={i}>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={() => toggleCategory(key)}
+                        style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                      >
+                        <View style={styles.dataRowLeft}>
+                          <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && styles.bulletExpanded]} />
+                          <View>
+                            <Text style={styles.dataLabel}>{item.category}</Text>
+                            <Text style={styles.dataMeta}>
+                              {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of essentials
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.dataRowRight}>
+                          <Text style={[styles.dataValue, { color: colors.coral }]}>
+                            {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
+                          </Text>
+                          <Text style={styles.chevron}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                        </View>
+                      </TouchableOpacity>
+                      {isExpanded && txs.length > 0 && (
+                        <View style={styles.txDropdown}>
+                          {txs.map((tx, j) => (
+                            <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                              <View style={styles.txLeft}>
+                                <Text style={styles.txMerchant}>{tx.merchant}</Text>
+                                <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                              </View>
+                              <Text style={[styles.txAmount, { color: colors.coral }]}>
+                                {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      {isExpanded && txs.length === 0 && (
+                        <View style={styles.txDropdown}>
+                          <Text style={styles.txEmpty}>No transaction details available</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </>
+            )}
+
+            {/* Lifestyle spending */}
+            {discItems.length > 0 && (
+              <>
+                <Text style={[styles.breakdownHeader, { marginTop: 20 }]}>
+                  LIFESTYLE SPENDING
+                </Text>
+                <Text style={styles.breakdownSubtext}>
+                  Discretionary spending — dining, shopping, entertainment
+                </Text>
+                {discItems.map((item: BudgetCategory, i: number) => {
+                  const key = `d-${item.category}`;
+                  const isExpanded = expandedCategories.has(key);
+                  const txs: TransactionDetail[] = item.transactions ?? [];
+                  const pctOfSection = discTotal > 0 ? Math.round((item.monthly / discTotal) * 100) : 0;
+                  return (
+                    <View key={i}>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={() => toggleCategory(key)}
+                        style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                      >
+                        <View style={styles.dataRowLeft}>
+                          <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && styles.bulletExpanded]} />
+                          <View>
+                            <Text style={styles.dataLabel}>{item.category}</Text>
+                            <Text style={styles.dataMeta}>
+                              {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.dataRowRight}>
+                          <Text style={[styles.dataValue, { color: gold }]}>
+                            {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
+                          </Text>
+                          <Text style={styles.chevron}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                        </View>
+                      </TouchableOpacity>
+                      {isExpanded && txs.length > 0 && (
+                        <View style={styles.txDropdown}>
+                          {txs.map((tx, j) => (
+                            <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                              <View style={styles.txLeft}>
+                                <Text style={styles.txMerchant}>{tx.merchant}</Text>
+                                <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                              </View>
+                              <Text style={[styles.txAmount, { color: gold }]}>
+                                {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      {isExpanded && txs.length === 0 && (
+                        <View style={styles.txDropdown}>
+                          <Text style={styles.txEmpty}>No transaction details available</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </>
+            )}
+
+            <Text style={styles.cardFooter}>Tap a category to view transactions</Text>
           </View>
+
+          {/* ── Upload new statement ── */}
+          <TouchableOpacity
+            style={styles.uploadButton}
+            onPress={() => router.push('/(main)/connect')}
+          >
+            <Text style={styles.uploadText}>Upload new statement</Text>
+          </TouchableOpacity>
         </>
       )}
     </ScrollView>
   );
 }
+
+// ── Styles ──
 
 const styles = StyleSheet.create({
   container: {
@@ -215,9 +440,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   scroll: {
-    padding: spacing.lg,
-    paddingTop: spacing.xxl + spacing.lg,
-    paddingBottom: spacing.xxl,
+    padding: 18,
+    paddingTop: 52,
+    paddingBottom: 40,
   },
   loadingContainer: {
     flex: 1,
@@ -225,36 +450,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+
+  // ── Header ──
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: 28,
   },
   greeting: {
     fontFamily: fonts.heading,
-    fontSize: 24,
+    fontSize: 22,
     color: colors.text,
+    letterSpacing: -0.2,
   },
-  greetingSub: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.dim,
-    marginTop: 2,
+  menuButton: {
+    padding: 4,
+    gap: 5,
   },
-  profileButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
+  menuLine: {
+    width: 22,
+    height: 2,
+    backgroundColor: colors.text,
+    borderRadius: 1,
   },
-  profileInitials: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    color: colors.bg,
+  menuLineShort: {
+    width: 16,
+    backgroundColor: colors.dim,
   },
+
+  // ── Empty State ──
   emptyState: {
     marginTop: spacing.xxl,
     alignItems: 'center',
@@ -294,189 +519,398 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.bg,
   },
-  sectionLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 11,
-    letterSpacing: 1.5,
-    color: colors.accent,
-    marginBottom: spacing.sm,
-    marginTop: spacing.md,
-  },
-  insightCard: {
-    backgroundColor: colors.surface,
+
+  // ── Shared Card ──
+  card: {
+    backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.accentDim,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
+    borderRadius: 14,
+    padding: 22,
+    paddingTop: 24,
+    marginBottom: 28,
+    overflow: 'hidden',
   },
-  insightAction: {
-    fontFamily: fonts.semibold,
-    fontSize: 18,
-    color: colors.text,
-    lineHeight: 26,
-    marginBottom: spacing.md,
-  },
-  insightTimeline: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: colors.accent,
-    marginBottom: spacing.md,
-  },
-  insightImpactRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  impactChip: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    backgroundColor: colors.accentDim,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: radius.sm,
-  },
-  impactValue: {
+  cardTitle: {
     fontFamily: fonts.heading,
-    fontSize: 18,
-    color: colors.accent,
+    fontSize: 22,
+    color: colors.text,
+    letterSpacing: -0.2,
+    marginBottom: 4,
   },
-  impactLabel: {
+  cardSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.accent,
-    marginLeft: 2,
+    fontSize: 14,
+    color: colors.dim,
+    lineHeight: 21,
+    marginBottom: 20,
   },
-  insightButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  approveButton: {
-    flex: 1,
-    backgroundColor: colors.accent,
-    paddingVertical: 14,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  approveText: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.bg,
-  },
-  modifyButton: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: colors.accent,
-    paddingVertical: 14,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  modifyText: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.accent,
-  },
-  noMoveText: {
+  noDataText: {
     fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     lineHeight: 22,
   },
-  card: {
-    backgroundColor: colors.surface,
+
+  // ── Card 1: Recommendations ──
+  recCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
+    borderColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 16,
+    paddingTop: 18,
+    marginBottom: 10,
   },
-  metricRow: {
+  recHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: spacing.xs,
+    marginBottom: 10,
   },
-  metricLabel: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
+  recMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  rankBadge: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  rankText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.dim,
   },
-  metricValue: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
+  effortLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: gold,
+    fontWeight: '500',
   },
-  metricValueBig: {
+  recImpact: {
+    fontFamily: fonts.mono,
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.accent,
+  },
+  recTitle: {
     fontFamily: fonts.heading,
-    fontSize: 20,
+    fontSize: 17,
+    color: colors.text,
+    lineHeight: 23,
+    marginBottom: 6,
+  },
+  recDesc: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    lineHeight: 19.5,
+    marginBottom: 4,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  approveBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(122,239,199,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(122,239,199,0.3)',
+    alignItems: 'center',
+  },
+  approveBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.accent,
+    letterSpacing: 0.3,
+  },
+  modifyBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+  },
+  modifyBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.dim,
+    letterSpacing: 0.3,
+  },
+
+  // ── Card 2: Income ──
+  bigNumberWrap: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingBottom: 24,
+  },
+  bigNumber: {
+    fontFamily: fonts.mono,
+    fontSize: 48,
+    fontWeight: '800',
+    color: colors.accent,
+    letterSpacing: -1,
+  },
+  bigNumberLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+    marginTop: 4,
   },
   divider: {
     height: 1,
-    backgroundColor: colors.border,
-    marginVertical: spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    marginBottom: 4,
   },
-  sourcesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-  },
-  sourceChip: {
-    backgroundColor: colors.accentDim,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
+  sourceCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
   },
-  sourceText: {
-    fontFamily: fonts.medium,
-    fontSize: 11,
-    color: colors.accent,
-  },
-  budgetRow: {
+  sourceRow: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'flex-start',
   },
-  budgetItem: {
+  sourceInfo: {
     flex: 1,
-    alignItems: 'center',
+    marginRight: 12,
   },
-  budgetDivider: {
-    width: 1,
-    height: 60,
-    backgroundColor: colors.border,
-    marginHorizontal: spacing.sm,
-  },
-  budgetLabel: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: colors.dim,
-    marginBottom: spacing.xs,
-  },
-  budgetValue: {
+  sourceName: {
     fontFamily: fonts.heading,
-    fontSize: 20,
-    marginBottom: 2,
+    fontSize: 16,
+    color: colors.text,
+    lineHeight: 21,
+    marginBottom: 8,
   },
-  budgetPct: {
-    fontFamily: fonts.regular,
+  sourceTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sourceFreq: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: 'rgba(122,239,199,0.6)',
+  },
+  primaryTag: {
+    backgroundColor: colors.accentDim,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+  },
+  primaryTagText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.accent,
+    letterSpacing: 0.8,
+  },
+  sourceAmountWrap: {
+    alignItems: 'flex-end',
+  },
+  sourceAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.accent,
+  },
+  sourceAmountPer: {
+    fontFamily: fonts.mono,
     fontSize: 11,
     color: colors.muted,
+    marginTop: 2,
   },
-  barContainer: {
+
+  // ── Card 3: Budget Reality ──
+  budgetBar: {
     flexDirection: 'row',
-    height: 6,
-    borderRadius: 3,
+    height: 8,
+    borderRadius: 4,
     overflow: 'hidden',
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-    gap: 2,
+    marginBottom: 14,
   },
-  barSegment: {
-    borderRadius: 3,
+  barSeg: {
+    borderRadius: 0,
   },
-  budgetInsight: {
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  summaryItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  summaryAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  summaryLabel: {
     fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+    marginTop: 2,
+  },
+  summaryPct: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 1,
+  },
+  breakdownHeader: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: colors.muted,
+    marginBottom: 4,
+  },
+  dataRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  dataRowLast: {
+    borderBottomWidth: 0,
+  },
+  dataRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bullet: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderTopWidth: 5,
+    borderTopColor: 'transparent',
+    borderBottomWidth: 5,
+    borderBottomColor: 'transparent',
+    borderLeftWidth: 7,
+  },
+  dataLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: colors.dim,
+  },
+  dataMeta: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  dataRowRight: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dataValue: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  chevron: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.muted,
+  },
+  bulletExpanded: {
+    borderLeftColor: colors.text,
+  },
+
+  // ── Transaction dropdown ──
+  txDropdown: {
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(255,255,255,0.06)',
+    marginLeft: 10,
+    marginBottom: 8,
+    paddingLeft: 14,
+    paddingVertical: 6,
+  },
+  txRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.03)',
+  },
+  txRowLast: {
+    borderBottomWidth: 0,
+  },
+  txLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  txMerchant: {
+    fontFamily: fonts.medium,
     fontSize: 13,
     color: colors.text2,
-    lineHeight: 20,
+  },
+  txDate: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  txAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  txEmpty: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.muted,
+    paddingVertical: 8,
+  },
+  breakdownSubtext: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.muted,
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  cardFooter: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.muted,
+    textAlign: 'center',
+    marginTop: 16,
+  },
+
+  // ── Upload CTA ──
+  uploadButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    paddingVertical: 16,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  uploadText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.accent,
   },
 });

@@ -1,4 +1,5 @@
 import type { Goals, Move, GoalTrajectory, FlowchartPosition } from './types';
+import { MAX_TRAJECTORY_MONTHS } from './constants';
 
 const GOAL_LABELS: Record<string, string> = {
   clear_debt: 'Clear all debt',
@@ -166,12 +167,16 @@ export function calcGoalTrajectory(
   const surplus = profile.monthly.surplus;
   const moveSaving = move?.monthlyImpact || 0;
 
-  const currentMonths = surplus > 0 ? Math.ceil(targetAmount / surplus) : Infinity;
-  const newMonths = (surplus + moveSaving) > 0 ? Math.ceil(targetAmount / (surplus + moveSaving)) : Infinity;
-  const monthsSaved = currentMonths === Infinity ? 0 : currentMonths - newMonths;
+  const rawCurrentMonths = surplus > 0 ? Math.ceil(targetAmount / surplus) : Infinity;
+  const rawNewMonths = (surplus + moveSaving) > 0 ? Math.ceil(targetAmount / (surplus + moveSaving)) : Infinity;
+
+  // Cap months at a displayable maximum (600 = 50 years)
+  const currentMonths = rawCurrentMonths === Infinity ? -1 : Math.min(rawCurrentMonths, MAX_TRAJECTORY_MONTHS);
+  const newMonths = rawNewMonths === Infinity ? -1 : Math.min(rawNewMonths, MAX_TRAJECTORY_MONTHS);
+  const monthsSaved = currentMonths < 0 ? 0 : Math.max(0, currentMonths - (newMonths < 0 ? currentMonths : newMonths));
 
   let insight = '';
-  if (currentMonths === Infinity) {
+  if (currentMonths < 0) {
     insight = `At current pace, you won't reach your goal. This move adds \u00a3${moveSaving}/month to get you moving.`;
   } else if (monthsSaved > 0) {
     insight = `This move cuts ${monthsSaved} months off your timeline \u2014 from ${currentMonths} to ${newMonths} months.`;
@@ -182,8 +187,8 @@ export function calcGoalTrajectory(
   return {
     goalLabel: label,
     targetAmount,
-    currentMonths: currentMonths === Infinity ? -1 : currentMonths,
-    newMonths: newMonths === Infinity ? -1 : newMonths,
+    currentMonths,
+    newMonths,
     monthsSaved,
     insight,
   };
