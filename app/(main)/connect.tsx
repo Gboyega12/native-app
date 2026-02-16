@@ -18,13 +18,14 @@ export default function Connect() {
   const [loading, setLoading] = useState(false);
   const [loadingCSV, setLoadingCSV] = useState(false);
   const [loadingPDF, setLoadingPDF] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
 
   // Handle TrueLayer redirect — code+state arrive as URL params
   useEffect(() => {
     if (params.code && params.state) {
       exchangeTrueLayerCode(params.code, params.state);
     } else if (params.status === 'success' && params.connection_id) {
-      // Legacy: direct connection_id from old server-redirect flow
       fetchBankData(params.connection_id);
     }
   }, [params.code, params.state, params.status, params.connection_id]);
@@ -32,6 +33,8 @@ export default function Connect() {
   // POST the auth code to our callback API for token exchange + data fetch
   const exchangeTrueLayerCode = async (code: string, state: string) => {
     setLoading(true);
+    setErrorMsg('');
+    setStatusMsg('Exchanging authorization code...');
     try {
       const res = await fetch('/api/truelayer/callback', {
         method: 'POST',
@@ -41,23 +44,27 @@ export default function Connect() {
       const data = await res.json();
 
       if (data.success && data.connection_id) {
+        setStatusMsg('Fetching bank data...');
         await fetchBankData(data.connection_id);
         return;
       }
 
-      Alert.alert(
-        'Connection failed',
-        data.error || 'Could not exchange bank authorization. Please try again.',
-      );
+      const errDetail = data.details
+        ? `${data.error}: ${typeof data.details === 'string' ? data.details : JSON.stringify(data.details)}`
+        : data.error || 'Token exchange failed';
+      setErrorMsg(errDetail);
+      setStatusMsg('');
       setLoading(false);
-    } catch {
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Network error during token exchange');
+      setStatusMsg('');
       setLoading(false);
-      Alert.alert('Error', 'Something went wrong connecting to your bank.');
     }
   };
 
   const fetchBankData = async (connId: string) => {
     setLoading(true);
+    setStatusMsg('Loading transactions...');
     try {
       const { data, error } = await supabase
         .from('bank_data')
@@ -66,16 +73,19 @@ export default function Connect() {
         .single();
 
       if (error || !data?.csv_data) {
-        Alert.alert('Error', 'Could not retrieve bank data. Please try again.');
+        setErrorMsg(error?.message || 'No bank data found for this connection');
+        setStatusMsg('');
         setLoading(false);
         return;
       }
 
+      setStatusMsg('');
       setLoading(false);
       router.push({ pathname: '/(main)/goals', params: { csvData: data.csv_data } });
-    } catch {
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to fetch bank data');
+      setStatusMsg('');
       setLoading(false);
-      Alert.alert('Error', 'Could not retrieve bank data.');
     }
   };
 
@@ -273,6 +283,13 @@ export default function Connect() {
         <Text style={styles.hint}>
           Download your statement from your banking app as PDF or CSV
         </Text>
+
+        {statusMsg ? (
+          <Text style={styles.statusText}>{statusMsg}</Text>
+        ) : null}
+        {errorMsg ? (
+          <Text style={styles.errorText}>{errorMsg}</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -447,5 +464,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
     textAlign: 'center',
+  },
+  statusText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.accent,
+    textAlign: 'center',
+    marginTop: spacing.md,
+  },
+  errorText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: '#ff6b6b',
+    textAlign: 'center',
+    marginTop: spacing.md,
   },
 });

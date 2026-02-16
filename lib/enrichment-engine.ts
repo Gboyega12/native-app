@@ -84,10 +84,19 @@ const EnrichmentEngine = {
     const header = lines[0].toLowerCase();
     const cols = header.split(',').map((c) => c.trim());
     const dateIdx = cols.findIndex((c) => c.includes('date'));
-    const descIdx = cols.findIndex((c) => c.includes('desc') || c.includes('narr') || c.includes('memo') || c.includes('reference'));
-    const amountIdx = cols.findIndex((c) => c === 'amount' || c.includes('amount'));
-    const debitIdx = cols.findIndex((c) => c.includes('debit'));
-    const creditIdx = cols.findIndex((c) => c.includes('credit'));
+    const descIdx = cols.findIndex((c) =>
+      c.includes('desc') || c.includes('narr') || c.includes('memo')
+      || c.includes('reference') || c.includes('detail') || c.includes('particular')
+    );
+    const amountIdx = cols.findIndex((c) =>
+      c === 'amount' || c.includes('amount') || c === 'value'
+    );
+    const debitIdx = cols.findIndex((c) =>
+      c.includes('debit') || c.includes('money out') || c.includes('paid out')
+    );
+    const creditIdx = cols.findIndex((c) =>
+      c.includes('credit') || c.includes('money in') || c.includes('paid in')
+    );
 
     // Validate that we found at least a date and description column.
     // Without these, positional fallback is unreliable and may misalign data.
@@ -101,8 +110,8 @@ const EnrichmentEngine = {
 
     const transactions: RawTransaction[] = [];
     const now = new Date();
-    const fourMonthsAgo = new Date(now);
-    fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4);
+    const cutoff = new Date(now);
+    cutoff.setFullYear(cutoff.getFullYear() - 1);
 
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
@@ -112,7 +121,7 @@ const EnrichmentEngine = {
       const dateStr = parts[dateIdx >= 0 ? dateIdx : 0] || '';
       const desc = parts[descIdx >= 0 ? descIdx : 1] || '';
       const date = parseDate(dateStr);
-      if (!date || date < fourMonthsAgo) continue;
+      if (!date || date < cutoff) continue;
 
       let amount = 0;
       if (debitIdx >= 0 && creditIdx >= 0) {
@@ -656,14 +665,14 @@ const EnrichmentEngine = {
       const surplusAnnual = Math.round(p.surplus * 12);
       const interestGain = Math.round(surplusAnnual * T.highSaverInterestRate);
       moves.push({
-        action: `Move \u00a3${Math.round(p.surplus)}/month surplus to ${(T.highSaverInterestRate * 100).toFixed(1)}% savings account`,
+        action: `Put \u00a3${Math.round(p.surplus)}/month surplus to work in a savings account`,
         annualImpact: interestGain,
         monthlyImpact: Math.round(interestGain / 12),
         effort: 'low',
         category: 'savings',
         merchants: [],
         strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Surplus is \u00a3${Math.round(p.surplus)}/month.`,
-        steps: ['Open a high-interest account (Chase, Chip, Monzo offer 4%+)', 'Auto-transfer surplus on payday', 'Consider S&S ISA for long-term savings'],
+        steps: ['Open a separate savings account with the best rate you can find', 'Auto-transfer surplus on payday', 'Review rates every 6 months and switch if needed'],
         effect: `\u00a3${interestGain}/year in passive interest.`,
       });
     }

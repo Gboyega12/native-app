@@ -108,8 +108,17 @@ export default async function handler(req, res) {
     const csv = csvLines.join('\n');
 
     // Save CSV to Supabase bank_data table (using service role)
-    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !serviceKey) {
+      console.error('Missing Supabase config:', { supabaseUrl: !!supabaseUrl, serviceKey: !!serviceKey });
+      return res.status(500).json({
+        error: 'Server misconfigured',
+        details: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set',
+      });
+    }
+
     const admin = createClient(supabaseUrl, serviceKey);
 
     const { error: dbError } = await admin.from('bank_data').insert({
@@ -120,12 +129,21 @@ export default async function handler(req, res) {
 
     if (dbError) {
       console.error('Failed to save bank data:', dbError);
-      return res.status(500).json({ error: 'Failed to save bank data' });
+      return res.status(500).json({
+        error: 'Failed to save bank data',
+        details: dbError.message || dbError.code || JSON.stringify(dbError),
+      });
     }
 
     // POST → return JSON to the client
     if (req.method === 'POST') {
-      return res.json({ success: true, connection_id: connectionId });
+      return res.json({
+        success: true,
+        connection_id: connectionId,
+        accounts_found: accounts.length,
+        cards_found: cards.length,
+        transactions_found: allTx.length,
+      });
     }
 
     // GET → redirect back to app (legacy flow)
