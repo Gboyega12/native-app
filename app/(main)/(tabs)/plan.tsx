@@ -124,6 +124,9 @@ export default function Plan() {
                 </View>
                 <View style={styles.cardContent}>
                   <Text style={[styles.moveAction, isApproved && styles.approvedAction]}>{move.action}</Text>
+                  {(move as any).timeline && (
+                    <Text style={styles.moveTimeline}>{(move as any).timeline}</Text>
+                  )}
                   <View style={styles.moveStats}>
                     <Text style={styles.moveImpact}>
                       {'\u00a3'}{move.monthlyImpact}/mo
@@ -363,6 +366,12 @@ const styles = StyleSheet.create({
   },
   approvedAction: {
     color: colors.text2,
+  },
+  moveTimeline: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: colors.accent,
+    marginBottom: spacing.xs,
   },
   moveStats: {
     flexDirection: 'row',

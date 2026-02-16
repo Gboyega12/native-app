@@ -3,7 +3,8 @@ import { View, Text, Animated, StyleSheet } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
-import { findMostMaterialMove, calcGoalTrajectory } from '@/lib/move-engine';
+import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
+import type { RankedMove } from '@/lib/move-engine';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { colors, fonts, spacing } from '@/theme';
 import type { Analysis, Goals } from '@/lib/types';
@@ -12,8 +13,8 @@ const STEPS = [
   'Scanning transactions',
   'Identifying merchants',
   'Detecting spending patterns',
-  'Modelling financial impact',
-  'Ranking your moves',
+  'Ranking by financial priority',
+  'Refining your action plan',
 ];
 
 // Global holder so dashboard can pick it up without re-fetching
@@ -48,21 +49,19 @@ function ProcessingInner() {
         return;
       }
 
-      // Step 1: Parse
+      // ── Layer 1: Enrichment Engine ──
+      // CSV → categorise, profile, raw moves
       setCurrentStep(0);
-      await delay(500);
+      await delay(400);
 
-      // Step 2: Enrich
       setCurrentStep(1);
       const result = EnrichmentEngine.enrich(csvData);
-      await delay(500);
+      await delay(400);
 
-      // Step 3: Patterns
       setCurrentStep(2);
-      await delay(500);
+      await delay(400);
 
-      // Step 4: Goals
-      setCurrentStep(3);
+      // Fetch user goals
       const { data: { user } } = await supabase.auth.getUser();
       let goals: Goals | null = null;
       if (user) {
@@ -73,37 +72,82 @@ function ProcessingInner() {
           .single();
         goals = data;
       }
-      await delay(500);
 
-      // Step 5: Moves
+      // ── Layer 2: Move Engine ──
+      // UKPF flowchart priority + goal-aware ranking + trajectories
+      setCurrentStep(3);
+      const ukpf = determineFlowchartPosition(result.profile, goals);
+      const rankedMoves = rankMoves(result.decisionStack, result.profile, goals);
+      const topRanked = rankedMoves[0] || null;
+      const goalTrajectory = topRanked ? topRanked.trajectory : null;
+      await delay(400);
+
+      // ── Layer 3: Claude Refinement ──
+      // Takes top 3 ranked moves + raw data → rewrites into BOCY-style language
       setCurrentStep(4);
-      const topMove = findMostMaterialMove(result.decisionStack, result.profile, goals);
-      const goalTrajectory = topMove ? calcGoalTrajectory(result.profile, goals, topMove) : null;
+      const top3 = rankedMoves.slice(0, 3);
+      let refinedMoves = top3 as RankedMove[];
 
-      // Try Claude enrichment (graceful fallback)
-      let enrichedTopMove = topMove;
-      if (topMove) {
-        try {
-          const res = await fetch('/api/claude/enrich', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: `Rewrite this financial advice title to be more engaging and personal (keep under 10 words): "${topMove.action}"`,
-              max_tokens: 50,
-            }),
+      try {
+        const res = await fetch('/api/claude/enrich', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            moves: top3.map((m) => ({
+              action: m.action,
+              category: m.category,
+              monthlyImpact: m.monthlyImpact,
+              annualImpact: m.annualImpact,
+              effort: m.effort,
+              merchants: m.merchants,
+              strategy: m.strategy,
+              steps: m.steps,
+              effect: m.effect,
+              trajectory: m.trajectory,
+            })),
+            context: {
+              monthly_income: result.profile.monthly.income,
+              monthly_spending: result.profile.monthly.spending,
+              surplus: result.profile.monthly.surplus,
+              goals: goals ? {
+                one_year_goal: goals.one_year_goal,
+                target_amount: goals.target_amount,
+              } : null,
+              ukpf_priority: ukpf.priority,
+              ukpf_label: ukpf.label,
+            },
+          }),
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.moves)) {
+          // Merge Claude's refined text with our ranked data
+          refinedMoves = top3.map((original, i) => {
+            const refined = data.moves[i];
+            if (!refined) return original;
+            return {
+              ...original,
+              action: refined.action || original.action,
+              strategy: refined.strategy || original.strategy,
+              steps: refined.steps || original.steps,
+              effect: refined.effect || original.effect,
+              timeline: refined.timeline || original.timeline,
+            };
           });
-          const data = await res.json();
-          if (data.success && data.text) {
-            enrichedTopMove = { ...topMove, action: data.text.trim().replace(/"/g, '') };
-          }
-        } catch {
-          // Graceful fallback — use original
         }
+      } catch {
+        // Graceful fallback — use pre-refined moves from Layer 2
       }
+
+      // Combine: refined top 3 + remaining unrefined moves
+      const allMoves = [
+        ...refinedMoves,
+        ...rankedMoves.slice(3),
+      ];
 
       await delay(300);
 
-      // Save to Supabase
+      // ── Save to Supabase ──
+      const topMove = allMoves[0] || null;
       const analysis: Analysis = {
         user_id: user?.id,
         archetype: result.archetype.key,
@@ -114,8 +158,8 @@ function ProcessingInner() {
         non_discretionary: result.profile.budgetReality.nonDiscretionary,
         discretionary: result.profile.budgetReality.discretionary,
         income_sources: result.profile.incomeSources,
-        top_move: enrichedTopMove || topMove || ({} as any),
-        all_moves: result.decisionStack,
+        top_move: topMove || ({} as any),
+        all_moves: allMoves,
         behavioral_patterns: result.behavioralPatterns,
         goal_context: goalTrajectory,
       };
@@ -133,7 +177,7 @@ function ProcessingInner() {
         });
       }
 
-      // Store for results screen
+      // Store for dashboard
       _lastResult = {
         ...analysis,
         _enrichmentResult: result,

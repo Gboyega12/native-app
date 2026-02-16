@@ -51,7 +51,7 @@ const EnrichmentEngine = {
     const archetype = this.determineArchetype(profile);
     const patterns = this.detectBehavioralPatterns(profile);
     const score = this.calcDecisionScore(profile);
-    const stack = this.genDecisionStack(profile);
+    const stack = this.genDecisionStack(profile, enriched);
 
     const metrics = profile.metrics;
     const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
@@ -395,115 +395,221 @@ const EnrichmentEngine = {
     return { score, verdict, breakdown };
   },
 
-  genDecisionStack(profile: any): Move[] {
+  genDecisionStack(profile: any, enrichedTxs?: EnrichedTransaction[]): Move[] {
     const moves: Move[] = [];
     const m = profile.metrics;
     const p = profile.monthly;
+    const subs = profile.subscriptions || [];
+    const txs = enrichedTxs || [];
 
+    // Subscriptions — attach actual merchant names
     if (m.subscriptionCount >= 4) {
+      const subNames = subs.map((s: any) => s.merchant).filter(Boolean);
+      const cutCount = Math.max(2, Math.round(m.subscriptionCount * 0.3));
       const saving = Math.round(p.subscriptions * 0.3);
       moves.push({
-        action: `Audit your ${m.subscriptionCount} subscriptions`,
+        action: `Cancel or downgrade ${cutCount} subscriptions to free \u00a3${saving}/month`,
         annualImpact: saving * 12,
         monthlyImpact: saving,
         effort: 'low',
-        strategy: 'Cancel unused, rotate streaming services month-to-month.',
-        steps: ['List all active subscriptions', 'Cancel any unused for 2+ weeks', 'Rotate streaming services'],
-        effect: 'Frees up cash for savings or debt repayment.',
+        category: 'spending',
+        merchants: subNames,
+        strategy: `${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month total.`,
+        steps: ['Review all subscriptions', 'Cancel unused ones', 'Rotate streaming services monthly'],
+        effect: `Saves \u00a3${saving}/month (\u00a3${saving * 12}/year).`,
       });
     }
 
+    // Food delivery — attach delivery merchant names
     if (m.foodDelivery > 50) {
       const saving = Math.round(m.foodDelivery * 0.4);
+      const deliveryMerchants = this._getMerchantsByCategory(txs, 'Food Delivery');
       moves.push({
-        action: 'Reduce food delivery spending',
+        action: `Cut delivery spend from \u00a3${Math.round(m.foodDelivery)} to \u00a3${Math.round(m.foodDelivery - saving)}/month`,
         annualImpact: saving * 12,
         monthlyImpact: saving,
         effort: 'medium',
-        strategy: 'Batch-cook 2 meals per week, set a delivery budget cap.',
-        steps: ['Plan 2 batch-cook sessions weekly', 'Delete delivery app payment cards', 'Set \u00a330/month delivery cap'],
-        effect: 'Healthier eating and significant monthly savings.',
+        category: 'spending',
+        merchants: deliveryMerchants,
+        strategy: `\u00a3${Math.round(m.foodDelivery)}/month on food delivery.`,
+        steps: ['Batch-cook twice a week', 'Delete saved payment cards from delivery apps', 'Set a monthly delivery budget cap'],
+        effect: `Frees \u00a3${saving}/month.`,
       });
     }
 
+    // Eating out
     if (m.eatingOut > 80) {
       const saving = Math.round(m.eatingOut * 0.25);
+      const eatingMerchants = this._getMerchantsByCategory(txs, 'Eating Out');
+      const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       moves.push({
-        action: 'Cut back on dining out',
+        action: `Reduce dining out from \u00a3${Math.round(m.eatingOut)} to \u00a3${Math.round(m.eatingOut - saving)}/month`,
         annualImpact: saving * 12,
         monthlyImpact: saving,
         effort: 'medium',
-        strategy: 'One fewer restaurant meal per week. Swap for home-cooked.',
-        steps: ['Track cafe and restaurant visits', 'Replace one outing per week with a home meal', 'Bring coffee from home twice a week'],
-        effect: 'Keeps social life intact while reducing spend.',
+        category: 'spending',
+        merchants: [...eatingMerchants, ...coffeeMerchants],
+        strategy: `\u00a3${Math.round(m.eatingOut)}/month on restaurants and caf\u00e9s.`,
+        steps: ['Replace one meal out per week with home-cooked', 'Bring coffee from home 2x per week'],
+        effect: `Saves \u00a3${saving}/month.`,
       });
     }
 
+    // Shopping
     if (m.shopping > 150) {
       const saving = Math.round(m.shopping * 0.25);
+      const shopMerchants = this._getMerchantsByCategory(txs, 'Shopping');
       moves.push({
-        action: 'Apply a 24-hour rule to non-essential purchases',
+        action: `Cap non-essential shopping at \u00a3${Math.round(m.shopping - saving)}/month`,
         annualImpact: saving * 12,
         monthlyImpact: saving,
         effort: 'low',
-        strategy: 'Wait 24 hours before any purchase over \u00a330.',
-        steps: ['Remove saved cards from shopping apps', 'Use a wishlist \u2014 buy after 24 hours', 'Unsubscribe from marketing emails'],
-        effect: 'Reduces impulse spending by 20-30%.',
+        category: 'spending',
+        merchants: shopMerchants,
+        strategy: `\u00a3${Math.round(m.shopping)}/month on shopping.`,
+        steps: ['Apply 24-hour rule on purchases over \u00a330', 'Remove saved cards from shopping apps', 'Unsubscribe from marketing emails'],
+        effect: `Saves \u00a3${saving}/month.`,
       });
     }
 
+    // Debt snowball
     if (m.debtAccountCount >= 2) {
+      const debtSaving = Math.round(p.debtPayments * 0.15);
+      const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       moves.push({
-        action: 'Start a debt snowball',
-        annualImpact: Math.round(p.debtPayments * 0.15) * 12,
-        monthlyImpact: Math.round(p.debtPayments * 0.15),
+        action: `Attack ${m.debtAccountCount} debts with snowball method`,
+        annualImpact: debtSaving * 12,
+        monthlyImpact: debtSaving,
         effort: 'high',
-        strategy: 'Pay minimums on all but smallest debt. Throw surplus at smallest first.',
-        steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Put any extra surplus into smallest debt', 'When cleared, roll payment into next smallest'],
-        effect: 'Faster debt payoff with psychological momentum.',
+        category: 'debt',
+        merchants: debtMerchants,
+        strategy: `${m.debtAccountCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.`,
+        steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Throw surplus at smallest debt first', 'Roll payments into next debt when cleared'],
+        effect: `Saves \u00a3${debtSaving * 12}/year in interest.`,
       });
     }
 
+    // Single debt account
+    if (m.debtAccountCount === 1) {
+      const debtSaving = Math.round(p.debtPayments * 0.1);
+      const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
+      moves.push({
+        action: `Overpay debt by \u00a3${Math.round(Math.min(p.surplus * 0.5, 200))}/month to clear faster`,
+        annualImpact: debtSaving * 12,
+        monthlyImpact: debtSaving,
+        effort: 'medium',
+        category: 'debt',
+        merchants: debtMerchants,
+        strategy: `1 debt account with \u00a3${Math.round(p.debtPayments)}/month in payments.`,
+        steps: ['Check if overpayments are allowed without penalty', 'Set up a monthly overpayment standing order', 'Redirect any savings from other moves into debt payoff'],
+        effect: `Reduces total interest paid and clears debt sooner.`,
+      });
+    }
+
+    // Transport
     if (m.transport > 100) {
       const saving = Math.round(m.transport * 0.2);
+      const transportMerchants = this._getMerchantsByCategory(txs, 'Transport');
       moves.push({
-        action: 'Optimise transport costs',
+        action: `Cut transport from \u00a3${Math.round(m.transport)} to \u00a3${Math.round(m.transport - saving)}/month`,
         annualImpact: saving * 12,
         monthlyImpact: saving,
         effort: 'medium',
-        strategy: 'Consider weekly caps, season tickets, or cycling one day/week.',
-        steps: ['Check if a weekly Oyster cap or railcard saves money', 'Try one car-free/ride-free day per week', 'Compare annual vs monthly ticket pricing'],
-        effect: 'Reduces a major fixed cost.',
+        category: 'spending',
+        merchants: transportMerchants,
+        strategy: `\u00a3${Math.round(m.transport)}/month on transport.`,
+        steps: ['Check railcard or weekly cap options', 'Go car-free one day per week', 'Compare annual vs monthly tickets'],
+        effect: `Saves \u00a3${saving}/month.`,
       });
     }
 
+    // Emergency buffer — this is a BUFFER move, not spending
     if (m.savingsRate < 10 && p.surplus > 0) {
-      const saving = Math.round(p.surplus * 0.5);
+      const autoSave = Math.round(p.surplus * 0.5);
+      const bufferTarget = Math.max(500, Math.round(p.spending));
+      const monthsToTarget = autoSave > 0 ? Math.ceil(bufferTarget / autoSave) : 0;
       moves.push({
-        action: 'Start a \u00a3500 emergency buffer',
+        action: `Auto-save \u00a3${autoSave}/month to build \u00a3${bufferTarget} buffer in ${monthsToTarget} months`,
+        annualImpact: autoSave * 12,
+        monthlyImpact: autoSave,
+        effort: 'low',
+        category: 'buffer',
+        merchants: [],
+        strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Monthly surplus is \u00a3${Math.round(p.surplus)}.`,
+        steps: ['Open a separate savings pot', 'Set up standing order on payday', 'Target 1 month of expenses, then build to 3'],
+        effect: `\u00a3${bufferTarget} safety net in ${monthsToTarget} months.`,
+      });
+    }
+
+    // High savers — SAVINGS/INVEST move
+    if (m.savingsRate >= 15) {
+      const surplusAnnual = Math.round(p.surplus * 12);
+      const interestGain = Math.round(surplusAnnual * 0.045);
+      moves.push({
+        action: `Move \u00a3${Math.round(p.surplus)}/month surplus to 4.5% savings account`,
+        annualImpact: interestGain,
+        monthlyImpact: Math.round(interestGain / 12),
+        effort: 'low',
+        category: 'savings',
+        merchants: [],
+        strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Surplus is \u00a3${Math.round(p.surplus)}/month.`,
+        steps: ['Open a high-interest account (Chase, Chip, Monzo offer 4%+)', 'Auto-transfer surplus on payday', 'Consider S&S ISA for long-term savings'],
+        effect: `\u00a3${interestGain}/year in passive interest.`,
+      });
+    }
+
+    // Coffee
+    if (m.coffeeAndCafes > 40) {
+      const saving = Math.round(m.coffeeAndCafes * 0.5);
+      const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
+      moves.push({
+        action: `Halve caf\u00e9 spending from \u00a3${Math.round(m.coffeeAndCafes)} to \u00a3${Math.round(m.coffeeAndCafes - saving)}/month`,
         annualImpact: saving * 12,
         monthlyImpact: saving,
         effort: 'low',
-        strategy: 'Auto-transfer 50% of surplus to a separate savings pot on payday.',
-        steps: ['Open a separate savings pot', 'Set up standing order for payday', 'Target \u00a3500 first, then 1 month of expenses'],
-        effect: 'Protection against unexpected bills without taking on debt.',
+        category: 'spending',
+        merchants: coffeeMerchants,
+        strategy: `\u00a3${Math.round(m.coffeeAndCafes)}/month on coffee and caf\u00e9s.`,
+        steps: ['Make coffee at home 3 mornings per week', 'Keep one treat coffee day', 'Track weekly spending'],
+        effect: `Saves \u00a3${saving}/month.`,
       });
     }
 
-    if (m.savingsRate >= 15) {
+    // Break-even move if in deficit
+    if (p.surplus < 0) {
+      const deficit = Math.abs(Math.round(p.surplus));
+      // Find the biggest discretionary categories to cut
+      const discItems = profile.budgetReality?.discretionary?.items || [];
+      const topCuts = discItems.slice(0, 3).map((i: any) => i.category);
       moves.push({
-        action: 'Optimise where your savings sit',
-        annualImpact: Math.round(p.surplus * 0.04 * 12),
-        monthlyImpact: Math.round(p.surplus * 0.04),
-        effort: 'low',
-        strategy: 'Move savings to a high-interest account or S&S ISA.',
-        steps: ['Compare easy-access savings rates', 'Consider a stocks & shares ISA for long-term', 'Max out annual ISA allowance if possible'],
-        effect: 'Compound growth on existing savings.',
+        action: `Close \u00a3${deficit}/month deficit by cutting discretionary spending`,
+        annualImpact: deficit * 12,
+        monthlyImpact: deficit,
+        effort: 'high',
+        category: 'break_even',
+        merchants: topCuts,
+        strategy: `Spending \u00a3${deficit}/month more than income. Top discretionary categories: ${topCuts.join(', ') || 'unknown'}.`,
+        steps: ['Freeze all non-essential spending for 30 days', 'Cancel unnecessary subscriptions immediately', 'Switch to cash/prepaid for discretionary spending'],
+        effect: `Stops the bleed and creates a foundation for saving.`,
       });
     }
 
     moves.sort((a, b) => b.annualImpact - a.annualImpact);
     return moves;
+  },
+
+  // Helper: get unique merchant names by category from enriched transactions
+  _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {
+    const matching = txs
+      .filter((t) => t.category === category && !t.isIncome && !t.isTransfer && !t.isRefund)
+      .map((t) => t.merchant);
+    // Deduplicate and take top merchants by frequency
+    const counts: Record<string, number> = {};
+    for (const m of matching) { counts[m] = (counts[m] || 0) + 1; }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([name]) => name);
   },
 };
 

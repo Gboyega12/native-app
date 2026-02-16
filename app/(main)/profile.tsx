@@ -48,7 +48,10 @@ export default function Profile() {
           onPress: async () => {
             try {
               const { data: { session } } = await supabase.auth.getSession();
-              if (!session) return;
+              if (!session) {
+                Alert.alert('Error', 'You are not signed in.');
+                return;
+              }
 
               const res = await fetch('/api/delete-account', {
                 method: 'POST',
@@ -63,10 +66,10 @@ export default function Profile() {
                 await supabase.auth.signOut();
                 router.replace('/(auth)/sign-in');
               } else {
-                Alert.alert('Error', 'Could not delete account. Please try again.');
+                Alert.alert('Error', data.error || 'Could not delete account. Please try again.');
               }
-            } catch {
-              Alert.alert('Error', 'Something went wrong. Please try again.');
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
             }
           },
         },

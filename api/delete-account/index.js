@@ -16,9 +16,13 @@ export default async function handler(req, res) {
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !serviceKey || !anonKey) {
+    const missing = [
+      !supabaseUrl && 'SUPABASE_URL',
+      !serviceKey && 'SUPABASE_SERVICE_ROLE_KEY',
+      !anonKey && 'EXPO_PUBLIC_SUPABASE_ANON_KEY',
+    ].filter(Boolean).join(', ');
     return res.status(500).json({
-      error: 'Server misconfigured',
-      details: 'Missing SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, or EXPO_PUBLIC_SUPABASE_ANON_KEY',
+      error: `Server misconfigured: missing ${missing}`,
     });
   }
 
