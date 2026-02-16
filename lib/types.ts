@@ -36,10 +36,18 @@ export interface CategoryBreakdown {
   [category: string]: number;
 }
 
+export interface TransactionDetail {
+  date: string;
+  merchant: string;
+  description: string;
+  amount: number;
+}
+
 export interface BudgetCategory {
   category: string;
   monthly: number;
   txs: number;
+  transactions: TransactionDetail[];
 }
 
 export interface BudgetSection {

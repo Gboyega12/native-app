@@ -1,12 +1,17 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
+  LayoutAnimation, Platform, UIManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
-import type { Analysis, BudgetCategory, IncomeSource, Move } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move } from '@/lib/types';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 // Extended palette matching the BOCY design
 const gold = '#E8C55A';
@@ -17,6 +22,22 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState('');
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+
+  const toggleCategory = (key: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const formatDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -259,22 +280,61 @@ export default function Home() {
             {/* Non-negotiable breakdown */}
             {nonDiscItems.length > 0 && (
               <>
-                <Text style={styles.breakdownHeader}>NON-NEGOTIABLE BREAKDOWN</Text>
-                {nonDiscItems.map((item: BudgetCategory, i: number) => (
-                  <View
-                    key={i}
-                    style={[styles.dataRow, i === nonDiscItems.length - 1 && styles.dataRowLast]}
-                  >
-                    <View style={styles.dataRowLeft}>
-                      <View style={[styles.bullet, { borderLeftColor: colors.coral }]} />
-                      <Text style={styles.dataLabel}>{item.category}</Text>
-                      <Text style={styles.dataCount}>({item.txs})</Text>
+                <Text style={styles.breakdownHeader}>ESSENTIALS BREAKDOWN</Text>
+                <Text style={styles.breakdownSubtext}>
+                  Fixed costs and necessities — bills, groceries, transport
+                </Text>
+                {nonDiscItems.map((item: BudgetCategory, i: number) => {
+                  const key = `nd-${item.category}`;
+                  const isExpanded = expandedCategories.has(key);
+                  const txs: TransactionDetail[] = item.transactions ?? [];
+                  const pctOfSection = nonDiscTotal > 0 ? Math.round((item.monthly / nonDiscTotal) * 100) : 0;
+                  return (
+                    <View key={i}>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={() => toggleCategory(key)}
+                        style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                      >
+                        <View style={styles.dataRowLeft}>
+                          <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && styles.bulletExpanded]} />
+                          <View>
+                            <Text style={styles.dataLabel}>{item.category}</Text>
+                            <Text style={styles.dataMeta}>
+                              {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of essentials
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.dataRowRight}>
+                          <Text style={[styles.dataValue, { color: colors.coral }]}>
+                            {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
+                          </Text>
+                          <Text style={styles.chevron}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                        </View>
+                      </TouchableOpacity>
+                      {isExpanded && txs.length > 0 && (
+                        <View style={styles.txDropdown}>
+                          {txs.map((tx, j) => (
+                            <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                              <View style={styles.txLeft}>
+                                <Text style={styles.txMerchant}>{tx.merchant}</Text>
+                                <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                              </View>
+                              <Text style={[styles.txAmount, { color: colors.coral }]}>
+                                {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      {isExpanded && txs.length === 0 && (
+                        <View style={styles.txDropdown}>
+                          <Text style={styles.txEmpty}>No transaction details available</Text>
+                        </View>
+                      )}
                     </View>
-                    <Text style={[styles.dataValue, { color: colors.coral }]}>
-                      {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
-                    </Text>
-                  </View>
-                ))}
+                  );
+                })}
               </>
             )}
 
@@ -284,21 +344,60 @@ export default function Home() {
                 <Text style={[styles.breakdownHeader, { marginTop: 20 }]}>
                   LIFESTYLE SPENDING
                 </Text>
-                {discItems.map((item: BudgetCategory, i: number) => (
-                  <View
-                    key={i}
-                    style={[styles.dataRow, i === discItems.length - 1 && styles.dataRowLast]}
-                  >
-                    <View style={styles.dataRowLeft}>
-                      <View style={[styles.bullet, { borderLeftColor: gold }]} />
-                      <Text style={styles.dataLabel}>{item.category}</Text>
-                      <Text style={styles.dataCount}>({item.txs})</Text>
+                <Text style={styles.breakdownSubtext}>
+                  Discretionary spending — dining, shopping, entertainment
+                </Text>
+                {discItems.map((item: BudgetCategory, i: number) => {
+                  const key = `d-${item.category}`;
+                  const isExpanded = expandedCategories.has(key);
+                  const txs: TransactionDetail[] = item.transactions ?? [];
+                  const pctOfSection = discTotal > 0 ? Math.round((item.monthly / discTotal) * 100) : 0;
+                  return (
+                    <View key={i}>
+                      <TouchableOpacity
+                        activeOpacity={0.7}
+                        onPress={() => toggleCategory(key)}
+                        style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                      >
+                        <View style={styles.dataRowLeft}>
+                          <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && styles.bulletExpanded]} />
+                          <View>
+                            <Text style={styles.dataLabel}>{item.category}</Text>
+                            <Text style={styles.dataMeta}>
+                              {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.dataRowRight}>
+                          <Text style={[styles.dataValue, { color: gold }]}>
+                            {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
+                          </Text>
+                          <Text style={styles.chevron}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                        </View>
+                      </TouchableOpacity>
+                      {isExpanded && txs.length > 0 && (
+                        <View style={styles.txDropdown}>
+                          {txs.map((tx, j) => (
+                            <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                              <View style={styles.txLeft}>
+                                <Text style={styles.txMerchant}>{tx.merchant}</Text>
+                                <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                              </View>
+                              <Text style={[styles.txAmount, { color: gold }]}>
+                                {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                      {isExpanded && txs.length === 0 && (
+                        <View style={styles.txDropdown}>
+                          <Text style={styles.txEmpty}>No transaction details available</Text>
+                        </View>
+                      )}
                     </View>
-                    <Text style={[styles.dataValue, { color: gold }]}>
-                      {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
-                    </Text>
-                  </View>
-                ))}
+                  );
+                })}
               </>
             )}
 
@@ -698,15 +797,84 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.dim,
   },
-  dataCount: {
+  dataMeta: {
     fontFamily: fonts.mono,
-    fontSize: 12,
+    fontSize: 11,
     color: colors.muted,
+    marginTop: 2,
+  },
+  dataRowRight: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 8,
   },
   dataValue: {
     fontFamily: fonts.mono,
     fontSize: 14,
     fontWeight: '600',
+  },
+  chevron: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.muted,
+  },
+  bulletExpanded: {
+    borderLeftColor: colors.text,
+  },
+
+  // ── Transaction dropdown ──
+  txDropdown: {
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(255,255,255,0.06)',
+    marginLeft: 10,
+    marginBottom: 8,
+    paddingLeft: 14,
+    paddingVertical: 6,
+  },
+  txRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.03)',
+  },
+  txRowLast: {
+    borderBottomWidth: 0,
+  },
+  txLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  txMerchant: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.text2,
+  },
+  txDate: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  txAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  txEmpty: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.muted,
+    paddingVertical: 8,
+  },
+  breakdownSubtext: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.muted,
+    marginBottom: 8,
+    lineHeight: 18,
   },
   cardFooter: {
     fontFamily: fonts.regular,

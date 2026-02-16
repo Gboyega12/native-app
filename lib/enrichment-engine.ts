@@ -245,18 +245,26 @@ const EnrichmentEngine = {
     const monthlySpending = totalSpending / months;
     const surplus = monthlyIncome - monthlySpending;
 
-    const catTotals: Record<string, { total: number; count: number }> = {};
+    const catTotals: Record<string, { total: number; count: number; transactions: { date: string; merchant: string; description: string; amount: number }[] }> = {};
     for (const tx of spending) {
       const cat = tx.category || 'Other';
-      if (!catTotals[cat]) catTotals[cat] = { total: 0, count: 0 };
+      if (!catTotals[cat]) catTotals[cat] = { total: 0, count: 0, transactions: [] };
       catTotals[cat].total += Math.abs(tx.amount);
       catTotals[cat].count++;
+      catTotals[cat].transactions.push({
+        date: tx.date,
+        merchant: tx.merchant || tx.description,
+        description: tx.description,
+        amount: tx.amount,
+      });
     }
 
     const nonDiscItems: any[] = [];
     const discItems: any[] = [];
     for (const [cat, d] of Object.entries(catTotals)) {
-      const item = { category: cat, monthly: d.total / months, txs: d.count };
+      // Sort transactions by date descending (most recent first)
+      const sortedTxs = d.transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const item = { category: cat, monthly: d.total / months, txs: d.count, transactions: sortedTxs };
       if (ESSENTIAL_CATEGORIES.has(cat)) nonDiscItems.push(item);
       else discItems.push(item);
     }
