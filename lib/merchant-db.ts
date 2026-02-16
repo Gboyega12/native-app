@@ -55,6 +55,8 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['dominos', "domino's"], merchant: "Domino's", category: 'Eating Out' },
   { patterns: ['pizza hut'], merchant: 'Pizza Hut', category: 'Eating Out' },
   { patterns: ['subway'], merchant: 'Subway', category: 'Eating Out' },
+  { patterns: ['kokoro'], merchant: 'Kokoro', category: 'Eating Out' },
+  { patterns: ['fillishack', 'filli shack'], merchant: 'Fillishack', category: 'Eating Out' },
 
   // ── Transport (essential) ──
   { patterns: ['uber', 'uber *trip', 'uber bv'], merchant: 'Uber', category: 'Transport', isEssential: true },
@@ -68,7 +70,7 @@ const MERCHANTS: MerchantEntry[] = [
   // ── Streaming (discretionary) ──
   { patterns: ['netflix'], merchant: 'Netflix', category: 'Streaming', isSubscription: true },
   { patterns: ['spotify'], merchant: 'Spotify', category: 'Streaming', isSubscription: true },
-  { patterns: ['apple.com/bill', 'apple services'], merchant: 'Apple Services', category: 'Streaming', isSubscription: true },
+  { patterns: ['apple.com/bill', 'apple services', 'apple.com'], merchant: 'Apple Services', category: 'Streaming', isSubscription: true },
   { patterns: ['amazon prime', 'amzn prime'], merchant: 'Amazon Prime', category: 'Streaming', isSubscription: true },
   { patterns: ['disney plus', 'disneyplus', 'disney+'], merchant: 'Disney+', category: 'Streaming', isSubscription: true },
   { patterns: ['youtube premium', 'google youtube'], merchant: 'YouTube Premium', category: 'Streaming', isSubscription: true },
@@ -76,6 +78,22 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['sky digital', 'sky uk'], merchant: 'Sky', category: 'Streaming', isSubscription: true },
   { patterns: ['crunchyroll'], merchant: 'Crunchyroll', category: 'Streaming', isSubscription: true },
   { patterns: ['audible'], merchant: 'Audible', category: 'Streaming', isSubscription: true },
+
+  // ── Software & SaaS Subscriptions (discretionary) ──
+  { patterns: ['claude.ai', 'claude ai', 'anthropic'], merchant: 'Claude', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['chatgpt', 'openai'], merchant: 'ChatGPT', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['github'], merchant: 'GitHub', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['framer'], merchant: 'Framer', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['mobbin'], merchant: 'Mobbin', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['figma'], merchant: 'Figma', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['notion'], merchant: 'Notion', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['canva'], merchant: 'Canva', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['adobe'], merchant: 'Adobe', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['twitter', 'x premium'], merchant: 'Twitter / X', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['linkedin premium', 'linkedin'], merchant: 'LinkedIn', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['google storage', 'google one'], merchant: 'Google One', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['icloud', 'icloud+'], merchant: 'iCloud+', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['microsoft 365', 'microsoft office', 'office 365'], merchant: 'Microsoft 365', category: 'Subscriptions', isSubscription: true },
 
   // ── Fitness (discretionary) ──
   { patterns: ['gym', 'puregym', 'pure gym', 'the gym', 'david lloyd', 'virgin active', 'nuffield'], merchant: 'Gym', category: 'Fitness', isSubscription: true },
@@ -163,7 +181,7 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['student loan', 'slc'], merchant: 'Student Loan', category: 'Debt Payments', isDebt: true, isEssential: true },
 
   // Credit card issuers — UK-specific
-  { patterns: ['amex', 'american express'], merchant: 'American Express', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['amex', 'american express', 'american exp'], merchant: 'American Express', category: 'Debt Payments', isDebt: true, isEssential: true },
   { patterns: ['barclaycard'], merchant: 'Barclaycard', category: 'Debt Payments', isDebt: true, isEssential: true },
   { patterns: ['mbna'], merchant: 'MBNA', category: 'Debt Payments', isDebt: true, isEssential: true },
   { patterns: ['capital one'], merchant: 'Capital One', category: 'Debt Payments', isDebt: true, isEssential: true },

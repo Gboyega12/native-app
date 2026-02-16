@@ -23,6 +23,11 @@ const GATEWAY_PREFIXES: RegExp[] = [
   /^sp\s*\*\s*/i,                   // Shopify payments
   /^gp\s*\*\s*/i,                   // GoCardless / generic prefix
   /^stripe\s*\*\s*/i,               // Stripe
+  /^to\s+/i,                        // "To American Exp 3773" → "American Exp 3773"
+  /^from\s+/i,                      // "From HSBC" → "HSBC"
+  /^payment\s+to\s+/i,              // "Payment to Amex" → "Amex"
+  /^card\s+payment\s+to\s+/i,       // "Card payment to ..." → "..."
+  /^direct\s+debit\s+to\s+/i,       // "Direct debit to ..." → "..."
 ];
 
 // Noise patterns to strip (order matters — most specific first)
@@ -37,6 +42,7 @@ const NOISE_PATTERNS: RegExp[] = [
   /\bon\s+\d{2}[\/\-]\d{2}/gi,    // "ON 15/01" date suffixes
   /\b\d{2}[\/\-]\d{2}[\/\-]\d{2,4}\b/g, // Inline dates
   /\bcd\s*\d{4}/gi,               // "CD 1234"
+  /\s+\d{4}$/g,                    // Trailing 4-digit card suffix: "AMEX 3773" → "AMEX"
   /\bvisa\b/gi,                    // Card network names
   /\bmastercard\b/gi,
   /\bdebit\b/gi,
