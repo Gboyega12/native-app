@@ -226,11 +226,19 @@ export function matchMerchant(description: string, normalisedDescription?: strin
     candidates.push(normalisedDescription);
   }
 
+  // Find the match with the LONGEST pattern. This ensures specific patterns
+  // like "tesco credit" beat generic ones like "tesco", and "student loan"
+  // beats "loan". Without this, array order would silently misclassify debt
+  // transactions as groceries or other categories.
+  let bestMatch: MerchantMatch | null = null;
+  let bestPatternLen = 0;
+
   for (const text of candidates) {
     for (const entry of MERCHANTS) {
       for (const pattern of entry.patterns) {
-        if (patternMatches(text, pattern)) {
-          return {
+        if (pattern.length > bestPatternLen && patternMatches(text, pattern)) {
+          bestPatternLen = pattern.length;
+          bestMatch = {
             merchant: entry.merchant,
             category: entry.category,
             isEssential: entry.isEssential || false,
@@ -243,7 +251,7 @@ export function matchMerchant(description: string, normalisedDescription?: strin
       }
     }
   }
-  return null;
+  return bestMatch;
 }
 
 // ── Salary / employer keyword detection ──
