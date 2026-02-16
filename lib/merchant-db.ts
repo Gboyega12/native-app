@@ -252,17 +252,22 @@ const BRAND_INDICATORS = [
 export function isPersonTransfer(description: string): boolean {
   const lower = description.toLowerCase().trim();
 
-  // Explicit transfer method patterns
+  // Explicit transfer method patterns — must NOT include generic "payment to"
+  // because UK banks format most debits as "CARD PAYMENT TO [merchant]".
   const transferPatterns = [
     /^(mr|mrs|miss|ms|dr)\s/,
     /\bfaster payment\b/,
     /\bbank transfer\b/,
-    /\bstanding order\b/,
     /\btransfer to\b/,
     /\btransfer from\b/,
-    /\bpayment to\b/,
   ];
   if (transferPatterns.some((p) => p.test(lower))) return true;
+
+  // "standing order" is only a transfer if the destination looks like a person,
+  // not a company (e.g. "STANDING ORDER TO BRITISH GAS" is a bill, not a transfer)
+  if (/\bstanding order\b/.test(lower) && !BRAND_INDICATORS.some((b) => lower.includes(b)) && !/\d/.test(lower)) {
+    return true;
+  }
 
   // If it contains any brand/company indicators, it's NOT a person
   if (BRAND_INDICATORS.some((b) => lower.includes(b))) return false;
@@ -276,9 +281,11 @@ export function isPersonTransfer(description: string): boolean {
     .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b/g, '')
     .trim();
 
-  // Match 1-3 purely alphabetic words (typical person name pattern)
+  // Match 2-3 purely alphabetic words (typical person name pattern).
+  // Single words are too ambiguous — "aldi", "pharmacy", "barbershop"
+  // would all false-positive. Require at least 2 words for a name match.
   const words = cleaned.split(/\s+/).filter(Boolean);
-  if (words.length >= 1 && words.length <= 3) {
+  if (words.length >= 2 && words.length <= 3) {
     const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w) && w.length >= 2);
     if (allAlpha) return true;
   }
