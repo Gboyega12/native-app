@@ -1,12 +1,15 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Animated, Easing,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
+import Markdown from '@/lib/markdown';
 import type { ChatMessage, ChatContext, Analysis, Goals } from '@/lib/types';
+
+// ── Suggested questions (contextual) ──
 
 function getContextualQuestions(analysis: Analysis | null, goals: Goals | null): string[] {
   if (!analysis) {
@@ -27,7 +30,7 @@ function getContextualQuestions(analysis: Analysis | null, goals: Goals | null):
   }
 
   const moves = analysis.all_moves || [];
-  if (moves.some((m: any) => m.action?.toLowerCase().includes('subscription'))) {
+  if (moves.some((m: { action?: string }) => m.action?.toLowerCase().includes('subscription'))) {
     questions.push('Which subscriptions should I cut first?');
   } else {
     questions.push('Where are my biggest spending leaks?');
@@ -43,19 +46,62 @@ function getContextualQuestions(analysis: Analysis | null, goals: Goals | null):
   return questions;
 }
 
+// ── Animated typing dots ──
+
+function TypingIndicator() {
+  const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
+
+  useEffect(() => {
+    const animations = dots.map((dot, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * 200),
+          Animated.timing(dot, { toValue: 1, duration: 400, easing: Easing.ease, useNativeDriver: true }),
+          Animated.timing(dot, { toValue: 0, duration: 400, easing: Easing.ease, useNativeDriver: true }),
+        ]),
+      ),
+    );
+    animations.forEach((a) => a.start());
+    return () => animations.forEach((a) => a.stop());
+  }, []);
+
+  return (
+    <View style={[styles.bubble, styles.assistantBubble]}>
+      <View style={styles.dotsRow}>
+        {dots.map((dot, i) => (
+          <Animated.View
+            key={i}
+            style={[
+              styles.dot,
+              { opacity: dot.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) },
+              { transform: [{ translateY: dot.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }) }] },
+            ]}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ── Main Chat Component ──
+
 export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [context, setContext] = useState<ChatContext>({});
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [goals, setGoals] = useState<Goals | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const inputRef = useRef<TextInput>(null);
+
+  // ── Load context + persisted messages on focus ──
 
   useFocusEffect(
     useCallback(() => {
       loadContext();
-    }, [])
+    }, []),
   );
 
   const loadContext = async () => {
@@ -82,19 +128,79 @@ export default function Chat() {
     setAnalysis(a);
     setGoals(g);
 
-    setContext({
+    // ── Build richer context ──
+    const ctx: ChatContext = {
       monthly_income: a?.monthly_income,
       monthly_spending: a?.monthly_spending,
       surplus: a?.surplus,
       archetype: a?.archetype,
+      decision_score: a?.decision_score,
       goals: g ? {
         current_situation: g.current_situation,
         one_year_goal: g.one_year_goal,
         two_year_goal: g.two_year_goal,
+        target_amount: g.target_amount,
       } : undefined,
-      top_move: a?.top_move ? { action: a.top_move.action } : undefined,
-    });
+      top_move: a?.top_move ? { action: a.top_move.action, monthlyImpact: a.top_move.monthlyImpact } : undefined,
+      all_moves: a?.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string }) => ({
+        action: m.action,
+        monthlyImpact: m.monthlyImpact,
+        effort: m.effort,
+      })),
+      spending_by_category: buildSpendingBreakdown(a),
+      behavioral_patterns: a?.behavioral_patterns,
+      goal_trajectory: a?.goal_context ? {
+        goalLabel: a.goal_context.goalLabel,
+        currentMonths: a.goal_context.currentMonths,
+        newMonths: a.goal_context.newMonths,
+        insight: a.goal_context.insight,
+      } : null,
+    };
+
+    // Add subscriptions from discretionary budget if available
+    if (a?.discretionary?.items) {
+      const subItems = a.discretionary.items.filter(
+        (item: { category: string }) => item.category === 'Subscriptions' || item.category === 'Streaming',
+      );
+      if (subItems.length) {
+        ctx.subscriptions = [];
+        for (const item of subItems) {
+          for (const tx of (item.transactions || [])) {
+            ctx.subscriptions.push({ merchant: tx.merchant, amount: tx.amount });
+          }
+        }
+      }
+    }
+
+    setContext(ctx);
+
+    // ── Load persisted messages ──
+    const { data: chatData } = await supabase
+      .from('chat_messages')
+      .select('messages')
+      .eq('user_id', user.id)
+      .single();
+
+    if (chatData?.messages?.length) {
+      setMessages(chatData.messages);
+    }
   };
+
+  // ── Persist messages to Supabase ──
+
+  const persistMessages = async (msgs: ChatMessage[]) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // Keep last 50 messages to avoid bloating the row
+    const toStore = msgs.slice(-50);
+    await supabase
+      .from('chat_messages')
+      .upsert({ user_id: user.id, messages: toStore }, { onConflict: 'user_id' })
+      .then(() => {});
+  };
+
+  // ── Send message (with streaming + fallback) ──
 
   const sendMessage = async (text: string) => {
     if (!text.trim() || loading) return;
@@ -104,30 +210,130 @@ export default function Chat() {
     setMessages(newMessages);
     setInput('');
     setLoading(true);
+    setError(null);
 
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: newMessages,
-          context,
-        }),
-      });
-      const data = await res.json();
-      if (data.success && data.text) {
-        setMessages([...newMessages, { role: 'assistant', content: data.text }]);
-      } else {
-        setMessages([...newMessages, { role: 'assistant', content: 'Sorry, I couldn\'t process that. Please try again.' }]);
+      // ── Try streaming first ──
+      const streamSuccess = await tryStream(newMessages);
+      if (!streamSuccess) {
+        // ── Fall back to standard request ──
+        await standardRequest(newMessages);
       }
     } catch {
-      setMessages([...newMessages, { role: 'assistant', content: 'Connection error. Please check your internet and try again.' }]);
+      setError('Connection error. Please check your internet and try again.');
+      const errorMsg: ChatMessage = { role: 'assistant', content: 'Sorry, something went wrong.' };
+      setMessages([...newMessages, errorMsg]);
     }
 
     setLoading(false);
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+  };
+
+  const tryStream = async (newMessages: ChatMessage[]): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: newMessages, context, stream: true }),
+      });
+
+      if (!res.ok || !res.body) return false;
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6).trim();
+          if (raw === '[DONE]') continue;
+
+          try {
+            const event = JSON.parse(raw);
+            if (event.error) {
+              setError(event.error);
+              return false;
+            }
+            if (event.t) {
+              fullText += event.t;
+              const streamMsg: ChatMessage = { role: 'assistant', content: fullText };
+              setMessages([...newMessages, streamMsg]);
+              scrollRef.current?.scrollToEnd({ animated: false });
+            }
+          } catch {
+            // Skip malformed SSE
+          }
+        }
+      }
+
+      if (fullText) {
+        const assistantMsg: ChatMessage = { role: 'assistant', content: fullText };
+        const final: ChatMessage[] = [...newMessages, assistantMsg];
+        setMessages(final);
+        persistMessages(final);
+        return true;
+      }
+
+      return false;
+    } catch {
+      // Streaming not supported (e.g. React Native on device) — fall back
+      return false;
+    }
+  };
+
+  const standardRequest = async (newMessages: ChatMessage[]) => {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: newMessages, context }),
+    });
+    const data = await res.json();
+
+    if (data.success && data.text) {
+      const assistantMsg: ChatMessage = { role: 'assistant', content: data.text };
+      const final: ChatMessage[] = [...newMessages, assistantMsg];
+      setMessages(final);
+      persistMessages(final);
+    } else {
+      setError(data.error || 'Failed to get response');
+      const errorMsg: ChatMessage = { role: 'assistant', content: 'Sorry, I couldn\'t process that. Please try again.' };
+      setMessages([...newMessages, errorMsg]);
+    }
+  };
+
+  // ── Retry last failed message ──
+
+  const retryLastMessage = () => {
+    setError(null);
+    // Remove the failed assistant message, re-send the last user message
+    const withoutLastAssistant = messages.slice(0, -1);
+    const lastUserMsg = withoutLastAssistant[withoutLastAssistant.length - 1];
+    if (lastUserMsg?.role === 'user') {
+      setMessages(withoutLastAssistant.slice(0, -1));
+      sendMessage(lastUserMsg.content);
+    }
+  };
+
+  // ── Clear conversation ──
+
+  const clearChat = async () => {
+    setMessages([]);
+    setError(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase.from('chat_messages').delete().eq('user_id', user.id);
+    }
   };
 
   const suggestedQuestions = getContextualQuestions(analysis, goals);
@@ -138,10 +344,22 @@ export default function Chat() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
+      {/* ── Header ── */}
+      {messages.length > 0 && (
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Bocy</Text>
+          <TouchableOpacity onPress={clearChat} style={styles.clearButton}>
+            <Text style={styles.clearText}>New chat</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* ── Messages ── */}
       <ScrollView
         ref={scrollRef}
         style={styles.messages}
         contentContainerStyle={styles.messagesContent}
+        keyboardShouldPersistTaps="handled"
       >
         {messages.length === 0 && (
           <View style={styles.suggestedContainer}>
@@ -167,26 +385,28 @@ export default function Chat() {
               msg.role === 'user' ? styles.userBubble : styles.assistantBubble,
             ]}
           >
-            <Text
-              style={[
-                styles.bubbleText,
-                msg.role === 'user' ? styles.userText : styles.assistantText,
-              ]}
-            >
-              {msg.content}
-            </Text>
+            {msg.role === 'user' ? (
+              <Text style={[styles.bubbleText, styles.userText]}>{msg.content}</Text>
+            ) : (
+              <Markdown>{msg.content}</Markdown>
+            )}
           </View>
         ))}
 
-        {loading && (
-          <View style={[styles.bubble, styles.assistantBubble]}>
-            <Text style={styles.thinkingText}>Thinking...</Text>
-          </View>
+        {loading && <TypingIndicator />}
+
+        {error && (
+          <TouchableOpacity style={styles.retryBanner} onPress={retryLastMessage}>
+            <Text style={styles.retryText}>{error}</Text>
+            <Text style={styles.retryAction}>Tap to retry</Text>
+          </TouchableOpacity>
         )}
       </ScrollView>
 
+      {/* ── Input ── */}
       <View style={styles.inputRow}>
         <TextInput
+          ref={inputRef}
           style={styles.input}
           placeholder="Ask about your finances..."
           placeholderTextColor={colors.muted}
@@ -194,7 +414,9 @@ export default function Chat() {
           onChangeText={setInput}
           onSubmitEditing={() => sendMessage(input)}
           returnKeyType="send"
-          multiline={false}
+          multiline
+          maxLength={1000}
+          blurOnSubmit
         />
         <TouchableOpacity
           style={[styles.sendButton, (!input.trim() || loading) && styles.sendDisabled]}
@@ -208,10 +430,56 @@ export default function Chat() {
   );
 }
 
+// ── Helpers ──
+
+function buildSpendingBreakdown(a: Analysis | null): { category: string; monthly: number }[] | undefined {
+  if (!a) return undefined;
+  const items: { category: string; monthly: number }[] = [];
+
+  const sections = [a.non_discretionary, a.discretionary];
+  for (const section of sections) {
+    if (!section?.items) continue;
+    for (const item of section.items) {
+      items.push({ category: item.category, monthly: item.monthly });
+    }
+  }
+
+  if (!items.length) return undefined;
+  // Sort by spend descending
+  items.sort((a, b) => b.monthly - a.monthly);
+  return items;
+}
+
+// ── Styles ──
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xxl + spacing.sm,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  headerTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 16,
+    color: colors.text,
+  },
+  clearButton: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  clearText: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.accent,
   },
   messages: {
     flex: 1,
@@ -279,15 +547,41 @@ const styles = StyleSheet.create({
   userText: {
     color: colors.bg,
   },
-  assistantText: {
-    color: colors.text2,
+  // ── Animated typing dots ──
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
   },
-  thinkingText: {
-    fontFamily: fonts.medium,
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.accent,
+  },
+  // ── Retry banner ──
+  retryBanner: {
+    backgroundColor: colors.coralDim,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginTop: spacing.xs,
+    alignItems: 'center',
+  },
+  retryText: {
+    fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.dim,
-    fontStyle: 'italic',
+    color: colors.coral,
+    textAlign: 'center',
   },
+  retryAction: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.coral,
+    marginTop: spacing.xs,
+  },
+  // ── Input row ──
   inputRow: {
     flexDirection: 'row',
     padding: spacing.md,
@@ -295,6 +589,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.surface,
     gap: spacing.sm,
+    alignItems: 'flex-end',
   },
   input: {
     flex: 1,
@@ -307,6 +602,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     fontSize: 14,
     color: colors.text,
+    maxHeight: 100,
   },
   sendButton: {
     backgroundColor: colors.accent,

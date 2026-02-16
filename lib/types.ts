@@ -204,12 +204,24 @@ export interface ChatContext {
   monthly_spending?: number;
   surplus?: number;
   archetype?: string;
+  decision_score?: number;
   goals?: {
     current_situation?: string;
     one_year_goal?: string;
     two_year_goal?: string;
+    target_amount?: number;
   };
-  top_move?: { action: string };
+  top_move?: { action: string; monthlyImpact: number };
+  all_moves?: { action: string; monthlyImpact: number; effort: string }[];
+  subscriptions?: { merchant: string; amount: number }[];
+  spending_by_category?: { category: string; monthly: number }[];
+  behavioral_patterns?: string[];
+  goal_trajectory?: {
+    goalLabel: string;
+    currentMonths: number;
+    newMonths: number;
+    insight: string;
+  } | null;
 }
 
 // ── Flowchart Position ──
