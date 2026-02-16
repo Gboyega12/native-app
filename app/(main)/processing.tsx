@@ -113,6 +113,13 @@ function ProcessingInner() {
         }
       } catch (classifyErr: any) {
         console.warn('[processing] Claude classify failed, falling back to rule-based enrichment:', classifyErr?.message || classifyErr);
+        // Surface the failure count so it's visible in logs. If this fires,
+        // check that CLAUDE_API_KEY is set in .env — without it, ALL unknown
+        // merchants (restaurants, SaaS tools, niche brands) stay as "Other".
+        const lowConfCount = result.enrichedTransactions.filter((t) => t.confidence === 'low' && !t.isIncome && !t.isTransfer).length;
+        if (lowConfCount > 0) {
+          console.warn(`[processing] ${lowConfCount} transactions stuck as "Other" — Claude AI fallback unavailable`);
+        }
       }
       await delay(400);
 
