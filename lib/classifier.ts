@@ -66,6 +66,14 @@ const KEYWORD_RULES: KeywordRule[] = [
   { patterns: [/\bschool\s*fee\b/, /\btuition\b/, /\buniversity\b/, /\bcollege\b/],
     category: 'Education', isEssential: true },
 
+  // Debt / Finance
+  { patterns: [/\bhire\s*purchase\b/, /\bhp\s*payment\b/, /\bfinance\s*payment\b/, /\bfinance\s*agreement\b/, /\bcar\s*loan\b/, /\bvehicle\s*finance\b/],
+    category: 'Debt Payments', isEssential: true },
+  { patterns: [/\bcredit\s*card\s*payment\b/, /\bcc\s*payment\b/, /\bcard\s*repayment\b/, /\bminimum\s*payment\b/],
+    category: 'Debt Payments', isEssential: true },
+  { patterns: [/\bloan\s*repayment\b/, /\bdebt\s*repayment\b/, /\boverpayment\b/, /\bconsolidation\b/],
+    category: 'Debt Payments', isEssential: true },
+
   // ── Discretionary keyword rules ──
   // Catches common spending that the merchant DB doesn't cover.
 

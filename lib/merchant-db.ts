@@ -55,6 +55,8 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['dominos', "domino's"], merchant: "Domino's", category: 'Eating Out' },
   { patterns: ['pizza hut'], merchant: 'Pizza Hut', category: 'Eating Out' },
   { patterns: ['subway'], merchant: 'Subway', category: 'Eating Out' },
+  { patterns: ['kokoro'], merchant: 'Kokoro', category: 'Eating Out' },
+  { patterns: ['fillishack', 'filli shack'], merchant: 'Fillishack', category: 'Eating Out' },
 
   // ── Transport (essential) ──
   { patterns: ['uber', 'uber *trip', 'uber bv'], merchant: 'Uber', category: 'Transport', isEssential: true },
@@ -68,7 +70,7 @@ const MERCHANTS: MerchantEntry[] = [
   // ── Streaming (discretionary) ──
   { patterns: ['netflix'], merchant: 'Netflix', category: 'Streaming', isSubscription: true },
   { patterns: ['spotify'], merchant: 'Spotify', category: 'Streaming', isSubscription: true },
-  { patterns: ['apple.com/bill', 'apple services'], merchant: 'Apple Services', category: 'Streaming', isSubscription: true },
+  { patterns: ['apple.com/bill', 'apple services', 'apple.com'], merchant: 'Apple Services', category: 'Streaming', isSubscription: true },
   { patterns: ['amazon prime', 'amzn prime'], merchant: 'Amazon Prime', category: 'Streaming', isSubscription: true },
   { patterns: ['disney plus', 'disneyplus', 'disney+'], merchant: 'Disney+', category: 'Streaming', isSubscription: true },
   { patterns: ['youtube premium', 'google youtube'], merchant: 'YouTube Premium', category: 'Streaming', isSubscription: true },
@@ -76,6 +78,22 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['sky digital', 'sky uk'], merchant: 'Sky', category: 'Streaming', isSubscription: true },
   { patterns: ['crunchyroll'], merchant: 'Crunchyroll', category: 'Streaming', isSubscription: true },
   { patterns: ['audible'], merchant: 'Audible', category: 'Streaming', isSubscription: true },
+
+  // ── Software & SaaS Subscriptions (discretionary) ──
+  { patterns: ['claude.ai', 'claude ai', 'anthropic'], merchant: 'Claude', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['chatgpt', 'openai'], merchant: 'ChatGPT', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['github'], merchant: 'GitHub', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['framer'], merchant: 'Framer', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['mobbin'], merchant: 'Mobbin', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['figma'], merchant: 'Figma', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['notion'], merchant: 'Notion', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['canva'], merchant: 'Canva', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['adobe'], merchant: 'Adobe', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['twitter', 'x premium'], merchant: 'Twitter / X', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['linkedin premium', 'linkedin'], merchant: 'LinkedIn', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['google storage', 'google one'], merchant: 'Google One', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['icloud', 'icloud+'], merchant: 'iCloud+', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['microsoft 365', 'microsoft office', 'office 365'], merchant: 'Microsoft 365', category: 'Subscriptions', isSubscription: true },
 
   // ── Fitness (discretionary) ──
   { patterns: ['gym', 'puregym', 'pure gym', 'the gym', 'david lloyd', 'virgin active', 'nuffield'], merchant: 'Gym', category: 'Fitness', isSubscription: true },
@@ -160,8 +178,41 @@ const MERCHANTS: MerchantEntry[] = [
 
   // ── Debt / Credit (essential) ──
   { patterns: ['loan', 'lending'], merchant: 'Loan Payment', category: 'Debt Payments', isDebt: true, isEssential: true },
-  { patterns: ['credit card', 'card payment'], merchant: 'Credit Card', category: 'Debt Payments', isDebt: true, isEssential: true },
   { patterns: ['student loan', 'slc'], merchant: 'Student Loan', category: 'Debt Payments', isDebt: true, isEssential: true },
+
+  // Credit card issuers — UK-specific
+  { patterns: ['amex', 'american express', 'american exp'], merchant: 'American Express', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['barclaycard'], merchant: 'Barclaycard', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['mbna'], merchant: 'MBNA', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['capital one'], merchant: 'Capital One', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['vanquis'], merchant: 'Vanquis', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['aqua card', 'aqua credit'], merchant: 'Aqua', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['newday', 'new day'], merchant: 'NewDay', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['virgin money credit', 'virgin credit'], merchant: 'Virgin Money', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['tesco credit', 'tesco bank credit'], merchant: 'Tesco Bank', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['sainsburys bank', "sainsbury's bank"], merchant: "Sainsbury's Bank", category: 'Debt Payments', isDebt: true, isEssential: true },
+
+  // Car finance / HP
+  { patterns: ['black horse', 'bhfc'], merchant: 'Black Horse Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['moneybarn'], merchant: 'Moneybarn', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['bmw financial', 'bmw finance'], merchant: 'BMW Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['vw financial', 'vw finance', 'volkswagen finance'], merchant: 'VW Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['mercedes finance', 'mercedes-benz finance'], merchant: 'Mercedes Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['pcp finance', 'motor finance', 'car finance'], merchant: 'Car Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['close brothers', 'close motor'], merchant: 'Close Brothers', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['motonovo', 'moto novo'], merchant: 'MotoNovo', category: 'Debt Payments', isDebt: true, isEssential: true },
+
+  // Mortgage providers
+  { patterns: ['nationwide mortgage'], merchant: 'Nationwide', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['halifax mortgage', 'halifax mtg'], merchant: 'Halifax', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['santander mortgage', 'santander mtg'], merchant: 'Santander', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['natwest mortgage', 'natwest mtg'], merchant: 'NatWest', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['barclays mortgage', 'barclays mtg'], merchant: 'Barclays', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['hsbc mortgage', 'hsbc mtg'], merchant: 'HSBC', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['lloyds mortgage', 'lloyds mtg'], merchant: 'Lloyds', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['tsb mortgage', 'tsb mtg'], merchant: 'TSB', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['coventry building', 'coventry bs'], merchant: 'Coventry BS', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['yorkshire building', 'yorkshire bs'], merchant: 'Yorkshire BS', category: 'Mortgage', isDebt: true, isEssential: true },
 
   // ── Income (special — not spending) ──
   { patterns: ['salary', 'wages', 'payroll'], merchant: 'Salary', category: 'Income', isIncome: true },
@@ -193,11 +244,19 @@ export function matchMerchant(description: string, normalisedDescription?: strin
     candidates.push(normalisedDescription);
   }
 
+  // Find the match with the LONGEST pattern. This ensures specific patterns
+  // like "tesco credit" beat generic ones like "tesco", and "student loan"
+  // beats "loan". Without this, array order would silently misclassify debt
+  // transactions as groceries or other categories.
+  let bestMatch: MerchantMatch | null = null;
+  let bestPatternLen = 0;
+
   for (const text of candidates) {
     for (const entry of MERCHANTS) {
       for (const pattern of entry.patterns) {
-        if (patternMatches(text, pattern)) {
-          return {
+        if (pattern.length > bestPatternLen && patternMatches(text, pattern)) {
+          bestPatternLen = pattern.length;
+          bestMatch = {
             merchant: entry.merchant,
             category: entry.category,
             isEssential: entry.isEssential || false,
@@ -210,7 +269,7 @@ export function matchMerchant(description: string, normalisedDescription?: strin
       }
     }
   }
-  return null;
+  return bestMatch;
 }
 
 // ── Salary / employer keyword detection ──
@@ -252,17 +311,22 @@ const BRAND_INDICATORS = [
 export function isPersonTransfer(description: string): boolean {
   const lower = description.toLowerCase().trim();
 
-  // Explicit transfer method patterns
+  // Explicit transfer method patterns — must NOT include generic "payment to"
+  // because UK banks format most debits as "CARD PAYMENT TO [merchant]".
   const transferPatterns = [
     /^(mr|mrs|miss|ms|dr)\s/,
     /\bfaster payment\b/,
     /\bbank transfer\b/,
-    /\bstanding order\b/,
     /\btransfer to\b/,
     /\btransfer from\b/,
-    /\bpayment to\b/,
   ];
   if (transferPatterns.some((p) => p.test(lower))) return true;
+
+  // "standing order" is only a transfer if the destination looks like a person,
+  // not a company (e.g. "STANDING ORDER TO BRITISH GAS" is a bill, not a transfer)
+  if (/\bstanding order\b/.test(lower) && !BRAND_INDICATORS.some((b) => lower.includes(b)) && !/\d/.test(lower)) {
+    return true;
+  }
 
   // If it contains any brand/company indicators, it's NOT a person
   if (BRAND_INDICATORS.some((b) => lower.includes(b))) return false;
@@ -276,9 +340,11 @@ export function isPersonTransfer(description: string): boolean {
     .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b/g, '')
     .trim();
 
-  // Match 1-3 purely alphabetic words (typical person name pattern)
+  // Match 2-3 purely alphabetic words (typical person name pattern).
+  // Single words are too ambiguous — "aldi", "pharmacy", "barbershop"
+  // would all false-positive. Require at least 2 words for a name match.
   const words = cleaned.split(/\s+/).filter(Boolean);
-  if (words.length >= 1 && words.length <= 3) {
+  if (words.length >= 2 && words.length <= 3) {
     const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w) && w.length >= 2);
     if (allAlpha) return true;
   }

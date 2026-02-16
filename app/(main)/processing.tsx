@@ -111,8 +111,15 @@ function ProcessingInner() {
             result = EnrichmentEngine.rebuild(updated);
           }
         }
-      } catch {
-        // Graceful fallback — continue with rule-based enrichment only
+      } catch (classifyErr: any) {
+        console.warn('[processing] Claude classify failed, falling back to rule-based enrichment:', classifyErr?.message || classifyErr);
+        // Surface the failure count so it's visible in logs. If this fires,
+        // check that CLAUDE_API_KEY is set in .env — without it, ALL unknown
+        // merchants (restaurants, SaaS tools, niche brands) stay as "Other".
+        const lowConfCount = result.enrichedTransactions.filter((t) => t.confidence === 'low' && !t.isIncome && !t.isTransfer).length;
+        if (lowConfCount > 0) {
+          console.warn(`[processing] ${lowConfCount} transactions stuck as "Other" — Claude AI fallback unavailable`);
+        }
       }
       await delay(400);
 
@@ -223,7 +230,7 @@ function ProcessingInner() {
       };
 
       if (user) {
-        await supabase.from('analyses').insert({
+        const { error: insertError } = await supabase.from('analyses').insert({
           ...analysis,
           non_discretionary: analysis.non_discretionary,
           discretionary: analysis.discretionary,
@@ -233,6 +240,9 @@ function ProcessingInner() {
           behavioral_patterns: analysis.behavioral_patterns,
           goal_context: analysis.goal_context,
         });
+        if (insertError) {
+          console.warn('[processing] Supabase insert failed:', insertError.message);
+        }
       }
 
       // Store for dashboard

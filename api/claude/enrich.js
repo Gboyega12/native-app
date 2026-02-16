@@ -49,7 +49,10 @@ export default async function handler(req, res) {
       });
 
       const data = await response.json();
-      const text = data.content?.[0]?.text || '';
+      let text = data.content?.[0]?.text || '';
+
+      // Strip markdown code fences that Claude sometimes wraps around JSON
+      text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
       // Parse the JSON response
       try {

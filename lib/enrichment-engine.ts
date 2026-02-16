@@ -133,7 +133,7 @@ const EnrichmentEngine = {
   enrichTransaction(tx: RawTransaction): EnrichedTransaction {
     const normalised = normaliseDescription(tx.description);
     const merchantMatch = matchMerchant(tx.description, normalised);
-    const isPerson = isPersonTransfer(tx.description);
+    let isPerson = isPersonTransfer(tx.description);
     const isCredit = tx.amount > 0;
     const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
     const isSavings = !!(tx.description.toLowerCase().match(/\bsaving|isa\b/i) && tx.amount < 0);
@@ -161,7 +161,7 @@ const EnrichmentEngine = {
         isBNPL: merchantMatch.isBNPL,
         isDebt: merchantMatch.isDebt,
         isIncome,
-        isTransfer: isPerson,
+        isTransfer: false, // Merchant DB match overrides person-name heuristic
         isRefund,
         isSavings,
         confidence: 'high',
@@ -188,16 +188,27 @@ const EnrichmentEngine = {
         isIncome = true;
         category = 'Income';
       }
-    } else if (isPerson) {
-      category = 'Transfers';
     } else if (isSavings) {
       category = 'Savings';
     } else {
       // Spending transaction with no merchant match — run keyword classifier
+      // BEFORE person-transfer heuristic, so that descriptions like
+      // "barbershop" or "restaurant" get categorised instead of being
+      // misclassified as person transfers.
       const classification = classifyTransaction(tx.description, null, normalised);
-      category = classification.category;
-      isEssential = classification.isEssential;
-      confidence = classification.confidence;
+      if (classification.source !== 'default') {
+        // Keyword classifier matched — trust it over person-name heuristic
+        category = classification.category;
+        isEssential = classification.isEssential;
+        confidence = classification.confidence;
+        isPerson = false;
+      } else if (isPerson) {
+        category = 'Transfers';
+      } else {
+        category = classification.category;
+        isEssential = classification.isEssential;
+        confidence = classification.confidence;
+      }
     }
 
     return {
