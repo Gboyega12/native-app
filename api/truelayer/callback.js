@@ -1,24 +1,30 @@
 import { createClient } from '@supabase/supabase-js';
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
+  // Accept both GET (legacy server redirect) and POST (new client-initiated flow)
+  let code, connectionId;
+
+  if (req.method === 'POST') {
+    code = req.body?.code;
+    const state = req.body?.state;
+    connectionId = state;
+  } else if (req.method === 'GET') {
+    code = req.query.code;
+    const state = req.query.state || '';
+    // Legacy: state may contain "connectionId|webOrigin"
+    const pipeIdx = state.indexOf('|');
+    connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
+  } else {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { code, state } = req.query;
   if (!code) return res.status(400).json({ error: 'Missing authorization code' });
-  if (!state) return res.status(400).json({ error: 'Missing connection_id (state)' });
+  if (!connectionId) return res.status(400).json({ error: 'Missing connection_id (state)' });
 
-  // Parse state: "connectionId" (mobile) or "connectionId|https://origin" (web)
-  const pipeIdx = state.indexOf('|');
-  const connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
-  const webOrigin = pipeIdx === -1 ? null : state.slice(pipeIdx + 1);
-
-  // Check both env var names — client uses EXPO_PUBLIC_ prefix, server may use either
   const redirectUri =
     process.env.TRUELAYER_REDIRECT_URI ||
     process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
-    'https://native-app-ashy.vercel.app/api/truelayer/callback';
+    'https://native-app-ashy.vercel.app/';
 
   const clientId = process.env.TRUELAYER_CLIENT_ID;
   const clientSecret = process.env.TRUELAYER_CLIENT_SECRET;
@@ -117,14 +123,20 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Failed to save bank data' });
     }
 
-    // Redirect back to app: web URL for browsers, deep link for mobile
-    if (webOrigin) {
-      const redirectTo = `${webOrigin}/connect?connection_id=${encodeURIComponent(connectionId)}&status=success`;
-      return res.redirect(302, redirectTo);
+    // POST → return JSON to the client
+    if (req.method === 'POST') {
+      return res.json({ success: true, connection_id: connectionId });
     }
 
-    const redirectTo = `bocy://callback?connection_id=${connectionId}&status=success`;
-    return res.redirect(302, redirectTo);
+    // GET → redirect back to app (legacy flow)
+    const webOrigin = req.query.state?.includes('|')
+      ? req.query.state.slice(req.query.state.indexOf('|') + 1)
+      : null;
+
+    if (webOrigin) {
+      return res.redirect(302, `${webOrigin}/connect?connection_id=${encodeURIComponent(connectionId)}&status=success`);
+    }
+    return res.redirect(302, `bocy://callback?connection_id=${connectionId}&status=success`);
   } catch (err) {
     console.error('Callback error:', err);
     return res.status(500).json({ error: err.message });

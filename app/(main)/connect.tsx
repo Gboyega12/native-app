@@ -11,17 +11,50 @@ import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function Connect() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ connection_id?: string; status?: string }>();
+  const params = useLocalSearchParams<{
+    connection_id?: string; status?: string;
+    code?: string; state?: string;
+  }>();
   const [loading, setLoading] = useState(false);
   const [loadingCSV, setLoadingCSV] = useState(false);
   const [loadingPDF, setLoadingPDF] = useState(false);
 
-  // Handle web OAuth callback (when redirected back from TrueLayer via query params)
+  // Handle TrueLayer redirect — code+state arrive as URL params
   useEffect(() => {
-    if (params.status === 'success' && params.connection_id) {
+    if (params.code && params.state) {
+      exchangeTrueLayerCode(params.code, params.state);
+    } else if (params.status === 'success' && params.connection_id) {
+      // Legacy: direct connection_id from old server-redirect flow
       fetchBankData(params.connection_id);
     }
-  }, [params.status, params.connection_id]);
+  }, [params.code, params.state, params.status, params.connection_id]);
+
+  // POST the auth code to our callback API for token exchange + data fetch
+  const exchangeTrueLayerCode = async (code: string, state: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/truelayer/callback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, state }),
+      });
+      const data = await res.json();
+
+      if (data.success && data.connection_id) {
+        await fetchBankData(data.connection_id);
+        return;
+      }
+
+      Alert.alert(
+        'Connection failed',
+        data.error || 'Could not exchange bank authorization. Please try again.',
+      );
+      setLoading(false);
+    } catch {
+      setLoading(false);
+      Alert.alert('Error', 'Something went wrong connecting to your bank.');
+    }
+  };
 
   const fetchBankData = async (connId: string) => {
     setLoading(true);
@@ -50,25 +83,22 @@ export default function Connect() {
     setLoading(true);
     try {
       const connectionId = `conn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const authUrl = getTrueLayerAuthUrl(connectionId);
 
-      // On web, pass the origin so the callback can redirect back here
-      const webOrigin = Platform.OS === 'web' ? window.location.origin : undefined;
-      const authUrl = getTrueLayerAuthUrl(connectionId, webOrigin);
-
-      // On web, use the web URL as the return URL; on mobile, use deep link
+      // TrueLayer redirects to the app root — match that as returnUrl
       const returnUrl = Platform.OS === 'web'
-        ? `${window.location.origin}/connect`
-        : 'bocy://callback';
+        ? window.location.origin
+        : 'bocy://';
 
       const result = await WebBrowser.openAuthSessionAsync(authUrl, returnUrl);
 
       if (result.type === 'success' && result.url) {
         const url = new URL(result.url);
-        const status = url.searchParams.get('status');
-        const connId = url.searchParams.get('connection_id');
+        const code = url.searchParams.get('code');
+        const state = url.searchParams.get('state');
 
-        if (status === 'success' && connId) {
-          await fetchBankData(connId);
+        if (code && state) {
+          await exchangeTrueLayerCode(code, state);
           return;
         }
       }

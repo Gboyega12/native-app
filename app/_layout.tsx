@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -25,6 +26,17 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready) return;
     const inAuth = segments[0] === '(auth)';
+
+    // If TrueLayer redirected to the root with ?code=...&state=..., forward to connect
+    if (session && Platform.OS === 'web') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+      const state = urlParams.get('state');
+      if (code && state) {
+        router.replace({ pathname: '/(main)/connect', params: { code, state } });
+        return;
+      }
+    }
 
     if (!session && !inAuth) {
       router.replace('/(auth)/sign-in');
