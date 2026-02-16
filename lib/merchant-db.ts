@@ -184,20 +184,29 @@ function patternMatches(text: string, pattern: string): boolean {
   return text.includes(pattern);
 }
 
-export function matchMerchant(description: string): MerchantMatch | null {
-  const lower = description.toLowerCase().trim();
-  for (const entry of MERCHANTS) {
-    for (const pattern of entry.patterns) {
-      if (patternMatches(lower, pattern)) {
-        return {
-          merchant: entry.merchant,
-          category: entry.category,
-          isEssential: entry.isEssential || false,
-          isSubscription: entry.isSubscription || false,
-          isBNPL: entry.isBNPL || false,
-          isDebt: entry.isDebt || false,
-          isIncome: entry.isIncome || false,
-        };
+export function matchMerchant(description: string, normalisedDescription?: string): MerchantMatch | null {
+  // Try raw description first, then fall back to normalised version.
+  // This ensures exact matches still work, while normalised descriptions
+  // catch cases where gateway prefixes / noise hide the merchant name.
+  const candidates = [description.toLowerCase().trim()];
+  if (normalisedDescription && normalisedDescription !== candidates[0]) {
+    candidates.push(normalisedDescription);
+  }
+
+  for (const text of candidates) {
+    for (const entry of MERCHANTS) {
+      for (const pattern of entry.patterns) {
+        if (patternMatches(text, pattern)) {
+          return {
+            merchant: entry.merchant,
+            category: entry.category,
+            isEssential: entry.isEssential || false,
+            isSubscription: entry.isSubscription || false,
+            isBNPL: entry.isBNPL || false,
+            isDebt: entry.isDebt || false,
+            isIncome: entry.isIncome || false,
+          };
+        }
       }
     }
   }

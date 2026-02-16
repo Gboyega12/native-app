@@ -65,6 +65,53 @@ const KEYWORD_RULES: KeywordRule[] = [
   // Education
   { patterns: [/\bschool\s*fee\b/, /\btuition\b/, /\buniversity\b/, /\bcollege\b/],
     category: 'Education', isEssential: true },
+
+  // ── Discretionary keyword rules ──
+  // Catches common spending that the merchant DB doesn't cover.
+
+  // Eating Out / Restaurants
+  { patterns: [/\brestaurant\b/, /\bbistro\b/, /\bbrasserie\b/, /\bpizzeria\b/, /\bchippy\b/, /\bfish\s*(?:&|and)\s*chips?\b/, /\btakeaway\b/, /\btake\s*away\b/],
+    category: 'Eating Out', isEssential: false },
+
+  // Coffee & Cafes
+  { patterns: [/\bcafe\b/, /\bcaf[eé]\b/, /\bcoffee\b/, /\bespresso\b/, /\bbakery\b/, /\bpatisserie\b/],
+    category: 'Coffee & Cafes', isEssential: false },
+
+  // Entertainment
+  { patterns: [/\bcinema\b/, /\bmovie\b/, /\btheatre\b/, /\btheater\b/, /\bconcert\b/, /\bgig\b/, /\bbowling\b/, /\barcade\b/, /\bmuseum\b/, /\bgallery\b/, /\bfestival\b/, /\bticket(?:s)?\b/],
+    category: 'Entertainment', isEssential: false },
+
+  // Fitness / Gym
+  { patterns: [/\bgym\b/, /\bfitness\b/, /\byoga\b/, /\bpilates\b/, /\bcrossfit\b/, /\bswimming\s*pool\b/, /\bsports?\s*centre\b/, /\bleisure\s*centre\b/],
+    category: 'Fitness', isEssential: false },
+
+  // Personal Care
+  { patterns: [/\bhairdress\w*\b/, /\bbarber\b/, /\bhaircut\b/, /\bsalon\b/, /\bbeauty\b/, /\bspa\b/, /\bnails?\b/, /\bmassage\b/, /\btattoo\b/, /\bwax(?:ing)?\b/],
+    category: 'Personal Care', isEssential: false },
+
+  // Shopping (catch-all for retail descriptions)
+  { patterns: [/\boutlet\b/, /\bretail\b/, /\bfashion\b/, /\bclothing\b/, /\bjeweller\w*\b/, /\bwatches\b/, /\bgadget\b/, /\belectronics\b/],
+    category: 'Shopping', isEssential: false },
+
+  // Delivery
+  { patterns: [/\bdelivery\b/, /\btakeaway\s*order\b/],
+    category: 'Delivery', isEssential: false },
+
+  // Gambling (discretionary, worth flagging)
+  { patterns: [/\bbet365\b/, /\bpaddy\s*power\b/, /\bladbrokes\b/, /\bwilliam\s*hill\b/, /\bbetfred\b/, /\bcoral\b/, /\bskybet\b/, /\bbetting\b/, /\bcasino\b/, /\blottery\b/, /\blotto\b/, /\bgambl/],
+    category: 'Gambling', isEssential: false },
+
+  // Subscriptions / memberships (generic)
+  { patterns: [/\bsubscription\b/, /\bmembership\b/, /\bmonthly\s*fee\b/, /\bannual\s*fee\b/],
+    category: 'Subscriptions', isEssential: false },
+
+  // Charity (discretionary but worth categorising)
+  { patterns: [/\bcharity\b/, /\bdonat\w+\b/, /\bcancer\s*research\b/, /\boxfam\b/, /\bred\s*cross\b/, /\bsave\s*the\s*children\b/, /\bbhf\b/, /\bmacmillan\b/],
+    category: 'Charity', isEssential: false },
+
+  // Pets
+  { patterns: [/\bvet\b/, /\bveterinar\w*\b/, /\bpets?\s*at\s*home\b/, /\bpet\s*shop\b/, /\bkennel\b/],
+    category: 'Pets', isEssential: false },
 ];
 
 /**
@@ -77,6 +124,7 @@ const KEYWORD_RULES: KeywordRule[] = [
 export function classifyTransaction(
   description: string,
   merchantMatch: MerchantMatch | null,
+  normalisedDescription?: string,
 ): ClassificationResult {
   // ── Layer 1: Merchant-DB match ──
   if (merchantMatch) {
@@ -89,15 +137,22 @@ export function classifyTransaction(
   }
 
   // ── Layer 2: Keyword detection ──
-  const lower = description.toLowerCase();
-  for (const rule of KEYWORD_RULES) {
-    if (rule.patterns.some((rx) => rx.test(lower))) {
-      return {
-        category: rule.category,
-        isEssential: rule.isEssential,
-        confidence: 'high',
-        source: 'keyword',
-      };
+  // Try both raw and normalised descriptions for maximum coverage.
+  const candidates = [description.toLowerCase()];
+  if (normalisedDescription && normalisedDescription !== candidates[0]) {
+    candidates.push(normalisedDescription);
+  }
+
+  for (const text of candidates) {
+    for (const rule of KEYWORD_RULES) {
+      if (rule.patterns.some((rx) => rx.test(text))) {
+        return {
+          category: rule.category,
+          isEssential: rule.isEssential,
+          confidence: 'high',
+          source: 'keyword',
+        };
+      }
     }
   }
 

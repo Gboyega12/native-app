@@ -3,6 +3,7 @@ import {
   isLikelyIncomeCredit, matchesSalaryKeywords,
 } from './merchant-db';
 import { classifyTransaction } from './classifier';
+import { normaliseDescription } from './normalise';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
 import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS } from './constants';
 import type {
@@ -130,7 +131,8 @@ const EnrichmentEngine = {
   },
 
   enrichTransaction(tx: RawTransaction): EnrichedTransaction {
-    const merchantMatch = matchMerchant(tx.description);
+    const normalised = normaliseDescription(tx.description);
+    const merchantMatch = matchMerchant(tx.description, normalised);
     const isPerson = isPersonTransfer(tx.description);
     const isCredit = tx.amount > 0;
     const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
@@ -192,7 +194,7 @@ const EnrichmentEngine = {
       category = 'Savings';
     } else {
       // Spending transaction with no merchant match — run keyword classifier
-      const classification = classifyTransaction(tx.description, null);
+      const classification = classifyTransaction(tx.description, null, normalised);
       category = classification.category;
       isEssential = classification.isEssential;
       confidence = classification.confidence;
@@ -692,6 +694,38 @@ const EnrichmentEngine = {
 
     moves.sort((a, b) => b.annualImpact - a.annualImpact);
     return moves;
+  },
+
+  /**
+   * Rebuild the full analysis from updated enriched transactions.
+   * Used after Claude AI verification upgrades low-confidence "Other"
+   * transactions into proper categories — the profile, archetype, score,
+   * and moves all recompute with the improved data.
+   */
+  rebuild(enriched: EnrichedTransaction[]): EnrichmentResult {
+    const recurring = this.detectRecurring(enriched);
+    const profile = this.buildProfile(enriched, recurring);
+    const archetype = this.determineArchetype(profile);
+    const patterns = this.detectBehavioralPatterns(profile);
+    const score = this.calcDecisionScore(profile);
+    const stack = this.genDecisionStack(profile, enriched);
+
+    const metrics = profile.metrics;
+    const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
+    const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
+    const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
+
+    return {
+      profile,
+      archetype,
+      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
+      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
+      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
+      decisionScore: score,
+      decisionStack: stack,
+      behavioralPatterns: patterns.map((p: any) => p.pattern || p),
+      enrichedTransactions: enriched,
+    };
   },
 
   _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {
