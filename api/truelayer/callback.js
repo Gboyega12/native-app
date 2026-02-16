@@ -38,7 +38,7 @@ export default async function handler(req, res) {
 
   try {
     // Exchange code for access token
-    const tokenRes = await fetch('https://auth.truelayer-sandbox.com/connect/token', {
+    const tokenRes = await fetch('https://auth.truelayer.com/connect/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -69,8 +69,8 @@ export default async function handler(req, res) {
 
     // Fetch accounts and cards
     const [accountsRes, cardsRes] = await Promise.all([
-      fetch('https://api.truelayer-sandbox.com/data/v1/accounts', { headers }),
-      fetch('https://api.truelayer-sandbox.com/data/v1/cards', { headers }),
+      fetch('https://api.truelayer.com/data/v1/accounts', { headers }),
+      fetch('https://api.truelayer.com/data/v1/cards', { headers }),
     ]);
     const accountsData = await accountsRes.json();
     const cardsData = await cardsRes.json();
@@ -87,10 +87,10 @@ export default async function handler(req, res) {
     // Fetch all transactions
     const txPromises = [
       ...accounts.map((a) =>
-        fetch(`https://api.truelayer-sandbox.com/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        fetch(`https://api.truelayer.com/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
       ),
       ...cards.map((c) =>
-        fetch(`https://api.truelayer-sandbox.com/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        fetch(`https://api.truelayer.com/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
       ),
     ];
 
