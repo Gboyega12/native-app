@@ -4,7 +4,7 @@ const REDIRECT_URI =
   process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
   'https://native-app-ashy.vercel.app/';
 const SCOPES = ['accounts', 'balance', 'transactions', 'cards'];
-const PROVIDERS = ['uk-ob-all', 'uk-cs-mock'];
+const PROVIDERS = ['uk-ob-all'];
 
 /**
  * Build TrueLayer auth URL.
