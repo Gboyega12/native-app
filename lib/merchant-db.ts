@@ -160,8 +160,41 @@ const MERCHANTS: MerchantEntry[] = [
 
   // ── Debt / Credit (essential) ──
   { patterns: ['loan', 'lending'], merchant: 'Loan Payment', category: 'Debt Payments', isDebt: true, isEssential: true },
-  { patterns: ['credit card', 'card payment'], merchant: 'Credit Card', category: 'Debt Payments', isDebt: true, isEssential: true },
   { patterns: ['student loan', 'slc'], merchant: 'Student Loan', category: 'Debt Payments', isDebt: true, isEssential: true },
+
+  // Credit card issuers — UK-specific
+  { patterns: ['amex', 'american express'], merchant: 'American Express', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['barclaycard'], merchant: 'Barclaycard', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['mbna'], merchant: 'MBNA', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['capital one'], merchant: 'Capital One', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['vanquis'], merchant: 'Vanquis', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['aqua card', 'aqua credit'], merchant: 'Aqua', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['newday', 'new day'], merchant: 'NewDay', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['virgin money credit', 'virgin credit'], merchant: 'Virgin Money', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['tesco credit', 'tesco bank credit'], merchant: 'Tesco Bank', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['sainsburys bank', "sainsbury's bank"], merchant: "Sainsbury's Bank", category: 'Debt Payments', isDebt: true, isEssential: true },
+
+  // Car finance / HP
+  { patterns: ['black horse', 'bhfc'], merchant: 'Black Horse Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['moneybarn'], merchant: 'Moneybarn', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['bmw financial', 'bmw finance'], merchant: 'BMW Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['vw financial', 'vw finance', 'volkswagen finance'], merchant: 'VW Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['mercedes finance', 'mercedes-benz finance'], merchant: 'Mercedes Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['pcp finance', 'motor finance', 'car finance'], merchant: 'Car Finance', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['close brothers', 'close motor'], merchant: 'Close Brothers', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['motonovo', 'moto novo'], merchant: 'MotoNovo', category: 'Debt Payments', isDebt: true, isEssential: true },
+
+  // Mortgage providers
+  { patterns: ['nationwide mortgage'], merchant: 'Nationwide', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['halifax mortgage', 'halifax mtg'], merchant: 'Halifax', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['santander mortgage', 'santander mtg'], merchant: 'Santander', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['natwest mortgage', 'natwest mtg'], merchant: 'NatWest', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['barclays mortgage', 'barclays mtg'], merchant: 'Barclays', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['hsbc mortgage', 'hsbc mtg'], merchant: 'HSBC', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['lloyds mortgage', 'lloyds mtg'], merchant: 'Lloyds', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['tsb mortgage', 'tsb mtg'], merchant: 'TSB', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['coventry building', 'coventry bs'], merchant: 'Coventry BS', category: 'Mortgage', isDebt: true, isEssential: true },
+  { patterns: ['yorkshire building', 'yorkshire bs'], merchant: 'Yorkshire BS', category: 'Mortgage', isDebt: true, isEssential: true },
 
   // ── Income (special — not spending) ──
   { patterns: ['salary', 'wages', 'payroll'], merchant: 'Salary', category: 'Income', isIncome: true },
