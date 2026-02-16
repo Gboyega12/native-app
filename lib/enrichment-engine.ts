@@ -283,17 +283,17 @@ const EnrichmentEngine = {
       if (avgInt >= 25 && avgInt <= 35) frequency = 'monthly';
       else if (avgInt >= 12 && avgInt <= 17) frequency = 'fortnightly';
       else if (avgInt >= 5 && avgInt <= 9) frequency = 'weekly';
-      return { source, frequency, avgAmount, monthly, isSalary };
+      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt };
     })
     // Filter out low-confidence unknown credits that aren't regular or substantial enough
-    // Keep: salary/employer/benefit matches, OR large regular credits (avg >£100, regular frequency)
+    // Keep: salary/employer/benefit matches, OR large regular credits
     .filter((src) => {
       // Always keep explicitly identified sources
       if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
       // Keep if regular (weekly/fortnightly/monthly) and meaningful amount
       if (src.frequency !== 'irregular' && src.avgAmount >= 100) return true;
-      // Keep if large one-off credit (>£500) — likely a salary even without keywords
-      if (src.avgAmount >= 500) return true;
+      // Keep large regular credits: >£500 avg, 2+ occurrences, 20-45 day interval
+      if (src.avgAmount >= 500 && src.count >= 2 && src.avgInterval >= 20 && src.avgInterval <= 45) return true;
       // Drop small/irregular unknown credits (likely refunds, cashback, etc.)
       return false;
     })

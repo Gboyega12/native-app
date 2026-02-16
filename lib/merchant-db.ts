@@ -162,10 +162,11 @@ export function matchMerchant(description: string): MerchantMatch | null {
 const SALARY_PATTERNS: RegExp[] = [
   /\bsalary\b/, /\bwages\b/, /\bpayroll\b/, /\bpayday\b/,
   /\bstipend\b/, /\bcommission\b/, /\bpension\b/,
+  /\bpay from\b/, /\bmonthly pay\b/, /\bnet pay\b/, /\bdirect deposit\b/,
 ];
 
 const EMPLOYER_PATTERNS: RegExp[] = [
-  /\bltd\b/, /\bplc\b/, /\blimited\b/, /\binc\b/, /\bcorp\b/,
+  /\bltd\b/, /\bplc\b/, /\blimited\b/, /\binc\b/, /\bcorp\b/, /\bllp\b/,
   /\bgroup\b/, /\bholdings\b/,
   /\bcouncil\b/, /\bnhs\b/, /\buniversity\b/,
   /\bacademy\b/, /\bassociates\b/, /\bpartners\b/,
