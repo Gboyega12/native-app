@@ -12,7 +12,7 @@ function getContextualQuestions(analysis: Analysis | null, goals: Goals | null):
   if (!analysis) {
     return [
       'What can Bocy help me with?',
-      'How does financial analysis work?',
+      'How does the financial analysis work?',
     ];
   }
 
@@ -146,7 +146,7 @@ export default function Chat() {
         {messages.length === 0 && (
           <View style={styles.suggestedContainer}>
             <Text style={styles.suggestedTitle}>Ask Bocy</Text>
-            <Text style={styles.suggestedSubtitle}>Your AI financial strategist</Text>
+            <Text style={styles.suggestedSubtitle}>Your AI financial advisor</Text>
             {suggestedQuestions.map((q, i) => (
               <TouchableOpacity
                 key={i}
@@ -201,7 +201,7 @@ export default function Chat() {
           onPress={() => sendMessage(input)}
           disabled={!input.trim() || loading}
         >
-          <Text style={styles.sendText}>&gt;</Text>
+          <Text style={styles.sendText}>{'\u2191'}</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -226,12 +226,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   suggestedTitle: {
-    fontFamily: fonts.mono,
-    fontSize: 18,
+    fontFamily: fonts.heading,
+    fontSize: 20,
     color: colors.text,
-    fontWeight: '700',
   },
   suggestedSubtitle: {
+    fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.dim,
     marginBottom: spacing.lg,
@@ -242,12 +242,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
     width: '100%',
   },
   suggestedText: {
+    fontFamily: fonts.medium,
     fontSize: 14,
     color: colors.text2,
     textAlign: 'center',
@@ -271,6 +272,7 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: radius.sm,
   },
   bubbleText: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     lineHeight: 22,
   },
@@ -281,7 +283,7 @@ const styles = StyleSheet.create({
     color: colors.text2,
   },
   thinkingText: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.medium,
     fontSize: 13,
     color: colors.dim,
     fontStyle: 'italic',
@@ -296,6 +298,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    fontFamily: fonts.regular,
     backgroundColor: colors.bg,
     borderWidth: 1,
     borderColor: colors.border,
@@ -317,9 +320,8 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   sendText: {
-    fontFamily: fonts.mono,
-    fontSize: 18,
+    fontFamily: fonts.semibold,
+    fontSize: 20,
     color: colors.bg,
-    fontWeight: '700',
   },
 });

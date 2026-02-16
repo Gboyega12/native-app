@@ -15,7 +15,7 @@ export default function Plan() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [completed, setCompleted] = useState<Set<number>>(new Set());
+  const [approved, setApproved] = useState<Set<number>>(new Set());
 
   useFocusEffect(
     useCallback(() => {
@@ -40,11 +40,18 @@ export default function Plan() {
     setLoading(false);
   };
 
-  const toggleComplete = (index: number) => {
-    setCompleted((prev) => {
+  const handleApprove = (index: number) => {
+    setApproved((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) next.delete(index);
-      else next.add(index);
+      next.add(index);
+      return next;
+    });
+  };
+
+  const handleUnapprove = (index: number) => {
+    setApproved((prev) => {
+      const next = new Set(prev);
+      next.delete(index);
       return next;
     });
   };
@@ -60,29 +67,39 @@ export default function Plan() {
   if (!analysis) {
     return (
       <View style={styles.emptyContainer}>
-        <Text style={styles.emptyText}>Run an analysis to see your action plan.</Text>
+        <Text style={styles.emptyTitle}>No action plan yet</Text>
+        <Text style={styles.emptyText}>Complete an analysis to see your personalised recommendations.</Text>
       </View>
     );
   }
 
   const moves: Move[] = analysis.all_moves || [];
-  const completedCount = completed.size;
+  const approvedCount = approved.size;
   const totalMonthly = moves.reduce((s, m) => s + (m.monthlyImpact || 0), 0);
-  const unlockedMonthly = moves.reduce((s, m, i) => completed.has(i) ? s + (m.monthlyImpact || 0) : s, 0);
-  const progress = moves.length > 0 ? completedCount / moves.length : 0;
+  const approvedMonthly = moves.reduce((s, m, i) => approved.has(i) ? s + (m.monthlyImpact || 0) : s, 0);
+  const progress = moves.length > 0 ? approvedCount / moves.length : 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       <Text style={styles.heading}>Action Plan</Text>
+      <Text style={styles.headingSub}>
+        {moves.length} recommendation{moves.length !== 1 ? 's' : ''} based on your transaction data
+      </Text>
 
       {/* Progress summary */}
       <View style={styles.progressCard}>
-        <Text style={styles.progressText}>
-          {completedCount} of {moves.length} moves completed
-        </Text>
-        <Text style={styles.progressAmount}>
-          {'\u00a3'}{unlockedMonthly} of {'\u00a3'}{totalMonthly}/mo unlocked
-        </Text>
+        <View style={styles.progressRow}>
+          <View>
+            <Text style={styles.progressLabel}>Approved</Text>
+            <Text style={styles.progressCount}>{approvedCount} of {moves.length}</Text>
+          </View>
+          <View style={styles.progressRight}>
+            <Text style={styles.progressLabel}>Monthly impact</Text>
+            <Text style={styles.progressAmount}>
+              {'\u00a3'}{Math.round(approvedMonthly)} of {'\u00a3'}{Math.round(totalMonthly)}
+            </Text>
+          </View>
+        </View>
         <View style={styles.progressBar}>
           <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
         </View>
@@ -91,62 +108,104 @@ export default function Plan() {
       {/* Moves */}
       {moves.map((move, i) => {
         const isExpanded = expanded === i;
-        const isDone = completed.has(i);
+        const isApproved = approved.has(i);
 
         return (
-          <TouchableOpacity
-            key={i}
-            style={[styles.card, isDone && styles.cardDone]}
-            onPress={() => setExpanded(isExpanded ? null : i)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.cardHeader}>
-              <Text style={[styles.moveNumber, isDone && styles.doneText]}>{i + 1}</Text>
-              <View style={styles.cardContent}>
-                <Text style={[styles.moveAction, isDone && styles.doneText]}>{move.action}</Text>
-                <View style={styles.moveStats}>
-                  <Text style={[styles.moveImpact, isDone && styles.doneText]}>
-                    {'\u00a3'}{move.monthlyImpact}/mo
+          <View key={i} style={[styles.card, isApproved && styles.cardApproved]}>
+            <TouchableOpacity
+              onPress={() => setExpanded(isExpanded ? null : i)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.cardHeader}>
+                <View style={[styles.moveNumberBadge, isApproved && styles.moveNumberApproved]}>
+                  <Text style={[styles.moveNumber, isApproved && styles.moveNumberTextApproved]}>
+                    {isApproved ? '\u2713' : i + 1}
                   </Text>
-                  <View style={[styles.effortBadge, { borderColor: effortColor(move.effort) }]}>
-                    <Text style={[styles.effortText, { color: effortColor(move.effort) }]}>{move.effort}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={[styles.checkButton, isDone && styles.checkButtonDone]}
-                    onPress={() => toggleComplete(i)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Text style={[styles.checkIcon, isDone && styles.checkIconDone]}>
-                      {isDone ? '\u2713' : ' '}
+                </View>
+                <View style={styles.cardContent}>
+                  <Text style={[styles.moveAction, isApproved && styles.approvedAction]}>{move.action}</Text>
+                  <View style={styles.moveStats}>
+                    <Text style={styles.moveImpact}>
+                      {'\u00a3'}{move.monthlyImpact}/mo
                     </Text>
-                  </TouchableOpacity>
+                    <View style={[styles.effortBadge, { backgroundColor: `${effortColor(move.effort)}15` }]}>
+                      <Text style={[styles.effortText, { color: effortColor(move.effort) }]}>{move.effort}</Text>
+                    </View>
+                    <Text style={styles.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                  </View>
                 </View>
               </View>
-            </View>
+            </TouchableOpacity>
 
             {isExpanded && (
               <View style={styles.expandedSection}>
                 <View style={styles.separator} />
+
                 {move.strategy && (
-                  <Text style={styles.strategy}>{move.strategy}</Text>
+                  <View style={styles.detailBlock}>
+                    <Text style={styles.detailLabel}>Strategy</Text>
+                    <Text style={styles.detailText}>{move.strategy}</Text>
+                  </View>
                 )}
-                {move.steps?.map((step, j) => (
-                  <Text key={j} style={styles.step}>{j + 1}. {step}</Text>
-                ))}
+
+                {move.steps && move.steps.length > 0 && (
+                  <View style={styles.detailBlock}>
+                    <Text style={styles.detailLabel}>Steps to execute</Text>
+                    {move.steps.map((step, j) => (
+                      <View key={j} style={styles.stepRow}>
+                        <Text style={styles.stepNumber}>{j + 1}</Text>
+                        <Text style={styles.stepText}>{step}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
                 {move.effect && (
-                  <Text style={styles.effect}>{move.effect}</Text>
+                  <View style={styles.detailBlock}>
+                    <Text style={styles.detailLabel}>Expected outcome</Text>
+                    <Text style={styles.effectText}>{move.effect}</Text>
+                  </View>
                 )}
-                <TouchableOpacity
-                  style={isDone ? styles.undoButton : styles.markDoneButton}
-                  onPress={() => toggleComplete(i)}
-                >
-                  <Text style={isDone ? styles.undoButtonText : styles.markDoneText}>
-                    {isDone ? 'Mark as not done' : 'Mark as done'}
-                  </Text>
-                </TouchableOpacity>
+
+                <View style={styles.detailBlock}>
+                  <Text style={styles.detailLabel}>Impact breakdown</Text>
+                  <View style={styles.impactGrid}>
+                    <View style={styles.impactItem}>
+                      <Text style={styles.impactValue}>{'\u00a3'}{move.monthlyImpact || 0}</Text>
+                      <Text style={styles.impactLabel}>per month</Text>
+                    </View>
+                    <View style={styles.impactItem}>
+                      <Text style={styles.impactValue}>{'\u00a3'}{move.annualImpact || ((move.monthlyImpact || 0) * 12)}</Text>
+                      <Text style={styles.impactLabel}>per year</Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.actionButtons}>
+                  {isApproved ? (
+                    <TouchableOpacity
+                      style={styles.unapproveButton}
+                      onPress={() => handleUnapprove(i)}
+                    >
+                      <Text style={styles.unapproveText}>Remove from plan</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <>
+                      <TouchableOpacity
+                        style={styles.approveBtn}
+                        onPress={() => handleApprove(i)}
+                      >
+                        <Text style={styles.approveBtnText}>Approve</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.modifyBtn}>
+                        <Text style={styles.modifyBtnText}>Modify</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </View>
               </View>
             )}
-          </TouchableOpacity>
+          </View>
         );
       })}
 
@@ -154,10 +213,10 @@ export default function Plan() {
       <Text style={styles.sectionLabel}>NEED HELP WITH DEBT?</Text>
       <View style={styles.card}>
         <TouchableOpacity onPress={() => Linking.openURL('https://www.stepchange.org')}>
-          <Text style={styles.resourceLink}>StepChange - Free debt advice</Text>
+          <Text style={styles.resourceLink}>StepChange — Free debt advice</Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => Linking.openURL('https://www.citizensadvice.org.uk/debt-and-money')}>
-          <Text style={styles.resourceLink}>Citizens Advice - Debt guidance</Text>
+          <Text style={styles.resourceLink}>Citizens Advice — Debt guidance</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -170,7 +229,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   scroll: {
-    padding: spacing.xl,
+    padding: spacing.lg,
     paddingTop: spacing.xxl + spacing.lg,
     paddingBottom: spacing.xxl,
   },
@@ -187,82 +246,123 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: spacing.xl,
   },
+  emptyTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
   emptyText: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     textAlign: 'center',
+    lineHeight: 22,
   },
   heading: {
-    fontFamily: fonts.mono,
-    fontSize: 22,
+    fontFamily: fonts.heading,
+    fontSize: 24,
     color: colors.text,
-    fontWeight: '700',
-    marginBottom: spacing.md,
+    marginBottom: 2,
+  },
+  headingSub: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    marginBottom: spacing.lg,
   },
   progressCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
     marginBottom: spacing.lg,
   },
-  progressText: {
-    fontFamily: fonts.mono,
-    fontSize: 13,
-    color: colors.text2,
-    marginBottom: spacing.xs,
+  progressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  progressLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+    marginBottom: 2,
+  },
+  progressCount: {
+    fontFamily: fonts.semibold,
+    fontSize: 16,
+    color: colors.text,
+  },
+  progressRight: {
+    alignItems: 'flex-end',
   },
   progressAmount: {
-    fontFamily: fonts.mono,
-    fontSize: 13,
+    fontFamily: fonts.semibold,
+    fontSize: 16,
     color: colors.accent,
-    marginBottom: spacing.sm,
   },
   progressBar: {
-    height: 4,
+    height: 6,
     backgroundColor: colors.border,
-    borderRadius: 2,
+    borderRadius: 3,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     backgroundColor: colors.accent,
-    borderRadius: 2,
+    borderRadius: 3,
     minWidth: 2,
   },
   card: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
     marginBottom: spacing.sm,
   },
-  cardDone: {
-    opacity: 0.5,
+  cardApproved: {
+    borderColor: colors.accentDim,
   },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
-  moveNumber: {
-    fontFamily: fonts.mono,
-    fontSize: 14,
-    color: colors.accent,
-    fontWeight: '700',
-    width: 24,
+  moveNumberBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.accentDim,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.sm,
     marginTop: 2,
+  },
+  moveNumberApproved: {
+    backgroundColor: colors.accent,
+  },
+  moveNumber: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.accent,
+  },
+  moveNumberTextApproved: {
+    color: colors.bg,
   },
   cardContent: {
     flex: 1,
   },
   moveAction: {
-    fontFamily: fonts.mono,
-    fontSize: 14,
+    fontFamily: fonts.semibold,
+    fontSize: 15,
     color: colors.text,
-    fontWeight: '600',
     marginBottom: spacing.xs,
+    lineHeight: 22,
+  },
+  approvedAction: {
+    color: colors.text2,
   },
   moveStats: {
     flexDirection: 'row',
@@ -270,100 +370,139 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   moveImpact: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
+    fontFamily: fonts.semibold,
+    fontSize: 13,
     color: colors.accent,
   },
   effortBadge: {
-    borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 10,
     paddingVertical: 2,
     paddingHorizontal: 8,
   },
   effortText: {
+    fontSize: 11,
+    fontFamily: fonts.medium,
+  },
+  expandIcon: {
     fontSize: 10,
-    fontFamily: fonts.mono,
-  },
-  doneText: {
     color: colors.muted,
-    textDecorationLine: 'line-through',
-  },
-  checkButton: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: colors.muted,
-    justifyContent: 'center',
-    alignItems: 'center',
     marginLeft: 'auto',
-  },
-  checkButtonDone: {
-    borderColor: colors.accent,
-    backgroundColor: colors.accentDim,
-  },
-  checkIcon: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    color: colors.muted,
-  },
-  checkIconDone: {
-    color: colors.accent,
   },
   expandedSection: {
     marginTop: spacing.sm,
-    paddingLeft: 24,
   },
   separator: {
     height: 1,
     backgroundColor: colors.border,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
-  strategy: {
-    fontSize: 13,
-    color: colors.text2,
-    lineHeight: 20,
-    marginBottom: spacing.sm,
+  detailBlock: {
+    marginBottom: spacing.md,
   },
-  step: {
-    fontSize: 13,
+  detailLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    letterSpacing: 0.5,
     color: colors.dim,
-    lineHeight: 20,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xs,
   },
-  effect: {
-    fontSize: 12,
+  detailText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text2,
+    lineHeight: 22,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    marginBottom: spacing.xs,
+  },
+  stepNumber: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
     color: colors.accent,
-    marginTop: spacing.sm,
-    fontStyle: 'italic',
+    width: 20,
   },
-  markDoneButton: {
-    borderWidth: 1,
-    borderColor: colors.accent,
-    paddingVertical: 10,
+  stepText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text2,
+    flex: 1,
+    lineHeight: 22,
+  },
+  effectText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.accent,
+    lineHeight: 22,
+  },
+  impactGrid: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  impactItem: {
+    flex: 1,
+    backgroundColor: colors.accentDim,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    alignItems: 'center',
+  },
+  impactValue: {
+    fontFamily: fonts.heading,
+    fontSize: 18,
+    color: colors.accent,
+  },
+  impactLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.accent,
+    marginTop: 2,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  approveBtn: {
+    flex: 1,
+    backgroundColor: colors.accent,
+    paddingVertical: 14,
     borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: spacing.md,
   },
-  markDoneText: {
-    fontFamily: fonts.mono,
-    fontSize: 13,
+  approveBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.bg,
+  },
+  modifyBtn: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  modifyBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
     color: colors.accent,
   },
-  undoButton: {
+  unapproveButton: {
+    flex: 1,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: 10,
+    paddingVertical: 14,
     borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: spacing.md,
   },
-  undoButtonText: {
-    fontFamily: fonts.mono,
-    fontSize: 13,
+  unapproveText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
     color: colors.dim,
   },
   sectionLabel: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 11,
     letterSpacing: 1.5,
     color: colors.accent,
@@ -371,6 +510,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.xl,
   },
   resourceLink: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.sky,
     paddingVertical: spacing.xs,

@@ -5,13 +5,8 @@ import {
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { ARCHETYPES } from '@/lib/archetypes';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis } from '@/lib/types';
-
-function effortColor(effort: string) {
-  return effort === 'low' ? colors.accent : effort === 'medium' ? colors.sky : colors.coral;
-}
 
 export default function Home() {
   const router = useRouter();
@@ -53,18 +48,25 @@ export default function Home() {
   }
 
   const topMove = analysis?.top_move;
-  const archetype = analysis ? ARCHETYPES[analysis.archetype] : null;
-  const score = analysis?.decision_score ?? 0;
-  const scoreColor = score >= 75 ? colors.accent : score >= 55 ? colors.sky : colors.coral;
-  const scoreVerdict = score >= 75 ? 'Strong' : score >= 55 ? 'Balanced' : score >= 35 ? 'Needs Attention' : 'At Risk';
+  const income = analysis?.monthly_income ?? 0;
+  const spending = analysis?.monthly_spending ?? 0;
+  const surplus = analysis?.surplus ?? 0;
+  const nonDisc = analysis?.non_discretionary ?? 0;
+  const disc = analysis?.discretionary ?? 0;
+  const totalExpense = nonDisc + disc || spending;
+  const nonDiscPct = totalExpense > 0 ? Math.round((nonDisc / totalExpense) * 100) : 0;
+  const discPct = totalExpense > 0 ? Math.round((disc / totalExpense) * 100) : 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       {/* Header */}
       <View style={styles.headerRow}>
-        <Text style={styles.greeting}>
-          {userName ? `Hey, ${userName}` : 'Welcome back'}
-        </Text>
+        <View>
+          <Text style={styles.greeting}>
+            {userName ? `${userName}` : 'Welcome'}
+          </Text>
+          <Text style={styles.greetingSub}>Here's your financial overview</Text>
+        </View>
         <TouchableOpacity
           style={styles.profileButton}
           onPress={() => router.push('/(main)/profile')}
@@ -77,99 +79,126 @@ export default function Home() {
 
       {!analysis ? (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyBrand}>{'{ B }'}</Text>
-          <Text style={styles.emptyTitle}>Discover your #1 move</Text>
+          <Text style={styles.emptyIcon}>B</Text>
+          <Text style={styles.emptyTitle}>Your #1 financial move awaits</Text>
           <Text style={styles.emptyDesc}>
-            Connect your bank to identify the most material financial move available to you right now.
+            Connect your bank account so I can analyse your transactions and identify the single most impactful action you can take right now.
           </Text>
           <TouchableOpacity
             style={styles.ctaButton}
             onPress={() => router.push('/(main)/connect')}
           >
-            <Text style={styles.ctaText}>Get started</Text>
+            <Text style={styles.ctaText}>Connect your bank</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <>
-          {/* Hero: Top Move */}
-          {topMove?.action && (
-            <>
-              <Text style={styles.sectionLabel}>YOUR #1 MOVE</Text>
-              <View style={styles.heroCard}>
-                <Text style={styles.heroAction}>{topMove.action}</Text>
-                <View style={styles.heroImpactRow}>
-                  <Text style={styles.heroImpact}>
-                    {'\u00a3'}{topMove.monthlyImpact || (topMove as any).monthlySaving}/mo
-                  </Text>
-                  <Text style={styles.heroAnnual}>
-                    {'\u00a3'}{topMove.annualImpact || ((topMove.monthlyImpact || 0) * 12)}/yr
-                  </Text>
-                  {topMove.effort && (
-                    <View style={[styles.effortBadge, { borderColor: effortColor(topMove.effort) }]}>
-                      <Text style={[styles.effortText, { color: effortColor(topMove.effort) }]}>
-                        {topMove.effort}
-                      </Text>
-                    </View>
-                  )}
+          {/* Card 1: Insight — #1 Move */}
+          <Text style={styles.sectionLabel}>YOUR #1 MOVE</Text>
+          <View style={styles.insightCard}>
+            {topMove?.action ? (
+              <>
+                <Text style={styles.insightAction}>{topMove.action}</Text>
+                <View style={styles.insightImpactRow}>
+                  <View style={styles.impactChip}>
+                    <Text style={styles.impactValue}>
+                      {'\u00a3'}{topMove.monthlyImpact || (topMove as any).monthlySaving || 0}
+                    </Text>
+                    <Text style={styles.impactLabel}>/month</Text>
+                  </View>
+                  <View style={styles.impactChip}>
+                    <Text style={styles.impactValue}>
+                      {'\u00a3'}{topMove.annualImpact || ((topMove.monthlyImpact || 0) * 12)}
+                    </Text>
+                    <Text style={styles.impactLabel}>/year</Text>
+                  </View>
                 </View>
-                <TouchableOpacity
-                  style={styles.ctaButton}
-                  onPress={() => router.push('/(main)/(tabs)/plan')}
-                >
-                  <Text style={styles.ctaText}>Start this move</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-
-          {/* Decision Score */}
-          <View style={styles.card}>
-            <View style={styles.scoreRow}>
-              <Text style={styles.scoreLabel}>Decision Score</Text>
-              <View style={styles.scoreRight}>
-                <Text style={[styles.scoreValue, { color: scoreColor }]}>{score}</Text>
-                <Text style={styles.scoreMax}>/100</Text>
-                <Text style={[styles.scoreVerdict, { color: scoreColor }]}>{scoreVerdict}</Text>
-              </View>
-            </View>
+                <View style={styles.insightButtons}>
+                  <TouchableOpacity
+                    style={styles.approveButton}
+                    onPress={() => router.push('/(main)/(tabs)/plan')}
+                  >
+                    <Text style={styles.approveText}>Approve</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.modifyButton}
+                    onPress={() => router.push('/(main)/(tabs)/plan')}
+                  >
+                    <Text style={styles.modifyText}>Modify</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <Text style={styles.noMoveText}>No actionable move identified yet. Connect more accounts for deeper analysis.</Text>
+            )}
           </View>
 
-          {/* Surplus */}
+          {/* Card 2: Income */}
+          <Text style={styles.sectionLabel}>INCOME</Text>
           <View style={styles.card}>
             <View style={styles.metricRow}>
-              <Text style={styles.metricLabel}>Monthly surplus</Text>
-              <Text style={[styles.metricValue, { color: analysis.surplus >= 0 ? colors.accent : colors.coral }]}>
-                {'\u00a3'}{analysis.surplus}
+              <Text style={styles.metricLabel}>Monthly income</Text>
+              <Text style={[styles.metricValue, { color: colors.accent }]}>
+                {'\u00a3'}{Math.round(income).toLocaleString()}
               </Text>
             </View>
+            <View style={styles.metricRow}>
+              <Text style={styles.metricLabel}>Monthly spending</Text>
+              <Text style={[styles.metricValue, { color: colors.coral }]}>
+                {'\u00a3'}{Math.round(spending).toLocaleString()}
+              </Text>
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.metricRow}>
+              <Text style={styles.metricLabel}>Surplus</Text>
+              <Text style={[styles.metricValueBig, { color: surplus >= 0 ? colors.accent : colors.coral }]}>
+                {surplus >= 0 ? '+' : ''}{'\u00a3'}{Math.round(surplus).toLocaleString()}
+              </Text>
+            </View>
+            {analysis.income_sources && analysis.income_sources.length > 0 && (
+              <View style={styles.sourcesRow}>
+                {analysis.income_sources.map((src: any, i: number) => (
+                  <View key={i} style={styles.sourceChip}>
+                    <Text style={styles.sourceText}>
+                      {typeof src === 'string' ? src : src.name || src.source || 'Income'}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </View>
 
-          {/* Archetype */}
-          {archetype && (
-            <View style={styles.card}>
-              <View style={styles.metricRow}>
-                <Text style={styles.metricLabel}>Financial type</Text>
-                <Text style={[styles.archetypeValue, { color: archetype.color }]}>
-                  {archetype.name}
+          {/* Card 3: Budget Reality — Non-negotiable vs Negotiable */}
+          <Text style={styles.sectionLabel}>BUDGET REALITY</Text>
+          <View style={styles.card}>
+            <View style={styles.budgetRow}>
+              <View style={styles.budgetItem}>
+                <Text style={styles.budgetLabel}>Non-negotiable</Text>
+                <Text style={[styles.budgetValue, { color: colors.coral }]}>
+                  {'\u00a3'}{Math.round(nonDisc).toLocaleString()}
                 </Text>
+                <Text style={styles.budgetPct}>{nonDiscPct}% of spending</Text>
+              </View>
+              <View style={styles.budgetDivider} />
+              <View style={styles.budgetItem}>
+                <Text style={styles.budgetLabel}>Negotiable</Text>
+                <Text style={[styles.budgetValue, { color: colors.sky }]}>
+                  {'\u00a3'}{Math.round(disc).toLocaleString()}
+                </Text>
+                <Text style={styles.budgetPct}>{discPct}% of spending</Text>
               </View>
             </View>
-          )}
-
-          {/* Quick Actions */}
-          <View style={styles.actions}>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => router.push('/(main)/connect')}
-            >
-              <Text style={styles.actionText}>New analysis</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => router.push('/(main)/history')}
-            >
-              <Text style={styles.actionText}>History</Text>
-            </TouchableOpacity>
+            <View style={styles.barContainer}>
+              <View style={[styles.barSegment, { flex: nonDiscPct || 1, backgroundColor: colors.coral }]} />
+              <View style={[styles.barSegment, { flex: discPct || 1, backgroundColor: colors.sky }]} />
+            </View>
+            <Text style={styles.budgetInsight}>
+              {nonDiscPct > 60
+                ? `${nonDiscPct}% of your spending is fixed. Focus on negotiable expenses for quick wins.`
+                : discPct > 50
+                  ? `${discPct}% of your spending is negotiable \u2014 significant room to optimise.`
+                  : 'Your fixed and flexible spending is relatively balanced.'}
+            </Text>
           </View>
         </>
       )}
@@ -183,7 +212,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   scroll: {
-    padding: spacing.xl,
+    padding: spacing.lg,
     paddingTop: spacing.xxl + spacing.lg,
     paddingBottom: spacing.xxl,
   },
@@ -197,46 +226,51 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xl,
   },
   greeting: {
-    fontFamily: fonts.mono,
-    fontSize: 22,
+    fontFamily: fonts.heading,
+    fontSize: 24,
     color: colors.text,
-    fontWeight: '700',
+  },
+  greetingSub: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    marginTop: 2,
   },
   profileButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
   profileInitials: {
-    fontFamily: fonts.mono,
-    fontSize: 14,
+    fontFamily: fonts.semibold,
+    fontSize: 16,
     color: colors.bg,
-    fontWeight: '700',
   },
   emptyState: {
     marginTop: spacing.xxl,
     alignItems: 'center',
   },
-  emptyBrand: {
-    fontFamily: fonts.mono,
-    fontSize: 32,
+  emptyIcon: {
+    fontFamily: fonts.heading,
+    fontSize: 40,
     color: colors.accent,
     marginBottom: spacing.lg,
   },
   emptyTitle: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 20,
     color: colors.text,
-    fontWeight: '700',
+    textAlign: 'center',
     marginBottom: spacing.sm,
   },
   emptyDesc: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     textAlign: 'center',
@@ -244,15 +278,28 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
     paddingHorizontal: spacing.md,
   },
+  ctaButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 16,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    width: '100%',
+  },
+  ctaText: {
+    fontFamily: fonts.semibold,
+    fontSize: 16,
+    color: colors.bg,
+  },
   sectionLabel: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 11,
     letterSpacing: 1.5,
     color: colors.accent,
     marginBottom: spacing.sm,
     marginTop: spacing.md,
   },
-  heroCard: {
+  insightCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.accentDim,
@@ -260,125 +307,167 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     marginBottom: spacing.md,
   },
-  heroAction: {
-    fontFamily: fonts.mono,
-    fontSize: 17,
+  insightAction: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
     color: colors.text,
-    fontWeight: '700',
-    lineHeight: 24,
-    marginBottom: spacing.sm,
-  },
-  heroImpactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+    lineHeight: 26,
     marginBottom: spacing.md,
   },
-  heroImpact: {
-    fontFamily: fonts.mono,
-    fontSize: 20,
+  insightImpactRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  impactChip: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    backgroundColor: colors.accentDim,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radius.sm,
+  },
+  impactValue: {
+    fontFamily: fonts.heading,
+    fontSize: 18,
     color: colors.accent,
-    fontWeight: '700',
   },
-  heroAnnual: {
-    fontFamily: fonts.mono,
-    fontSize: 13,
-    color: colors.dim,
+  impactLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.accent,
+    marginLeft: 2,
   },
-  effortBadge: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 2,
-    paddingHorizontal: 8,
+  insightButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
   },
-  effortText: {
-    fontSize: 10,
-    fontFamily: fonts.mono,
-  },
-  ctaButton: {
+  approveButton: {
+    flex: 1,
     backgroundColor: colors.accent,
     paddingVertical: 14,
     borderRadius: radius.md,
     alignItems: 'center',
   },
-  ctaText: {
-    fontFamily: fonts.mono,
+  approveText: {
+    fontFamily: fonts.semibold,
     fontSize: 15,
     color: colors.bg,
-    fontWeight: '700',
+  },
+  modifyButton: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  modifyText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.accent,
+  },
+  noMoveText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.dim,
+    lineHeight: 22,
   },
   card: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  scoreRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  scoreLabel: {
-    fontSize: 14,
-    color: colors.dim,
-  },
-  scoreRight: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: spacing.xs,
-  },
-  scoreValue: {
-    fontFamily: fonts.mono,
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  scoreMax: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    color: colors.muted,
-  },
-  scoreVerdict: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    marginLeft: spacing.xs,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
   },
   metricRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: spacing.xs,
   },
   metricLabel: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
   },
   metricValue: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 16,
-    fontWeight: '700',
   },
-  archetypeValue: {
-    fontFamily: fonts.mono,
-    fontSize: 14,
-    fontWeight: '700',
+  metricValueBig: {
+    fontFamily: fonts.heading,
+    fontSize: 20,
   },
-  actions: {
+  divider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.sm,
+  },
+  sourcesRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.lg,
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
   },
-  actionButton: {
+  sourceChip: {
+    backgroundColor: colors.accentDim,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+  },
+  sourceText: {
+    fontFamily: fonts.medium,
+    fontSize: 11,
+    color: colors.accent,
+  },
+  budgetRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  budgetItem: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: 12,
-    borderRadius: radius.md,
     alignItems: 'center',
   },
-  actionText: {
-    fontFamily: fonts.mono,
+  budgetDivider: {
+    width: 1,
+    height: 60,
+    backgroundColor: colors.border,
+    marginHorizontal: spacing.sm,
+  },
+  budgetLabel: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: colors.dim,
+    marginBottom: spacing.xs,
+  },
+  budgetValue: {
+    fontFamily: fonts.heading,
+    fontSize: 20,
+    marginBottom: 2,
+  },
+  budgetPct: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.muted,
+  },
+  barContainer: {
+    flexDirection: 'row',
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+    gap: 2,
+  },
+  barSegment: {
+    borderRadius: 3,
+  },
+  budgetInsight: {
+    fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.text,
+    color: colors.text2,
+    lineHeight: 20,
   },
 });

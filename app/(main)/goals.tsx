@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
   },
   progress: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 11,
     color: colors.accent,
     letterSpacing: 1.5,
@@ -176,10 +176,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   question: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.heading,
     fontSize: 18,
     color: colors.text,
-    fontWeight: '700',
     lineHeight: 26,
     marginBottom: spacing.xl,
   },
@@ -197,14 +196,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentDim,
   },
   optionText: {
+    fontFamily: fonts.regular,
     fontSize: 15,
     color: colors.text2,
   },
   optionTextSelected: {
+    fontFamily: fonts.semibold,
     color: colors.accent,
-    fontWeight: '600',
   },
   input: {
+    fontFamily: fonts.regular,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
@@ -225,9 +226,8 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   buttonText: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
-    fontWeight: '700',
   },
 });

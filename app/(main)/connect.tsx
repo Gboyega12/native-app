@@ -193,13 +193,13 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
   },
   title: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.heading,
     fontSize: 22,
     color: colors.text,
-    fontWeight: '700',
     marginBottom: spacing.sm,
   },
   subtitle: {
+    fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     lineHeight: 22,
@@ -213,10 +213,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   primaryButtonText: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.semibold,
     fontSize: 15,
     color: colors.bg,
-    fontWeight: '700',
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -238,7 +237,7 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 11,
     color: colors.accent,
-    fontFamily: fonts.mono,
+    fontFamily: fonts.medium,
   },
   divider: {
     flexDirection: 'row',
@@ -251,6 +250,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   dividerText: {
+    fontFamily: fonts.regular,
     color: colors.muted,
     fontSize: 12,
     marginHorizontal: spacing.md,
@@ -264,11 +264,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   secondaryButtonText: {
-    fontFamily: fonts.mono,
+    fontFamily: fonts.medium,
     fontSize: 15,
     color: colors.text,
   },
   hint: {
+    fontFamily: fonts.regular,
     fontSize: 12,
     color: colors.muted,
     textAlign: 'center',
