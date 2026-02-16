@@ -79,8 +79,39 @@ ALTER TABLE bank_data ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users can read own bank data"
   ON bank_data FOR SELECT USING (auth.uid() = user_id);
 
+-- Allow authenticated users to read unclaimed bank_data rows (user_id is NULL)
+-- after TrueLayer callback. The connection_id is a random string that acts as
+-- an ephemeral secret — knowing it is proof you initiated the connection.
+CREATE POLICY "Authenticated users can read unclaimed bank data"
+  ON bank_data FOR SELECT USING (user_id IS NULL AND auth.role() = 'authenticated');
+
 CREATE POLICY "Service role can insert bank data"
   ON bank_data FOR INSERT WITH CHECK (true);
 
 CREATE POLICY "Users can delete own bank data"
   ON bank_data FOR DELETE USING (auth.uid() = user_id);
+
+
+-- ============================================================
+-- Table: chat_messages
+-- Persists Bocy chat conversations. One row per user.
+-- ============================================================
+CREATE TABLE chat_messages (
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
+  messages JSONB DEFAULT '[]',
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own chat messages"
+  ON chat_messages FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can upsert own chat messages"
+  ON chat_messages FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own chat messages"
+  ON chat_messages FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own chat messages"
+  ON chat_messages FOR DELETE USING (auth.uid() = user_id);
