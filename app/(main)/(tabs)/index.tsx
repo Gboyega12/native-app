@@ -48,34 +48,39 @@ export default function Home() {
 
   const loadData = async () => {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoading(false); return; }
 
-    setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
+      setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
 
-    // Use the latest in-memory result from processing if available.
-    // This ensures the budget reality card always reflects the most recent
-    // enrichment, even if the Supabase insert failed or is still propagating.
-    const lastResult = getLastResult();
-    if (lastResult) {
-      setAnalysis(lastResult);
-      setLoading(false);
-      return;
+      // Use the latest in-memory result from processing if available.
+      // This ensures the budget reality card always reflects the most recent
+      // enrichment, even if the Supabase insert failed or is still propagating.
+      const lastResult = getLastResult();
+      if (lastResult) {
+        setAnalysis(lastResult);
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('analyses')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) {
+        console.warn('[home] Failed to fetch analysis:', error.message);
+      }
+
+      setAnalysis(data || null);
+    } catch (err: any) {
+      console.warn('[home] loadData error:', err?.message);
+      setAnalysis(null);
     }
-
-    const { data, error } = await supabase
-      .from('analyses')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (error) {
-      console.warn('[home] Failed to fetch analysis:', error.message);
-    }
-
-    setAnalysis(data);
     setLoading(false);
   };
 

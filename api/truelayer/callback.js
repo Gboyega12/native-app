@@ -6,12 +6,13 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     code = req.body?.code;
-    const state = req.body?.state;
-    connectionId = state;
+    const state = req.body?.state || '';
+    const pipeIdx = state.indexOf('|');
+    connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
   } else if (req.method === 'GET') {
     code = req.query.code;
     const state = req.query.state || '';
-    // Legacy: state may contain "connectionId|webOrigin"
+    // state format: "connectionId|webOrigin"
     const pipeIdx = state.indexOf('|');
     connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
   } else {

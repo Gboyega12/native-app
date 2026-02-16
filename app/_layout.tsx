@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View } from 'react-native';
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -72,7 +72,9 @@ export default function RootLayout() {
     if (fontsLoaded) SplashScreen.hideAsync();
   }, [fontsLoaded]);
 
-  if (!fontsLoaded) return null;
+  if (!fontsLoaded) {
+    return <View style={{ flex: 1, backgroundColor: '#050505' }} />;
+  }
 
   return (
     <AuthGate>

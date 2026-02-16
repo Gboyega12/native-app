@@ -2,23 +2,29 @@ const AUTH_URL = 'https://auth.truelayer.com';
 const CLIENT_ID = process.env.EXPO_PUBLIC_TRUELAYER_CLIENT_ID || 'bocy-9c3edc';
 const REDIRECT_URI =
   process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
-  'https://native-app-ashy.vercel.app/';
+  'https://native-app-ashy.vercel.app/api/truelayer/callback';
 const SCOPES = ['accounts', 'balance', 'transactions', 'cards'];
 const PROVIDERS = ['uk-ob-all'];
 
 /**
  * Build TrueLayer auth URL.
- * After auth, TrueLayer redirects to the app root with ?code=...&state=connectionId.
- * The app then POSTs the code to /api/truelayer/callback for token exchange.
+ * After auth, TrueLayer redirects to /api/truelayer/callback with ?code=...&state=...
+ * The server exchanges the code, fetches data, saves to Supabase, then redirects
+ * the user back to /connect?connection_id=...&status=success.
  */
 export function getTrueLayerAuthUrl(connectionId: string): string {
+  // Encode web origin in state so the server can redirect back to the app
+  const state = typeof window !== 'undefined'
+    ? `${connectionId}|${window.location.origin}`
+    : connectionId;
+
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: CLIENT_ID,
     scope: SCOPES.join(' '),
     redirect_uri: REDIRECT_URI,
     providers: PROVIDERS.join(' '),
-    state: connectionId,
+    state,
   });
   return `${AUTH_URL}/?${params.toString()}`;
 }

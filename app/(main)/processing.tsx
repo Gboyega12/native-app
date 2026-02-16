@@ -45,8 +45,8 @@ function ProcessingInner() {
 
   const runAnalysis = async () => {
     try {
-      if (!csvData) {
-        setError('No transaction data found.');
+      if (!csvData || csvData.trim().length < 10) {
+        setError('No transaction data found. Please go back and upload a bank statement.');
         return;
       }
 
@@ -57,6 +57,11 @@ function ProcessingInner() {
 
       setCurrentStep(1);
       let result = EnrichmentEngine.enrich(csvData);
+
+      if (result.enrichedTransactions.length === 0) {
+        setError('No transactions found in your data. Check the file format — it should have Date, Description, and Amount columns.');
+        return;
+      }
       await delay(400);
 
       // ── Layer 1.5: Claude AI Verification ──
@@ -127,7 +132,13 @@ function ProcessingInner() {
       await delay(400);
 
       // Fetch user goals
-      const { data: { user } } = await supabase.auth.getUser();
+      let user: any = null;
+      try {
+        const { data: { user: u } } = await supabase.auth.getUser();
+        user = u;
+      } catch (authErr: any) {
+        console.warn('[processing] getUser failed:', authErr?.message);
+      }
       let goals: Goals | null = null;
       if (user) {
         const { data } = await supabase
@@ -214,7 +225,7 @@ function ProcessingInner() {
       // ── Save to Supabase ──
       const topMove = allMoves[0] || null;
       const analysis: Analysis = {
-        user_id: user?.id,
+        user_id: user?.id ?? undefined,
         archetype: result.archetype.key,
         decision_score: result.decisionScore.score,
         monthly_income: Math.round(result.profile.monthly.income),
@@ -229,20 +240,31 @@ function ProcessingInner() {
         goal_context: goalTrajectory,
       };
 
-      if (user) {
-        const { error: insertError } = await supabase.from('analyses').insert({
-          ...analysis,
-          non_discretionary: analysis.non_discretionary,
-          discretionary: analysis.discretionary,
-          income_sources: analysis.income_sources,
-          top_move: analysis.top_move,
-          all_moves: analysis.all_moves,
-          behavioral_patterns: analysis.behavioral_patterns,
-          goal_context: analysis.goal_context,
-        });
-        if (insertError) {
-          console.warn('[processing] Supabase insert failed:', insertError.message);
+      if (user?.id) {
+        try {
+          const { error: insertError } = await supabase.from('analyses').insert({
+            user_id: user.id,
+            archetype: analysis.archetype,
+            decision_score: analysis.decision_score,
+            monthly_income: analysis.monthly_income,
+            monthly_spending: analysis.monthly_spending,
+            surplus: analysis.surplus,
+            non_discretionary: analysis.non_discretionary,
+            discretionary: analysis.discretionary,
+            income_sources: analysis.income_sources,
+            top_move: analysis.top_move,
+            all_moves: analysis.all_moves,
+            behavioral_patterns: analysis.behavioral_patterns,
+            goal_context: analysis.goal_context,
+          });
+          if (insertError) {
+            console.warn('[processing] Supabase insert failed:', insertError.message);
+          }
+        } catch (dbErr: any) {
+          console.warn('[processing] Supabase insert threw:', dbErr?.message);
         }
+      } else {
+        console.warn('[processing] No authenticated user — analysis saved in-memory only');
       }
 
       // Store for dashboard

@@ -105,7 +105,12 @@ const EnrichmentEngine = {
     const hasAmountCol = amountIdx >= 0 || (debitIdx >= 0 && creditIdx >= 0);
 
     if (!hasDateCol && !hasDescCol && !hasAmountCol) {
+      console.warn('[enrichment] CSV header not recognised. Columns found:', cols.join(', '));
+      console.warn('[enrichment] Expected columns containing: date, description/narrative/memo, amount/debit/credit');
       return [];
+    }
+    if (!hasDateCol || !hasDescCol) {
+      console.warn(`[enrichment] Missing critical columns — date:${hasDateCol}, desc:${hasDescCol}, amount:${hasAmountCol}. Header: ${cols.join(', ')}`);
     }
 
     const transactions: RawTransaction[] = [];
