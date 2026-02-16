@@ -6,32 +6,11 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
-import type { Analysis, GoalTrajectory } from '@/lib/types';
+import type { Analysis, BudgetCategory, IncomeSource, Move } from '@/lib/types';
 
-// ── Helpers ──
-
-function getScoreVerdict(score: number): { label: string; color: string } {
-  if (score >= 80) return { label: 'Strong', color: colors.accent };
-  if (score >= 60) return { label: 'Balanced', color: colors.sky };
-  if (score >= 40) return { label: 'Needs Attention', color: '#E8C872' };
-  return { label: 'At Risk', color: colors.coral };
-}
-
-function getArchetypeDisplay(key: string): { name: string; emoji: string } {
-  const map: Record<string, { name: string; emoji: string }> = {
-    subscription_collector: { name: 'Subscription Collector', emoji: '\u{1F4E6}' },
-    convenience_seeker: { name: 'Convenience Seeker', emoji: '\u{1F695}' },
-    lifestyle_investor: { name: 'Lifestyle Investor', emoji: '\u2728' },
-    quiet_builder: { name: 'Quiet Builder', emoji: '\u{1F9F1}' },
-    edge_walker: { name: 'Edge Walker', emoji: '\u26A1' },
-    debt_juggler: { name: 'Debt Juggler', emoji: '\u{1F3AA}' },
-    impulse_surfer: { name: 'Impulse Surfer', emoji: '\u{1F3C4}' },
-    comfort_spender: { name: 'Comfort Spender', emoji: '\u2615' },
-    side_hustler: { name: 'Side Hustler', emoji: '\u{1F4BC}' },
-    balanced_realist: { name: 'Balanced Realist', emoji: '\u2696\uFE0F' },
-  };
-  return map[key] || { name: 'Balanced Realist', emoji: '\u2696\uFE0F' };
-}
+// Extended palette matching the BOCY design
+const gold = '#E8C55A';
+const goldSoft = 'rgba(232, 197, 90, 0.15)';
 
 export default function Home() {
   const router = useRouter();
@@ -73,42 +52,43 @@ export default function Home() {
   }
 
   // ── Derived data ──
-  const topMove = analysis?.top_move;
+  const moves = analysis?.all_moves ?? [];
   const income = analysis?.monthly_income ?? 0;
-  const spending = analysis?.monthly_spending ?? 0;
-  const surplus = analysis?.surplus ?? 0;
-  const score = analysis?.decision_score ?? 0;
-  const verdict = getScoreVerdict(score);
-  const archetype = analysis?.archetype ? getArchetypeDisplay(analysis.archetype) : null;
-  const patterns = analysis?.behavioral_patterns ?? [];
-  const goalCtx = analysis?.goal_context as GoalTrajectory | null;
+  const incomeSources = analysis?.income_sources ?? [];
 
-  // Budget reality
-  const nonDiscTotal = typeof analysis?.non_discretionary === 'object' && analysis.non_discretionary
-    ? (analysis.non_discretionary as any).total ?? 0 : 0;
-  const discTotal = typeof analysis?.discretionary === 'object' && analysis.discretionary
-    ? (analysis.discretionary as any).total ?? 0 : 0;
-  const totalExpense = nonDiscTotal + discTotal || spending;
-  const nonDiscPct = totalExpense > 0 ? Math.round((nonDiscTotal / totalExpense) * 100) : 0;
-  const discPct = totalExpense > 0 ? Math.round((discTotal / totalExpense) * 100) : 0;
+  const nonDisc = analysis?.non_discretionary as any;
+  const disc = analysis?.discretionary as any;
+  const nonDiscTotal = nonDisc?.total ?? 0;
+  const discTotal = disc?.total ?? 0;
+  const nonDiscItems: BudgetCategory[] = nonDisc?.items ?? [];
+  const discItems: BudgetCategory[] = disc?.items ?? [];
+  const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
+
+  // Bar segment proportions
+  const barTotal = nonDiscTotal + discTotal + leftToDecide || 1;
+  const nonDiscFlex = nonDiscTotal / barTotal;
+  const discFlex = discTotal / barTotal;
+  const leftFlex = leftToDecide / barTotal;
+
+  // Percentages of income
+  const nonDiscPct = income > 0 ? Math.round((nonDiscTotal / income) * 100) : 0;
+  const discPct = income > 0 ? Math.round((discTotal / income) * 100) : 0;
+  const leftPct = income > 0 ? Math.round((leftToDecide / income) * 100) : 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       {/* ── Header ── */}
       <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.greeting}>
-            {userName ? userName : 'Welcome'}
-          </Text>
-          <Text style={styles.greetingSub}>Here's your financial snapshot</Text>
-        </View>
+        <Text style={styles.greeting}>
+          Hello, {userName || 'there'}
+        </Text>
         <TouchableOpacity
-          style={styles.profileButton}
+          style={styles.menuButton}
           onPress={() => router.push('/(main)/profile')}
         >
-          <Text style={styles.profileInitials}>
-            {userName ? userName.charAt(0).toUpperCase() : '?'}
-          </Text>
+          <View style={styles.menuLine} />
+          <View style={[styles.menuLine, styles.menuLineShort]} />
+          <View style={styles.menuLine} />
         </TouchableOpacity>
       </View>
 
@@ -129,220 +109,203 @@ export default function Home() {
         </View>
       ) : (
         <>
-          {/* ── 1. Decision Score ── */}
-          <Text style={styles.sectionLabel}>DECISION SCORE</Text>
-          <View style={styles.scoreCard}>
-            <View style={styles.scoreHeader}>
-              <View>
-                <Text style={styles.scoreTitle}>Decision Score</Text>
-                {archetype && (
-                  <Text style={styles.archetypeLabel}>
-                    {archetype.emoji} {archetype.name}
-                  </Text>
-                )}
-              </View>
-              <Text style={styles.scoreNumber}>{score}</Text>
-            </View>
-            <View style={styles.verdictRow}>
-              <View style={[styles.verdictBadge, { backgroundColor: verdict.color + '1A' }]}>
-                <View style={[styles.verdictDot, { backgroundColor: verdict.color }]} />
-                <Text style={[styles.verdictText, { color: verdict.color }]}>
-                  {verdict.label}
-                </Text>
-              </View>
-              <Text style={styles.scoreOutOf}>/100</Text>
-            </View>
-            {/* Score gauge bar */}
-            <View style={styles.gaugeTrack}>
-              <View style={[styles.gaugeFill, { width: `${Math.min(score, 100)}%` }]} />
-              <View style={[styles.gaugeThumb, { left: `${Math.min(score, 100)}%` }]} />
-            </View>
-            <View style={styles.gaugeLabels}>
-              <Text style={styles.gaugeLabelText}>0</Text>
-              <Text style={styles.gaugeLabelText}>50</Text>
-              <Text style={styles.gaugeLabelText}>100</Text>
-            </View>
-          </View>
+          {/* ══════════════════════════════════════════════
+              CARD 1 — YOUR TOP MONEY MOVES
+              ══════════════════════════════════════════════ */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Your top money moves</Text>
+            <Text style={styles.cardSubtitle}>Ranked by impact. Start with #1.</Text>
 
-          {/* ── 2. Your #1 Move ── */}
-          <Text style={styles.sectionLabel}>YOUR #1 MOVE</Text>
-          <View style={styles.moveCard}>
-            {topMove?.action ? (
-              <>
-                <Text style={styles.moveAction}>{topMove.action}</Text>
-                {topMove.timeline && (
-                  <View style={styles.timelineRow}>
-                    <View style={styles.timelineDot} />
-                    <Text style={styles.timelineText}>{topMove.timeline}</Text>
-                  </View>
-                )}
-                <View style={styles.impactRow}>
-                  <View style={styles.impactChip}>
-                    <Text style={styles.impactValue}>
-                      {'\u00a3'}{topMove.monthlyImpact || 0}
-                    </Text>
-                    <Text style={styles.impactUnit}>/month</Text>
-                  </View>
-                  <View style={styles.impactChip}>
-                    <Text style={styles.impactValue}>
-                      {'\u00a3'}{topMove.annualImpact || ((topMove.monthlyImpact || 0) * 12)}
-                    </Text>
-                    <Text style={styles.impactUnit}>/year</Text>
-                  </View>
-                  {topMove.effort && (
-                    <View style={[styles.effortChip, topMove.effort === 'low' && styles.effortLow, topMove.effort === 'high' && styles.effortHigh]}>
-                      <Text style={[styles.effortText, topMove.effort === 'low' && styles.effortTextLow, topMove.effort === 'high' && styles.effortTextHigh]}>
-                        {topMove.effort.charAt(0).toUpperCase() + topMove.effort.slice(1)} effort
-                      </Text>
+            {moves.length > 0 ? moves.slice(0, 3).map((move: Move, i: number) => (
+              <View key={i} style={styles.recCard}>
+                {/* Rank / effort / impact header */}
+                <View style={styles.recHeader}>
+                  <View style={styles.recMeta}>
+                    <View style={styles.rankBadge}>
+                      <Text style={styles.rankText}>#{i + 1}</Text>
                     </View>
-                  )}
+                    {move.effort && (
+                      <Text style={styles.effortLabel}>
+                        {move.effort} effort
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={styles.recImpact}>
+                    +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
+                  </Text>
                 </View>
-                <View style={styles.moveButtons}>
+
+                {/* Title + description */}
+                <Text style={styles.recTitle}>{move.action}</Text>
+                <Text style={styles.recDesc}>{move.strategy}</Text>
+
+                {/* Approve / Modify */}
+                <View style={styles.actionRow}>
                   <TouchableOpacity
-                    style={styles.approveButton}
+                    style={styles.approveBtn}
                     onPress={() => router.push('/(main)/(tabs)/plan')}
                   >
-                    <Text style={styles.approveText}>Approve</Text>
+                    <Text style={styles.approveBtnText}>Approve</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={styles.modifyButton}
+                    style={styles.modifyBtn}
                     onPress={() => router.push('/(main)/(tabs)/plan')}
                   >
-                    <Text style={styles.modifyText}>Modify</Text>
+                    <Text style={styles.modifyBtnText}>Modify</Text>
                   </TouchableOpacity>
                 </View>
-              </>
-            ) : (
+              </View>
+            )) : (
               <Text style={styles.noDataText}>
-                No actionable move identified yet. Connect more accounts for deeper analysis.
+                No actionable moves yet. Upload a statement to get started.
               </Text>
             )}
           </View>
 
-          {/* ── 3. Money Flow ── */}
-          <Text style={styles.sectionLabel}>MONEY FLOW</Text>
+          {/* ══════════════════════════════════════════════
+              CARD 2 — YOUR INCOME
+              ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <View style={styles.flowRow}>
-              <Text style={styles.flowLabel}>Monthly income</Text>
-              <Text style={[styles.flowValue, { color: colors.accent }]}>
+            <Text style={styles.cardTitle}>Your income</Text>
+
+            {/* Big centered number */}
+            <View style={styles.bigNumberWrap}>
+              <Text style={styles.bigNumber}>
                 {'\u00a3'}{Math.round(income).toLocaleString()}
               </Text>
+              <Text style={styles.bigNumberLabel}>total monthly income</Text>
             </View>
-            <View style={styles.flowRow}>
-              <Text style={styles.flowLabel}>Monthly spending</Text>
-              <Text style={[styles.flowValue, { color: colors.coral }]}>
-                {'\u00a3'}{Math.round(spending).toLocaleString()}
-              </Text>
-            </View>
+
             <View style={styles.divider} />
-            <View style={styles.flowRow}>
-              <Text style={styles.flowLabel}>Surplus</Text>
-              <Text style={[styles.surplusValue, { color: surplus >= 0 ? colors.accent : colors.coral }]}>
-                {surplus >= 0 ? '+' : ''}{'\u00a3'}{Math.round(surplus).toLocaleString()}
-              </Text>
+
+            {/* Income sources */}
+            {incomeSources.map((src: IncomeSource, i: number) => (
+              <View key={i} style={styles.sourceCard}>
+                <View style={styles.sourceRow}>
+                  <View style={styles.sourceInfo}>
+                    <Text style={styles.sourceName}>{src.source}</Text>
+                    <View style={styles.sourceTagRow}>
+                      <Text style={styles.sourceFreq}>
+                        {src.frequency.charAt(0).toUpperCase() + src.frequency.slice(1)}
+                      </Text>
+                      {src.isSalary && (
+                        <View style={styles.primaryTag}>
+                          <Text style={styles.primaryTagText}>PRIMARY</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  <View style={styles.sourceAmountWrap}>
+                    <Text style={styles.sourceAmount}>
+                      {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
+                    </Text>
+                    <Text style={styles.sourceAmountPer}>
+                      per {src.frequency === 'weekly' ? 'week' : 'month'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+
+            {incomeSources.length === 0 && (
+              <Text style={styles.noDataText}>No income sources detected.</Text>
+            )}
+          </View>
+
+          {/* ══════════════════════════════════════════════
+              CARD 3 — YOUR BUDGET REALITY
+              ══════════════════════════════════════════════ */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Your budget reality</Text>
+
+            {/* 3-segment stacked bar */}
+            <View style={styles.budgetBar}>
+              {nonDiscFlex > 0 && (
+                <View style={[styles.barSeg, { flex: nonDiscFlex, backgroundColor: colors.coral }]} />
+              )}
+              {discFlex > 0 && (
+                <View style={[styles.barSeg, { flex: discFlex, backgroundColor: gold }]} />
+              )}
+              {leftFlex > 0 && (
+                <View style={[styles.barSeg, { flex: leftFlex, backgroundColor: colors.accent }]} />
+              )}
             </View>
-            {analysis.income_sources && analysis.income_sources.length > 0 && (
-              <View style={styles.chipRow}>
-                {analysis.income_sources.map((src: any, i: number) => (
-                  <View key={i} style={styles.sourceChip}>
-                    <Text style={styles.sourceChipText}>
-                      {typeof src === 'string' ? src : src.source || src.name || 'Income'}
+
+            {/* Summary row */}
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryItem}>
+                <Text style={[styles.summaryAmount, { color: colors.coral }]}>
+                  {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
+                </Text>
+                <Text style={styles.summaryLabel}>Non-negotiable</Text>
+                <Text style={styles.summaryPct}>{nonDiscPct}%</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={[styles.summaryAmount, { color: gold }]}>
+                  {'\u00a3'}{Math.round(discTotal).toLocaleString()}
+                </Text>
+                <Text style={styles.summaryLabel}>Lifestyle</Text>
+                <Text style={styles.summaryPct}>{discPct}%</Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={[styles.summaryAmount, { color: colors.accent }]}>
+                  {'\u00a3'}{Math.round(leftToDecide).toLocaleString()}
+                </Text>
+                <Text style={styles.summaryLabel}>Left to decide</Text>
+                <Text style={styles.summaryPct}>{leftPct}%</Text>
+              </View>
+            </View>
+
+            {/* Non-negotiable breakdown */}
+            {nonDiscItems.length > 0 && (
+              <>
+                <Text style={styles.breakdownHeader}>NON-NEGOTIABLE BREAKDOWN</Text>
+                {nonDiscItems.map((item: BudgetCategory, i: number) => (
+                  <View
+                    key={i}
+                    style={[styles.dataRow, i === nonDiscItems.length - 1 && styles.dataRowLast]}
+                  >
+                    <View style={styles.dataRowLeft}>
+                      <View style={[styles.bullet, { borderLeftColor: colors.coral }]} />
+                      <Text style={styles.dataLabel}>{item.category}</Text>
+                      <Text style={styles.dataCount}>({item.txs})</Text>
+                    </View>
+                    <Text style={[styles.dataValue, { color: colors.coral }]}>
+                      {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                     </Text>
                   </View>
                 ))}
-              </View>
+              </>
             )}
-          </View>
 
-          {/* ── 4. Spending Breakdown ── */}
-          <Text style={styles.sectionLabel}>SPENDING BREAKDOWN</Text>
-          <View style={styles.card}>
-            <View style={styles.breakdownColumns}>
-              <View style={styles.breakdownCol}>
-                <Text style={styles.breakdownLabel}>Non-negotiable</Text>
-                <Text style={[styles.breakdownValue, { color: colors.coral }]}>
-                  {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
+            {/* Lifestyle spending */}
+            {discItems.length > 0 && (
+              <>
+                <Text style={[styles.breakdownHeader, { marginTop: 20 }]}>
+                  LIFESTYLE SPENDING
                 </Text>
-                <Text style={styles.breakdownPct}>{nonDiscPct}% of spending</Text>
-              </View>
-              <View style={styles.breakdownDivider} />
-              <View style={styles.breakdownCol}>
-                <Text style={styles.breakdownLabel}>Negotiable</Text>
-                <Text style={[styles.breakdownValue, { color: colors.sky }]}>
-                  {'\u00a3'}{Math.round(discTotal).toLocaleString()}
-                </Text>
-                <Text style={styles.breakdownPct}>{discPct}% of spending</Text>
-              </View>
-            </View>
-            <View style={styles.barTrack}>
-              <View style={[styles.barSegment, { flex: nonDiscPct || 1, backgroundColor: colors.coral }]} />
-              <View style={[styles.barSegment, { flex: discPct || 1, backgroundColor: colors.sky }]} />
-            </View>
-            <Text style={styles.insightText}>
-              {nonDiscPct > 60
-                ? `${nonDiscPct}% of your spending is fixed. Focus on negotiable expenses for quick wins.`
-                : discPct > 50
-                  ? `${discPct}% of your spending is negotiable \u2014 significant room to optimise.`
-                  : 'Your fixed and flexible spending is relatively balanced.'}
-            </Text>
-          </View>
-
-          {/* ── 5. Behavioral Insights ── */}
-          {patterns.length > 0 && (
-            <>
-              <Text style={styles.sectionLabel}>BEHAVIORAL INSIGHTS</Text>
-              <View style={styles.card}>
-                <View style={styles.patternGrid}>
-                  {patterns.map((pattern: string, i: number) => (
-                    <View key={i} style={styles.patternChip}>
-                      <Text style={styles.patternText}>{pattern}</Text>
+                {discItems.map((item: BudgetCategory, i: number) => (
+                  <View
+                    key={i}
+                    style={[styles.dataRow, i === discItems.length - 1 && styles.dataRowLast]}
+                  >
+                    <View style={styles.dataRowLeft}>
+                      <View style={[styles.bullet, { borderLeftColor: gold }]} />
+                      <Text style={styles.dataLabel}>{item.category}</Text>
+                      <Text style={styles.dataCount}>({item.txs})</Text>
                     </View>
-                  ))}
-                </View>
-              </View>
-            </>
-          )}
-
-          {/* ── 6. Goal Tracker ── */}
-          {goalCtx && goalCtx.goalLabel && (
-            <>
-              <Text style={styles.sectionLabel}>GOAL TRACKER</Text>
-              <View style={styles.goalCard}>
-                <Text style={styles.goalLabel}>{goalCtx.goalLabel}</Text>
-                {goalCtx.targetAmount > 0 && (
-                  <Text style={styles.goalTarget}>
-                    Target: {'\u00a3'}{goalCtx.targetAmount.toLocaleString()}
-                  </Text>
-                )}
-                <View style={styles.goalTimeline}>
-                  <View style={styles.goalTimeBlock}>
-                    <Text style={styles.goalTimeNumber}>{goalCtx.currentMonths}</Text>
-                    <Text style={styles.goalTimeUnit}>months{'\n'}currently</Text>
-                  </View>
-                  <View style={styles.goalArrow}>
-                    <Text style={styles.goalArrowText}>{'\u2192'}</Text>
-                  </View>
-                  <View style={styles.goalTimeBlock}>
-                    <Text style={[styles.goalTimeNumber, { color: colors.accent }]}>
-                      {goalCtx.newMonths}
+                    <Text style={[styles.dataValue, { color: gold }]}>
+                      {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                     </Text>
-                    <Text style={styles.goalTimeUnit}>months{'\n'}with move</Text>
                   </View>
-                  <View style={styles.goalSavedBlock}>
-                    <Text style={styles.goalSavedNumber}>
-                      {goalCtx.monthsSaved}
-                    </Text>
-                    <Text style={styles.goalSavedUnit}>months{'\n'}saved</Text>
-                  </View>
-                </View>
-                {goalCtx.insight && (
-                  <Text style={styles.goalInsight}>{goalCtx.insight}</Text>
-                )}
-              </View>
-            </>
-          )}
+                ))}
+              </>
+            )}
 
-          {/* ── 7. Upload New Statement CTA ── */}
+            <Text style={styles.cardFooter}>Tap a category to view transactions</Text>
+          </View>
+
+          {/* ── Upload new statement ── */}
           <TouchableOpacity
             style={styles.uploadButton}
             onPress={() => router.push('/(main)/connect')}
@@ -363,9 +326,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   scroll: {
-    padding: spacing.lg,
-    paddingTop: spacing.xxl + spacing.lg,
-    paddingBottom: spacing.xxl + spacing.lg,
+    padding: 18,
+    paddingTop: 52,
+    paddingBottom: 40,
   },
   loadingContainer: {
     flex: 1,
@@ -379,31 +342,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: 28,
   },
   greeting: {
     fontFamily: fonts.heading,
-    fontSize: 24,
+    fontSize: 22,
     color: colors.text,
+    letterSpacing: -0.2,
   },
-  greetingSub: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.dim,
-    marginTop: 2,
+  menuButton: {
+    padding: 4,
+    gap: 5,
   },
-  profileButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
+  menuLine: {
+    width: 22,
+    height: 2,
+    backgroundColor: colors.text,
+    borderRadius: 1,
   },
-  profileInitials: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    color: colors.bg,
+  menuLineShort: {
+    width: 16,
+    backgroundColor: colors.dim,
   },
 
   // ── Empty State ──
@@ -447,221 +406,30 @@ const styles = StyleSheet.create({
     color: colors.bg,
   },
 
-  // ── Section Label ──
-  sectionLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 11,
-    letterSpacing: 1.5,
-    color: colors.accent,
-    marginBottom: spacing.sm,
-    marginTop: spacing.lg,
-  },
-
-  // ── 1. Decision Score Card ──
-  scoreCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  scoreHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.sm,
-  },
-  scoreTitle: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: colors.dim,
-  },
-  archetypeLabel: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: colors.text2,
-    marginTop: 4,
-  },
-  scoreNumber: {
-    fontFamily: fonts.heading,
-    fontSize: 42,
-    color: colors.text,
-    lineHeight: 48,
-  },
-  verdictRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  verdictBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 5,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    gap: 6,
-  },
-  verdictDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-  },
-  verdictText: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-  },
-  scoreOutOf: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.muted,
-  },
-  gaugeTrack: {
-    height: 6,
-    backgroundColor: colors.muted,
-    borderRadius: 3,
-    marginBottom: spacing.xs,
-    position: 'relative',
-  },
-  gaugeFill: {
-    height: 6,
-    backgroundColor: colors.accent,
-    borderRadius: 3,
-  },
-  gaugeThumb: {
-    position: 'absolute',
-    top: -4,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: colors.accent,
-    marginLeft: -7,
-    borderWidth: 2,
-    borderColor: colors.bg,
-  },
-  gaugeLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 2,
-  },
-  gaugeLabelText: {
-    fontFamily: fonts.regular,
-    fontSize: 10,
-    color: colors.muted,
-  },
-
-  // ── 2. #1 Move Card ──
-  moveCard: {
-    backgroundColor: colors.surface,
+  // ── Shared Card ──
+  card: {
+    backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.accentDim,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.accent,
+    borderRadius: 14,
+    padding: 22,
+    paddingTop: 24,
+    marginBottom: 28,
+    overflow: 'hidden',
   },
-  moveAction: {
-    fontFamily: fonts.semibold,
-    fontSize: 17,
-    color: colors.text,
-    lineHeight: 25,
-    marginBottom: spacing.sm,
-  },
-  timelineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-    gap: 8,
-  },
-  timelineDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.accent,
-  },
-  timelineText: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: colors.accent,
-  },
-  impactRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  impactChip: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    backgroundColor: colors.accentDim,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: radius.sm,
-  },
-  impactValue: {
+  cardTitle: {
     fontFamily: fonts.heading,
-    fontSize: 17,
-    color: colors.accent,
+    fontSize: 22,
+    color: colors.text,
+    letterSpacing: -0.2,
+    marginBottom: 4,
   },
-  impactUnit: {
+  cardSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 11,
-    color: colors.accent,
-    marginLeft: 2,
-  },
-  effortChip: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: radius.sm,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  effortLow: {
-    backgroundColor: colors.accentDim,
-  },
-  effortHigh: {
-    backgroundColor: colors.coralDim,
-  },
-  effortText: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
+    fontSize: 14,
     color: colors.dim,
-  },
-  effortTextLow: {
-    color: colors.accent,
-  },
-  effortTextHigh: {
-    color: colors.coral,
-  },
-  moveButtons: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  approveButton: {
-    flex: 1,
-    backgroundColor: colors.accent,
-    paddingVertical: 14,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  approveText: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.bg,
-  },
-  modifyButton: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: colors.accent,
-    paddingVertical: 14,
-    borderRadius: radius.md,
-    alignItems: 'center',
-  },
-  modifyText: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.accent,
+    lineHeight: 21,
+    marginBottom: 20,
   },
   noDataText: {
     fontFamily: fonts.regular,
@@ -670,214 +438,285 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
-  // ── 3. Money Flow ──
-  card: {
-    backgroundColor: colors.surface,
+  // ── Card 1: Recommendations ──
+  recCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
+    borderColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 16,
+    paddingTop: 18,
+    marginBottom: 10,
   },
-  flowRow: {
+  recHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 6,
+    marginBottom: 10,
   },
-  flowLabel: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
+  recMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  rankBadge: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  rankText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    fontWeight: '700',
     color: colors.dim,
   },
-  flowValue: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
+  effortLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: gold,
+    fontWeight: '500',
+  },
+  recImpact: {
+    fontFamily: fonts.mono,
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.accent,
+  },
+  recTitle: {
+    fontFamily: fonts.heading,
+    fontSize: 17,
+    color: colors.text,
+    lineHeight: 23,
+    marginBottom: 6,
+  },
+  recDesc: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    lineHeight: 19.5,
+    marginBottom: 4,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  approveBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(122,239,199,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(122,239,199,0.3)',
+    alignItems: 'center',
+  },
+  approveBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.accent,
+    letterSpacing: 0.3,
+  },
+  modifyBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+  },
+  modifyBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.dim,
+    letterSpacing: 0.3,
+  },
+
+  // ── Card 2: Income ──
+  bigNumberWrap: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingBottom: 24,
+  },
+  bigNumber: {
+    fontFamily: fonts.mono,
+    fontSize: 48,
+    fontWeight: '800',
+    color: colors.accent,
+    letterSpacing: -1,
+  },
+  bigNumberLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+    marginTop: 4,
   },
   divider: {
     height: 1,
-    backgroundColor: colors.border,
-    marginVertical: spacing.sm,
-  },
-  surplusValue: {
-    fontFamily: fonts.heading,
-    fontSize: 20,
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-    marginTop: spacing.md,
-  },
-  sourceChip: {
-    backgroundColor: colors.accentDim,
-    paddingVertical: 4,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-  },
-  sourceChipText: {
-    fontFamily: fonts.medium,
-    fontSize: 11,
-    color: colors.accent,
-  },
-
-  // ── 4. Spending Breakdown ──
-  breakdownColumns: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  breakdownCol: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  breakdownDivider: {
-    width: 1,
-    height: 60,
-    backgroundColor: colors.border,
-    marginHorizontal: spacing.sm,
-  },
-  breakdownLabel: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: colors.dim,
-    marginBottom: spacing.xs,
-  },
-  breakdownValue: {
-    fontFamily: fonts.heading,
-    fontSize: 20,
-    marginBottom: 2,
-  },
-  breakdownPct: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: colors.muted,
-  },
-  barTrack: {
-    flexDirection: 'row',
-    height: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-    gap: 2,
-  },
-  barSegment: {
-    borderRadius: 3,
-  },
-  insightText: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.text2,
-    lineHeight: 20,
-  },
-
-  // ── 5. Behavioral Insights ──
-  patternGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  patternChip: {
     backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-  },
-  patternText: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: colors.text2,
-  },
-
-  // ── 6. Goal Tracker ──
-  goalCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-  },
-  goalLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    color: colors.text,
     marginBottom: 4,
   },
-  goalTarget: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.dim,
-    marginBottom: spacing.md,
+  sourceCard: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
   },
-  goalTimeline: {
+  sourceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  sourceInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  sourceName: {
+    fontFamily: fonts.heading,
+    fontSize: 16,
+    color: colors.text,
+    lineHeight: 21,
+    marginBottom: 8,
+  },
+  sourceTagRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md,
-    gap: spacing.sm,
+    gap: 8,
   },
-  goalTimeBlock: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: radius.sm,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.sm,
-    alignItems: 'center',
+  sourceFreq: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: 'rgba(122,239,199,0.6)',
   },
-  goalTimeNumber: {
-    fontFamily: fonts.heading,
-    fontSize: 26,
-    color: colors.text,
-    lineHeight: 30,
-  },
-  goalTimeUnit: {
-    fontFamily: fonts.regular,
-    fontSize: 10,
-    color: colors.dim,
-    textAlign: 'center',
-    marginTop: 2,
-    lineHeight: 14,
-  },
-  goalArrow: {
-    paddingHorizontal: 4,
-  },
-  goalArrowText: {
-    fontFamily: fonts.medium,
-    fontSize: 18,
-    color: colors.muted,
-  },
-  goalSavedBlock: {
-    flex: 1,
+  primaryTag: {
     backgroundColor: colors.accentDim,
-    borderRadius: radius.sm,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.sm,
-    alignItems: 'center',
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 4,
   },
-  goalSavedNumber: {
-    fontFamily: fonts.heading,
-    fontSize: 26,
-    color: colors.accent,
-    lineHeight: 30,
-  },
-  goalSavedUnit: {
-    fontFamily: fonts.regular,
+  primaryTagText: {
+    fontFamily: fonts.mono,
     fontSize: 10,
+    fontWeight: '600',
     color: colors.accent,
-    textAlign: 'center',
-    marginTop: 2,
-    lineHeight: 14,
+    letterSpacing: 0.8,
   },
-  goalInsight: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.text2,
-    lineHeight: 20,
+  sourceAmountWrap: {
+    alignItems: 'flex-end',
+  },
+  sourceAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.accent,
+  },
+  sourceAmountPer: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
   },
 
-  // ── 7. Upload CTA ──
+  // ── Card 3: Budget Reality ──
+  budgetBar: {
+    flexDirection: 'row',
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 14,
+  },
+  barSeg: {
+    borderRadius: 0,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  summaryItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  summaryAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  summaryLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+    marginTop: 2,
+  },
+  summaryPct: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 1,
+  },
+  breakdownHeader: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: colors.muted,
+    marginBottom: 4,
+  },
+  dataRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  dataRowLast: {
+    borderBottomWidth: 0,
+  },
+  dataRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bullet: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderTopWidth: 5,
+    borderTopColor: 'transparent',
+    borderBottomWidth: 5,
+    borderBottomColor: 'transparent',
+    borderLeftWidth: 7,
+  },
+  dataLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: colors.dim,
+  },
+  dataCount: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.muted,
+  },
+  dataValue: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cardFooter: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.muted,
+    textAlign: 'center',
+    marginTop: 16,
+  },
+
+  // ── Upload CTA ──
   uploadButton: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,
@@ -885,7 +724,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: radius.md,
     alignItems: 'center',
-    marginTop: spacing.lg,
   },
   uploadText: {
     fontFamily: fonts.semibold,
