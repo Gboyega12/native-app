@@ -2,8 +2,9 @@ import {
   matchMerchant, isPersonTransfer,
   isLikelyIncomeCredit, matchesSalaryKeywords,
 } from './merchant-db';
+import { classifyTransaction } from './classifier';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
-import { UK_BENCHMARKS, ESSENTIAL_CATEGORIES, MOVE_THRESHOLDS, INCOME_THRESHOLDS } from './constants';
+import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS } from './constants';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -94,7 +95,6 @@ const EnrichmentEngine = {
     const hasAmountCol = amountIdx >= 0 || (debitIdx >= 0 && creditIdx >= 0);
 
     if (!hasDateCol && !hasDescCol && !hasAmountCol) {
-      // CSV headers are unrecognised — return empty rather than silently misparse
       return [];
     }
 
@@ -130,7 +130,7 @@ const EnrichmentEngine = {
   },
 
   enrichTransaction(tx: RawTransaction): EnrichedTransaction {
-    const match = matchMerchant(tx.description);
+    const merchantMatch = matchMerchant(tx.description);
     const isPerson = isPersonTransfer(tx.description);
     const isCredit = tx.amount > 0;
     const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
@@ -144,15 +144,20 @@ const EnrichmentEngine = {
     //   4. Refund → not income
     //   5. Other credit → tentative income (validated in buildProfile via regularity check)
 
-    if (match) {
-      const isIncome = match.isIncome || (isCredit && !isPerson && !isRefund && isLikelyIncomeCredit(tx.description));
+    if (merchantMatch) {
+      const isIncome = merchantMatch.isIncome || (isCredit && !isPerson && !isRefund && isLikelyIncomeCredit(tx.description));
+
+      // Use the classifier for category + essentiality
+      const classification = classifyTransaction(tx.description, merchantMatch);
+
       return {
         ...tx,
-        merchant: match.merchant,
-        category: isIncome ? match.category : (isCredit && !match.isIncome ? 'Refunds' : match.category),
-        isSubscription: match.isSubscription,
-        isBNPL: match.isBNPL,
-        isDebt: match.isDebt,
+        merchant: merchantMatch.merchant,
+        category: isIncome ? merchantMatch.category : (isCredit && !merchantMatch.isIncome ? 'Refunds' : classification.category),
+        isEssential: classification.isEssential,
+        isSubscription: merchantMatch.isSubscription,
+        isBNPL: merchantMatch.isBNPL,
+        isDebt: merchantMatch.isDebt,
         isIncome,
         isTransfer: isPerson,
         isRefund,
@@ -161,23 +166,23 @@ const EnrichmentEngine = {
       };
     }
 
-    // No merchant match — apply the decision tree
+    // No merchant match — classify via keyword fallback or default
     let isIncome = false;
     let category = 'Other';
+    let isEssential = false;
+    let confidence: EnrichedTransaction['confidence'] = 'low';
 
     if (isCredit) {
       if (isRefund) {
         category = 'Refunds';
       } else if (isPerson) {
-        // Person-to-person transfer — NOT income
         category = 'Transfers';
       } else if (isLikelyIncomeCredit(tx.description)) {
-        // Matches salary/employer/benefit keywords — income
         isIncome = true;
         category = 'Income';
+        confidence = 'high';
       } else {
-        // Unknown credit — mark as tentative income
-        // buildProfile will validate via regularity (>£500, monthly pattern)
+        // Unknown credit — tentative income, validated in buildProfile
         isIncome = true;
         category = 'Income';
       }
@@ -185,12 +190,19 @@ const EnrichmentEngine = {
       category = 'Transfers';
     } else if (isSavings) {
       category = 'Savings';
+    } else {
+      // Spending transaction with no merchant match — run keyword classifier
+      const classification = classifyTransaction(tx.description, null);
+      category = classification.category;
+      isEssential = classification.isEssential;
+      confidence = classification.confidence;
     }
 
     return {
       ...tx,
       merchant: tx.description,
       category,
+      isEssential,
       isSubscription: false,
       isBNPL: false,
       isDebt: false,
@@ -198,7 +210,7 @@ const EnrichmentEngine = {
       isTransfer: isPerson,
       isRefund,
       isSavings,
-      confidence: isIncome && isLikelyIncomeCredit(tx.description) ? 'high' : 'low',
+      confidence,
     };
   },
 
@@ -242,7 +254,6 @@ const EnrichmentEngine = {
 
   buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): FinancialProfile {
     const spending = transactions.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
-    // Income: only credits explicitly marked as income, excluding person transfers
     const income = transactions.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer);
 
     const dates = transactions.map((t) => new Date(t.date).getTime()).filter(Boolean);
@@ -257,6 +268,7 @@ const EnrichmentEngine = {
     const monthlySpending = totalSpending / months;
     const surplus = monthlyIncome - monthlySpending;
 
+    // Group spending by category for budget card display
     const catTotals: Record<string, { total: number; count: number; transactions: { date: string; merchant: string; description: string; amount: number }[] }> = {};
     for (const tx of spending) {
       const cat = tx.category || 'Other';
@@ -271,15 +283,28 @@ const EnrichmentEngine = {
       });
     }
 
+    // ── Essential vs discretionary split ──
+    // Uses per-transaction isEssential flag (description-first, category-fallback)
+    // instead of the old flat ESSENTIAL_CATEGORIES set.
     const nonDiscItems: BudgetCategory[] = [];
     const discItems: BudgetCategory[] = [];
+
     for (const [cat, d] of Object.entries(catTotals)) {
-      // Sort transactions by date descending (most recent first)
       const sortedTxs = d.transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       const item: BudgetCategory = { category: cat, monthly: d.total / months, txs: d.count, transactions: sortedTxs };
-      if (ESSENTIAL_CATEGORIES.has(cat)) nonDiscItems.push(item);
+
+      // Determine essentiality from the transactions in this category.
+      // If the majority of spend in this category is from essential transactions,
+      // the whole category goes into non-discretionary.
+      const catSpending = spending.filter((t) => (t.category || 'Other') === cat);
+      const essentialSpend = catSpending.filter((t) => t.isEssential).reduce((s, t) => s + Math.abs(t.amount), 0);
+      const totalCatSpend = catSpending.reduce((s, t) => s + Math.abs(t.amount), 0);
+      const isEssentialCategory = totalCatSpend > 0 && (essentialSpend / totalCatSpend) > 0.5;
+
+      if (isEssentialCategory) nonDiscItems.push(item);
       else discItems.push(item);
     }
+
     const nonDiscTotal = nonDiscItems.reduce((s, i) => s + i.monthly, 0);
     const discTotal = discItems.reduce((s, i) => s + i.monthly, 0);
 
@@ -305,27 +330,19 @@ const EnrichmentEngine = {
       else if (avgInt >= 5 && avgInt <= 9) frequency = 'weekly';
       return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt };
     })
-    // Filter out low-confidence unknown credits that aren't regular or substantial enough
-    // Keep: salary/employer/benefit matches, OR large regular credits
     .filter((src) => {
-      // Always keep explicitly identified sources
       if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
-      // Keep if regular (weekly/fortnightly/monthly) and meaningful amount
       if (src.frequency !== 'irregular' && src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount) return true;
-      // Keep large regular credits
       if (
         src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin &&
         src.count >= INCOME_THRESHOLDS.largeCreditMinCount &&
         src.avgInterval >= INCOME_THRESHOLDS.largeCreditIntervalMin &&
         src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax
       ) return true;
-      // Drop small/irregular unknown credits (likely refunds, cashback, etc.)
       return false;
     })
-    // Sort by total monthly amount — highest income source first (= primary)
     .sort((a, b) => b.monthly - a.monthly);
 
-    // Mark the highest-total source as primary if no salary keyword was found
     if (incomeSources.length > 0 && !incomeSources.some((s) => s.isSalary)) {
       incomeSources[0].isSalary = true;
     }
@@ -343,7 +360,7 @@ const EnrichmentEngine = {
       streamingCount: subscriptions.filter((r) =>
         ['Netflix', 'Spotify', 'Disney+', 'YouTube Premium', 'NOW TV', 'Crunchyroll', 'Audible', 'Apple Services'].includes(r.merchant)
       ).length,
-      foodDelivery: catMonthly('Food Delivery'),
+      foodDelivery: catMonthly('Delivery'),
       transport: catMonthly('Transport'),
       groceries: catMonthly('Groceries'),
       shopping: catMonthly('Shopping'),
@@ -499,10 +516,10 @@ const EnrichmentEngine = {
       });
     }
 
-    // Food delivery — attach delivery merchant names
+    // Food delivery
     if (m.foodDelivery > T.foodDeliveryMin) {
       const saving = Math.round(m.foodDelivery * T.foodDeliveryCutPct);
-      const deliveryMerchants = this._getMerchantsByCategory(txs, 'Food Delivery');
+      const deliveryMerchants = this._getMerchantsByCategory(txs, 'Delivery');
       moves.push({
         action: `Cut delivery spend from \u00a3${Math.round(m.foodDelivery)} to \u00a3${Math.round(m.foodDelivery - saving)}/month`,
         annualImpact: saving * 12,
@@ -603,7 +620,7 @@ const EnrichmentEngine = {
       });
     }
 
-    // Emergency buffer — this is a BUFFER move, not spending
+    // Emergency buffer
     if (m.savingsRate < T.bufferSavingsRateThreshold && p.surplus > 0) {
       const autoSave = Math.round(p.surplus * T.bufferAutoSavePct);
       const bufferTarget = Math.max(T.bufferMinTarget, Math.round(p.spending));
@@ -621,7 +638,7 @@ const EnrichmentEngine = {
       });
     }
 
-    // High savers — SAVINGS/INVEST move
+    // High savers
     if (m.savingsRate >= T.highSaverThreshold) {
       const surplusAnnual = Math.round(p.surplus * 12);
       const interestGain = Math.round(surplusAnnual * T.highSaverInterestRate);
@@ -658,7 +675,6 @@ const EnrichmentEngine = {
     // Break-even move if in deficit
     if (p.surplus < 0) {
       const deficit = Math.abs(Math.round(p.surplus));
-      // Find the biggest discretionary categories to cut
       const topDiscItems = profile.budgetReality?.discretionary?.items || [];
       const topCuts = topDiscItems.slice(0, 3).map((i) => i.category);
       moves.push({
@@ -678,7 +694,6 @@ const EnrichmentEngine = {
     return moves;
   },
 
-  // Helper: get unique merchant names by category from enriched transactions
   _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {
     const counts: Record<string, number> = {};
     for (const t of txs) {

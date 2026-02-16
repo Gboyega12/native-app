@@ -2,6 +2,7 @@ interface MerchantEntry {
   patterns: string[];
   merchant: string;
   category: string;
+  isEssential?: boolean;
   isSubscription?: boolean;
   isBNPL?: boolean;
   isDebt?: boolean;
@@ -11,6 +12,7 @@ interface MerchantEntry {
 export interface MerchantMatch {
   merchant: string;
   category: string;
+  isEssential: boolean;
   isSubscription: boolean;
   isBNPL: boolean;
   isDebt: boolean;
@@ -18,32 +20,32 @@ export interface MerchantMatch {
 }
 
 const MERCHANTS: MerchantEntry[] = [
-  // Supermarkets & Groceries
-  { patterns: ['tesco', 'tesco stores'], merchant: 'Tesco', category: 'Groceries' },
-  { patterns: ['sainsbury', 'sainsburys', "sainsbury's"], merchant: "Sainsbury's", category: 'Groceries' },
-  { patterns: ['asda', 'asda stores'], merchant: 'Asda', category: 'Groceries' },
-  { patterns: ['morrisons', 'wm morrisons'], merchant: 'Morrisons', category: 'Groceries' },
-  { patterns: ['aldi'], merchant: 'Aldi', category: 'Groceries' },
-  { patterns: ['lidl'], merchant: 'Lidl', category: 'Groceries' },
-  { patterns: ['waitrose'], merchant: 'Waitrose', category: 'Groceries' },
-  { patterns: ['co-op', 'coop', 'co op'], merchant: 'Co-op', category: 'Groceries' },
-  { patterns: ['marks and spencer', 'm&s', 'marks & spencer'], merchant: 'M&S', category: 'Groceries' },
-  { patterns: ['iceland'], merchant: 'Iceland', category: 'Groceries' },
-  { patterns: ['ocado'], merchant: 'Ocado', category: 'Groceries' },
+  // ── Groceries (essential) ──
+  { patterns: ['tesco', 'tesco stores'], merchant: 'Tesco', category: 'Groceries', isEssential: true },
+  { patterns: ['sainsbury', 'sainsburys', "sainsbury's"], merchant: "Sainsbury's", category: 'Groceries', isEssential: true },
+  { patterns: ['asda', 'asda stores'], merchant: 'Asda', category: 'Groceries', isEssential: true },
+  { patterns: ['morrisons', 'wm morrisons'], merchant: 'Morrisons', category: 'Groceries', isEssential: true },
+  { patterns: ['aldi'], merchant: 'Aldi', category: 'Groceries', isEssential: true },
+  { patterns: ['lidl'], merchant: 'Lidl', category: 'Groceries', isEssential: true },
+  { patterns: ['waitrose'], merchant: 'Waitrose', category: 'Groceries', isEssential: true },
+  { patterns: ['co-op', 'coop', 'co op'], merchant: 'Co-op', category: 'Groceries', isEssential: true },
+  { patterns: ['marks and spencer', 'm&s', 'marks & spencer'], merchant: 'M&S', category: 'Groceries', isEssential: true },
+  { patterns: ['iceland'], merchant: 'Iceland', category: 'Groceries', isEssential: true },
+  { patterns: ['ocado'], merchant: 'Ocado', category: 'Groceries', isEssential: true },
 
-  // Food Delivery
-  { patterns: ['deliveroo'], merchant: 'Deliveroo', category: 'Food Delivery' },
-  { patterns: ['uber eats', 'ubereats'], merchant: 'Uber Eats', category: 'Food Delivery' },
-  { patterns: ['just eat', 'justeat'], merchant: 'Just Eat', category: 'Food Delivery' },
+  // ── Delivery (discretionary) ──
+  { patterns: ['deliveroo'], merchant: 'Deliveroo', category: 'Delivery' },
+  { patterns: ['uber eats', 'ubereats'], merchant: 'Uber Eats', category: 'Delivery' },
+  { patterns: ['just eat', 'justeat'], merchant: 'Just Eat', category: 'Delivery' },
 
-  // Coffee & Cafes
+  // ── Coffee & Cafes (discretionary) ──
   { patterns: ['starbucks'], merchant: 'Starbucks', category: 'Coffee & Cafes' },
   { patterns: ['costa coffee', 'costa'], merchant: 'Costa Coffee', category: 'Coffee & Cafes' },
   { patterns: ['pret', 'pret a manger'], merchant: 'Pret A Manger', category: 'Coffee & Cafes' },
   { patterns: ['greggs'], merchant: 'Greggs', category: 'Coffee & Cafes' },
   { patterns: ['caffe nero', 'nero'], merchant: 'Caffe Nero', category: 'Coffee & Cafes' },
 
-  // Eating Out
+  // ── Eating Out (discretionary) ──
   { patterns: ['mcdonald', 'mcdonalds'], merchant: "McDonald's", category: 'Eating Out' },
   { patterns: ['burger king'], merchant: 'Burger King', category: 'Eating Out' },
   { patterns: ['kfc'], merchant: 'KFC', category: 'Eating Out' },
@@ -54,29 +56,31 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['pizza hut'], merchant: 'Pizza Hut', category: 'Eating Out' },
   { patterns: ['subway'], merchant: 'Subway', category: 'Eating Out' },
 
-  // Transport
-  { patterns: ['uber', 'uber *trip', 'uber bv'], merchant: 'Uber', category: 'Transport' },
-  { patterns: ['tfl', 'transport for london', 'tfl.gov'], merchant: 'TfL', category: 'Transport' },
-  { patterns: ['trainline'], merchant: 'Trainline', category: 'Transport' },
-  { patterns: ['bolt', 'bolt.eu'], merchant: 'Bolt', category: 'Transport' },
-  { patterns: ['shell', 'shell petrol'], merchant: 'Shell', category: 'Transport' },
-  { patterns: ['bp', 'bp petrol'], merchant: 'BP', category: 'Transport' },
-  { patterns: ['esso'], merchant: 'Esso', category: 'Transport' },
+  // ── Transport (essential) ──
+  { patterns: ['uber', 'uber *trip', 'uber bv'], merchant: 'Uber', category: 'Transport', isEssential: true },
+  { patterns: ['tfl', 'transport for london', 'tfl.gov'], merchant: 'TfL', category: 'Transport', isEssential: true },
+  { patterns: ['trainline'], merchant: 'Trainline', category: 'Transport', isEssential: true },
+  { patterns: ['bolt', 'bolt.eu'], merchant: 'Bolt', category: 'Transport', isEssential: true },
+  { patterns: ['shell', 'shell petrol'], merchant: 'Shell', category: 'Transport', isEssential: true },
+  { patterns: ['bp', 'bp petrol'], merchant: 'BP', category: 'Transport', isEssential: true },
+  { patterns: ['esso'], merchant: 'Esso', category: 'Transport', isEssential: true },
 
-  // Subscriptions & Streaming
-  { patterns: ['netflix'], merchant: 'Netflix', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['spotify'], merchant: 'Spotify', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['apple.com/bill', 'apple services'], merchant: 'Apple Services', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['amazon prime', 'amzn prime'], merchant: 'Amazon Prime', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['disney plus', 'disneyplus', 'disney+'], merchant: 'Disney+', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['youtube premium', 'google youtube'], merchant: 'YouTube Premium', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['now tv', 'nowtv'], merchant: 'NOW TV', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['sky digital', 'sky uk'], merchant: 'Sky', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['crunchyroll'], merchant: 'Crunchyroll', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['audible'], merchant: 'Audible', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['gym', 'puregym', 'pure gym', 'the gym', 'david lloyd', 'virgin active', 'nuffield'], merchant: 'Gym', category: 'Subscriptions', isSubscription: true },
+  // ── Streaming (discretionary) ──
+  { patterns: ['netflix'], merchant: 'Netflix', category: 'Streaming', isSubscription: true },
+  { patterns: ['spotify'], merchant: 'Spotify', category: 'Streaming', isSubscription: true },
+  { patterns: ['apple.com/bill', 'apple services'], merchant: 'Apple Services', category: 'Streaming', isSubscription: true },
+  { patterns: ['amazon prime', 'amzn prime'], merchant: 'Amazon Prime', category: 'Streaming', isSubscription: true },
+  { patterns: ['disney plus', 'disneyplus', 'disney+'], merchant: 'Disney+', category: 'Streaming', isSubscription: true },
+  { patterns: ['youtube premium', 'google youtube'], merchant: 'YouTube Premium', category: 'Streaming', isSubscription: true },
+  { patterns: ['now tv', 'nowtv'], merchant: 'NOW TV', category: 'Streaming', isSubscription: true },
+  { patterns: ['sky digital', 'sky uk'], merchant: 'Sky', category: 'Streaming', isSubscription: true },
+  { patterns: ['crunchyroll'], merchant: 'Crunchyroll', category: 'Streaming', isSubscription: true },
+  { patterns: ['audible'], merchant: 'Audible', category: 'Streaming', isSubscription: true },
 
-  // Shopping
+  // ── Fitness (discretionary) ──
+  { patterns: ['gym', 'puregym', 'pure gym', 'the gym', 'david lloyd', 'virgin active', 'nuffield'], merchant: 'Gym', category: 'Fitness', isSubscription: true },
+
+  // ── Shopping (discretionary) ──
   { patterns: ['amazon', 'amzn', 'amzn mktp'], merchant: 'Amazon', category: 'Shopping' },
   { patterns: ['asos'], merchant: 'ASOS', category: 'Shopping' },
   { patterns: ['ebay'], merchant: 'eBay', category: 'Shopping' },
@@ -92,44 +96,79 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['boohoo'], merchant: 'Boohoo', category: 'Shopping' },
   { patterns: ['plt', 'prettylittlething'], merchant: 'PrettyLittleThing', category: 'Shopping' },
 
-  // BNPL
+  // ── BNPL (discretionary) ──
   { patterns: ['klarna'], merchant: 'Klarna', category: 'BNPL', isBNPL: true },
   { patterns: ['clearpay'], merchant: 'Clearpay', category: 'BNPL', isBNPL: true },
   { patterns: ['laybuy'], merchant: 'Laybuy', category: 'BNPL', isBNPL: true },
 
-  // Bills & Utilities
-  { patterns: ['bt group', 'bt payment', 'british telecom'], merchant: 'BT', category: 'Bills' },
-  { patterns: ['virgin media', 'virginmedia'], merchant: 'Virgin Media', category: 'Bills' },
-  { patterns: ['ee', 'ee limited'], merchant: 'EE', category: 'Bills' },
-  { patterns: ['vodafone'], merchant: 'Vodafone', category: 'Bills' },
-  { patterns: ['three', 'three.co.uk', 'hutchison 3g'], merchant: 'Three', category: 'Bills' },
-  { patterns: ['o2', 'telefonica'], merchant: 'O2', category: 'Bills' },
-  { patterns: ['council tax'], merchant: 'Council Tax', category: 'Bills' },
-  { patterns: ['british gas', 'britishgas'], merchant: 'British Gas', category: 'Bills' },
-  { patterns: ['octopus energy'], merchant: 'Octopus Energy', category: 'Bills' },
-  { patterns: ['eon', 'e.on'], merchant: 'E.ON', category: 'Bills' },
-  { patterns: ['thames water', 'united utilities', 'severn trent', 'anglian water', 'southern water'], merchant: 'Water', category: 'Bills' },
-  { patterns: ['tv licence', 'tv licensing'], merchant: 'TV Licence', category: 'Bills' },
+  // ── Broadband & Phone (essential) ──
+  { patterns: ['bt group', 'bt payment', 'british telecom'], merchant: 'BT', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['virgin media', 'virginmedia'], merchant: 'Virgin Media', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['ee', 'ee limited'], merchant: 'EE', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['vodafone'], merchant: 'Vodafone', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['three', 'three.co.uk', 'hutchison 3g'], merchant: 'Three', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['o2', 'telefonica'], merchant: 'O2', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['giffgaff'], merchant: 'giffgaff', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['tesco mobile'], merchant: 'Tesco Mobile', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['sky broadband'], merchant: 'Sky Broadband', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['plusnet'], merchant: 'Plusnet', category: 'Broadband & Phone', isEssential: true },
+  { patterns: ['talktalk'], merchant: 'TalkTalk', category: 'Broadband & Phone', isEssential: true },
 
-  // Entertainment
+  // ── Council Tax (essential) ──
+  { patterns: ['council tax'], merchant: 'Council Tax', category: 'Council Tax', isEssential: true },
+
+  // ── Energy (essential) ──
+  { patterns: ['british gas', 'britishgas'], merchant: 'British Gas', category: 'Energy', isEssential: true },
+  { patterns: ['octopus energy'], merchant: 'Octopus Energy', category: 'Energy', isEssential: true },
+  { patterns: ['eon', 'e.on'], merchant: 'E.ON', category: 'Energy', isEssential: true },
+  { patterns: ['edf energy', 'edf'], merchant: 'EDF', category: 'Energy', isEssential: true },
+  { patterns: ['ovo energy', 'ovo'], merchant: 'OVO Energy', category: 'Energy', isEssential: true },
+  { patterns: ['bulb energy', 'bulb'], merchant: 'Bulb', category: 'Energy', isEssential: true },
+  { patterns: ['scottish power', 'scottishpower'], merchant: 'Scottish Power', category: 'Energy', isEssential: true },
+
+  // ── Water (essential) ──
+  { patterns: ['thames water', 'united utilities', 'severn trent', 'anglian water', 'southern water', 'yorkshire water', 'welsh water', 'northumbrian water'], merchant: 'Water', category: 'Water', isEssential: true },
+
+  // ── TV Licence (essential) ──
+  { patterns: ['tv licence', 'tv licensing'], merchant: 'TV Licence', category: 'TV Licence', isEssential: true },
+
+  // ── Insurance (essential) ──
+  { patterns: ['aviva'], merchant: 'Aviva', category: 'Insurance', isEssential: true },
+  { patterns: ['admiral'], merchant: 'Admiral', category: 'Insurance', isEssential: true },
+  { patterns: ['direct line', 'directline'], merchant: 'Direct Line', category: 'Insurance', isEssential: true },
+  { patterns: ['hastings direct', 'hastingsdirect'], merchant: 'Hastings Direct', category: 'Insurance', isEssential: true },
+  { patterns: ['aa insurance', 'aa breakdown'], merchant: 'AA', category: 'Insurance', isEssential: true },
+  { patterns: ['rac'], merchant: 'RAC', category: 'Insurance', isEssential: true },
+  { patterns: ['churchill'], merchant: 'Churchill', category: 'Insurance', isEssential: true },
+  { patterns: ['legal & general', 'legal and general'], merchant: 'Legal & General', category: 'Insurance', isEssential: true },
+  { patterns: ['vitality'], merchant: 'Vitality', category: 'Insurance', isEssential: true },
+  { patterns: ['bupa'], merchant: 'Bupa', category: 'Insurance', isEssential: true },
+
+  // ── Rent (essential) ──
+  { patterns: ['openrent'], merchant: 'OpenRent', category: 'Rent', isEssential: true },
+  { patterns: ['goodlord'], merchant: 'Goodlord', category: 'Rent', isEssential: true },
+  { patterns: ['foxtons'], merchant: 'Foxtons', category: 'Rent', isEssential: true },
+  { patterns: ['rightmove'], merchant: 'Rightmove', category: 'Rent', isEssential: true },
+
+  // ── Entertainment (discretionary) ──
   { patterns: ['cineworld', 'odeon', 'vue cinema'], merchant: 'Cinema', category: 'Entertainment' },
   { patterns: ['ticketmaster'], merchant: 'Ticketmaster', category: 'Entertainment' },
 
-  // Health
-  { patterns: ['boots'], merchant: 'Boots', category: 'Health' },
-  { patterns: ['superdrug'], merchant: 'Superdrug', category: 'Health' },
+  // ── Health (essential) ──
+  { patterns: ['boots'], merchant: 'Boots', category: 'Health', isEssential: true },
+  { patterns: ['superdrug'], merchant: 'Superdrug', category: 'Health', isEssential: true },
 
-  // Debt / Credit
-  { patterns: ['loan', 'lending'], merchant: 'Loan Payment', category: 'Debt Payments', isDebt: true },
-  { patterns: ['credit card', 'card payment'], merchant: 'Credit Card', category: 'Debt Payments', isDebt: true },
-  { patterns: ['student loan', 'slc'], merchant: 'Student Loan', category: 'Debt Payments', isDebt: true },
+  // ── Debt / Credit (essential) ──
+  { patterns: ['loan', 'lending'], merchant: 'Loan Payment', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['credit card', 'card payment'], merchant: 'Credit Card', category: 'Debt Payments', isDebt: true, isEssential: true },
+  { patterns: ['student loan', 'slc'], merchant: 'Student Loan', category: 'Debt Payments', isDebt: true, isEssential: true },
 
-  // Income patterns
+  // ── Income (special — not spending) ──
   { patterns: ['salary', 'wages', 'payroll'], merchant: 'Salary', category: 'Income', isIncome: true },
   { patterns: ['hmrc', 'tax refund', 'tax credit'], merchant: 'HMRC', category: 'Income', isIncome: true },
   { patterns: ['dwp', 'universal credit', 'jobseekers'], merchant: 'DWP Benefits', category: 'Income', isIncome: true },
 
-  // Savings
+  // ── Savings (special — not spending) ──
   { patterns: ['vanguard'], merchant: 'Vanguard', category: 'Savings' },
   { patterns: ['trading 212', 'trading212'], merchant: 'Trading 212', category: 'Savings' },
   { patterns: ['nutmeg'], merchant: 'Nutmeg', category: 'Savings' },
@@ -153,6 +192,7 @@ export function matchMerchant(description: string): MerchantMatch | null {
         return {
           merchant: entry.merchant,
           category: entry.category,
+          isEssential: entry.isEssential || false,
           isSubscription: entry.isSubscription || false,
           isBNPL: entry.isBNPL || false,
           isDebt: entry.isDebt || false,

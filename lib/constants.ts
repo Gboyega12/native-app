@@ -4,15 +4,6 @@ export const UK_BENCHMARKS = {
   savingsRate: 11,
 };
 
-export const ESSENTIAL_CATEGORIES = new Set([
-  'Bills',
-  'Groceries',
-  'Transport',
-  'Health',
-  'Education',
-  'Debt Payments',
-]);
-
 // ── Move generation thresholds ──
 // Minimum monthly spend before a move is generated for that category.
 

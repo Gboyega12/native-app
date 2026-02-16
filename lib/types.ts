@@ -9,6 +9,7 @@ export interface RawTransaction {
 export interface EnrichedTransaction extends RawTransaction {
   merchant: string;
   category: string;
+  isEssential: boolean;
   isSubscription: boolean;
   isBNPL: boolean;
   isDebt: boolean;
