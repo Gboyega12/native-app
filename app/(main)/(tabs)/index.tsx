@@ -6,6 +6,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { getLastResult } from '@/app/(main)/processing';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move } from '@/lib/types';
 
@@ -52,13 +53,27 @@ export default function Home() {
 
     setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
 
-    const { data } = await supabase
+    // Use the latest in-memory result from processing if available.
+    // This ensures the budget reality card always reflects the most recent
+    // enrichment, even if the Supabase insert failed or is still propagating.
+    const lastResult = getLastResult();
+    if (lastResult) {
+      setAnalysis(lastResult);
+      setLoading(false);
+      return;
+    }
+
+    const { data, error } = await supabase
       .from('analyses')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
+
+    if (error) {
+      console.warn('[home] Failed to fetch analysis:', error.message);
+    }
 
     setAnalysis(data);
     setLoading(false);
