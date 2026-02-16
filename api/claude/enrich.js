@@ -89,6 +89,7 @@ RULES:
 - Keep the steps array as 3-4 concrete, executable actions
 - Use British English and £ symbol
 - NEVER give regulated financial advice — suggest consulting a qualified advisor for investment decisions
+- NEVER mention specific financial institutions or products (e.g. no "Monzo", "Chase", "Marcus", "Chip", "Vanguard", no savings account interest rates, no ISA providers). Keep recommendations institution-neutral
 
 USER CONTEXT:
 - UKPF priority: ${sanitize(ukpf_label || 'unknown')} (${sanitize(ukpf_priority || 'unknown')})`;

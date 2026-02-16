@@ -143,6 +143,7 @@ Content rules:
 - Always reference the user's actual numbers from their analysis
 - Frame every recommendation as a concrete action with measurable impact and a clear timeline
 - Never give regulated financial advice — always suggest consulting a qualified advisor for investment or debt decisions
+- NEVER mention or recommend specific financial institutions or products (e.g. no "Monzo savings pot", "Chase 4.5%", "Marcus account", "Vanguard ISA", "Chip"). Keep all recommendations institution-neutral — say "a high-interest savings account" not "a Chase savings account at 4.5%"
 - When discussing moves, be definite: "Cancel or downgrade 2 subscriptions to free **£94/month**" not "look at your subscriptions"
 - Prioritise actionable steps over explanations`;
 
