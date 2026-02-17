@@ -25,12 +25,40 @@ const CLASSIFY_BATCH_SIZE = 25; // Send to Claude in batches of 25
 let _lastResult: Analysis | null = null;
 export function getLastResult(): Analysis | null { return _lastResult; }
 
+function buildFirstInsight(identity: any, profile: any, topMove: any): string {
+  if (!identity || !profile) return '';
+  const surplus = Math.round(profile.monthly.surplus);
+  const transport = Math.round(profile.monthly.transport);
+  const topAction = topMove?.action || '';
+
+  if (identity.work_setup === 'remote' && transport < 30) {
+    return `As a remote worker, your commute costs are already minimal at \u00a3${transport}/month. Your biggest opportunity is ${topAction ? topAction.toLowerCase() : 'optimising your surplus'}.`;
+  }
+  if (identity.work_setup === 'hybrid') {
+    return `As a hybrid worker, your transport pattern is unique. We've tailored your recommendations to your split schedule — your top move: ${topAction || 'unlocking more from your surplus'}.`;
+  }
+  if (identity.household === 'single_parent') {
+    return `As a single parent, we've prioritised stability and protection in your plan. Your top move frees up \u00a3${topMove?.monthlyImpact || surplus}/month while keeping essential spending protected.`;
+  }
+  if (identity.work_setup === 'self_employed') {
+    return `As self-employed, we've built in a larger safety buffer and tax set-aside. Your \u00a3${surplus}/month surplus gives you real flexibility — let's put it to work.`;
+  }
+  if (surplus > 500) {
+    return `With \u00a3${surplus}/month in surplus, you're in a strong position. We've identified ${topAction ? `your top move: ${topAction.toLowerCase()}` : 'high-impact opportunities to grow your wealth'}.`;
+  }
+  if (surplus < 0) {
+    return `You're currently spending \u00a3${Math.abs(surplus)}/month more than income. We've identified the fastest path back to positive — starting with ${topAction || 'cutting non-essential spending'}.`;
+  }
+  return `We've mapped your complete financial picture. ${topAction ? `Your top move: ${topAction.toLowerCase()}` : 'Your personalised action plan is ready'}.`;
+}
+
 function ProcessingInner() {
   const router = useRouter();
   const { csvData } = useLocalSearchParams<{ csvData: string }>();
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState('');
   const [enrichProgress, setEnrichProgress] = useState('');
+  const [insight, setInsight] = useState('');
   const fadeAnims = useRef(STEPS.map(() => new Animated.Value(0))).current;
 
   useEffect(() => {
@@ -80,8 +108,23 @@ function ProcessingInner() {
         }
       } catch {}
 
+      // Fetch identity + debt accounts for personalised analysis
+      let identityData: any = null;
+      let debtAccountsData: any[] = [];
+      try {
+        const { data: { user: idUser } } = await supabase.auth.getUser();
+        if (idUser) {
+          const [idRes, debtRes] = await Promise.all([
+            supabase.from('user_identity').select('*').eq('user_id', idUser.id).single(),
+            supabase.from('debt_accounts').select('account_name, account_type, outstanding_balance, credit_limit').eq('user_id', idUser.id),
+          ]);
+          if (idRes.data) identityData = idRes.data;
+          if (debtRes.data) debtAccountsData = debtRes.data;
+        }
+      } catch {}
+
       setCurrentStep(1);
-      let result = EnrichmentEngine.enrich(csvData, overrides);
+      let result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
 
       if (result.enrichedTransactions.length === 0) {
         setError('No transactions found in your data. Check the file format — it should have Date, Description, and Amount columns.');
@@ -158,7 +201,7 @@ function ProcessingInner() {
           }
 
           // Rebuild profile with all improved data
-          result = EnrichmentEngine.rebuild(updated);
+          result = EnrichmentEngine.rebuild(updated, debtAccountsData, identityData);
           setEnrichProgress(`${unclassified.length} transactions verified`);
         }
       } catch (classifyErr: any) {
@@ -195,7 +238,7 @@ function ProcessingInner() {
       // ── Layer 2: Move Engine ──
       // UKPF flowchart priority + goal-aware ranking + trajectories
       setCurrentStep(5);
-      const ukpf = determineFlowchartPosition(result.profile, goals);
+      const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
       const rankedMoves = rankMoves(result.decisionStack, result.profile, goals);
       const topRanked = rankedMoves[0] || null;
       const goalTrajectory = topRanked ? topRanked.trajectory : null;
@@ -383,6 +426,13 @@ function ProcessingInner() {
         _decisionScore: result.decisionScore,
       } as any;
 
+      // Show personalised first insight before navigating
+      const firstInsight = buildFirstInsight(identityData, result.profile, topMove);
+      if (firstInsight) {
+        setInsight(firstInsight);
+        await delay(3500);
+      }
+
       router.replace('/(main)/(tabs)');
     } catch (err: any) {
       setError(err.message || 'Analysis failed. Please try again.');
@@ -394,6 +444,16 @@ function ProcessingInner() {
       <View style={styles.container}>
         <Text style={styles.errorIcon}>!</Text>
         <Text style={styles.errorText}>{error}</Text>
+      </View>
+    );
+  }
+
+  if (insight) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.insightEmoji}>{'{ B }'}</Text>
+        <Text style={styles.insightTitle}>Your plan is ready</Text>
+        <Text style={styles.insightText}>{insight}</Text>
       </View>
     );
   }
@@ -476,6 +536,28 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.accent,
     marginTop: 2,
+  },
+  insightEmoji: {
+    fontFamily: fonts.heading,
+    fontSize: 36,
+    color: colors.accent,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
+  insightTitle: {
+    fontFamily: fonts.heading,
+    fontSize: 22,
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+  insightText: {
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: colors.text2,
+    textAlign: 'center',
+    lineHeight: 24,
+    paddingHorizontal: spacing.md,
   },
   errorIcon: {
     fontFamily: fonts.medium,

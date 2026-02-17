@@ -261,3 +261,28 @@ export interface FlowchartPosition {
   label: string;
   priority: 'break_even' | 'buffer' | 'debt' | 'spending' | 'savings' | 'invest';
 }
+
+// ── User Identity (onboarding discovery) ──
+
+export type WorkSetup = 'office' | 'hybrid' | 'remote' | 'self_employed' | 'student' | 'multiple_jobs';
+export type HouseholdType = 'single' | 'couple_shared' | 'couple_separate' | 'family' | 'single_parent' | 'shared_house';
+export type HousingStatus = 'renting' | 'mortgage' | 'with_family' | 'shared_house' | 'council';
+export type FinancialExperience = 'beginner' | 'basics' | 'confident' | 'advanced';
+export type RiskAppetite = 'conservative' | 'balanced' | 'growth';
+export type Priority = 'security' | 'freedom' | 'growth' | 'experiences' | 'family';
+export type UpcomingEvent = 'moving' | 'baby' | 'wedding' | 'career_change' | 'first_home' | 'business' | 'retirement' | 'none';
+export type Dependent = 'none' | 'young_children' | 'teenagers' | 'elderly_parents' | 'pets';
+
+export interface UserIdentity {
+  user_id?: string;
+  work_setup: WorkSetup;
+  household: HouseholdType;
+  housing: HousingStatus;
+  financial_experience: FinancialExperience;
+  risk_appetite: RiskAppetite;
+  priorities: Priority[];
+  upcoming_events: UpcomingEvent[];
+  dependents: Dependent[];
+  created_at?: string;
+  updated_at?: string;
+}

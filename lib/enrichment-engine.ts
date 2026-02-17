@@ -55,7 +55,7 @@ export type TransactionOverride = {
 };
 
 const EnrichmentEngine = {
-  enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[]): EnrichmentResult {
+  enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[], identity?: any): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
     const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
     const recurring = this.detectRecurring(enriched);
@@ -63,7 +63,7 @@ const EnrichmentEngine = {
     const archetype = this.determineArchetype(profile);
     const patterns = this.detectBehavioralPatterns(profile);
     const score = this.calcDecisionScore(profile);
-    const stack = this.genDecisionStack(profile, enriched, debtAccounts);
+    const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
 
     const metrics = profile.metrics;
     const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
@@ -562,7 +562,7 @@ const EnrichmentEngine = {
     return { score, verdict, breakdown };
   },
 
-  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[], debtAccounts?: any[]): Move[] {
+  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[], debtAccounts?: any[], identity?: any): Move[] {
     const moves: Move[] = [];
     const m = profile.metrics;
     const p = profile.monthly;
@@ -571,6 +571,25 @@ const EnrichmentEngine = {
     cutoff.setMonth(cutoff.getMonth() - ANALYSIS_MONTHS);
     const txs = (enrichedTxs || []).filter((t) => new Date(t.date) >= cutoff);
     const T = MOVE_THRESHOLDS;
+
+    // ── Identity-aware modifiers ──
+    const id = identity || {};
+    const isRemote = id.work_setup === 'remote';
+    const isHybrid = id.work_setup === 'hybrid';
+    const isSelfEmployed = id.work_setup === 'self_employed';
+    const isStudent = id.work_setup === 'student';
+    const isSingleParent = id.household === 'single_parent';
+    const hasChildren = isSingleParent || id.household === 'family' || (id.dependents || []).some((d: string) => d === 'young_children' || d === 'teenagers');
+    const isRenting = id.housing === 'renting' || id.housing === 'shared_house';
+    const hasMortgage = id.housing === 'mortgage';
+    const wantsSecurity = (id.priorities || []).includes('security');
+    const wantsGrowth = (id.priorities || []).includes('growth');
+    const wantsFreedom = (id.priorities || []).includes('freedom');
+    const wantsExperiences = (id.priorities || []).includes('experiences');
+    const buyingHome = (id.upcoming_events || []).includes('first_home');
+    const havingBaby = (id.upcoming_events || []).includes('baby');
+    const changingCareer = (id.upcoming_events || []).includes('career_change');
+    const isAdvanced = id.financial_experience === 'confident' || id.financial_experience === 'advanced';
 
     // Subscriptions — attach actual merchant names
     if (m.subscriptionCount >= T.subscriptionMinCount) {
@@ -716,10 +735,14 @@ const EnrichmentEngine = {
       }
     }
 
-    // Transport
-    if (m.transport > T.transportMin) {
-      const saving = Math.round(m.transport * T.transportCutPct);
+    // Transport — adjusted for work setup
+    if (m.transport > T.transportMin && !isRemote) {
+      const cutPct = isHybrid ? T.transportCutPct * 0.5 : T.transportCutPct; // Hybrid workers already commute less
+      const saving = Math.round(m.transport * cutPct);
       const transportMerchants = this._getMerchantsByCategory(txs, 'Transport');
+      const steps = isHybrid
+        ? ['Check if 2-3 day travelcards are cheaper than pay-as-you-go', 'Batch office days to reduce trips', 'Compare cycle-to-work scheme for office days']
+        : ['Check railcard or weekly cap options', 'Go car-free one day per week', 'Compare annual vs monthly tickets'];
       moves.push({
         action: `Cut transport from \u00a3${Math.round(m.transport)} to \u00a3${Math.round(m.transport - saving)}/month`,
         annualImpact: saving * 12,
@@ -727,17 +750,25 @@ const EnrichmentEngine = {
         effort: 'medium',
         category: 'spending',
         merchants: transportMerchants,
-        strategy: `\u00a3${Math.round(m.transport)}/month on transport.`,
-        steps: ['Check railcard or weekly cap options', 'Go car-free one day per week', 'Compare annual vs monthly tickets'],
+        strategy: `\u00a3${Math.round(m.transport)}/month on transport.${isHybrid ? ' As a hybrid worker, you already commute less — but there may be cheaper options for your pattern.' : ''}`,
+        steps,
         effect: `Saves \u00a3${saving}/month.`,
       });
     }
 
-    // Emergency buffer
+    // Emergency buffer — adjusted for life situation
     if (m.savingsRate < T.bufferSavingsRateThreshold && p.surplus > 0) {
       const autoSave = Math.round(p.surplus * T.bufferAutoSavePct);
-      const bufferTarget = Math.max(T.bufferMinTarget, Math.round(p.spending));
+      const bufferMonths = isSelfEmployed ? 6 : (isSingleParent || hasChildren) ? 3 : 1;
+      const bufferTarget = Math.max(T.bufferMinTarget, Math.round(p.spending * bufferMonths));
       const monthsToTarget = autoSave > 0 ? Math.ceil(bufferTarget / autoSave) : 0;
+      const reason = isSelfEmployed
+        ? 'As self-employed, you need a larger runway for income gaps.'
+        : isSingleParent
+          ? 'As a single parent, a bigger buffer protects your family from surprises.'
+          : hasChildren
+            ? 'With children, unexpected costs come up — a solid buffer is essential.'
+            : '';
       moves.push({
         action: `Auto-save \u00a3${autoSave}/month to build \u00a3${bufferTarget} buffer in ${monthsToTarget} months`,
         annualImpact: autoSave * 12,
@@ -745,8 +776,8 @@ const EnrichmentEngine = {
         effort: 'low',
         category: 'buffer',
         merchants: [],
-        strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Monthly surplus is \u00a3${Math.round(p.surplus)}.`,
-        steps: ['Set aside this amount on payday — I\'ll track it', 'Target 1 month of expenses first, then build to 3', 'I\'ll update your progress each month'],
+        strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Monthly surplus is \u00a3${Math.round(p.surplus)}.${reason ? ' ' + reason : ''} Target: ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses.`,
+        steps: ['Set aside this amount on payday — I\'ll track it', `Target ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses (\u00a3${bufferTarget})`, 'I\'ll update your progress each month'],
         effect: `\u00a3${bufferTarget} safety net in ${monthsToTarget} months.`,
       });
     }
@@ -782,6 +813,68 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.coffeeAndCafes)}/month on coffee and caf\u00e9s.`,
         steps: ['Make coffee at home 3 mornings per week', 'Keep one treat coffee day', 'I\'ll track your weekly café spend'],
         effect: `Saves \u00a3${saving}/month.`,
+      });
+    }
+
+    // ── Identity-driven life event moves ──
+    if (buyingHome && p.surplus > 0) {
+      const depositTarget = Math.round(p.income * 12 * 3); // rough 3x annual income
+      const monthsToDeposit = p.surplus > 0 ? Math.ceil(depositTarget * 0.1 / p.surplus) : 0;
+      moves.push({
+        action: `Build a house deposit — save \u00a3${Math.round(p.surplus * 0.6)}/month toward \u00a3${Math.round(depositTarget * 0.1)}`,
+        annualImpact: Math.round(p.surplus * 0.6 * 12),
+        monthlyImpact: Math.round(p.surplus * 0.6),
+        effort: 'medium',
+        category: 'savings',
+        merchants: [],
+        strategy: `You're saving for your first home. A 10% deposit on a typical property for your income would be ~\u00a3${Math.round(depositTarget * 0.1).toLocaleString()}.`,
+        steps: ['Open a Lifetime ISA for the 25% government bonus (max \u00a34,000/year)', 'Set up automatic monthly transfers on payday', 'I\'ll track your deposit progress and project your timeline'],
+        effect: `Deposit ready in ~${monthsToDeposit} months with current surplus.`,
+      });
+    }
+
+    if (havingBaby && p.surplus > 0) {
+      const parentalRunway = Math.round(p.spending * 3);
+      moves.push({
+        action: `Build a \u00a3${parentalRunway.toLocaleString()} parental leave runway`,
+        annualImpact: Math.round(parentalRunway),
+        monthlyImpact: Math.round(parentalRunway / 12),
+        effort: 'medium',
+        category: 'buffer',
+        merchants: [],
+        strategy: 'With a baby on the way, you\'ll want 3 months of expenses saved to cover reduced income during parental leave.',
+        steps: ['Calculate your expected statutory/employer maternity/paternity pay', 'Work out the monthly shortfall vs current spending', 'Set aside the difference now while you can', 'I\'ll model the income change for you'],
+        effect: `\u00a3${parentalRunway.toLocaleString()} runway covers 3 months of expenses.`,
+      });
+    }
+
+    if (changingCareer && p.surplus > 0) {
+      const runwayTarget = Math.round(p.spending * 6);
+      moves.push({
+        action: `Build a \u00a3${runwayTarget.toLocaleString()} career change runway`,
+        annualImpact: Math.round(runwayTarget),
+        monthlyImpact: Math.round(runwayTarget / 12),
+        effort: 'high',
+        category: 'buffer',
+        merchants: [],
+        strategy: 'A career change means potential income gaps. 6 months of expenses gives you freedom to transition without financial pressure.',
+        steps: ['Calculate 6 months of essential expenses', 'Redirect surplus into a dedicated transition fund', 'Consider freelance income during the transition', 'I\'ll track your runway and flag when you\'re ready'],
+        effect: `\u00a3${runwayTarget.toLocaleString()} gives you 6 months to transition.`,
+      });
+    }
+
+    if (isSelfEmployed && p.surplus > 0) {
+      const taxSetAside = Math.round(p.income * 0.25);
+      moves.push({
+        action: `Set aside \u00a3${taxSetAside}/month for tax (25% of income)`,
+        annualImpact: taxSetAside * 12,
+        monthlyImpact: taxSetAside,
+        effort: 'low',
+        category: 'buffer',
+        merchants: [],
+        strategy: 'As self-employed, your tax isn\'t deducted automatically. Setting aside 25% prevents a January surprise.',
+        steps: ['Open a separate savings account for tax', 'Transfer 25% of every payment received', 'I\'ll track your tax reserve vs estimated liability'],
+        effect: 'No tax bill shock — always prepared for self-assessment.',
       });
     }
 
@@ -896,13 +989,13 @@ const EnrichmentEngine = {
    * transactions into proper categories — the profile, archetype, score,
    * and moves all recompute with the improved data.
    */
-  rebuild(enriched: EnrichedTransaction[], debtAccounts?: any[]): EnrichmentResult {
+  rebuild(enriched: EnrichedTransaction[], debtAccounts?: any[], identity?: any): EnrichmentResult {
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
     const patterns = this.detectBehavioralPatterns(profile);
     const score = this.calcDecisionScore(profile);
-    const stack = this.genDecisionStack(profile, enriched, debtAccounts);
+    const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
 
     const metrics = profile.metrics;
     const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
