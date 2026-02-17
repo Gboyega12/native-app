@@ -807,8 +807,8 @@ export default function Home() {
                             style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
                           >
                             <View style={styles.dataRowLeft}>
-                              <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && [styles.bulletExpanded, { borderTopColor: colors.coral }]]} />
-                              <View>
+                              <View style={[styles.catDot, { backgroundColor: colors.coral }]} />
+                              <View style={styles.catInfo}>
                                 <Text style={styles.dataLabel}>{item.category}</Text>
                                 <Text style={styles.dataMeta}>
                                   {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of essentials
@@ -819,6 +819,7 @@ export default function Home() {
                               <Text style={[styles.dataValue, { color: colors.coral }]}>
                                 {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
+                              <Text style={styles.txToggleHint}>{isExpanded ? 'hide' : 'txns'}</Text>
                             </View>
                           </TouchableOpacity>
                           {isExpanded && txs.length > 0 && (
@@ -866,8 +867,8 @@ export default function Home() {
                             style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
                           >
                             <View style={styles.dataRowLeft}>
-                              <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && [styles.bulletExpanded, { borderTopColor: gold }]]} />
-                              <View>
+                              <View style={[styles.catDot, { backgroundColor: gold }]} />
+                              <View style={styles.catInfo}>
                                 <Text style={styles.dataLabel}>{item.category}</Text>
                                 <Text style={styles.dataMeta}>
                                   {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
@@ -878,6 +879,7 @@ export default function Home() {
                               <Text style={[styles.dataValue, { color: gold }]}>
                                 {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
+                              <Text style={styles.txToggleHint}>{isExpanded ? 'hide' : 'txns'}</Text>
                             </View>
                           </TouchableOpacity>
                           {isExpanded && txs.length > 0 && (
@@ -906,11 +908,11 @@ export default function Home() {
                   </>
                 )}
 
-                <Text style={styles.cardFooter}>Tap a category to see this month's transactions</Text>
+                <Text style={styles.cardFooter}>Tap any category to expand transactions</Text>
               </>
             )}
 
-            {/* Add item button */}
+            {/* Add manual budget entry */}
             <TouchableOpacity
               style={styles.addItemButton}
               onPress={() => {
@@ -918,7 +920,7 @@ export default function Home() {
                 setShowAddItem(true);
               }}
             >
-              <Text style={styles.addItemButtonText}>+ Add item</Text>
+              <Text style={styles.addItemButtonText}>+ Add missing bill or subscription</Text>
             </TouchableOpacity>
           </View>
 
@@ -1486,16 +1488,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  bullet: {
-    width: 0,
-    height: 0,
-    backgroundColor: 'transparent',
-    borderTopWidth: 5,
-    borderTopColor: 'transparent',
-    borderBottomWidth: 5,
-    borderBottomColor: 'transparent',
-    borderLeftWidth: 7,
-    marginTop: 2,
+  catDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginTop: 6,
+  },
+  catInfo: {
+    flex: 1,
   },
   dataLabel: {
     fontFamily: fonts.mono,
@@ -1510,21 +1510,18 @@ const styles = StyleSheet.create({
   },
   dataRowRight: {
     alignItems: 'flex-end',
-    flexDirection: 'row',
-    gap: 8,
   },
   dataValue: {
     fontFamily: fonts.mono,
     fontSize: 14,
     fontWeight: '600',
   },
-  bulletExpanded: {
-    borderLeftColor: 'transparent',
-    borderTopWidth: 7,
-    borderBottomWidth: 0,
-    borderLeftWidth: 5,
-    borderRightWidth: 5,
-    borderRightColor: 'transparent',
+  txToggleHint: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.muted,
+    marginTop: 2,
+    textAlign: 'right',
   },
 
   // ── Transaction dropdown ──
