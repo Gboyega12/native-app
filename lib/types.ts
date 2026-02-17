@@ -195,7 +195,7 @@ export interface EnrichmentResult {
 // ── Chat ──
 
 export interface ChatAction {
-  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed' | 'plan_error';
+  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed' | 'plan_error' | 'budget_item_saved';
   data: {
     id?: string;
     action?: string;
@@ -206,6 +206,10 @@ export interface ChatAction {
     category?: string;
     is_essential?: boolean;
     notes?: string | null;
+    error?: string | null;
+    // budget item fields
+    description?: string;
+    monthly_amount?: number | null;
     // goal update fields
     reason?: string;
     new_situation?: string;

@@ -278,17 +278,25 @@ export default function Home() {
         }
       } catch {}
 
-      // If TrueLayer sync failed, fall back to existing CSV from bank_data
+      // If TrueLayer sync failed, fall back to existing CSV from ALL bank_data rows
       if (!csvData) {
         try {
-          const { data: bankRow } = await supabase
+          const { data: bankRows } = await supabase
             .from('bank_data')
             .select('csv_data')
             .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-          if (bankRow?.csv_data) csvData = bankRow.csv_data;
+            .order('created_at', { ascending: false });
+          if (bankRows && bankRows.length > 0) {
+            // Merge CSVs: take header from first, data lines from all
+            const allLines: string[] = ['Date,Description,Amount'];
+            for (const row of bankRows) {
+              if (!row.csv_data) continue;
+              const lines = row.csv_data.split('\n');
+              // Skip header line (first line) from each CSV
+              allLines.push(...lines.slice(1).filter((l: string) => l.trim()));
+            }
+            csvData = allLines.join('\n');
+          }
         } catch {}
       }
 
@@ -409,36 +417,36 @@ export default function Home() {
         goal_context: updatedAnalysis.goal_context,
       });
 
-      // Sync debt accounts from bank_data.card_balances
+      // Sync debt accounts from ALL bank_data.card_balances
       try {
-        const { data: bankRow } = await supabase
+        const { data: bankRows } = await supabase
           .from('bank_data')
           .select('card_balances')
           .eq('user_id', userId)
-          .not('card_balances', 'is', null)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+          .not('card_balances', 'is', null);
 
-        if (bankRow?.card_balances && Array.isArray(bankRow.card_balances)) {
+        if (bankRows && bankRows.length > 0) {
           const debtRows: any[] = [];
-          for (const card of bankRow.card_balances) {
-            const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
-              user_id: userId,
-              account_name: card.name || 'Card',
-              account_type: card.type || 'credit_card',
-              outstanding_balance: card.balance,
-              credit_limit: card.limit,
-              source: 'truelayer',
-              last_updated: new Date().toISOString(),
-            }, { onConflict: 'user_id,account_name' });
-            if (!upsertErr) {
-              debtRows.push({
+          for (const row of bankRows) {
+            if (!Array.isArray(row.card_balances)) continue;
+            for (const card of row.card_balances) {
+              const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
+                user_id: userId,
                 account_name: card.name || 'Card',
                 account_type: card.type || 'credit_card',
                 outstanding_balance: card.balance,
                 credit_limit: card.limit,
-              });
+                source: 'truelayer',
+                last_updated: new Date().toISOString(),
+              }, { onConflict: 'user_id,account_name' });
+              if (!upsertErr) {
+                debtRows.push({
+                  account_name: card.name || 'Card',
+                  account_type: card.type || 'credit_card',
+                  outstanding_balance: card.balance,
+                  credit_limit: card.limit,
+                });
+              }
             }
           }
           if (debtRows.length > 0) setDebtAccounts(debtRows);

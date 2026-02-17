@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
+  LayoutAnimation,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -11,6 +12,7 @@ export default function Profile() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [connectedBanks, setConnectedBanks] = useState<any[]>([]);
 
   useEffect(() => {
     loadUser();
@@ -21,7 +23,33 @@ export default function Profile() {
     if (user) {
       setName(user.user_metadata?.full_name || '');
       setEmail(user.email || '');
+      // Fetch connected bank accounts
+      const { data: banks } = await supabase
+        .from('bank_data')
+        .select('id, connection_id, source, created_at, updated_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true });
+      if (banks) setConnectedBanks(banks);
     }
+  };
+
+  const handleRemoveBank = (bankId: string, connectionId: string) => {
+    Alert.alert(
+      'Remove bank connection',
+      'This will remove this bank connection and its transaction data. You can reconnect it later.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase.from('bank_data').delete().eq('id', bankId);
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setConnectedBanks((prev) => prev.filter((b) => b.id !== bankId));
+          },
+        },
+      ],
+    );
   };
 
   const initials = name
@@ -88,12 +116,41 @@ export default function Profile() {
         <Text style={styles.email}>{email}</Text>
       </View>
 
-      {/* Menu Items */}
-      <MenuItem
-        icon="+"
-        label="Add Account"
+      {/* Connected Banks */}
+      <Text style={styles.sectionLabel}>CONNECTED BANKS</Text>
+      {connectedBanks.length > 0 ? (
+        connectedBanks.map((bank, i) => {
+          const connDate = new Date(bank.created_at);
+          const lastSync = bank.updated_at ? new Date(bank.updated_at) : null;
+          return (
+            <View key={bank.id} style={styles.bankRow}>
+              <View style={styles.bankInfo}>
+                <Text style={styles.bankName}>Bank account {i + 1}</Text>
+                <Text style={styles.bankMeta}>
+                  Connected {connDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {lastSync ? ` · Last synced ${lastSync.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.bankRemove}
+                onPress={() => handleRemoveBank(bank.id, bank.connection_id)}
+              >
+                <Text style={styles.bankRemoveText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })
+      ) : (
+        <Text style={styles.noBanksText}>No banks connected yet</Text>
+      )}
+      <TouchableOpacity
+        style={styles.addBankButton}
         onPress={() => router.push('/(main)/connect')}
-      />
+      >
+        <Text style={styles.addBankText}>+ Add {connectedBanks.length > 0 ? 'another' : 'a'} bank account</Text>
+      </TouchableOpacity>
+
+      {/* Menu Items */}
       <MenuItem
         icon=">"
         label="Goals"
@@ -224,6 +281,69 @@ const styles = StyleSheet.create({
   },
   dimmed: {
     color: colors.muted,
+  },
+  sectionLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    letterSpacing: 1.5,
+    color: colors.accent,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+    marginTop: spacing.md,
+  },
+  bankRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  bankInfo: {
+    flex: 1,
+  },
+  bankName: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.text,
+  },
+  bankMeta: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.dim,
+    marginTop: 2,
+  },
+  bankRemove: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  bankRemoveText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.coral,
+  },
+  noBanksText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.muted,
+    textAlign: 'center',
+    paddingVertical: spacing.md,
+  },
+  addBankButton: {
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderStyle: 'dashed' as any,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  addBankText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.accent,
   },
   securityHeader: {
     flexDirection: 'row',
