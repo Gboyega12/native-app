@@ -65,6 +65,33 @@ const TOOLS = [
     },
   },
   {
+    name: 'save_budget_item',
+    description:
+      'Add a manual budget item that doesn\'t appear in bank transactions. Use this when the user tells you about recurring expenses paid in cash, via a partner, or through accounts not connected. Examples: "My rent is £1200 paid by standing order from my partner", "I spend £200/month on childcare in cash", "Add council tax £150 to essentials".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        description: {
+          type: 'string',
+          description: 'Short description of the expense. E.g. "Rent", "Council Tax", "Childcare".',
+        },
+        category: {
+          type: 'string',
+          description: 'Budget category. One of: Rent, Mortgage, Bills, Insurance, Groceries, Transport, Dining, Shopping, Entertainment, Subscriptions, Health, Childcare, Education, Charity, Other.',
+        },
+        monthly_amount: {
+          type: 'number',
+          description: 'Monthly cost in pounds. E.g. 1200.',
+        },
+        is_essential: {
+          type: 'boolean',
+          description: 'Whether this is an essential (non-discretionary) expense.',
+        },
+      },
+      required: ['description', 'category', 'monthly_amount', 'is_essential'],
+    },
+  },
+  {
     name: 'suggest_goal_update',
     description:
       'Suggest the user update their financial goals when their situation has clearly changed. Use this when: (1) The user says their circumstances changed (got a raise, paid off debt, new expense, job loss). (2) Their financial data shows they\'ve achieved or outgrown their current goal (e.g. debt is nearly cleared but goal is still "clear debt"). (3) They explicitly ask to change their goals. Do NOT use this for minor progress updates — only for genuine goal shifts.',
@@ -354,6 +381,9 @@ async function executeTool(name, input, userId) {
   if (name === 'propose_plan') {
     return executePlan(input, userId);
   }
+  if (name === 'save_budget_item') {
+    return executeBudgetItem(input, userId);
+  }
   if (name === 'suggest_goal_update') {
     return executeGoalUpdate(input, userId);
   }
@@ -403,6 +433,57 @@ async function executeOverride(input, userId) {
         category: input.category,
         is_essential: input.is_essential,
         notes: input.notes || null,
+      },
+    },
+  };
+}
+
+async function executeBudgetItem(input, userId) {
+  if (!userId) {
+    return {
+      response: { success: false, error: 'No user session' },
+      action: null,
+    };
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    return {
+      response: { success: false, error: 'Server misconfigured' },
+      action: null,
+    };
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  const { error } = await admin.from('budget_adjustments').insert({
+    user_id: userId,
+    description: input.description,
+    category: input.category,
+    monthly_amount: input.monthly_amount,
+    is_essential: input.is_essential,
+  });
+
+  if (error) {
+    return {
+      response: { success: false, error: error.message },
+      action: null,
+    };
+  }
+
+  return {
+    response: {
+      success: true,
+      message: `Added ${input.description} (£${input.monthly_amount}/month) to your ${input.is_essential ? 'essentials' : 'lifestyle'} budget.`,
+    },
+    action: {
+      type: 'budget_item_saved',
+      data: {
+        description: input.description,
+        category: input.category,
+        monthly_amount: input.monthly_amount,
+        is_essential: input.is_essential,
       },
     },
   };
@@ -518,6 +599,7 @@ Rules:
 Tools:
 - When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction. For the match_description, use the EXACT bank description shown in the transfers list if available — partial matches work (e.g. "JOHN" will match "TFR TO JOHN SMITH"). Common cases: rent paid to partner/housemate, bill splits, debt repayments showing as transfers.
 - When you recommend a concrete financial plan, use propose_plan to create it directly. It will be added to the user's action plan automatically — no approval step needed. Be decisive.
+- When the user mentions a regular expense that doesn't appear in their bank data (rent paid via partner, cash payments, expenses from unconnected accounts), use save_budget_item to add it to their budget. This appears immediately on their budget card. Examples: "My rent is £1200", "I spend £200 on childcare", "Add council tax £150".
 - When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis and recommendations. Don't suggest this casually — only when a real shift has happened.
 - IMPORTANT: In all tool call inputs (action titles, reasons, descriptions), use PLAIN TEXT only — no markdown, no **bold**, no *italic*. Markdown is only for your chat messages.`;
 
@@ -562,6 +644,14 @@ Tools:
       prompt += `\n- "${t.description}" £${Math.abs(t.amount).toFixed(2)}`;
     }
     prompt += `\nIf the user mentions a payment that matches one of these, use save_transaction_override with the exact description above as match_description.`;
+  }
+
+  // ── Manual budget items (added by user) ──
+  if (ctx.budget_adjustments?.length) {
+    prompt += `\n\nManual budget items (already added by user — don't re-add these):`;
+    for (const a of ctx.budget_adjustments) {
+      prompt += `\n- ${a.description} (${a.category}, ${a.essential ? 'essential' : 'lifestyle'}): £${a.amount}/month`;
+    }
   }
 
   // ── Debt accounts (from TrueLayer or manual entry) ──

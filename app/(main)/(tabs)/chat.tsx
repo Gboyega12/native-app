@@ -351,6 +351,22 @@ export default function Chat() {
       }
     }
 
+    // Add existing manual budget items so Claude knows what's been added
+    try {
+      const { data: adjData } = await supabase
+        .from('budget_adjustments')
+        .select('description, category, monthly_amount, is_essential')
+        .eq('user_id', user.id);
+      if (adjData && adjData.length > 0) {
+        ctx.budget_adjustments = adjData.map((a: any) => ({
+          description: a.description,
+          category: a.category,
+          amount: a.monthly_amount,
+          essential: a.is_essential,
+        }));
+      }
+    } catch {}
+
     setContext(ctx);
 
     // ── Load persisted messages ──

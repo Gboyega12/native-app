@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, Platform, UIManager,
+  LayoutAnimation, Platform, UIManager, TextInput, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -65,6 +65,52 @@ export default function Home() {
 
   const [syncing, setSyncing] = useState(false);
 
+  // Add budget item state
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [addItemDesc, setAddItemDesc] = useState('');
+  const [addItemAmount, setAddItemAmount] = useState('');
+  const [addItemCategory, setAddItemCategory] = useState('');
+  const [addItemEssential, setAddItemEssential] = useState(true);
+  const [addItemSaving, setAddItemSaving] = useState(false);
+
+  const BUDGET_CATEGORIES = [
+    'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport',
+    'Dining', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
+    'Childcare', 'Education', 'Charity', 'Other',
+  ];
+
+  const saveAddItem = async () => {
+    const amount = parseFloat(addItemAmount);
+    if (!addItemDesc.trim() || !addItemCategory || isNaN(amount) || amount <= 0) return;
+
+    setAddItemSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      await supabase.from('budget_adjustments').insert({
+        user_id: user.id,
+        description: addItemDesc.trim(),
+        category: addItemCategory,
+        monthly_amount: amount,
+        is_essential: addItemEssential,
+      });
+
+      // Reset form and close
+      setAddItemDesc('');
+      setAddItemAmount('');
+      setAddItemCategory('');
+      setAddItemEssential(true);
+      setShowAddItem(false);
+
+      // Refresh data to show the new item
+      loadData();
+    } catch (err: any) {
+      console.warn('[home] Failed to save budget item:', err?.message);
+    }
+    setAddItemSaving(false);
+  };
+
   useFocusEffect(
     useCallback(() => {
       loadData();
@@ -118,31 +164,60 @@ export default function Home() {
   const syncInBackground = async (userId: string) => {
     try {
       setSyncing(true);
-      const res = await fetch('/api/truelayer/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId }),
-      });
-      const data = await res.json();
 
-      if (!data.success || !data.csv_data) {
-        // No TrueLayer connection, token expired, or no new data — silent fail
+      // Try TrueLayer sync for fresh data
+      let csvData: string | null = null;
+      try {
+        const res = await fetch('/api/truelayer/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId }),
+        });
+        const data = await res.json();
+        if (data.success && data.csv_data) {
+          csvData = data.csv_data;
+        }
+      } catch {}
+
+      // If TrueLayer sync failed, fall back to existing CSV from bank_data
+      if (!csvData) {
+        try {
+          const { data: bankRow } = await supabase
+            .from('bank_data')
+            .select('csv_data')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          if (bankRow?.csv_data) csvData = bankRow.csv_data;
+        } catch {}
+      }
+
+      if (!csvData) {
         setSyncing(false);
         return;
       }
 
-      // Fetch user's transaction overrides
+      // Fetch user's transaction overrides + budget adjustments
       let overrides: any[] = [];
+      let budgetAdjustments: any[] = [];
       try {
-        const { data: overrideData } = await supabase
-          .from('transaction_overrides')
-          .select('match_description, category, is_essential')
-          .eq('user_id', userId);
-        if (overrideData) overrides = overrideData;
+        const [overrideRes, adjustmentRes] = await Promise.all([
+          supabase
+            .from('transaction_overrides')
+            .select('match_description, category, is_essential')
+            .eq('user_id', userId),
+          supabase
+            .from('budget_adjustments')
+            .select('description, category, monthly_amount, is_essential')
+            .eq('user_id', userId),
+        ]);
+        if (overrideRes.data) overrides = overrideRes.data;
+        if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
       } catch {}
 
       // Re-run enrichment engine with fresh data (fast, ~1 second)
-      const result = EnrichmentEngine.enrich(data.csv_data, overrides);
+      const result = EnrichmentEngine.enrich(csvData, overrides);
       if (result.enrichedTransactions.length === 0) {
         setSyncing(false);
         return;
@@ -166,15 +241,51 @@ export default function Home() {
       const allMoves = rankedMoves;
       const topMove = allMoves[0] || null;
 
+      // Merge manual budget adjustments into the enrichment result
+      const nonDisc = { ...result.profile.budgetReality.nonDiscretionary };
+      const disc = { ...result.profile.budgetReality.discretionary };
+      nonDisc.items = [...(nonDisc.items || [])];
+      disc.items = [...(disc.items || [])];
+
+      for (const adj of budgetAdjustments) {
+        const section = adj.is_essential ? nonDisc : disc;
+        const existing = section.items.find((i: BudgetCategory) => i.category === adj.category);
+        if (existing) {
+          existing.monthly += adj.monthly_amount;
+          existing.txs += 1;
+          existing.transactions = [...(existing.transactions || []), {
+            date: new Date().toISOString().split('T')[0],
+            merchant: adj.description,
+            description: adj.description + ' (manual)',
+            amount: -Math.abs(adj.monthly_amount),
+          }];
+        } else {
+          section.items.push({
+            category: adj.category,
+            monthly: adj.monthly_amount,
+            txs: 1,
+            transactions: [{
+              date: new Date().toISOString().split('T')[0],
+              merchant: adj.description,
+              description: adj.description + ' (manual)',
+              amount: -Math.abs(adj.monthly_amount),
+            }],
+          });
+        }
+        section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+      }
+
+      const totalManualSpend = budgetAdjustments.reduce((s: number, a: any) => s + a.monthly_amount, 0);
+
       const updatedAnalysis: Analysis = {
         user_id: userId,
         archetype: result.archetype.key,
         decision_score: result.decisionScore.score,
         monthly_income: Math.round(result.profile.monthly.income),
-        monthly_spending: Math.round(result.profile.monthly.spending),
-        surplus: Math.round(result.profile.monthly.surplus),
-        non_discretionary: result.profile.budgetReality.nonDiscretionary,
-        discretionary: result.profile.budgetReality.discretionary,
+        monthly_spending: Math.round(result.profile.monthly.spending + totalManualSpend),
+        surplus: Math.round(result.profile.monthly.surplus - totalManualSpend),
+        non_discretionary: nonDisc,
+        discretionary: disc,
         income_sources: result.profile.incomeSources,
         top_move: topMove || ({} as any),
         all_moves: allMoves,
@@ -663,7 +774,106 @@ export default function Home() {
                 <Text style={styles.cardFooter}>Tap a category to see this month's transactions</Text>
               </>
             )}
+
+            {/* Add item button */}
+            <TouchableOpacity
+              style={styles.addItemButton}
+              onPress={() => {
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setShowAddItem(true);
+              }}
+            >
+              <Text style={styles.addItemButtonText}>+ Add item</Text>
+            </TouchableOpacity>
           </View>
+
+          {/* Add budget item modal */}
+          <Modal visible={showAddItem} transparent animationType="fade">
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Add budget item</Text>
+                <Text style={styles.modalSubtitle}>
+                  For expenses not in your bank data (rent via partner, cash, etc.)
+                </Text>
+
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Description (e.g. Rent)"
+                  placeholderTextColor={colors.muted}
+                  value={addItemDesc}
+                  onChangeText={setAddItemDesc}
+                />
+
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Monthly amount"
+                  placeholderTextColor={colors.muted}
+                  keyboardType="numeric"
+                  value={addItemAmount}
+                  onChangeText={setAddItemAmount}
+                />
+
+                {/* Category picker */}
+                <Text style={styles.modalLabel}>Category</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+                  {BUDGET_CATEGORIES.map((cat) => (
+                    <TouchableOpacity
+                      key={cat}
+                      style={[styles.categoryChip, addItemCategory === cat && styles.categoryChipActive]}
+                      onPress={() => setAddItemCategory(cat)}
+                    >
+                      <Text style={[styles.categoryChipText, addItemCategory === cat && styles.categoryChipTextActive]}>
+                        {cat}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {/* Essential toggle */}
+                <View style={styles.essentialRow}>
+                  <Text style={styles.modalLabel}>Type</Text>
+                  <View style={styles.toggleRow}>
+                    <TouchableOpacity
+                      style={[styles.toggleOption, addItemEssential && styles.toggleOptionActive]}
+                      onPress={() => setAddItemEssential(true)}
+                    >
+                      <Text style={[styles.toggleText, addItemEssential && styles.toggleTextActive]}>Essential</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.toggleOption, !addItemEssential && styles.toggleOptionLifestyle]}
+                      onPress={() => setAddItemEssential(false)}
+                    >
+                      <Text style={[styles.toggleText, !addItemEssential && styles.toggleTextLifestyle]}>Lifestyle</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Actions */}
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={styles.modalCancel}
+                    onPress={() => setShowAddItem(false)}
+                  >
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.modalSave,
+                      (!addItemDesc.trim() || !addItemCategory || !addItemAmount) && styles.modalSaveDisabled,
+                    ]}
+                    onPress={saveAddItem}
+                    disabled={addItemSaving || !addItemDesc.trim() || !addItemCategory || !addItemAmount}
+                  >
+                    {addItemSaving ? (
+                      <ActivityIndicator color={colors.bg} size="small" />
+                    ) : (
+                      <Text style={styles.modalSaveText}>Add</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
 
           {/* ── Upload new statement ── */}
           <TouchableOpacity
@@ -1240,5 +1450,156 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 15,
     color: colors.accent,
+  },
+
+  // ── Add item button ──
+  addItemButton: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderStyle: 'dashed' as any,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  addItemButtonText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+  },
+
+  // ── Modal ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+  },
+  modalTitle: {
+    fontFamily: fonts.heading,
+    fontSize: 20,
+    color: colors.text,
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  modalInput: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: colors.text,
+    marginBottom: 12,
+  },
+  modalLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  categoryScroll: {
+    marginBottom: 16,
+    maxHeight: 36,
+  },
+  categoryChip: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginRight: 8,
+  },
+  categoryChipActive: {
+    backgroundColor: colors.accentDim,
+  },
+  categoryChipText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.dim,
+  },
+  categoryChipTextActive: {
+    color: colors.accent,
+  },
+  essentialRow: {
+    marginBottom: 20,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toggleOption: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  toggleOptionActive: {
+    borderColor: colors.coral,
+    backgroundColor: 'rgba(232,96,99,0.1)',
+  },
+  toggleOptionLifestyle: {
+    borderColor: '#E8C55A',
+    backgroundColor: 'rgba(232,197,90,0.1)',
+  },
+  toggleText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+  },
+  toggleTextActive: {
+    color: colors.coral,
+  },
+  toggleTextLifestyle: {
+    color: '#E8C55A',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  modalCancelText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.dim,
+  },
+  modalSave: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: colors.accent,
+  },
+  modalSaveDisabled: {
+    opacity: 0.4,
+  },
+  modalSaveText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.bg,
   },
 });

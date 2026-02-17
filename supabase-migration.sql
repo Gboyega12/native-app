@@ -257,3 +257,37 @@ CREATE POLICY "Users can delete own debt accounts"
 
 CREATE POLICY "Service role can manage debt accounts"
   ON debt_accounts FOR ALL USING (true);
+
+
+-- ============================================================
+-- Table: budget_adjustments
+-- Manual budget items added by the user (e.g. rent paid via
+-- a partner, cash expenses) that don't appear in bank data.
+-- Merged into the budget reality card during analysis.
+-- ============================================================
+CREATE TABLE budget_adjustments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  description TEXT NOT NULL,
+  category TEXT NOT NULL,
+  monthly_amount NUMERIC NOT NULL,
+  is_essential BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE budget_adjustments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own budget adjustments"
+  ON budget_adjustments FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own budget adjustments"
+  ON budget_adjustments FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own budget adjustments"
+  ON budget_adjustments FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own budget adjustments"
+  ON budget_adjustments FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Service role can manage budget adjustments"
+  ON budget_adjustments FOR ALL USING (true);
