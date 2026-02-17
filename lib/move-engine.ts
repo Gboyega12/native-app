@@ -28,12 +28,19 @@ const GOAL_DEFAULTS: Record<string, number> = {
 // This sets the PRIORITY CATEGORY — what type of move matters most.
 // A user with 19% credit card debt should NOT get "cancel Netflix" as #1.
 
-export function determineFlowchartPosition(profile: any, goals: Goals | null): FlowchartPosition {
+export function determineFlowchartPosition(profile: any, goals: Goals | null, debtAccounts?: any[]): FlowchartPosition {
   const surplus = profile.monthly.surplus;
   const debtCount = profile.metrics.debtAccountCount;
   const savingsRate = profile.metrics.savingsRate;
   const debtPayments = profile.monthly.debtPayments;
   const situation = goals?.current_situation || '';
+
+  // Check if debt is "good debt" (low utilization, rewards-focused)
+  const debts = debtAccounts || [];
+  const totalLimit = debts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
+  const totalBalance = debts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+  const overallUtil = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : -1;
+  const isGoodDebt = overallUtil >= 0 && overallUtil <= 30;
 
   // Level 0: Spending more than earning — must break even first
   if (surplus < 0) {
@@ -41,7 +48,7 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null): F
   }
 
   // Level 1: Overwhelmed by debt — get support
-  if (situation === 'in_debt' && debtCount >= 3) {
+  if (situation === 'in_debt' && debtCount >= 3 && !isGoodDebt) {
     return { level: 1, label: 'Get debt support', priority: 'debt' };
   }
 
@@ -50,11 +57,9 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null): F
     return { level: 2, label: 'Build a buffer', priority: 'buffer' };
   }
 
-  // Level 3: Employer pension match — don't leave free money on the table
-  // (We can't detect this from bank data, so skip to next)
-
   // Level 4: High-interest debt (credit cards, BNPL) — pay it off
-  if (debtCount >= 1 && (situation === 'in_debt' || debtPayments > 100)) {
+  // Skip this level if user has good debt (low utilization, paying on time for rewards)
+  if (debtCount >= 1 && !isGoodDebt && (situation === 'in_debt' || debtPayments > 100)) {
     return { level: 4, label: 'Clear high-interest debt', priority: 'debt' };
   }
 

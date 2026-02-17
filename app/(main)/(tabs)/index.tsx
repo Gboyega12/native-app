@@ -225,50 +225,54 @@ export default function Home() {
     setSavingRecat(false);
   };
 
-  const handleRemoveIncomeSource = (sourceName: string) => {
-    Alert.alert(
-      'Remove income source?',
-      `"${sourceName}" will no longer be counted as income. This affects your surplus and recommendations.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            setRemovingSource(sourceName);
-            try {
-              const { data: { user } } = await supabase.auth.getUser();
-              if (user) {
-                // Save override to mark this as a transfer (not income)
-                await supabase.from('transaction_overrides').upsert({
-                  user_id: user.id,
-                  match_description: sourceName,
-                  category: 'Transfers',
-                  is_essential: false,
-                }, { onConflict: 'user_id,match_description' });
-              }
+  const doRemoveIncomeSource = async (sourceName: string) => {
+    setRemovingSource(sourceName);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('transaction_overrides').upsert({
+          user_id: user.id,
+          match_description: sourceName,
+          category: 'Transfers',
+          is_essential: false,
+        }, { onConflict: 'user_id,match_description' });
+      }
 
-              // Optimistic update
-              if (analysis) {
-                const updated = { ...analysis };
-                const sources = [...(updated.income_sources || [])];
-                const removed = sources.find((s) => s.source === sourceName);
-                updated.income_sources = sources.filter((s) => s.source !== sourceName);
-                if (removed) {
-                  updated.monthly_income = Math.max(0, (updated.monthly_income || 0) - removed.monthly);
-                  updated.surplus = (updated.surplus || 0) - removed.monthly;
-                }
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setAnalysis(updated);
-              }
-            } catch (err: any) {
-              console.warn('[home] Remove income source failed:', err?.message);
-            }
-            setRemovingSource(null);
-          },
-        },
-      ],
-    );
+      if (analysis) {
+        const updated = { ...analysis };
+        const sources = [...(updated.income_sources || [])];
+        const removed = sources.find((s) => s.source === sourceName);
+        updated.income_sources = sources.filter((s) => s.source !== sourceName);
+        if (removed) {
+          updated.monthly_income = Math.max(0, (updated.monthly_income || 0) - removed.monthly);
+          updated.surplus = (updated.surplus || 0) - removed.monthly;
+        }
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setAnalysis(updated);
+      }
+    } catch (err: any) {
+      console.warn('[home] Remove income source failed:', err?.message);
+    }
+    setRemovingSource(null);
+  };
+
+  const handleRemoveIncomeSource = (sourceName: string) => {
+    if (Platform.OS === 'web') {
+      // Alert.alert may not work reliably on web — use confirm
+      const ok = window.confirm(
+        `Remove "${sourceName}"?\n\nThis will no longer be counted as income. This affects your surplus and recommendations.`
+      );
+      if (ok) doRemoveIncomeSource(sourceName);
+    } else {
+      Alert.alert(
+        'Remove income source?',
+        `"${sourceName}" will no longer be counted as income. This affects your surplus and recommendations.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', style: 'destructive', onPress: () => doRemoveIncomeSource(sourceName) },
+        ],
+      );
+    }
   };
 
   useFocusEffect(
@@ -446,8 +450,18 @@ export default function Home() {
         if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
       } catch {}
 
+      // Fetch debt accounts for good/bad debt differentiation
+      let debtAccountsData: any[] = [];
+      try {
+        const { data: dData } = await supabase
+          .from('debt_accounts')
+          .select('account_name, account_type, outstanding_balance, credit_limit')
+          .eq('user_id', userId);
+        if (dData) debtAccountsData = dData;
+      } catch {}
+
       // Re-run enrichment engine with fresh data (fast, ~1 second)
-      const result = EnrichmentEngine.enrich(csvData, overrides);
+      const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData);
       if (result.enrichedTransactions.length === 0) {
         setSyncing(false);
         return;
@@ -463,7 +477,7 @@ export default function Home() {
       goals = goalsData;
 
       // Run move engine
-      const ukpf = determineFlowchartPosition(result.profile, goals);
+      const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData);
       const rankedMoves = rankMoves(result.decisionStack, result.profile, goals);
       const topRanked = rankedMoves[0] || null;
       const goalTrajectory = topRanked ? topRanked.trajectory : null;
@@ -858,6 +872,8 @@ export default function Home() {
                       style={styles.removeSourceBtn}
                       onPress={() => handleRemoveIncomeSource(src.source)}
                       disabled={removingSource === src.source}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      activeOpacity={0.6}
                     >
                       <Text style={styles.removeSourceText}>
                         {removingSource === src.source ? 'Removing...' : 'Not income? Remove'}
@@ -1805,13 +1821,17 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   removeSourceBtn: {
-    marginTop: 8,
+    marginTop: 10,
     alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: 'rgba(232,96,99,0.08)',
   },
   removeSourceText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.dim,
+    fontSize: 12,
+    color: colors.coral,
   },
 
   // ── Card 3: Safe to Spend ──

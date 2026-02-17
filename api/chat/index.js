@@ -675,6 +675,16 @@ Tools:
     if (totalDebt > 0) {
       prompt += `\nTotal outstanding debt: £${Math.round(totalDebt)}`;
     }
+    // Determine good vs bad debt for advice
+    const totalCreditLimit = ctx.debt_accounts.reduce((s, d) => s + (d.limit || 0), 0);
+    const overallUtilisation = totalCreditLimit > 0 ? Math.round((totalDebt / totalCreditLimit) * 100) : -1;
+    if (overallUtilisation >= 0 && overallUtilisation <= 30) {
+      prompt += `\nOverall utilisation: ${overallUtilisation}% — this is GOOD DEBT management. The user pays on time with low utilisation, likely earning rewards/points. Do NOT recommend aggressive debt paydown. Instead, suggest maximising rewards, maintaining low utilisation, and ensuring full monthly payments.`;
+    } else if (overallUtilisation > 75) {
+      prompt += `\nOverall utilisation: ${overallUtilisation}% — this is HIGH utilisation and is negatively impacting credit score. Recommend aggressive paydown starting with highest-rate debt.`;
+    } else if (overallUtilisation > 30) {
+      prompt += `\nOverall utilisation: ${overallUtilisation}% — moderate utilisation. Suggest bringing it below 30% for credit score benefits.`;
+    }
     prompt += `\nUse these actual balances when discussing debt strategy. Be specific — "Pay down your £${Math.round(totalDebt)} across ${ctx.debt_accounts.length} account(s)" not "attack your debts."`;
   }
 
