@@ -31,6 +31,7 @@ export default function Home() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
   const [budgetExpanded, setBudgetExpanded] = useState(false);
+  const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -206,14 +207,21 @@ export default function Home() {
 
       setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
 
-      // Fetch budget adjustments for merging
+      // Fetch budget adjustments + debt accounts
       let adjustments: any[] = [];
       try {
-        const { data: adjData } = await supabase
-          .from('budget_adjustments')
-          .select('description, category, monthly_amount, is_essential')
-          .eq('user_id', user.id);
-        if (adjData) adjustments = adjData;
+        const [adjRes, debtRes] = await Promise.all([
+          supabase
+            .from('budget_adjustments')
+            .select('description, category, monthly_amount, is_essential')
+            .eq('user_id', user.id),
+          supabase
+            .from('debt_accounts')
+            .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated')
+            .eq('user_id', user.id),
+        ]);
+        if (adjRes.data) adjustments = adjRes.data;
+        if (debtRes.data) setDebtAccounts(debtRes.data);
       } catch {}
 
       // Use the latest in-memory result from processing if available.
@@ -400,6 +408,42 @@ export default function Home() {
         behavioral_patterns: updatedAnalysis.behavioral_patterns,
         goal_context: updatedAnalysis.goal_context,
       });
+
+      // Sync debt accounts from bank_data.card_balances
+      try {
+        const { data: bankRow } = await supabase
+          .from('bank_data')
+          .select('card_balances')
+          .eq('user_id', userId)
+          .not('card_balances', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (bankRow?.card_balances && Array.isArray(bankRow.card_balances)) {
+          const debtRows: any[] = [];
+          for (const card of bankRow.card_balances) {
+            const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
+              user_id: userId,
+              account_name: card.name || 'Card',
+              account_type: card.type || 'credit_card',
+              outstanding_balance: card.balance,
+              credit_limit: card.limit,
+              source: 'truelayer',
+              last_updated: new Date().toISOString(),
+            }, { onConflict: 'user_id,account_name' });
+            if (!upsertErr) {
+              debtRows.push({
+                account_name: card.name || 'Card',
+                account_type: card.type || 'credit_card',
+                outstanding_balance: card.balance,
+                credit_limit: card.limit,
+              });
+            }
+          }
+          if (debtRows.length > 0) setDebtAccounts(debtRows);
+        }
+      } catch {}
 
       // Update dashboard
       setAnalysis(updatedAnalysis);
@@ -877,6 +921,65 @@ export default function Home() {
               <Text style={styles.addItemButtonText}>+ Add item</Text>
             </TouchableOpacity>
           </View>
+
+          {/* ══════════════════════════════════════════════
+              CARD 5 — DEBT ACCOUNTS
+              ══════════════════════════════════════════════ */}
+          {debtAccounts.length > 0 && (() => {
+            const totalDebt = debtAccounts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+            const totalLimit = debtAccounts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
+            const overallUtil = totalLimit > 0 ? Math.round((totalDebt / totalLimit) * 100) : null;
+            return (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Your debt</Text>
+                <Text style={styles.cardSubtitle}>
+                  {debtAccounts.length} account{debtAccounts.length !== 1 ? 's' : ''}
+                  {overallUtil != null ? ` · ${overallUtil}% utilised` : ''}
+                </Text>
+
+                {/* Total debt hero */}
+                <View style={styles.debtHero}>
+                  <Text style={styles.debtHeroAmount}>
+                    {'\u00a3'}{Math.round(totalDebt).toLocaleString()}
+                  </Text>
+                  <Text style={styles.debtHeroLabel}>total outstanding</Text>
+                </View>
+
+                {/* Individual accounts */}
+                {debtAccounts.map((d: any, i: number) => {
+                  const bal = d.outstanding_balance || 0;
+                  const lim = d.credit_limit || 0;
+                  const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
+                  const isHigh = util != null && util > 75;
+                  const typeLabel = d.account_type === 'credit_card' ? 'Credit card'
+                    : d.account_type === 'overdraft' ? 'Overdraft'
+                    : d.account_type === 'overdraft_facility' ? 'Overdraft facility'
+                    : d.account_type || 'Account';
+                  return (
+                    <View
+                      key={i}
+                      style={[styles.debtRow, i === debtAccounts.length - 1 && styles.debtRowLast]}
+                    >
+                      <View style={styles.debtRowLeft}>
+                        <Text style={styles.debtName}>{d.account_name}</Text>
+                        <Text style={styles.debtType}>{typeLabel}</Text>
+                      </View>
+                      <View style={styles.debtRowRight}>
+                        <Text style={[styles.debtBalance, isHigh && { color: colors.coral }]}>
+                          {'\u00a3'}{Math.round(bal).toLocaleString()}
+                        </Text>
+                        {lim > 0 && (
+                          <Text style={[styles.debtUtil, isHigh && { color: colors.coral }]}>
+                            / {'\u00a3'}{Math.round(lim).toLocaleString()} ({util}%)
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })()}
 
           {/* Add budget item modal */}
           <Modal visible={showAddItem} transparent animationType="fade">
@@ -1541,6 +1644,67 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 15,
     color: colors.accent,
+  },
+
+  // ── Card 5: Debt accounts ──
+  debtHero: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingBottom: 20,
+  },
+  debtHeroAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 40,
+    fontWeight: '800',
+    color: colors.coral,
+    letterSpacing: -1,
+  },
+  debtHeroLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+    marginTop: 4,
+  },
+  debtRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  debtRowLast: {
+    borderBottomWidth: 0,
+  },
+  debtRowLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  debtName: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.text,
+  },
+  debtType: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  debtRowRight: {
+    alignItems: 'flex-end',
+  },
+  debtBalance: {
+    fontFamily: fonts.mono,
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  debtUtil: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
   },
 
   // ── Add item button ──
