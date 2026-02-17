@@ -5,7 +5,7 @@ import {
 import { classifyTransaction } from './classifier';
 import { normaliseDescription } from './normalise';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
-import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS } from './constants';
+import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -280,10 +280,17 @@ const EnrichmentEngine = {
   },
 
   buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): FinancialProfile {
-    const spending = transactions.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
-    const income = transactions.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer);
+    // Use only the most recent N months for income & spending calculations
+    // so figures reflect the user's current financial picture (especially
+    // important for weekly/fortnightly earners over long data windows).
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - ANALYSIS_MONTHS);
+    const recent = transactions.filter((t) => new Date(t.date) >= cutoff);
 
-    const dates = transactions.map((t) => new Date(t.date).getTime()).filter(Boolean);
+    const spending = recent.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
+    const income = recent.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer);
+
+    const dates = recent.map((t) => new Date(t.date).getTime()).filter(Boolean);
     const span = dates.length >= 2
       ? (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24 * 30)
       : 1;
@@ -522,7 +529,9 @@ const EnrichmentEngine = {
     const m = profile.metrics;
     const p = profile.monthly;
     const subs = profile.subscriptions || [];
-    const txs = enrichedTxs || [];
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - ANALYSIS_MONTHS);
+    const txs = (enrichedTxs || []).filter((t) => new Date(t.date) >= cutoff);
     const T = MOVE_THRESHOLDS;
 
     // Subscriptions — attach actual merchant names
