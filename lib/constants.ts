@@ -31,6 +31,11 @@ export const MOVE_THRESHOLDS = {
   highSaverInterestRate: 0.045,
 } as const;
 
+// ── Analysis window ──
+// Number of months of recent data used for income & spending calculations.
+// Full 12-month data is still fetched for pattern detection (recurring subs etc).
+export const ANALYSIS_MONTHS = 4;
+
 // ── Income detection thresholds ──
 
 export const INCOME_THRESHOLDS = {

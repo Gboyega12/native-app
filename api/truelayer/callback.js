@@ -131,6 +131,7 @@ export default async function handler(req, res) {
       connection_id: connectionId,
       csv_data: csv,
       source: 'truelayer',
+      refresh_token: tokenData.refresh_token || null,
     });
 
     if (dbError) {
