@@ -5,14 +5,13 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import * as DocumentPicker from 'expo-document-picker';
-import { supabase } from '@/lib/supabase';
 import { getTrueLayerAuthUrl } from '@/lib/truelayer';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function Connect() {
   const router = useRouter();
   const params = useLocalSearchParams<{
-    connection_id?: string; status?: string;
+    connection_id?: string; status?: string; error?: string;
     code?: string; state?: string;
   }>();
   const [loading, setLoading] = useState(false);
@@ -21,14 +20,19 @@ export default function Connect() {
   const [statusMsg, setStatusMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Handle TrueLayer redirect — code+state arrive as URL params
+  // Handle redirect params — arriving back from TrueLayer server redirect or popup
   useEffect(() => {
-    if (params.code && params.state) {
-      exchangeTrueLayerCode(params.code, params.state);
-    } else if (params.status === 'success' && params.connection_id) {
+    if (params.status === 'success' && params.connection_id) {
+      // Server-side callback already processed data — fetch CSV from our API
       fetchBankData(params.connection_id);
+    } else if (params.status === 'error' && params.error) {
+      // Server-side callback failed and redirected back with error
+      setErrorMsg(decodeURIComponent(params.error));
+    } else if (params.code && params.state) {
+      // Fallback: client-side code+state flow (e.g. native popup returned code)
+      exchangeTrueLayerCode(params.code, params.state);
     }
-  }, [params.code, params.state, params.status, params.connection_id]);
+  }, [params.connection_id, params.status, params.code, params.state]);
 
   // POST the auth code to our callback API for token exchange + data fetch
   const exchangeTrueLayerCode = async (code: string, state: string) => {
@@ -62,18 +66,17 @@ export default function Connect() {
     }
   };
 
+  // Fetch bank data via server-side API (bypasses RLS)
   const fetchBankData = async (connId: string) => {
     setLoading(true);
+    setErrorMsg('');
     setStatusMsg('Loading transactions...');
     try {
-      const { data, error } = await supabase
-        .from('bank_data')
-        .select('csv_data')
-        .eq('connection_id', connId)
-        .single();
+      const res = await fetch(`/api/bank-data?connection_id=${encodeURIComponent(connId)}`);
+      const result = await res.json();
 
-      if (error || !data?.csv_data) {
-        setErrorMsg(error?.message || 'No bank data found for this connection');
+      if (!result.success || !result.csv_data) {
+        setErrorMsg(result.error || 'No bank data found for this connection');
         setStatusMsg('');
         setLoading(false);
         return;
@@ -81,7 +84,7 @@ export default function Connect() {
 
       setStatusMsg('');
       setLoading(false);
-      router.push({ pathname: '/(main)/goals', params: { csvData: data.csv_data } });
+      router.push({ pathname: '/(main)/goals', params: { csvData: result.csv_data } });
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to fetch bank data');
       setStatusMsg('');
@@ -97,26 +100,27 @@ export default function Connect() {
       const connectionId = `conn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       const authUrl = getTrueLayerAuthUrl(connectionId);
 
-      // Use /connect as returnUrl so the popup isn't closed prematurely
-      // when it hits /api/truelayer/callback (same origin, but not the final URL)
-      const returnUrl = Platform.OS === 'web'
-        ? window.location.origin + '/connect'
-        : 'bocy://callback';
+      if (Platform.OS === 'web') {
+        // On web: full page redirect — most reliable approach.
+        // Popups are often blocked and openAuthSessionAsync can't handle
+        // the 5-10 second server processing time reliably.
+        // After bank auth → callback processes → redirects back here with params.
+        window.location.href = authUrl;
+        return; // page is navigating away
+      }
 
+      // On native: use auth session popup
+      const returnUrl = 'bocy://callback';
       const result = await WebBrowser.openAuthSessionAsync(authUrl, returnUrl);
 
       if (result.type === 'success' && result.url) {
         const url = new URL(result.url);
-
-        // Server redirect flow: callback processed data and redirected here
         const connId = url.searchParams.get('connection_id');
         const status = url.searchParams.get('status');
         if (status === 'success' && connId) {
           await fetchBankData(connId);
           return;
         }
-
-        // Fallback: client-side code+state flow
         const code = url.searchParams.get('code');
         const state = url.searchParams.get('state');
         if (code && state) {
@@ -126,12 +130,14 @@ export default function Connect() {
       }
 
       setLoading(false);
+      setStatusMsg('');
       if (result.type !== 'cancel') {
-        Alert.alert('Connection failed', 'Could not connect to your bank. Please try again.');
+        setErrorMsg('Could not connect to your bank. Please try again.');
       }
-    } catch (err) {
+    } catch (err: any) {
       setLoading(false);
-      Alert.alert('Error', 'Something went wrong connecting to your bank.');
+      setStatusMsg('');
+      setErrorMsg(err.message || 'Something went wrong connecting to your bank.');
     }
   };
 

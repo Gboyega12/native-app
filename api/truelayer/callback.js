@@ -1,8 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 
+// TrueLayer sandbox vs live – must match the frontend setting
+const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 'true';
+const TL_AUTH_HOST = IS_SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
+const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://api.truelayer.com';
+
 export default async function handler(req, res) {
-  // Accept both GET (legacy server redirect) and POST (new client-initiated flow)
-  let code, connectionId;
+  // Accept both GET (server redirect from TrueLayer) and POST (client-initiated)
+  let code, connectionId, webOrigin;
 
   if (req.method === 'POST') {
     code = req.body?.code;
@@ -12,34 +17,41 @@ export default async function handler(req, res) {
   } else if (req.method === 'GET') {
     code = req.query.code;
     const state = req.query.state || '';
-    // state format: "connectionId|webOrigin"
     const pipeIdx = state.indexOf('|');
     connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
+    webOrigin = pipeIdx === -1 ? null : state.slice(pipeIdx + 1);
   } else {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!code) return res.status(400).json({ error: 'Missing authorization code' });
-  if (!connectionId) return res.status(400).json({ error: 'Missing connection_id (state)' });
+  // Helper: for GET requests, redirect errors back to the app instead of returning JSON.
+  // Without this, the popup/browser shows raw JSON and the user sees a blank screen.
+  const fail = (status, error, details) => {
+    if (req.method === 'GET' && webOrigin) {
+      const errMsg = encodeURIComponent(details ? `${error}: ${details}` : error);
+      return res.redirect(302, `${webOrigin}/connect?status=error&error=${errMsg}`);
+    }
+    return res.status(status).json({ error, details });
+  };
+
+  if (!code) return fail(400, 'Missing authorization code');
+  if (!connectionId) return fail(400, 'Missing connection_id (state)');
 
   const redirectUri =
     process.env.TRUELAYER_REDIRECT_URI ||
     process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
-    'https://native-app-ashy.vercel.app/';
+    'https://native-app-ashy.vercel.app/api/truelayer/callback';
 
   const clientId = process.env.TRUELAYER_CLIENT_ID;
   const clientSecret = process.env.TRUELAYER_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    return res.status(500).json({
-      error: 'Server misconfigured',
-      details: 'TRUELAYER_CLIENT_ID or TRUELAYER_CLIENT_SECRET not set',
-    });
+    return fail(500, 'Server misconfigured', 'TRUELAYER_CLIENT_ID or TRUELAYER_CLIENT_SECRET not set');
   }
 
   try {
     // Exchange code for access token
-    const tokenRes = await fetch('https://auth.truelayer.com/connect/token', {
+    const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -58,11 +70,7 @@ export default async function handler(req, res) {
         redirect_uri_used: redirectUri,
         response: tokenData,
       }));
-      return res.status(400).json({
-        error: 'Token exchange failed',
-        details: tokenData.error || tokenData,
-        hint: `redirect_uri sent: ${redirectUri}`,
-      });
+      return fail(400, 'Token exchange failed', tokenData.error_description || tokenData.error || `redirect_uri: ${redirectUri}`);
     }
 
     const token = tokenData.access_token;
@@ -70,8 +78,8 @@ export default async function handler(req, res) {
 
     // Fetch accounts and cards
     const [accountsRes, cardsRes] = await Promise.all([
-      fetch('https://api.truelayer.com/data/v1/accounts', { headers }),
-      fetch('https://api.truelayer.com/data/v1/cards', { headers }),
+      fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
+      fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
     ]);
     const accountsData = await accountsRes.json();
     const cardsData = await cardsRes.json();
@@ -88,10 +96,10 @@ export default async function handler(req, res) {
     // Fetch all transactions
     const txPromises = [
       ...accounts.map((a) =>
-        fetch(`https://api.truelayer.com/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
       ),
       ...cards.map((c) =>
-        fetch(`https://api.truelayer.com/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
       ),
     ];
 
@@ -108,16 +116,13 @@ export default async function handler(req, res) {
     }
     const csv = csvLines.join('\n');
 
-    // Save CSV to Supabase bank_data table (using service role)
+    // Save CSV to Supabase bank_data table (using service role to bypass RLS)
     const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceKey) {
       console.error('Missing Supabase config:', { supabaseUrl: !!supabaseUrl, serviceKey: !!serviceKey });
-      return res.status(500).json({
-        error: 'Server misconfigured',
-        details: 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set',
-      });
+      return fail(500, 'Server misconfigured', 'SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set');
     }
 
     const admin = createClient(supabaseUrl, serviceKey);
@@ -130,10 +135,7 @@ export default async function handler(req, res) {
 
     if (dbError) {
       console.error('Failed to save bank data:', dbError);
-      return res.status(500).json({
-        error: 'Failed to save bank data',
-        details: dbError.message || dbError.code || JSON.stringify(dbError),
-      });
+      return fail(500, 'Failed to save bank data', dbError.message || dbError.code);
     }
 
     // POST → return JSON to the client
@@ -147,17 +149,13 @@ export default async function handler(req, res) {
       });
     }
 
-    // GET → redirect back to app (legacy flow)
-    const webOrigin = req.query.state?.includes('|')
-      ? req.query.state.slice(req.query.state.indexOf('|') + 1)
-      : null;
-
+    // GET → redirect back to app
     if (webOrigin) {
       return res.redirect(302, `${webOrigin}/connect?connection_id=${encodeURIComponent(connectionId)}&status=success`);
     }
     return res.redirect(302, `bocy://callback?connection_id=${connectionId}&status=success`);
   } catch (err) {
     console.error('Callback error:', err);
-    return res.status(500).json({ error: err.message });
+    return fail(500, 'Unexpected error', err.message);
   }
 }
