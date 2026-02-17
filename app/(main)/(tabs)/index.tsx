@@ -808,7 +808,18 @@ export default function Home() {
                 {/* Non-negotiable breakdown */}
                 {nonDiscItems.length > 0 && (
                   <>
-                    <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
+                    <View style={styles.breakdownHeaderRow}>
+                      <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          setShowAddItem(true);
+                        }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Text style={styles.addItemIcon}>+</Text>
+                      </TouchableOpacity>
+                    </View>
                     {nonDiscItems.map((item: BudgetCategory, i: number) => {
                       const key = `nd-${item.category}`;
                       const isExpanded = expandedCategories.has(key);
@@ -865,9 +876,18 @@ export default function Home() {
                 {/* Lifestyle spending */}
                 {discItems.length > 0 && (
                   <>
-                    <Text style={[styles.breakdownHeader, { marginTop: 28 }]}>
-                      LIFESTYLE
-                    </Text>
+                    <View style={[styles.breakdownHeaderRow, { marginTop: 28 }]}>
+                      <Text style={styles.breakdownHeader}>LIFESTYLE</Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          setShowAddItem(true);
+                        }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Text style={styles.addItemIcon}>+</Text>
+                      </TouchableOpacity>
+                    </View>
                     {discItems.map((item: BudgetCategory, i: number) => {
                       const key = `d-${item.category}`;
                       const isExpanded = expandedCategories.has(key);
@@ -925,18 +945,6 @@ export default function Home() {
               </>
             )}
 
-            {/* Add manual budget entry — subtle inline link */}
-            {budgetExpanded && (
-              <TouchableOpacity
-                style={styles.addItemLink}
-                onPress={() => {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setShowAddItem(true);
-                }}
-              >
-                <Text style={styles.addItemLinkText}>+ Add missing bill or subscription</Text>
-              </TouchableOpacity>
-            )}
           </View>
 
           {/* ══════════════════════════════════════════════
@@ -1086,13 +1094,6 @@ export default function Home() {
             </View>
           </Modal>
 
-          {/* ── Upload new statement ── */}
-          <TouchableOpacity
-            style={styles.uploadButton}
-            onPress={() => router.push('/(main)/connect')}
-          >
-            <Text style={styles.uploadText}>Upload new statement</Text>
-          </TouchableOpacity>
         </>
       )}
     </ScrollView>
@@ -1492,13 +1493,31 @@ const styles = StyleSheet.create({
     color: colors.muted,
     marginTop: 1,
   },
+  breakdownHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
   breakdownHeader: {
     fontFamily: fonts.mono,
     fontSize: 12,
     letterSpacing: 1,
     textTransform: 'uppercase',
     color: colors.muted,
-    marginBottom: 4,
+  },
+  addItemIcon: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    color: colors.accent,
+    width: 26,
+    height: 26,
+    lineHeight: 24,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderRadius: 13,
+    overflow: 'hidden',
   },
   dataRow: {
     flexDirection: 'row',
@@ -1545,7 +1564,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  // (reserved)
 
   // ── Transaction dropdown ──
   txDropdown: {
@@ -1607,24 +1625,6 @@ const styles = StyleSheet.create({
     color: colors.muted,
     textAlign: 'center',
     marginTop: 16,
-  },
-
-  // ── Upload CTA ──
-  uploadButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: colors.accent,
-    paddingVertical: 16,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    marginTop: 8,
-    minHeight: 52,
-    justifyContent: 'center',
-  },
-  uploadText: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.accent,
   },
 
   // ── Card 5: Debt accounts ──
@@ -1689,16 +1689,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Add item button ──
-  addItemLink: {
-    paddingVertical: 10,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  addItemLinkText: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    color: colors.muted,
-  },
 
   // ── Modal ──
   modalOverlay: {
