@@ -256,6 +256,49 @@ export default function Home() {
     setRemovingSource(null);
   };
 
+  const handleDeleteMove = (move: Move) => {
+    const doDelete = async () => {
+      if (!analysis) return;
+      const updatedMoves = (analysis.all_moves || []).filter(m => m.action !== move.action);
+      const updated = { ...analysis, all_moves: updatedMoves };
+
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setAnalysis(updated);
+
+      // Persist to Supabase
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: latest } = await supabase.from('analyses')
+            .select('id')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          if (latest?.id) {
+            await supabase.from('analyses')
+              .update({ all_moves: updatedMoves })
+              .eq('id', latest.id);
+          }
+        }
+      } catch {}
+    };
+
+    if (Platform.OS === 'web') {
+      const ok = window.confirm(`Delete "${stripMd(move.action)}"?\n\nThis recommendation will be permanently removed.`);
+      if (ok) doDelete();
+    } else {
+      Alert.alert(
+        'Delete recommendation?',
+        `Remove "${stripMd(move.action)}" from your insights?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Delete', style: 'destructive', onPress: doDelete },
+        ],
+      );
+    }
+  };
+
   const handleRemoveIncomeSource = (sourceName: string) => {
     if (Platform.OS === 'web') {
       // Alert.alert may not work reliably on web — use confirm
@@ -734,11 +777,11 @@ export default function Home() {
       ) : (
         <>
           {/* ══════════════════════════════════════════════
-              CARD 1 — YOUR TOP MONEY MOVES
+              CARD 1 — YOUR INSIGHTS
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
             <View style={styles.cardTitleRow}>
-              <Text style={styles.cardTitle}>Your top moves</Text>
+              <Text style={styles.cardTitle}>Your Insights</Text>
               <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'moves' ? null : 'moves')}>
                 <Text style={styles.infoIcon}>i</Text>
               </TouchableOpacity>
@@ -746,24 +789,19 @@ export default function Home() {
             {infoCard === 'moves' && (
               <View style={styles.infoBox}>
                 <Text style={styles.infoBoxText}>
-                  These recommendations are ranked by financial impact using the UKPF flowchart priority system, weighted by your goals and effort level. Higher-impact, lower-effort actions rank first.
+                  Personalised recommendations based on your spending patterns, income, goals, and financial position. Higher-impact actions that match your effort level appear first.
                 </Text>
               </View>
             )}
-            <Text style={styles.cardSubtitle}>Ranked by impact on your finances</Text>
 
             {dashboardMoves.length > 0 ? dashboardMoves.map((move: Move, i: number) => {
-              const isOpen = expandedMoves.has(i);
               const effortColor = move.effort === 'high' ? colors.coral
                 : move.effort === 'medium' ? gold : colors.accent;
               return (
-                <TouchableOpacity
+                <View
                   key={i}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Move ${i + 1}: ${move.action}, saves ${move.annualImpact} pounds per year`}
-                  accessibilityHint="Tap to see details"
-                  onPress={() => toggleMove(i)}
+                  accessibilityRole="summary"
+                  accessibilityLabel={`Insight ${i + 1}: ${move.action}, saves ${move.annualImpact} pounds per year`}
                   style={styles.moveItem}
                 >
                   {/* Rank number */}
@@ -771,8 +809,7 @@ export default function Home() {
 
                   {/* Content */}
                   <View style={styles.moveContent}>
-                    {/* Title — the clear hero */}
-                    <Text style={styles.moveTitle} numberOfLines={isOpen ? undefined : 2}>
+                    <Text style={styles.moveTitle}>
                       {stripMd(move.action)}
                     </Text>
 
@@ -790,32 +827,32 @@ export default function Home() {
                       )}
                     </View>
 
-                    {/* Expanded: strategy + action buttons */}
-                    {isOpen && (
-                      <View style={styles.moveExpanded}>
-                        <Text style={styles.moveStrategy}>{stripMd(move.strategy)}</Text>
-                        <View style={styles.moveActions}>
-                          <TouchableOpacity
-                            style={styles.moveApproveBtn}
-                            onPress={() => router.push('/(main)/(tabs)/plan')}
-                          >
-                            <Text style={styles.moveApproveBtnText}>Approve</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={styles.moveVerifyBtn}
-                            onPress={() => setVerifyMove(move)}
-                          >
-                            <Text style={styles.moveVerifyBtnText}>Verify</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
+                    {/* Strategy — always visible */}
+                    {move.strategy && (
+                      <Text style={styles.moveStrategy}>{stripMd(move.strategy)}</Text>
                     )}
+
+                    {/* Action buttons — always visible */}
+                    <View style={styles.moveActions}>
+                      <TouchableOpacity
+                        style={styles.moveApproveBtn}
+                        onPress={() => router.push('/(main)/(tabs)/plan')}
+                      >
+                        <Text style={styles.moveApproveBtnText}>Approve</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.moveDeleteBtn}
+                        onPress={() => handleDeleteMove(move)}
+                      >
+                        <Text style={styles.moveDeleteBtnText}>Delete</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                </TouchableOpacity>
+                </View>
               );
             }) : (
               <Text style={styles.noDataText}>
-                No actionable moves yet. Upload a statement to get started.
+                No actionable insights yet. Upload a statement to get started.
               </Text>
             )}
           </View>
@@ -970,25 +1007,10 @@ export default function Home() {
               </View>
             )}
 
-            {/* Tappable header to toggle breakdown */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => {
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setBudgetExpanded((prev) => !prev);
-              }}
-              style={styles.budgetHeaderRow}
-            >
-              <View>
-                <Text style={styles.cardTitle}>Your budget reality</Text>
-                {!budgetExpanded && (
-                  <Text style={styles.expandHint}>Tap to see full breakdown</Text>
-                )}
-              </View>
-              <View style={styles.expandToggle}>
-                <Text style={styles.expandToggleText}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
-              </View>
-            </TouchableOpacity>
+            {/* Header */}
+            <View style={styles.budgetHeaderRow}>
+              <Text style={styles.cardTitle}>Your budget reality</Text>
+            </View>
 
             {/* 3-segment stacked bar */}
             <View style={styles.budgetBar}>
@@ -1199,6 +1221,19 @@ export default function Home() {
               </>
             )}
 
+            {/* View transactions button */}
+            {!budgetExpanded && (
+              <TouchableOpacity
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setBudgetExpanded(true);
+                }}
+                style={styles.viewTransactionsBtn}
+              >
+                <Text style={styles.viewTransactionsText}>View transactions</Text>
+              </TouchableOpacity>
+            )}
+
           </View>
 
           {/* ══════════════════════════════════════════════
@@ -1397,7 +1432,7 @@ export default function Home() {
                           style={styles.moveVerifyBtn}
                           onPress={() => setVerifyMove(null)}
                         >
-                          <Text style={styles.moveVerifyBtnText}>Discard</Text>
+                          <Text style={styles.moveVerifyBtnText}>Close</Text>
                         </TouchableOpacity>
                       </View>
                     </>
@@ -1702,11 +1737,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.dim,
     lineHeight: 20,
+    marginTop: 8,
   },
   moveActions: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 4,
+    marginTop: 12,
   },
   moveApproveBtn: {
     flex: 1,
@@ -1733,6 +1769,20 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 13,
     color: colors.dim,
+  },
+  moveDeleteBtn: {
+    flex: 1,
+    backgroundColor: colors.coralDim,
+    borderWidth: 1,
+    borderColor: 'rgba(232,114,114,0.2)',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  moveDeleteBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.coral,
   },
 
   // ── Card 2: Income ──
@@ -2096,6 +2146,16 @@ const styles = StyleSheet.create({
     color: colors.muted,
     textAlign: 'center',
     marginTop: 16,
+  },
+  viewTransactionsBtn: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginTop: 8,
+  },
+  viewTransactionsText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.accent,
   },
 
   // ── Card 5: Debt accounts ──
