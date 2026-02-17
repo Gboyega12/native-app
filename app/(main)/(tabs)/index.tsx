@@ -96,15 +96,51 @@ export default function Home() {
         is_essential: addItemEssential,
       });
 
+      // Optimistic update: merge the new item directly into current analysis state
+      if (analysis) {
+        const updated = { ...analysis };
+        const sectionKey = addItemEssential ? 'non_discretionary' : 'discretionary';
+        const section = { ...(updated[sectionKey] as any || { total: 0, items: [] }) };
+        section.items = [...(section.items || [])];
+
+        const existingIdx = section.items.findIndex((i: BudgetCategory) => i.category === addItemCategory);
+        const newTx = {
+          date: new Date().toISOString().split('T')[0],
+          merchant: addItemDesc.trim(),
+          description: addItemDesc.trim() + ' (manual)',
+          amount: -Math.abs(amount),
+        };
+
+        if (existingIdx >= 0) {
+          const existing = { ...section.items[existingIdx] };
+          existing.monthly += amount;
+          existing.txs += 1;
+          existing.transactions = [...(existing.transactions || []), newTx];
+          section.items[existingIdx] = existing;
+        } else {
+          section.items.push({
+            category: addItemCategory,
+            monthly: amount,
+            txs: 1,
+            transactions: [newTx],
+          });
+        }
+        section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+
+        (updated as any)[sectionKey] = section;
+        updated.monthly_spending = (updated.monthly_spending || 0) + amount;
+        updated.surplus = (updated.surplus || 0) - amount;
+
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setAnalysis(updated);
+      }
+
       // Reset form and close
       setAddItemDesc('');
       setAddItemAmount('');
       setAddItemCategory('');
       setAddItemEssential(true);
       setShowAddItem(false);
-
-      // Refresh data to show the new item
-      loadData();
     } catch (err: any) {
       console.warn('[home] Failed to save budget item:', err?.message);
     }
@@ -117,6 +153,51 @@ export default function Home() {
     }, [])
   );
 
+  // Merge budget adjustments into an analysis object
+  const mergeAdjustments = (base: Analysis, adjustments: any[]): Analysis => {
+    if (!adjustments.length) return base;
+
+    const updated = { ...base };
+    const nonDisc = { ...((updated.non_discretionary as any) || { total: 0, items: [] }) };
+    const disc = { ...((updated.discretionary as any) || { total: 0, items: [] }) };
+    nonDisc.items = [...(nonDisc.items || [])];
+    disc.items = [...(disc.items || [])];
+
+    for (const adj of adjustments) {
+      const section = adj.is_essential ? nonDisc : disc;
+      const existingIdx = section.items.findIndex((i: BudgetCategory) => i.category === adj.category);
+      const newTx = {
+        date: new Date().toISOString().split('T')[0],
+        merchant: adj.description,
+        description: adj.description + ' (manual)',
+        amount: -Math.abs(adj.monthly_amount),
+      };
+
+      if (existingIdx >= 0) {
+        const existing = { ...section.items[existingIdx] };
+        existing.monthly += adj.monthly_amount;
+        existing.txs += 1;
+        existing.transactions = [...(existing.transactions || []), newTx];
+        section.items[existingIdx] = existing;
+      } else {
+        section.items.push({
+          category: adj.category,
+          monthly: adj.monthly_amount,
+          txs: 1,
+          transactions: [newTx],
+        });
+      }
+      section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+    }
+
+    const totalManual = adjustments.reduce((s: number, a: any) => s + a.monthly_amount, 0);
+    updated.non_discretionary = nonDisc;
+    updated.discretionary = disc;
+    updated.monthly_spending = (updated.monthly_spending || 0) + totalManual;
+    updated.surplus = (updated.surplus || 0) - totalManual;
+    return updated;
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -125,10 +206,20 @@ export default function Home() {
 
       setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
 
+      // Fetch budget adjustments for merging
+      let adjustments: any[] = [];
+      try {
+        const { data: adjData } = await supabase
+          .from('budget_adjustments')
+          .select('description, category, monthly_amount, is_essential')
+          .eq('user_id', user.id);
+        if (adjData) adjustments = adjData;
+      } catch {}
+
       // Use the latest in-memory result from processing if available.
       const lastResult = getLastResult();
       if (lastResult) {
-        setAnalysis(lastResult);
+        setAnalysis(mergeAdjustments(lastResult, adjustments));
         setLoading(false);
         // Still trigger background sync for fresh data
         syncInBackground(user.id);
@@ -147,7 +238,7 @@ export default function Home() {
         console.warn('[home] Failed to fetch analysis:', error.message);
       }
 
-      setAnalysis(data || null);
+      setAnalysis(data ? mergeAdjustments(data, adjustments) : null);
 
       // Trigger background sync if user has an existing analysis
       if (data) {
