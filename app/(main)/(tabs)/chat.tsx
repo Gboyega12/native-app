@@ -7,7 +7,7 @@ import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 import Markdown from '@/lib/markdown';
-import type { ChatMessage, ChatContext, Analysis, Goals } from '@/lib/types';
+import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/lib/types';
 
 // ── Suggested questions (contextual) ──
 
@@ -83,6 +83,81 @@ function TypingIndicator() {
   );
 }
 
+// ── Inline action cards ──
+
+function PlanCard({
+  action,
+  onApprove,
+  onDismiss,
+}: {
+  action: ChatAction;
+  onApprove: () => void;
+  onDismiss: () => void;
+}) {
+  const d = action.data;
+  const isApproved = action.status === 'approved';
+  const isDismissed = action.status === 'dismissed';
+
+  return (
+    <View style={[styles.actionCard, isApproved && styles.actionCardApproved]}>
+      <Text style={styles.actionCardLabel}>SUGGESTED PLAN</Text>
+      <Text style={styles.actionCardTitle}>{d.action}</Text>
+      <View style={styles.actionCardStats}>
+        {d.target_amount != null && (
+          <View style={styles.actionStat}>
+            <Text style={styles.actionStatValue}>{'\u00a3'}{d.target_amount}</Text>
+            <Text style={styles.actionStatLabel}>target</Text>
+          </View>
+        )}
+        {d.monthly_saving != null && (
+          <View style={styles.actionStat}>
+            <Text style={styles.actionStatValue}>{'\u00a3'}{d.monthly_saving}/mo</Text>
+            <Text style={styles.actionStatLabel}>saving</Text>
+          </View>
+        )}
+        {d.timeline && (
+          <View style={styles.actionStat}>
+            <Text style={styles.actionStatValue}>{d.timeline}</Text>
+            <Text style={styles.actionStatLabel}>timeline</Text>
+          </View>
+        )}
+      </View>
+      {isApproved ? (
+        <View style={styles.approvedBanner}>
+          <Text style={styles.approvedBannerText}>{'\u2713'} Added to your plan</Text>
+        </View>
+      ) : isDismissed ? (
+        <View style={styles.dismissedBanner}>
+          <Text style={styles.dismissedBannerText}>Dismissed</Text>
+        </View>
+      ) : (
+        <View style={styles.actionCardButtons}>
+          <TouchableOpacity style={styles.approveBtn} onPress={onApprove} activeOpacity={0.8}>
+            <Text style={styles.approveBtnText}>Approve</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss} activeOpacity={0.8}>
+            <Text style={styles.dismissBtnText}>Dismiss</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function OverrideCard({ action }: { action: ChatAction }) {
+  const d = action.data;
+  return (
+    <View style={styles.actionCard}>
+      <Text style={styles.actionCardLabel}>TRANSACTION UPDATED</Text>
+      <Text style={styles.overrideDescription}>
+        &ldquo;{d.match_description}&rdquo; {'\u2192'} {d.category}
+        {d.is_essential ? ' (essential)' : ' (discretionary)'}
+      </Text>
+      <Text style={styles.overrideNote}>Will apply on your next analysis.</Text>
+    </View>
+  );
+}
+
 // ── Main Chat Component ──
 
 export default function Chat() {
@@ -93,6 +168,7 @@ export default function Chat() {
   const [context, setContext] = useState<ChatContext>({});
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [goals, setGoals] = useState<Goals | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
 
@@ -107,6 +183,7 @@ export default function Chat() {
   const loadContext = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    setUserId(user.id);
 
     const [analysisRes, goalsRes] = await Promise.all([
       supabase
@@ -200,6 +277,48 @@ export default function Chat() {
       .then(() => {});
   };
 
+  // ── Handle plan approval ──
+
+  const handleApprovePlan = async (msgIndex: number, actionIndex: number) => {
+    const msg = messages[msgIndex];
+    const action = msg?.actions?.[actionIndex];
+    if (!action || action.type !== 'plan_proposed' || !userId) return;
+
+    // Insert into user_plans
+    const { error: insertErr } = await supabase.from('user_plans').insert({
+      user_id: userId,
+      action: action.data.action || '',
+      target_amount: action.data.target_amount || null,
+      monthly_saving: action.data.monthly_saving || null,
+      timeline: action.data.timeline || null,
+      status: 'active',
+    });
+
+    if (insertErr) {
+      console.warn('[chat] Failed to save plan:', insertErr.message);
+      return;
+    }
+
+    // Update action status
+    const updated = [...messages];
+    const updatedActions = [...(updated[msgIndex].actions || [])];
+    updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'approved' };
+    updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+    setMessages(updated);
+    persistMessages(updated);
+  };
+
+  // ── Handle plan dismissal ──
+
+  const handleDismissPlan = (msgIndex: number, actionIndex: number) => {
+    const updated = [...messages];
+    const updatedActions = [...(updated[msgIndex].actions || [])];
+    updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'dismissed' };
+    updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+    setMessages(updated);
+    persistMessages(updated);
+  };
+
   // ── Send message (with streaming + fallback) ──
 
   const sendMessage = async (text: string) => {
@@ -236,7 +355,7 @@ export default function Chat() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages, context, stream: true }),
+        body: JSON.stringify({ messages: newMessages, context, stream: true, user_id: userId }),
       });
 
       if (!res.ok || !res.body) return false;
@@ -245,6 +364,7 @@ export default function Chat() {
       const decoder = new TextDecoder();
       let fullText = '';
       let buffer = '';
+      const collectedActions: ChatAction[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -271,14 +391,26 @@ export default function Chat() {
               setMessages([...newMessages, streamMsg]);
               scrollRef.current?.scrollToEnd({ animated: false });
             }
+            // Collect action events from tool execution
+            if (event.action) {
+              collectedActions.push({
+                type: event.action.type,
+                data: event.action.data,
+                status: event.action.type === 'plan_proposed' ? 'pending' : undefined,
+              });
+            }
           } catch {
             // Skip malformed SSE
           }
         }
       }
 
-      if (fullText) {
-        const assistantMsg: ChatMessage = { role: 'assistant', content: fullText };
+      if (fullText || collectedActions.length > 0) {
+        const assistantMsg: ChatMessage = {
+          role: 'assistant',
+          content: fullText || '',
+          actions: collectedActions.length > 0 ? collectedActions : undefined,
+        };
         const final: ChatMessage[] = [...newMessages, assistantMsg];
         setMessages(final);
         persistMessages(final);
@@ -296,12 +428,25 @@ export default function Chat() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: newMessages, context }),
+      body: JSON.stringify({ messages: newMessages, context, user_id: userId }),
     });
     const data = await res.json();
 
     if (data.success && data.text) {
-      const assistantMsg: ChatMessage = { role: 'assistant', content: data.text };
+      // Convert API actions to ChatActions
+      const chatActions: ChatAction[] | undefined = data.actions?.length
+        ? data.actions.map((a: { type: string; data: ChatAction['data'] }) => ({
+            type: a.type,
+            data: a.data,
+            status: a.type === 'plan_proposed' ? 'pending' : undefined,
+          }))
+        : undefined;
+
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
+        content: data.text,
+        actions: chatActions,
+      };
       const final: ChatMessage[] = [...newMessages, assistantMsg];
       setMessages(final);
       persistMessages(final);
@@ -378,18 +523,34 @@ export default function Chat() {
         )}
 
         {messages.map((msg, i) => (
-          <View
-            key={i}
-            style={[
-              styles.bubble,
-              msg.role === 'user' ? styles.userBubble : styles.assistantBubble,
-            ]}
-          >
-            {msg.role === 'user' ? (
-              <Text style={[styles.bubbleText, styles.userText]}>{msg.content}</Text>
-            ) : (
-              <Markdown>{msg.content}</Markdown>
-            )}
+          <View key={i}>
+            <View
+              style={[
+                styles.bubble,
+                msg.role === 'user' ? styles.userBubble : styles.assistantBubble,
+              ]}
+            >
+              {msg.role === 'user' ? (
+                <Text style={[styles.bubbleText, styles.userText]}>{msg.content}</Text>
+              ) : (
+                <Markdown>{msg.content}</Markdown>
+              )}
+            </View>
+
+            {/* Render action cards below assistant messages */}
+            {msg.actions?.map((action, j) => (
+              <View key={`action-${i}-${j}`} style={styles.actionCardWrapper}>
+                {action.type === 'plan_proposed' ? (
+                  <PlanCard
+                    action={action}
+                    onApprove={() => handleApprovePlan(i, j)}
+                    onDismiss={() => handleDismissPlan(i, j)}
+                  />
+                ) : action.type === 'override_saved' ? (
+                  <OverrideCard action={action} />
+                ) : null}
+              </View>
+            ))}
           </View>
         ))}
 
@@ -560,6 +721,120 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: colors.accent,
+  },
+  // ── Action cards ──
+  actionCardWrapper: {
+    alignSelf: 'flex-start',
+    maxWidth: '85%',
+    marginBottom: spacing.sm,
+  },
+  actionCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+  },
+  actionCardApproved: {
+    borderColor: colors.accent,
+  },
+  actionCardLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 10,
+    letterSpacing: 1,
+    color: colors.accent,
+    marginBottom: spacing.xs,
+  },
+  actionCardTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 22,
+    marginBottom: spacing.sm,
+  },
+  actionCardStats: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginBottom: spacing.md,
+  },
+  actionStat: {
+    alignItems: 'center',
+  },
+  actionStatValue: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.accent,
+  },
+  actionStatLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.dim,
+    marginTop: 2,
+  },
+  actionCardButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  approveBtn: {
+    flex: 1,
+    backgroundColor: colors.accent,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  approveBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.bg,
+  },
+  dismissBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  dismissBtnText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.dim,
+  },
+  approvedBanner: {
+    backgroundColor: colors.accentDim,
+    borderRadius: radius.sm,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  approvedBannerText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.accent,
+  },
+  dismissedBanner: {
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  dismissedBannerText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.muted,
+  },
+  overrideDescription: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.text2,
+    lineHeight: 22,
+  },
+  overrideNote: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+    marginTop: spacing.xs,
   },
   // ── Retry banner ──
   retryBanner: {

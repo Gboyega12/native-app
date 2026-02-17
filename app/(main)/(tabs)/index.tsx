@@ -127,8 +127,18 @@ export default function Home() {
         return;
       }
 
+      // Fetch user's transaction overrides
+      let overrides: any[] = [];
+      try {
+        const { data: overrideData } = await supabase
+          .from('transaction_overrides')
+          .select('match_description, category, is_essential')
+          .eq('user_id', userId);
+        if (overrideData) overrides = overrideData;
+      } catch {}
+
       // Re-run enrichment engine with fresh data (fast, ~1 second)
-      const result = EnrichmentEngine.enrich(data.csv_data);
+      const result = EnrichmentEngine.enrich(data.csv_data, overrides);
       if (result.enrichedTransactions.length === 0) {
         setSyncing(false);
         return;
@@ -206,13 +216,11 @@ export default function Home() {
   const income = analysis?.monthly_income ?? 0;
   const incomeSources = analysis?.income_sources ?? [];
 
-  // Only show high + medium impact moves on dashboard; low impact → plan page only
-  const highImpactMoves = moves.filter((m: Move) => (m.annualImpact || 0) >= 600);
-  const mediumImpactMoves = moves.filter((m: Move) => {
-    const impact = m.annualImpact || 0;
-    return impact >= 120 && impact < 600;
-  });
-  const dashboardMoves = [...highImpactMoves, ...mediumImpactMoves];
+  // Only show high + medium effort moves on dashboard; low effort → plan page only
+  // Sort: high effort first, then medium
+  const highEffortMoves = moves.filter((m: Move) => m.effort === 'high');
+  const mediumEffortMoves = moves.filter((m: Move) => m.effort === 'medium');
+  const dashboardMoves = [...highEffortMoves, ...mediumEffortMoves];
 
   // Primary income source only
   const primaryIncome = incomeSources.find((s: IncomeSource) => s.isSalary)
@@ -302,7 +310,7 @@ export default function Home() {
 
             {dashboardMoves.length > 0 ? dashboardMoves.map((move: Move, i: number) => {
               const isOpen = expandedMoves.has(i);
-              const isHigh = (move.annualImpact || 0) >= 600;
+              const isHigh = move.effort === 'high';
               return (
                 <TouchableOpacity
                   key={i}

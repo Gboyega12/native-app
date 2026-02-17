@@ -194,9 +194,25 @@ export interface EnrichmentResult {
 
 // ── Chat ──
 
+export interface ChatAction {
+  type: 'plan_proposed' | 'override_saved';
+  data: {
+    action?: string;
+    target_amount?: number | null;
+    monthly_saving?: number | null;
+    timeline?: string | null;
+    match_description?: string;
+    category?: string;
+    is_essential?: boolean;
+    notes?: string | null;
+  };
+  status?: 'pending' | 'approved' | 'dismissed';
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  actions?: ChatAction[];
 }
 
 export interface ChatContext {

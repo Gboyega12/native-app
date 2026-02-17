@@ -48,10 +48,16 @@ function parseDate(str: string): Date | null {
   return isNaN(named.getTime()) ? null : named;
 }
 
+export type TransactionOverride = {
+  match_description: string;
+  category: string;
+  is_essential: boolean;
+};
+
 const EnrichmentEngine = {
-  enrich(rawCSV: string): EnrichmentResult {
+  enrich(rawCSV: string, overrides?: TransactionOverride[]): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
-    const enriched = transactions.map((tx) => this.enrichTransaction(tx));
+    const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
@@ -144,7 +150,31 @@ const EnrichmentEngine = {
     return transactions;
   },
 
-  enrichTransaction(tx: RawTransaction): EnrichedTransaction {
+  enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[]): EnrichedTransaction {
+    // Check user overrides first — short-circuit if matched
+    if (overrides?.length) {
+      const descLower = tx.description.toLowerCase();
+      const override = overrides.find((o) => descLower.includes(o.match_description.toLowerCase()));
+      if (override) {
+        return {
+          date: tx.date,
+          description: tx.description,
+          amount: tx.amount,
+          merchant: tx.description,
+          category: override.category,
+          isEssential: override.is_essential,
+          isSubscription: false,
+          isBNPL: false,
+          isDebt: override.category === 'Debt Payments',
+          isIncome: tx.amount > 0,
+          isTransfer: false,
+          isRefund: false,
+          isSavings: override.category === 'Savings',
+          confidence: 'high' as const,
+        };
+      }
+    }
+
     const normalised = normaliseDescription(tx.description);
     const merchantMatch = matchMerchant(tx.description, normalised);
     let isPerson = isPersonTransfer(tx.description);

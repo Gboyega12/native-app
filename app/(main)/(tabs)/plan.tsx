@@ -7,15 +7,27 @@ import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, Move } from '@/lib/types';
 
+interface UserPlan {
+  id: string;
+  action: string;
+  target_amount: number | null;
+  monthly_saving: number | null;
+  timeline: string | null;
+  status: string;
+  created_at: string;
+}
+
 function effortColor(effort: string) {
   return effort === 'low' ? colors.accent : effort === 'medium' ? colors.sky : colors.coral;
 }
 
 export default function Plan() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [userPlans, setUserPlans] = useState<UserPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [approved, setApproved] = useState<Set<number>>(new Set());
+  const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -28,15 +40,24 @@ export default function Plan() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
-    const { data } = await supabase
-      .from('analyses')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+    const [analysisRes, plansRes] = await Promise.all([
+      supabase
+        .from('analyses')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single(),
+      supabase
+        .from('user_plans')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false }),
+    ]);
 
-    setAnalysis(data);
+    setAnalysis(analysisRes.data);
+    setUserPlans(plansRes.data || []);
     setLoading(false);
   };
 
@@ -56,6 +77,14 @@ export default function Plan() {
     });
   };
 
+  const handleRemovePlan = async (planId: string) => {
+    await supabase
+      .from('user_plans')
+      .update({ status: 'removed' })
+      .eq('id', planId);
+    setUserPlans((prev) => prev.filter((p) => p.id !== planId));
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -64,7 +93,7 @@ export default function Plan() {
     );
   }
 
-  if (!analysis) {
+  if (!analysis && userPlans.length === 0) {
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyTitle}>No action plan yet</Text>
@@ -73,37 +102,116 @@ export default function Plan() {
     );
   }
 
-  const moves: Move[] = analysis.all_moves || [];
+  const moves: Move[] = analysis?.all_moves || [];
   const approvedCount = approved.size;
   const totalMonthly = moves.reduce((s, m) => s + (m.monthlyImpact || 0), 0);
   const approvedMonthly = moves.reduce((s, m, i) => approved.has(i) ? s + (m.monthlyImpact || 0) : s, 0);
+  const planMonthly = userPlans.reduce((s, p) => s + (p.monthly_saving || 0), 0);
   const progress = moves.length > 0 ? approvedCount / moves.length : 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       <Text style={styles.heading}>Action Plan</Text>
       <Text style={styles.headingSub}>
-        {moves.length} recommendation{moves.length !== 1 ? 's' : ''} based on your transaction data
+        {moves.length} recommendation{moves.length !== 1 ? 's' : ''}
+        {userPlans.length > 0 ? ` + ${userPlans.length} active plan${userPlans.length !== 1 ? 's' : ''}` : ''}
       </Text>
 
+      {/* User Plans — created from chat */}
+      {userPlans.length > 0 && (
+        <>
+          <Text style={styles.sectionLabel}>YOUR PLANS</Text>
+          {userPlans.map((plan) => {
+            const isPlanExpanded = expandedPlan === plan.id;
+            return (
+              <View key={plan.id} style={[styles.card, styles.userPlanCard]}>
+                <TouchableOpacity
+                  onPress={() => setExpandedPlan(isPlanExpanded ? null : plan.id)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.cardHeader}>
+                    <View style={[styles.moveNumberBadge, styles.planBadge]}>
+                      <Text style={styles.planBadgeText}>{'\u2713'}</Text>
+                    </View>
+                    <View style={styles.cardContent}>
+                      <Text style={styles.moveAction}>{plan.action}</Text>
+                      {plan.timeline && (
+                        <Text style={styles.moveTimeline}>{plan.timeline}</Text>
+                      )}
+                      <View style={styles.moveStats}>
+                        {plan.monthly_saving != null && (
+                          <Text style={styles.moveImpact}>
+                            {'\u00a3'}{plan.monthly_saving}/mo
+                          </Text>
+                        )}
+                        {plan.target_amount != null && (
+                          <Text style={styles.planTarget}>
+                            Target: {'\u00a3'}{plan.target_amount}
+                          </Text>
+                        )}
+                        <Text style={styles.expandIcon}>{isPlanExpanded ? '\u25B2' : '\u25BC'}</Text>
+                      </View>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                {isPlanExpanded && (
+                  <View style={styles.expandedSection}>
+                    <View style={styles.separator} />
+                    {plan.target_amount != null && plan.monthly_saving != null && plan.monthly_saving > 0 && (
+                      <View style={styles.detailBlock}>
+                        <Text style={styles.detailLabel}>Projection</Text>
+                        <View style={styles.impactGrid}>
+                          <View style={styles.impactItem}>
+                            <Text style={styles.impactValue}>{'\u00a3'}{plan.target_amount}</Text>
+                            <Text style={styles.impactLabel}>target</Text>
+                          </View>
+                          <View style={styles.impactItem}>
+                            <Text style={styles.impactValue}>{'\u00a3'}{plan.monthly_saving}</Text>
+                            <Text style={styles.impactLabel}>per month</Text>
+                          </View>
+                        </View>
+                      </View>
+                    )}
+                    <View style={styles.actionButtons}>
+                      <TouchableOpacity
+                        style={styles.unapproveButton}
+                        onPress={() => handleRemovePlan(plan.id)}
+                      >
+                        <Text style={styles.unapproveText}>Remove plan</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </>
+      )}
+
       {/* Progress summary */}
-      <View style={styles.progressCard}>
-        <View style={styles.progressRow}>
-          <View>
-            <Text style={styles.progressLabel}>Approved</Text>
-            <Text style={styles.progressCount}>{approvedCount} of {moves.length}</Text>
+      {moves.length > 0 && (
+        <>
+          <Text style={styles.sectionLabel}>RECOMMENDATIONS</Text>
+          <View style={styles.progressCard}>
+            <View style={styles.progressRow}>
+              <View>
+                <Text style={styles.progressLabel}>Approved</Text>
+                <Text style={styles.progressCount}>{approvedCount} of {moves.length}</Text>
+              </View>
+              <View style={styles.progressRight}>
+                <Text style={styles.progressLabel}>Monthly impact</Text>
+                <Text style={styles.progressAmount}>
+                  {'\u00a3'}{Math.round(approvedMonthly + planMonthly)} of {'\u00a3'}{Math.round(totalMonthly + planMonthly)}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
+            </View>
           </View>
-          <View style={styles.progressRight}>
-            <Text style={styles.progressLabel}>Monthly impact</Text>
-            <Text style={styles.progressAmount}>
-              {'\u00a3'}{Math.round(approvedMonthly)} of {'\u00a3'}{Math.round(totalMonthly)}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
-        </View>
-      </View>
+        </>
+      )}
 
       {/* Moves */}
       {moves.map((move, i) => {
@@ -329,6 +437,9 @@ const styles = StyleSheet.create({
   cardApproved: {
     borderColor: colors.accentDim,
   },
+  userPlanCard: {
+    borderColor: colors.accent,
+  },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -345,6 +456,14 @@ const styles = StyleSheet.create({
   },
   moveNumberApproved: {
     backgroundColor: colors.accent,
+  },
+  planBadge: {
+    backgroundColor: colors.accent,
+  },
+  planBadgeText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.bg,
   },
   moveNumber: {
     fontFamily: fonts.semibold,
@@ -382,6 +501,11 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 13,
     color: colors.accent,
+  },
+  planTarget: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
   },
   effortBadge: {
     borderRadius: 10,

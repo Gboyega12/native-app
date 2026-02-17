@@ -120,3 +120,67 @@ CREATE POLICY "Users can update own chat messages"
 
 CREATE POLICY "Users can delete own chat messages"
   ON chat_messages FOR DELETE USING (auth.uid() = user_id);
+
+
+-- ============================================================
+-- Table: transaction_overrides
+-- User corrections to auto-categorised transactions.
+-- Applied by the enrichment engine on next analysis run.
+-- ============================================================
+CREATE TABLE transaction_overrides (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  match_description TEXT NOT NULL,
+  category TEXT NOT NULL,
+  is_essential BOOLEAN NOT NULL DEFAULT false,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE transaction_overrides ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own overrides"
+  ON transaction_overrides FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own overrides"
+  ON transaction_overrides FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own overrides"
+  ON transaction_overrides FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Service role can insert overrides"
+  ON transaction_overrides FOR INSERT WITH CHECK (true);
+
+
+-- ============================================================
+-- Table: user_plans
+-- Plans created or approved via chat. Shown on plan page.
+-- ============================================================
+CREATE TABLE user_plans (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  action TEXT NOT NULL,
+  target_amount NUMERIC,
+  monthly_saving NUMERIC,
+  timeline TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE user_plans ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own plans"
+  ON user_plans FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own plans"
+  ON user_plans FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own plans"
+  ON user_plans FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own plans"
+  ON user_plans FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Service role can insert plans"
+  ON user_plans FOR INSERT WITH CHECK (true);

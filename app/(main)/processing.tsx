@@ -55,8 +55,21 @@ function ProcessingInner() {
       setCurrentStep(0);
       await delay(400);
 
+      // Fetch user's transaction overrides (corrections made via chat)
+      let overrides: any[] = [];
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          const { data: overrideData } = await supabase
+            .from('transaction_overrides')
+            .select('match_description, category, is_essential')
+            .eq('user_id', authUser.id);
+          if (overrideData) overrides = overrideData;
+        }
+      } catch {}
+
       setCurrentStep(1);
-      let result = EnrichmentEngine.enrich(csvData);
+      let result = EnrichmentEngine.enrich(csvData, overrides);
 
       if (result.enrichedTransactions.length === 0) {
         setError('No transactions found in your data. Check the file format — it should have Date, Description, and Amount columns.');
