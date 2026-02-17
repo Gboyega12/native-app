@@ -753,8 +753,15 @@ export default function Home() {
               }}
               style={styles.budgetHeaderRow}
             >
-              <Text style={styles.cardTitle}>Your budget reality</Text>
-              <Text style={styles.chevron}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
+              <View>
+                <Text style={styles.cardTitle}>Your budget reality</Text>
+                {!budgetExpanded && (
+                  <Text style={styles.expandHint}>Tap to see full breakdown</Text>
+                )}
+              </View>
+              <View style={styles.expandToggle}>
+                <Text style={styles.expandToggleText}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
+              </View>
             </TouchableOpacity>
 
             {/* 3-segment stacked bar */}
@@ -815,7 +822,7 @@ export default function Home() {
                             style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
                           >
                             <View style={styles.dataRowLeft}>
-                              <View style={[styles.catDot, { backgroundColor: colors.coral }]} />
+                              <Text style={[styles.catArrow, { color: colors.coral }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
                               <View style={styles.catInfo}>
                                 <Text style={styles.dataLabel}>{item.category}</Text>
                                 <Text style={styles.dataMeta}>
@@ -827,7 +834,6 @@ export default function Home() {
                               <Text style={[styles.dataValue, { color: colors.coral }]}>
                                 {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
-                              <Text style={styles.txToggleHint}>{isExpanded ? 'hide' : 'txns'}</Text>
                             </View>
                           </TouchableOpacity>
                           {isExpanded && txs.length > 0 && (
@@ -875,7 +881,7 @@ export default function Home() {
                             style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
                           >
                             <View style={styles.dataRowLeft}>
-                              <View style={[styles.catDot, { backgroundColor: gold }]} />
+                              <Text style={[styles.catArrow, { color: gold }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
                               <View style={styles.catInfo}>
                                 <Text style={styles.dataLabel}>{item.category}</Text>
                                 <Text style={styles.dataMeta}>
@@ -887,7 +893,6 @@ export default function Home() {
                               <Text style={[styles.dataValue, { color: gold }]}>
                                 {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
-                              <Text style={styles.txToggleHint}>{isExpanded ? 'hide' : 'txns'}</Text>
                             </View>
                           </TouchableOpacity>
                           {isExpanded && txs.length > 0 && (
@@ -920,16 +925,18 @@ export default function Home() {
               </>
             )}
 
-            {/* Add manual budget entry */}
-            <TouchableOpacity
-              style={styles.addItemButton}
-              onPress={() => {
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setShowAddItem(true);
-              }}
-            >
-              <Text style={styles.addItemButtonText}>+ Add missing bill or subscription</Text>
-            </TouchableOpacity>
+            {/* Add manual budget entry — subtle inline link */}
+            {budgetExpanded && (
+              <TouchableOpacity
+                style={styles.addItemLink}
+                onPress={() => {
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setShowAddItem(true);
+                }}
+              >
+                <Text style={styles.addItemLinkText}>+ Add missing bill or subscription</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* ══════════════════════════════════════════════
@@ -1430,9 +1437,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 6,
   },
-  chevron: {
-    fontFamily: fonts.mono,
+  expandHint: {
+    fontFamily: fonts.regular,
     fontSize: 12,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  expandToggle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expandToggleText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.dim,
   },
   budgetBar: {
@@ -1496,11 +1517,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  catDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginTop: 6,
+  catArrow: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    marginTop: 4,
+    width: 14,
   },
   catInfo: {
     flex: 1,
@@ -1524,13 +1545,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  txToggleHint: {
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    color: colors.muted,
-    marginTop: 2,
-    textAlign: 'right',
-  },
+  // (reserved)
 
   // ── Transaction dropdown ──
   txDropdown: {
@@ -1674,19 +1689,15 @@ const styles = StyleSheet.create({
   },
 
   // ── Add item button ──
-  addItemButton: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderStyle: 'dashed' as any,
-    borderRadius: 10,
-    paddingVertical: 12,
+  addItemLink: {
+    paddingVertical: 10,
     alignItems: 'center',
-    marginTop: 16,
+    marginTop: 8,
   },
-  addItemButtonText: {
+  addItemLinkText: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    color: colors.dim,
+    fontSize: 12,
+    color: colors.muted,
   },
 
   // ── Modal ──
