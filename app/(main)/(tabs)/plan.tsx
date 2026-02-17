@@ -40,24 +40,36 @@ export default function Plan() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
 
-    const [analysisRes, plansRes] = await Promise.all([
-      supabase
-        .from('analyses')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single(),
-      supabase
+    // Fetch analysis
+    const { data: analysisData } = await supabase
+      .from('analyses')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    setAnalysis(analysisData);
+
+    // Fetch user plans (separate try to handle table not existing)
+    try {
+      const { data: plansData, error: plansError } = await supabase
         .from('user_plans')
         .select('*')
         .eq('user_id', user.id)
         .eq('status', 'active')
-        .order('created_at', { ascending: false }),
-    ]);
+        .order('created_at', { ascending: false });
 
-    setAnalysis(analysisRes.data);
-    setUserPlans(plansRes.data || []);
+      if (plansError) {
+        console.warn('[plan] Failed to fetch user plans:', plansError.message);
+        setUserPlans([]);
+      } else {
+        setUserPlans(plansData || []);
+      }
+    } catch {
+      setUserPlans([]);
+    }
+
     setLoading(false);
   };
 

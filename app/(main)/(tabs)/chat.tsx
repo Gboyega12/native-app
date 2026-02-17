@@ -174,6 +174,7 @@ function OverrideCard({ action }: { action: ChatAction }) {
 export default function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [inputHeight, setInputHeight] = useState(40);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [context, setContext] = useState<ChatContext>({});
@@ -328,13 +329,15 @@ export default function Chat() {
         return;
       }
 
-      // Update action status
+      // Update action status in chat messages
       const updated = [...messages];
       const updatedActions = [...(updated[msgIndex].actions || [])];
       updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'approved' };
       updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
       setMessages(updated);
       persistMessages(updated);
+
+      Alert.alert('Plan saved', 'Switch to the Plan tab to track your progress.');
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Something went wrong.');
     }
@@ -362,6 +365,7 @@ export default function Chat() {
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput('');
+    setInputHeight(40);
     setLoading(true);
     setError(null);
 
@@ -603,11 +607,12 @@ export default function Chat() {
       <View style={styles.inputRow}>
         <TextInput
           ref={inputRef}
-          style={styles.input}
+          style={[styles.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
           placeholder="Ask about your finances..."
           placeholderTextColor={colors.muted}
           value={input}
           onChangeText={setInput}
+          onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
           onSubmitEditing={() => sendMessage(input)}
           returnKeyType="send"
           multiline
@@ -915,7 +920,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     fontSize: 14,
     color: colors.text,
-    maxHeight: 200,
   },
   sendButton: {
     backgroundColor: colors.accent,
