@@ -1,9 +1,9 @@
 // TrueLayer sandbox vs live – default to sandbox for development
-const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'true') === 'true';
+const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 'true';
 const AUTH_URL = IS_SANDBOX
   ? 'https://auth.truelayer-sandbox.com'
   : 'https://auth.truelayer.com';
-const CLIENT_ID = process.env.EXPO_PUBLIC_TRUELAYER_CLIENT_ID || 'bocy-9c3edc';
+const CLIENT_ID = process.env.EXPO_PUBLIC_TRUELAYER_CLIENT_ID || 'native-971b11';
 const REDIRECT_URI =
   process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
   'https://native-app-ashy.vercel.app/api/truelayer/callback';
