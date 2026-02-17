@@ -6,6 +6,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import * as DocumentPicker from 'expo-document-picker';
 import { getTrueLayerAuthUrl } from '@/lib/truelayer';
+import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function Connect() {
@@ -72,7 +73,14 @@ export default function Connect() {
     setErrorMsg('');
     setStatusMsg('Loading transactions...');
     try {
-      const res = await fetch(`/api/bank-data?connection_id=${encodeURIComponent(connId)}`);
+      // Pass user_id so the API can claim this bank_data row for future sync
+      let userId = '';
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        userId = user?.id || '';
+      } catch {}
+      const qs = `connection_id=${encodeURIComponent(connId)}${userId ? `&user_id=${encodeURIComponent(userId)}` : ''}`;
+      const res = await fetch(`/api/bank-data?${qs}`);
       const result = await res.json();
 
       if (!result.success || !result.csv_data) {

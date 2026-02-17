@@ -13,6 +13,7 @@ export default async function handler(req, res) {
   }
 
   const connectionId = req.query.connection_id;
+  const userId = req.query.user_id;
   if (!connectionId) {
     return res.status(400).json({ error: 'Missing connection_id' });
   }
@@ -37,6 +38,14 @@ export default async function handler(req, res) {
         error: 'No bank data found',
         details: error?.message,
       });
+    }
+
+    // Claim the row for this user so sync can find it later
+    if (userId) {
+      await admin.from('bank_data')
+        .update({ user_id: userId })
+        .eq('connection_id', connectionId)
+        .is('user_id', null);
     }
 
     return res.json({ success: true, csv_data: data.csv_data });

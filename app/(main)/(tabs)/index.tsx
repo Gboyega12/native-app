@@ -7,8 +7,10 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { getLastResult } from '@/app/(main)/processing';
+import EnrichmentEngine from '@/lib/enrichment-engine';
+import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import { colors, fonts, spacing, radius } from '@/theme';
-import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -40,6 +42,8 @@ export default function Home() {
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   };
 
+  const [syncing, setSyncing] = useState(false);
+
   useFocusEffect(
     useCallback(() => {
       loadData();
@@ -55,12 +59,12 @@ export default function Home() {
       setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
 
       // Use the latest in-memory result from processing if available.
-      // This ensures the budget reality card always reflects the most recent
-      // enrichment, even if the Supabase insert failed or is still propagating.
       const lastResult = getLastResult();
       if (lastResult) {
         setAnalysis(lastResult);
         setLoading(false);
+        // Still trigger background sync for fresh data
+        syncInBackground(user.id);
         return;
       }
 
@@ -77,11 +81,99 @@ export default function Home() {
       }
 
       setAnalysis(data || null);
+
+      // Trigger background sync if user has an existing analysis
+      if (data) {
+        syncInBackground(user.id);
+      }
     } catch (err: any) {
       console.warn('[home] loadData error:', err?.message);
       setAnalysis(null);
     }
     setLoading(false);
+  };
+
+  // Background sync: refresh bank data via TrueLayer and re-run analysis
+  const syncInBackground = async (userId: string) => {
+    try {
+      setSyncing(true);
+      const res = await fetch('/api/truelayer/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      const data = await res.json();
+
+      if (!data.success || !data.csv_data) {
+        // No TrueLayer connection, token expired, or no new data — silent fail
+        setSyncing(false);
+        return;
+      }
+
+      // Re-run enrichment engine with fresh data (fast, ~1 second)
+      const result = EnrichmentEngine.enrich(data.csv_data);
+      if (result.enrichedTransactions.length === 0) {
+        setSyncing(false);
+        return;
+      }
+
+      // Fetch goals for move ranking
+      let goals: Goals | null = null;
+      const { data: goalsData } = await supabase
+        .from('goals')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+      goals = goalsData;
+
+      // Run move engine
+      const ukpf = determineFlowchartPosition(result.profile, goals);
+      const rankedMoves = rankMoves(result.decisionStack, result.profile, goals);
+      const topRanked = rankedMoves[0] || null;
+      const goalTrajectory = topRanked ? topRanked.trajectory : null;
+
+      const allMoves = rankedMoves;
+      const topMove = allMoves[0] || null;
+
+      const updatedAnalysis: Analysis = {
+        user_id: userId,
+        archetype: result.archetype.key,
+        decision_score: result.decisionScore.score,
+        monthly_income: Math.round(result.profile.monthly.income),
+        monthly_spending: Math.round(result.profile.monthly.spending),
+        surplus: Math.round(result.profile.monthly.surplus),
+        non_discretionary: result.profile.budgetReality.nonDiscretionary,
+        discretionary: result.profile.budgetReality.discretionary,
+        income_sources: result.profile.incomeSources,
+        top_move: topMove || ({} as any),
+        all_moves: allMoves,
+        behavioral_patterns: result.behavioralPatterns,
+        goal_context: goalTrajectory,
+      };
+
+      // Save to Supabase
+      await supabase.from('analyses').insert({
+        user_id: userId,
+        archetype: updatedAnalysis.archetype,
+        decision_score: updatedAnalysis.decision_score,
+        monthly_income: updatedAnalysis.monthly_income,
+        monthly_spending: updatedAnalysis.monthly_spending,
+        surplus: updatedAnalysis.surplus,
+        non_discretionary: updatedAnalysis.non_discretionary,
+        discretionary: updatedAnalysis.discretionary,
+        income_sources: updatedAnalysis.income_sources,
+        top_move: updatedAnalysis.top_move,
+        all_moves: updatedAnalysis.all_moves,
+        behavioral_patterns: updatedAnalysis.behavioral_patterns,
+        goal_context: updatedAnalysis.goal_context,
+      });
+
+      // Update dashboard
+      setAnalysis(updatedAnalysis);
+    } catch (err: any) {
+      console.warn('[home] Background sync failed:', err?.message);
+    }
+    setSyncing(false);
   };
 
   if (loading) {
@@ -135,9 +227,14 @@ export default function Home() {
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       {/* ── Header ── */}
       <View style={styles.headerRow}>
-        <Text style={styles.greeting}>
-          Hello, {userName || 'there'}
-        </Text>
+        <View>
+          <Text style={styles.greeting}>
+            Hello, {userName || 'there'}
+          </Text>
+          {syncing && (
+            <Text style={styles.syncText}>Syncing latest transactions...</Text>
+          )}
+        </View>
         <TouchableOpacity
           style={styles.menuButton}
           onPress={() => router.push('/(main)/profile')}
@@ -497,6 +594,12 @@ const styles = StyleSheet.create({
   menuLineShort: {
     width: 16,
     backgroundColor: colors.dim,
+  },
+  syncText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.accent,
+    marginTop: 4,
   },
 
   // ── Empty State ──

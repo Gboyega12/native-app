@@ -71,7 +71,9 @@ CREATE TABLE bank_data (
   connection_id TEXT UNIQUE NOT NULL,
   csv_data TEXT NOT NULL,
   source TEXT NOT NULL DEFAULT 'truelayer',
-  created_at TIMESTAMPTZ DEFAULT now()
+  refresh_token TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 ALTER TABLE bank_data ENABLE ROW LEVEL SECURITY;
@@ -87,6 +89,9 @@ CREATE POLICY "Authenticated users can read unclaimed bank data"
 
 CREATE POLICY "Service role can insert bank data"
   ON bank_data FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Service role can update bank data"
+  ON bank_data FOR UPDATE USING (true);
 
 CREATE POLICY "Users can delete own bank data"
   ON bank_data FOR DELETE USING (auth.uid() = user_id);
