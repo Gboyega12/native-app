@@ -31,6 +31,7 @@ export default function Home() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
   const [budgetExpanded, setBudgetExpanded] = useState(false);
+  const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -96,15 +97,51 @@ export default function Home() {
         is_essential: addItemEssential,
       });
 
+      // Optimistic update: merge the new item directly into current analysis state
+      if (analysis) {
+        const updated = { ...analysis };
+        const sectionKey = addItemEssential ? 'non_discretionary' : 'discretionary';
+        const section = { ...(updated[sectionKey] as any || { total: 0, items: [] }) };
+        section.items = [...(section.items || [])];
+
+        const existingIdx = section.items.findIndex((i: BudgetCategory) => i.category === addItemCategory);
+        const newTx = {
+          date: new Date().toISOString().split('T')[0],
+          merchant: addItemDesc.trim(),
+          description: addItemDesc.trim() + ' (manual)',
+          amount: -Math.abs(amount),
+        };
+
+        if (existingIdx >= 0) {
+          const existing = { ...section.items[existingIdx] };
+          existing.monthly += amount;
+          existing.txs += 1;
+          existing.transactions = [...(existing.transactions || []), newTx];
+          section.items[existingIdx] = existing;
+        } else {
+          section.items.push({
+            category: addItemCategory,
+            monthly: amount,
+            txs: 1,
+            transactions: [newTx],
+          });
+        }
+        section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+
+        (updated as any)[sectionKey] = section;
+        updated.monthly_spending = (updated.monthly_spending || 0) + amount;
+        updated.surplus = (updated.surplus || 0) - amount;
+
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setAnalysis(updated);
+      }
+
       // Reset form and close
       setAddItemDesc('');
       setAddItemAmount('');
       setAddItemCategory('');
       setAddItemEssential(true);
       setShowAddItem(false);
-
-      // Refresh data to show the new item
-      loadData();
     } catch (err: any) {
       console.warn('[home] Failed to save budget item:', err?.message);
     }
@@ -117,6 +154,51 @@ export default function Home() {
     }, [])
   );
 
+  // Merge budget adjustments into an analysis object
+  const mergeAdjustments = (base: Analysis, adjustments: any[]): Analysis => {
+    if (!adjustments.length) return base;
+
+    const updated = { ...base };
+    const nonDisc = { ...((updated.non_discretionary as any) || { total: 0, items: [] }) };
+    const disc = { ...((updated.discretionary as any) || { total: 0, items: [] }) };
+    nonDisc.items = [...(nonDisc.items || [])];
+    disc.items = [...(disc.items || [])];
+
+    for (const adj of adjustments) {
+      const section = adj.is_essential ? nonDisc : disc;
+      const existingIdx = section.items.findIndex((i: BudgetCategory) => i.category === adj.category);
+      const newTx = {
+        date: new Date().toISOString().split('T')[0],
+        merchant: adj.description,
+        description: adj.description + ' (manual)',
+        amount: -Math.abs(adj.monthly_amount),
+      };
+
+      if (existingIdx >= 0) {
+        const existing = { ...section.items[existingIdx] };
+        existing.monthly += adj.monthly_amount;
+        existing.txs += 1;
+        existing.transactions = [...(existing.transactions || []), newTx];
+        section.items[existingIdx] = existing;
+      } else {
+        section.items.push({
+          category: adj.category,
+          monthly: adj.monthly_amount,
+          txs: 1,
+          transactions: [newTx],
+        });
+      }
+      section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+    }
+
+    const totalManual = adjustments.reduce((s: number, a: any) => s + a.monthly_amount, 0);
+    updated.non_discretionary = nonDisc;
+    updated.discretionary = disc;
+    updated.monthly_spending = (updated.monthly_spending || 0) + totalManual;
+    updated.surplus = (updated.surplus || 0) - totalManual;
+    return updated;
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -125,10 +207,27 @@ export default function Home() {
 
       setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
 
+      // Fetch budget adjustments + debt accounts
+      let adjustments: any[] = [];
+      try {
+        const [adjRes, debtRes] = await Promise.all([
+          supabase
+            .from('budget_adjustments')
+            .select('description, category, monthly_amount, is_essential')
+            .eq('user_id', user.id),
+          supabase
+            .from('debt_accounts')
+            .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated')
+            .eq('user_id', user.id),
+        ]);
+        if (adjRes.data) adjustments = adjRes.data;
+        if (debtRes.data) setDebtAccounts(debtRes.data);
+      } catch {}
+
       // Use the latest in-memory result from processing if available.
       const lastResult = getLastResult();
       if (lastResult) {
-        setAnalysis(lastResult);
+        setAnalysis(mergeAdjustments(lastResult, adjustments));
         setLoading(false);
         // Still trigger background sync for fresh data
         syncInBackground(user.id);
@@ -147,7 +246,7 @@ export default function Home() {
         console.warn('[home] Failed to fetch analysis:', error.message);
       }
 
-      setAnalysis(data || null);
+      setAnalysis(data ? mergeAdjustments(data, adjustments) : null);
 
       // Trigger background sync if user has an existing analysis
       if (data) {
@@ -179,17 +278,25 @@ export default function Home() {
         }
       } catch {}
 
-      // If TrueLayer sync failed, fall back to existing CSV from bank_data
+      // If TrueLayer sync failed, fall back to existing CSV from ALL bank_data rows
       if (!csvData) {
         try {
-          const { data: bankRow } = await supabase
+          const { data: bankRows } = await supabase
             .from('bank_data')
             .select('csv_data')
             .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-          if (bankRow?.csv_data) csvData = bankRow.csv_data;
+            .order('created_at', { ascending: false });
+          if (bankRows && bankRows.length > 0) {
+            // Merge CSVs: take header from first, data lines from all
+            const allLines: string[] = ['Date,Description,Amount'];
+            for (const row of bankRows) {
+              if (!row.csv_data) continue;
+              const lines = row.csv_data.split('\n');
+              // Skip header line (first line) from each CSV
+              allLines.push(...lines.slice(1).filter((l: string) => l.trim()));
+            }
+            csvData = allLines.join('\n');
+          }
         } catch {}
       }
 
@@ -309,6 +416,42 @@ export default function Home() {
         behavioral_patterns: updatedAnalysis.behavioral_patterns,
         goal_context: updatedAnalysis.goal_context,
       });
+
+      // Sync debt accounts from ALL bank_data.card_balances
+      try {
+        const { data: bankRows } = await supabase
+          .from('bank_data')
+          .select('card_balances')
+          .eq('user_id', userId)
+          .not('card_balances', 'is', null);
+
+        if (bankRows && bankRows.length > 0) {
+          const debtRows: any[] = [];
+          for (const row of bankRows) {
+            if (!Array.isArray(row.card_balances)) continue;
+            for (const card of row.card_balances) {
+              const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
+                user_id: userId,
+                account_name: card.name || 'Card',
+                account_type: card.type || 'credit_card',
+                outstanding_balance: card.balance,
+                credit_limit: card.limit,
+                source: 'truelayer',
+                last_updated: new Date().toISOString(),
+              }, { onConflict: 'user_id,account_name' });
+              if (!upsertErr) {
+                debtRows.push({
+                  account_name: card.name || 'Card',
+                  account_type: card.type || 'credit_card',
+                  outstanding_balance: card.balance,
+                  credit_limit: card.limit,
+                });
+              }
+            }
+          }
+          if (debtRows.length > 0) setDebtAccounts(debtRows);
+        }
+      } catch {}
 
       // Update dashboard
       setAnalysis(updatedAnalysis);
@@ -449,11 +592,12 @@ export default function Home() {
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Your top moves</Text>
-            <Text style={styles.cardSubtitle}>Ranked by impact</Text>
+            <Text style={styles.cardSubtitle}>Ranked by impact on your finances</Text>
 
             {dashboardMoves.length > 0 ? dashboardMoves.map((move: Move, i: number) => {
               const isOpen = expandedMoves.has(i);
-              const isHigh = move.effort === 'high';
+              const effortColor = move.effort === 'high' ? colors.coral
+                : move.effort === 'medium' ? gold : colors.accent;
               return (
                 <TouchableOpacity
                   key={i}
@@ -462,47 +606,46 @@ export default function Home() {
                   accessibilityLabel={`Move ${i + 1}: ${move.action}, saves ${move.annualImpact} pounds per year`}
                   accessibilityHint="Tap to see details"
                   onPress={() => toggleMove(i)}
-                  style={[styles.recCard, i === dashboardMoves.length - 1 && { marginBottom: 0 }]}
+                  style={styles.moveItem}
                 >
-                  {/* Priority indicator for high effort */}
-                  {isHigh && <View style={styles.priorityStripe} />}
+                  {/* Rank number */}
+                  <Text style={styles.moveRank}>{i + 1}</Text>
 
-                  {/* Collapsed: rank + title + impact */}
-                  <View style={styles.recHeader}>
-                    <View style={styles.recMeta}>
-                      <View style={[styles.rankBadge, isHigh && styles.rankBadgeHigh]}>
-                        <Text style={[styles.rankText, isHigh && styles.rankTextHigh]}>#{i + 1}</Text>
-                      </View>
-                      <View style={styles.recTitleWrap}>
-                        <Text style={styles.recTitle}>{stripMd(move.action)}</Text>
-                        {isHigh && (
-                          <View style={styles.priorityTag}>
-                            <Text style={styles.priorityTagText}>HIGH PRIORITY</Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                    <Text style={styles.recImpact}>
-                      +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}
+                  {/* Content */}
+                  <View style={styles.moveContent}>
+                    {/* Title — the clear hero */}
+                    <Text style={styles.moveTitle} numberOfLines={isOpen ? undefined : 2}>
+                      {stripMd(move.action)}
                     </Text>
-                  </View>
 
-                  {/* Expanded: effort, strategy, CTA */}
-                  {isOpen && (
-                    <View style={styles.recExpanded}>
+                    {/* Impact + effort on one line */}
+                    <View style={styles.moveMeta}>
+                      <Text style={styles.moveImpact}>
+                        +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
+                      </Text>
                       {move.effort && (
-                        <Text style={styles.effortLabel}>{move.effort} effort</Text>
+                        <View style={[styles.effortPill, { backgroundColor: effortColor + '1A' }]}>
+                          <Text style={[styles.effortPillText, { color: effortColor }]}>
+                            {move.effort}
+                          </Text>
+                        </View>
                       )}
-                      <Text style={styles.recDesc}>{stripMd(move.strategy)}</Text>
-                      <TouchableOpacity
-                        style={styles.planLink}
-                        accessibilityRole="link"
-                        onPress={() => router.push('/(main)/(tabs)/plan')}
-                      >
-                        <Text style={styles.planLinkText}>View in plan</Text>
-                      </TouchableOpacity>
                     </View>
-                  )}
+
+                    {/* Expanded details */}
+                    {isOpen && (
+                      <View style={styles.moveExpanded}>
+                        <Text style={styles.moveStrategy}>{stripMd(move.strategy)}</Text>
+                        <TouchableOpacity
+                          style={styles.moveViewPlan}
+                          accessibilityRole="link"
+                          onPress={() => router.push('/(main)/(tabs)/plan')}
+                        >
+                          <Text style={styles.moveViewPlanText}>View in plan {'>'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
                 </TouchableOpacity>
               );
             }) : (
@@ -610,8 +753,15 @@ export default function Home() {
               }}
               style={styles.budgetHeaderRow}
             >
-              <Text style={styles.cardTitle}>Your budget reality</Text>
-              <Text style={styles.chevron}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
+              <View>
+                <Text style={styles.cardTitle}>Your budget reality</Text>
+                {!budgetExpanded && (
+                  <Text style={styles.expandHint}>Tap to see full breakdown</Text>
+                )}
+              </View>
+              <View style={styles.expandToggle}>
+                <Text style={styles.expandToggleText}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
+              </View>
             </TouchableOpacity>
 
             {/* 3-segment stacked bar */}
@@ -658,7 +808,18 @@ export default function Home() {
                 {/* Non-negotiable breakdown */}
                 {nonDiscItems.length > 0 && (
                   <>
-                    <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
+                    <View style={styles.breakdownHeaderRow}>
+                      <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          setShowAddItem(true);
+                        }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Text style={styles.addItemIcon}>+</Text>
+                      </TouchableOpacity>
+                    </View>
                     {nonDiscItems.map((item: BudgetCategory, i: number) => {
                       const key = `nd-${item.category}`;
                       const isExpanded = expandedCategories.has(key);
@@ -672,8 +833,8 @@ export default function Home() {
                             style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
                           >
                             <View style={styles.dataRowLeft}>
-                              <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && [styles.bulletExpanded, { borderTopColor: colors.coral }]]} />
-                              <View>
+                              <Text style={[styles.catArrow, { color: colors.coral }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
+                              <View style={styles.catInfo}>
                                 <Text style={styles.dataLabel}>{item.category}</Text>
                                 <Text style={styles.dataMeta}>
                                   {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of essentials
@@ -715,9 +876,18 @@ export default function Home() {
                 {/* Lifestyle spending */}
                 {discItems.length > 0 && (
                   <>
-                    <Text style={[styles.breakdownHeader, { marginTop: 28 }]}>
-                      LIFESTYLE
-                    </Text>
+                    <View style={[styles.breakdownHeaderRow, { marginTop: 28 }]}>
+                      <Text style={styles.breakdownHeader}>LIFESTYLE</Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          setShowAddItem(true);
+                        }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Text style={styles.addItemIcon}>+</Text>
+                      </TouchableOpacity>
+                    </View>
                     {discItems.map((item: BudgetCategory, i: number) => {
                       const key = `d-${item.category}`;
                       const isExpanded = expandedCategories.has(key);
@@ -731,8 +901,8 @@ export default function Home() {
                             style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
                           >
                             <View style={styles.dataRowLeft}>
-                              <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && [styles.bulletExpanded, { borderTopColor: gold }]]} />
-                              <View>
+                              <Text style={[styles.catArrow, { color: gold }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
+                              <View style={styles.catInfo}>
                                 <Text style={styles.dataLabel}>{item.category}</Text>
                                 <Text style={styles.dataMeta}>
                                   {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
@@ -771,21 +941,70 @@ export default function Home() {
                   </>
                 )}
 
-                <Text style={styles.cardFooter}>Tap a category to see this month's transactions</Text>
+                <Text style={styles.cardFooter}>Tap any category to expand transactions</Text>
               </>
             )}
 
-            {/* Add item button */}
-            <TouchableOpacity
-              style={styles.addItemButton}
-              onPress={() => {
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setShowAddItem(true);
-              }}
-            >
-              <Text style={styles.addItemButtonText}>+ Add item</Text>
-            </TouchableOpacity>
           </View>
+
+          {/* ══════════════════════════════════════════════
+              CARD 5 — DEBT ACCOUNTS
+              ══════════════════════════════════════════════ */}
+          {debtAccounts.length > 0 && (() => {
+            const totalDebt = debtAccounts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+            const totalLimit = debtAccounts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
+            const overallUtil = totalLimit > 0 ? Math.round((totalDebt / totalLimit) * 100) : null;
+            return (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Your debt</Text>
+                <Text style={styles.cardSubtitle}>
+                  {debtAccounts.length} account{debtAccounts.length !== 1 ? 's' : ''}
+                  {overallUtil != null ? ` · ${overallUtil}% utilised` : ''}
+                </Text>
+
+                {/* Total debt hero */}
+                <View style={styles.debtHero}>
+                  <Text style={styles.debtHeroAmount}>
+                    {'\u00a3'}{Math.round(totalDebt).toLocaleString()}
+                  </Text>
+                  <Text style={styles.debtHeroLabel}>total outstanding</Text>
+                </View>
+
+                {/* Individual accounts */}
+                {debtAccounts.map((d: any, i: number) => {
+                  const bal = d.outstanding_balance || 0;
+                  const lim = d.credit_limit || 0;
+                  const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
+                  const isHigh = util != null && util > 75;
+                  const typeLabel = d.account_type === 'credit_card' ? 'Credit card'
+                    : d.account_type === 'overdraft' ? 'Overdraft'
+                    : d.account_type === 'overdraft_facility' ? 'Overdraft facility'
+                    : d.account_type || 'Account';
+                  return (
+                    <View
+                      key={i}
+                      style={[styles.debtRow, i === debtAccounts.length - 1 && styles.debtRowLast]}
+                    >
+                      <View style={styles.debtRowLeft}>
+                        <Text style={styles.debtName}>{d.account_name}</Text>
+                        <Text style={styles.debtType}>{typeLabel}</Text>
+                      </View>
+                      <View style={styles.debtRowRight}>
+                        <Text style={[styles.debtBalance, isHigh && { color: colors.coral }]}>
+                          {'\u00a3'}{Math.round(bal).toLocaleString()}
+                        </Text>
+                        {lim > 0 && (
+                          <Text style={[styles.debtUtil, isHigh && { color: colors.coral }]}>
+                            / {'\u00a3'}{Math.round(lim).toLocaleString()} ({util}%)
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })()}
 
           {/* Add budget item modal */}
           <Modal visible={showAddItem} transparent animationType="fade">
@@ -875,13 +1094,6 @@ export default function Home() {
             </View>
           </Modal>
 
-          {/* ── Upload new statement ── */}
-          <TouchableOpacity
-            style={styles.uploadButton}
-            onPress={() => router.push('/(main)/connect')}
-          >
-            <Text style={styles.uploadText}>Upload new statement</Text>
-          </TouchableOpacity>
         </>
       )}
     </ScrollView>
@@ -1020,110 +1232,71 @@ const styles = StyleSheet.create({
   },
 
   // ── Card 1: Recommendations ──
-  recCard: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-    paddingVertical: 16,
-    marginBottom: 0,
-    position: 'relative' as const,
-  },
-  recHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    minHeight: 44,
-  },
-  recMeta: {
+  // ── Card 1: Move items ──
+  moveItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
-    flex: 1,
-    marginRight: 12,
+    paddingVertical: 14,
+    gap: 14,
   },
-  rankBadge: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rankBadgeHigh: {
-    backgroundColor: 'rgba(122,239,199,0.12)',
-  },
-  rankText: {
+  moveRank: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.dim,
+    fontSize: 28,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.10)',
+    lineHeight: 32,
+    width: 28,
+    textAlign: 'center',
   },
-  rankTextHigh: {
-    color: colors.accent,
-  },
-  recTitleWrap: {
+  moveContent: {
     flex: 1,
-    gap: 6,
   },
-  recTitle: {
+  moveTitle: {
     fontFamily: fonts.semibold,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.text,
-    lineHeight: 20,
+    lineHeight: 22,
   },
-  priorityStripe: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 3,
-    backgroundColor: colors.accent,
-    borderRadius: 2,
+  moveMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 6,
   },
-  priorityTag: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.accentDim,
-    borderRadius: 4,
-    paddingVertical: 2,
-    paddingHorizontal: 6,
-  },
-  priorityTagText: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.accent,
-    letterSpacing: 1,
-  },
-  recImpact: {
+  moveImpact: {
     fontFamily: fonts.mono,
     fontSize: 13,
     fontWeight: '700',
     color: colors.accent,
   },
-  recExpanded: {
-    paddingLeft: 44,
-    paddingTop: 8,
-    paddingBottom: 4,
-    gap: 8,
+  effortPill: {
+    borderRadius: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 7,
   },
-  effortLabel: {
+  effortPillText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: gold,
-    fontWeight: '500',
+    fontSize: 10,
+    fontWeight: '700',
     textTransform: 'capitalize',
+    letterSpacing: 0.3,
   },
-  recDesc: {
+  moveExpanded: {
+    marginTop: 12,
+    gap: 10,
+  },
+  moveStrategy: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.dim,
     lineHeight: 20,
   },
-  planLink: {
-    paddingVertical: 8,
-    minHeight: 44,
+  moveViewPlan: {
+    paddingVertical: 6,
+    minHeight: 36,
     justifyContent: 'center',
   },
-  planLinkText: {
+  moveViewPlanText: {
     fontFamily: fonts.mono,
     fontSize: 12,
     fontWeight: '600',
@@ -1265,9 +1438,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 6,
   },
-  chevron: {
-    fontFamily: fonts.mono,
+  expandHint: {
+    fontFamily: fonts.regular,
     fontSize: 12,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  expandToggle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expandToggleText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.dim,
   },
   budgetBar: {
@@ -1306,13 +1493,31 @@ const styles = StyleSheet.create({
     color: colors.muted,
     marginTop: 1,
   },
+  breakdownHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
   breakdownHeader: {
     fontFamily: fonts.mono,
     fontSize: 12,
     letterSpacing: 1,
     textTransform: 'uppercase',
     color: colors.muted,
-    marginBottom: 4,
+  },
+  addItemIcon: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    color: colors.accent,
+    width: 26,
+    height: 26,
+    lineHeight: 24,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderRadius: 13,
+    overflow: 'hidden',
   },
   dataRow: {
     flexDirection: 'row',
@@ -1331,16 +1536,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  bullet: {
-    width: 0,
-    height: 0,
-    backgroundColor: 'transparent',
-    borderTopWidth: 5,
-    borderTopColor: 'transparent',
-    borderBottomWidth: 5,
-    borderBottomColor: 'transparent',
-    borderLeftWidth: 7,
-    marginTop: 2,
+  catArrow: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    marginTop: 4,
+    width: 14,
+  },
+  catInfo: {
+    flex: 1,
   },
   dataLabel: {
     fontFamily: fonts.mono,
@@ -1355,21 +1558,11 @@ const styles = StyleSheet.create({
   },
   dataRowRight: {
     alignItems: 'flex-end',
-    flexDirection: 'row',
-    gap: 8,
   },
   dataValue: {
     fontFamily: fonts.mono,
     fontSize: 14,
     fontWeight: '600',
-  },
-  bulletExpanded: {
-    borderLeftColor: 'transparent',
-    borderTopWidth: 7,
-    borderBottomWidth: 0,
-    borderLeftWidth: 5,
-    borderRightWidth: 5,
-    borderRightColor: 'transparent',
   },
 
   // ── Transaction dropdown ──
@@ -1434,39 +1627,68 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
 
-  // ── Upload CTA ──
-  uploadButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1.5,
-    borderColor: colors.accent,
-    paddingVertical: 16,
-    borderRadius: radius.md,
+  // ── Card 5: Debt accounts ──
+  debtHero: {
     alignItems: 'center',
-    marginTop: 8,
-    minHeight: 52,
-    justifyContent: 'center',
-  },
-  uploadText: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.accent,
-  },
-
-  // ── Add item button ──
-  addItemButton: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderStyle: 'dashed' as any,
-    borderRadius: 10,
     paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 16,
+    paddingBottom: 20,
   },
-  addItemButtonText: {
+  debtHeroAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 40,
+    fontWeight: '800',
+    color: colors.coral,
+    letterSpacing: -1,
+  },
+  debtHeroLabel: {
     fontFamily: fonts.mono,
     fontSize: 13,
     color: colors.dim,
+    marginTop: 4,
   },
+  debtRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  debtRowLast: {
+    borderBottomWidth: 0,
+  },
+  debtRowLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  debtName: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.text,
+  },
+  debtType: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  debtRowRight: {
+    alignItems: 'flex-end',
+  },
+  debtBalance: {
+    fontFamily: fonts.mono,
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  debtUtil: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
+  },
+
+  // ── Add item button ──
 
   // ── Modal ──
   modalOverlay: {

@@ -5,53 +5,11 @@ const TL_AUTH_HOST = IS_SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https:
 const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://api.truelayer.com';
 
 /**
- * POST /api/truelayer/sync
- * Body: { user_id }
- *
- * Uses the stored refresh_token to fetch the latest transactions from TrueLayer,
- * updates the csv_data in bank_data, and returns the new CSV.
+ * Sync a single TrueLayer connection: refresh token → fetch transactions + balances.
+ * Returns { csv, balances, newRefreshToken } or null on failure.
  */
-export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const userId = req.body?.user_id;
-  if (!userId) {
-    return res.status(400).json({ error: 'Missing user_id' });
-  }
-
-  const clientId = process.env.TRUELAYER_CLIENT_ID;
-  const clientSecret = process.env.TRUELAYER_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    return res.status(500).json({ error: 'Server misconfigured', details: 'Missing TrueLayer credentials' });
-  }
-
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceKey) {
-    return res.status(500).json({ error: 'Server misconfigured', details: 'Missing Supabase credentials' });
-  }
-
-  const admin = createClient(supabaseUrl, serviceKey);
-
+async function syncConnection(bankRow, clientId, clientSecret) {
   try {
-    // Find the user's most recent TrueLayer bank_data with a refresh_token
-    const { data: bankRow, error: findErr } = await admin
-      .from('bank_data')
-      .select('id, connection_id, refresh_token, updated_at')
-      .eq('user_id', userId)
-      .eq('source', 'truelayer')
-      .not('refresh_token', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    if (findErr || !bankRow?.refresh_token) {
-      return res.json({ success: false, reason: 'no_connection' });
-    }
-
-    // Use refresh_token to get a new access_token
     const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -65,31 +23,24 @@ export default async function handler(req, res) {
 
     const tokenData = await tokenRes.json();
     if (!tokenData.access_token) {
-      // Refresh token expired or revoked — user needs to re-connect
-      return res.json({ success: false, reason: 'token_expired' });
+      console.warn(`[sync] Token expired for connection ${bankRow.connection_id}`);
+      return null;
     }
 
-    const token = tokenData.access_token;
-    const headers = { Authorization: `Bearer ${token}` };
+    const headers = { Authorization: `Bearer ${tokenData.access_token}` };
 
-    // Fetch accounts and cards
     const [accountsRes, cardsRes] = await Promise.all([
       fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
       fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
     ]);
-    const accountsData = await accountsRes.json();
-    const cardsData = await cardsRes.json();
+    const accounts = (await accountsRes.json()).results || [];
+    const cards = (await cardsRes.json()).results || [];
 
-    const accounts = accountsData.results || [];
-    const cards = cardsData.results || [];
-
-    // Date range: last 12 months
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
     fromDate.setFullYear(fromDate.getFullYear() - 1);
     const from = fromDate.toISOString().split('T')[0];
 
-    // Fetch all transactions + balances in parallel
     const txPromises = [
       ...accounts.map((a) =>
         fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
@@ -119,17 +70,15 @@ export default async function handler(req, res) {
     ]);
     const allTx = txResults.flatMap((r) => r.results || []);
 
-    // Convert to CSV
-    const csvLines = ['Date,Description,Amount'];
+    // Convert to CSV lines (without header)
+    const csvLines = [];
     for (const tx of allTx) {
       const date = tx.timestamp ? tx.timestamp.split('T')[0] : '';
       const desc = (tx.merchant_name || tx.description || '').replace(/,/g, ' ');
       const amount = tx.transaction_type === 'CREDIT' ? Math.abs(tx.amount) : -Math.abs(tx.amount);
       csvLines.push(`${date},${desc},${amount}`);
     }
-    const csv = csvLines.join('\n');
 
-    // Build refreshed balance data
     const cardBalances = cardBalanceResults
       .filter((r) => r.balance)
       .map((r) => ({
@@ -157,33 +106,117 @@ export default async function handler(req, res) {
       })
       .filter(Boolean);
 
-    const allBalances = [...cardBalances, ...accountBalances];
-
-    // Update bank_data with fresh CSV, balances, and new refresh_token
-    const updateFields = {
-      csv_data: csv,
-      updated_at: new Date().toISOString(),
+    return {
+      csvLines,
+      balances: [...cardBalances, ...accountBalances],
+      newRefreshToken: tokenData.refresh_token || null,
+      txCount: allTx.length,
     };
-    if (allBalances.length > 0) {
-      updateFields.card_balances = allBalances;
-    }
-    // Store the new refresh_token if one was issued
-    if (tokenData.refresh_token) {
-      updateFields.refresh_token = tokenData.refresh_token;
+  } catch (err) {
+    console.warn(`[sync] Connection ${bankRow.connection_id} failed:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * POST /api/truelayer/sync
+ * Body: { user_id }
+ *
+ * Syncs ALL connected bank accounts for a user, merges transactions and
+ * balances, and returns the combined CSV.
+ */
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const userId = req.body?.user_id;
+  if (!userId) {
+    return res.status(400).json({ error: 'Missing user_id' });
+  }
+
+  const clientId = process.env.TRUELAYER_CLIENT_ID;
+  const clientSecret = process.env.TRUELAYER_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    return res.status(500).json({ error: 'Server misconfigured', details: 'Missing TrueLayer credentials' });
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    return res.status(500).json({ error: 'Server misconfigured', details: 'Missing Supabase credentials' });
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  try {
+    // Find ALL TrueLayer connections for this user
+    const { data: bankRows, error: findErr } = await admin
+      .from('bank_data')
+      .select('id, connection_id, refresh_token, updated_at')
+      .eq('user_id', userId)
+      .eq('source', 'truelayer')
+      .not('refresh_token', 'is', null)
+      .order('created_at', { ascending: false });
+
+    if (findErr || !bankRows || bankRows.length === 0) {
+      return res.json({ success: false, reason: 'no_connection' });
     }
 
-    await admin.from('bank_data')
-      .update(updateFields)
-      .eq('id', bankRow.id);
+    // Sync all connections in parallel
+    const results = await Promise.all(
+      bankRows.map((row) => syncConnection(row, clientId, clientSecret).then((r) => ({ row, result: r })))
+    );
 
-    console.log('[sync] Refreshed balances:', allBalances.length, 'account(s)');
+    let mergedCsvLines = [];
+    let mergedBalances = [];
+    let totalTx = 0;
+    let syncedCount = 0;
+    let expiredConnections = [];
+
+    for (const { row, result } of results) {
+      if (!result) {
+        expiredConnections.push(row.connection_id);
+        continue;
+      }
+
+      syncedCount++;
+      mergedCsvLines.push(...result.csvLines);
+      mergedBalances.push(...result.balances);
+      totalTx += result.txCount;
+
+      // Update each bank_data row individually with its own data
+      const updateFields = {
+        csv_data: ['Date,Description,Amount', ...result.csvLines].join('\n'),
+        updated_at: new Date().toISOString(),
+      };
+      if (result.balances.length > 0) {
+        updateFields.card_balances = result.balances;
+      }
+      if (result.newRefreshToken) {
+        updateFields.refresh_token = result.newRefreshToken;
+      }
+      await admin.from('bank_data').update(updateFields).eq('id', row.id);
+    }
+
+    if (syncedCount === 0) {
+      return res.json({ success: false, reason: 'token_expired' });
+    }
+
+    // Return merged CSV across all connections
+    const mergedCsv = ['Date,Description,Amount', ...mergedCsvLines].join('\n');
+
+    console.log(`[sync] Synced ${syncedCount}/${bankRows.length} connections, ${totalTx} transactions, ${mergedBalances.length} balance(s)`);
 
     return res.json({
       success: true,
-      csv_data: csv,
-      transactions_found: allTx.length,
-      balances_found: allBalances.length,
-      updated_at: updateFields.updated_at,
+      csv_data: mergedCsv,
+      transactions_found: totalTx,
+      balances_found: mergedBalances.length,
+      connections_synced: syncedCount,
+      connections_total: bankRows.length,
+      expired_connections: expiredConnections.length > 0 ? expiredConnections : undefined,
+      updated_at: new Date().toISOString(),
     });
   } catch (err) {
     console.error('[sync] Error:', err);

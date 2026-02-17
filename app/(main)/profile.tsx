@@ -1,16 +1,42 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
+  LayoutAnimation,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
+
+const CONSENT_DAYS = 90;
+const WARN_DAYS = 14; // show warning when < 14 days left
+
+type BankConnection = {
+  id: string;
+  connection_id: string;
+  source: string;
+  created_at: string;
+  updated_at: string | null;
+  account_type?: string; // 'bank' | 'credit'
+  provider_name?: string;
+};
+
+function getConsentStatus(createdAt: string) {
+  const created = new Date(createdAt);
+  const expiry = new Date(created);
+  expiry.setDate(expiry.getDate() + CONSENT_DAYS);
+  const now = new Date();
+  const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const expired = daysLeft <= 0;
+  const expiring = !expired && daysLeft <= WARN_DAYS;
+  return { expiry, daysLeft, expired, expiring };
+}
 
 export default function Profile() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
 
   useEffect(() => {
     loadUser();
@@ -21,7 +47,36 @@ export default function Profile() {
     if (user) {
       setName(user.user_metadata?.full_name || '');
       setEmail(user.email || '');
+      const { data: banks } = await supabase
+        .from('bank_data')
+        .select('id, connection_id, source, created_at, updated_at, account_type, provider_name')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true });
+      if (banks) setConnectedBanks(banks as BankConnection[]);
     }
+  };
+
+  const handleRemoveBank = (bankId: string, label: string) => {
+    Alert.alert(
+      `Remove ${label}?`,
+      'This will remove this connection and its data. You can reconnect it later.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase.from('bank_data').delete().eq('id', bankId);
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setConnectedBanks((prev) => prev.filter((b) => b.id !== bankId));
+          },
+        },
+      ],
+    );
+  };
+
+  const handleReconnect = () => {
+    router.push('/(main)/connect');
   };
 
   const initials = name
@@ -77,8 +132,21 @@ export default function Profile() {
     );
   };
 
+  // Split connections by type
+  const bankAccounts = connectedBanks.filter((b) => b.account_type !== 'credit');
+  const creditCards = connectedBanks.filter((b) => b.account_type === 'credit');
+
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scroll}>
+      {/* Back button */}
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => router.back()}
+      >
+        <Text style={styles.backArrow}>{'\u2190'}</Text>
+        <Text style={styles.backLabel}>Home</Text>
+      </TouchableOpacity>
+
       {/* Avatar */}
       <View style={styles.avatarSection}>
         <View style={styles.avatar}>
@@ -88,12 +156,88 @@ export default function Profile() {
         <Text style={styles.email}>{email}</Text>
       </View>
 
+      {/* ── BANK ACCOUNTS (transactions) ── */}
+      <View style={styles.connectionSection}>
+        <View style={styles.sectionHeaderRow}>
+          <View>
+            <Text style={styles.sectionLabel}>BANK ACCOUNTS</Text>
+            <Text style={styles.sectionHint}>Transaction data (e.g. Revolut, Monzo)</Text>
+          </View>
+          <TouchableOpacity
+            onPress={handleReconnect}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={styles.addIcon}>+</Text>
+          </TouchableOpacity>
+        </View>
+
+        {bankAccounts.length > 0 ? (
+          bankAccounts.map((bank, i) => (
+            <ConnectionCard
+              key={bank.id}
+              bank={bank}
+              index={i}
+              typeLabel="Bank account"
+              onRemove={() => handleRemoveBank(bank.id, bank.provider_name || `Bank account ${i + 1}`)}
+              onReconnect={handleReconnect}
+            />
+          ))
+        ) : (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyCardText}>No bank accounts connected</Text>
+            <TouchableOpacity onPress={handleReconnect}>
+              <Text style={styles.emptyCardLink}>Connect your first bank account</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      {/* ── CREDIT CARDS (balances) ── */}
+      <View style={styles.connectionSection}>
+        <View style={styles.sectionHeaderRow}>
+          <View>
+            <Text style={styles.sectionLabel}>CREDIT CARDS</Text>
+            <Text style={styles.sectionHint}>Credit balances (e.g. Amex, Capital One)</Text>
+          </View>
+          <TouchableOpacity
+            onPress={handleReconnect}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={styles.addIcon}>+</Text>
+          </TouchableOpacity>
+        </View>
+
+        {creditCards.length > 0 ? (
+          creditCards.map((bank, i) => (
+            <ConnectionCard
+              key={bank.id}
+              bank={bank}
+              index={i}
+              typeLabel="Credit card"
+              onRemove={() => handleRemoveBank(bank.id, bank.provider_name || `Credit card ${i + 1}`)}
+              onReconnect={handleReconnect}
+            />
+          ))
+        ) : (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyCardText}>No credit cards connected</Text>
+            <TouchableOpacity onPress={handleReconnect}>
+              <Text style={styles.emptyCardLink}>Connect a credit card</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
+      {/* 90-day consent info */}
+      {connectedBanks.length > 0 && (
+        <View style={styles.consentInfo}>
+          <Text style={styles.consentText}>
+            Open Banking connections expire every 90 days. You'll need to reauthorise to keep your data up to date.
+          </Text>
+        </View>
+      )}
+
       {/* Menu Items */}
-      <MenuItem
-        icon="+"
-        label="Add Account"
-        onPress={() => router.push('/(main)/connect')}
-      />
       <MenuItem
         icon=">"
         label="Goals"
@@ -140,6 +284,80 @@ export default function Profile() {
   );
 }
 
+/* ── Connection Card Component ── */
+function ConnectionCard({
+  bank, index, typeLabel, onRemove, onReconnect,
+}: {
+  bank: BankConnection; index: number; typeLabel: string;
+  onRemove: () => void; onReconnect: () => void;
+}) {
+  const connDate = new Date(bank.created_at);
+  const lastSync = bank.updated_at ? new Date(bank.updated_at) : null;
+  const { daysLeft, expired, expiring } = getConsentStatus(bank.created_at);
+  const displayName = bank.provider_name || `${typeLabel} ${index + 1}`;
+
+  return (
+    <View style={[styles.bankCard, expired && styles.bankCardExpired]}>
+      <View style={styles.bankCardTop}>
+        <View style={styles.bankCardInfo}>
+          <Text style={styles.bankCardName}>{displayName}</Text>
+          <Text style={styles.bankCardMeta}>
+            Connected {connDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+            {lastSync ? ` · Synced ${lastSync.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
+          </Text>
+        </View>
+
+        {/* Status badge */}
+        {expired ? (
+          <View style={[styles.statusBadge, styles.statusExpired]}>
+            <Text style={styles.statusExpiredText}>Expired</Text>
+          </View>
+        ) : expiring ? (
+          <View style={[styles.statusBadge, styles.statusWarning]}>
+            <Text style={styles.statusWarningText}>{daysLeft}d left</Text>
+          </View>
+        ) : (
+          <View style={[styles.statusBadge, styles.statusActive]}>
+            <Text style={styles.statusActiveText}>Active</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Consent expiry bar */}
+      <View style={styles.consentBar}>
+        <View
+          style={[
+            styles.consentBarFill,
+            {
+              flex: Math.max(0, Math.min(CONSENT_DAYS, CONSENT_DAYS - daysLeft)),
+              backgroundColor: expired ? colors.coral : expiring ? '#E8C55A' : colors.accent,
+            },
+          ]}
+        />
+        <View style={{ flex: Math.max(0, Math.min(CONSENT_DAYS, daysLeft)) }} />
+      </View>
+
+      {/* Actions row */}
+      <View style={styles.bankCardActions}>
+        {expired ? (
+          <TouchableOpacity style={styles.reconnectButton} onPress={onReconnect}>
+            <Text style={styles.reconnectText}>Reconnect now</Text>
+          </TouchableOpacity>
+        ) : expiring ? (
+          <TouchableOpacity style={styles.renewButton} onPress={onReconnect}>
+            <Text style={styles.renewText}>Renew connection</Text>
+          </TouchableOpacity>
+        ) : (
+          <View />
+        )}
+        <TouchableOpacity onPress={onRemove} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <Text style={styles.removeText}>Remove</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 function MenuItem({
   icon, label, onPress, dimmed,
 }: {
@@ -161,8 +379,24 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: spacing.xl,
-    paddingTop: spacing.xxl + spacing.lg,
+    paddingTop: spacing.xxl + spacing.md,
     paddingBottom: spacing.xxl,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  backArrow: {
+    fontFamily: fonts.regular,
+    fontSize: 20,
+    color: colors.accent,
+    marginRight: spacing.xs,
+  },
+  backLabel: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.accent,
   },
   avatarSection: {
     alignItems: 'center',
@@ -195,6 +429,192 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.dim,
   },
+
+  // ── Connection sections ──
+  connectionSection: {
+    marginBottom: spacing.lg,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  sectionLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    letterSpacing: 1.5,
+    color: colors.accent,
+    textTransform: 'uppercase',
+  },
+  sectionHint: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  addIcon: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    color: colors.accent,
+    width: 30,
+    height: 30,
+    lineHeight: 28,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderRadius: 15,
+    overflow: 'hidden',
+  },
+
+  // ── Connection card ──
+  bankCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  bankCardExpired: {
+    borderColor: colors.coralDim,
+  },
+  bankCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  bankCardInfo: {
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  bankCardName: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.text,
+  },
+  bankCardMeta: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.dim,
+    marginTop: 2,
+  },
+
+  // ── Status badges ──
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  statusActive: {
+    backgroundColor: 'rgba(122,239,199,0.1)',
+  },
+  statusActiveText: {
+    fontFamily: fonts.medium,
+    fontSize: 10,
+    color: colors.accent,
+  },
+  statusWarning: {
+    backgroundColor: 'rgba(232,197,90,0.12)',
+  },
+  statusWarningText: {
+    fontFamily: fonts.medium,
+    fontSize: 10,
+    color: '#E8C55A',
+  },
+  statusExpired: {
+    backgroundColor: colors.coralDim,
+  },
+  statusExpiredText: {
+    fontFamily: fonts.medium,
+    fontSize: 10,
+    color: colors.coral,
+  },
+
+  // ── Consent bar ──
+  consentBar: {
+    flexDirection: 'row',
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    marginTop: 10,
+    overflow: 'hidden',
+  },
+  consentBarFill: {
+    borderRadius: 2,
+  },
+
+  // ── Card actions ──
+  bankCardActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  reconnectButton: {
+    backgroundColor: colors.coralDim,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  reconnectText: {
+    fontFamily: fonts.semibold,
+    fontSize: 12,
+    color: colors.coral,
+  },
+  renewButton: {
+    backgroundColor: 'rgba(232,197,90,0.12)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  renewText: {
+    fontFamily: fonts.semibold,
+    fontSize: 12,
+    color: '#E8C55A',
+  },
+  removeText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+  },
+
+  // ── Empty state ──
+  emptyCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.lg,
+    alignItems: 'center',
+  },
+  emptyCardText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.muted,
+    marginBottom: spacing.xs,
+  },
+  emptyCardLink: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.accent,
+  },
+
+  // ── Consent info ──
+  consentInfo: {
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  consentText: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.dim,
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+
+  // ── Menu items ──
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -225,6 +645,8 @@ const styles = StyleSheet.create({
   dimmed: {
     color: colors.muted,
   },
+
+  // ── Security ──
   securityHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',

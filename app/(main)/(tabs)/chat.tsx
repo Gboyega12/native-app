@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 import Markdown from '@/lib/markdown';
@@ -91,9 +91,11 @@ function TypingIndicator() {
 function PlanCard({
   action,
   onDismiss,
+  onViewPlan,
 }: {
   action: ChatAction;
   onDismiss: () => void;
+  onViewPlan: () => void;
 }) {
   const d = action.data;
   const isDismissed = action.status === 'dismissed';
@@ -105,13 +107,13 @@ function PlanCard({
       <View style={styles.actionCardStats}>
         {d.target_amount != null && (
           <View style={styles.actionStat}>
-            <Text style={styles.actionStatValue}>{'\u00a3'}{d.target_amount}</Text>
+            <Text style={styles.actionStatValue}>{'\u00a3'}{d.target_amount.toLocaleString()}</Text>
             <Text style={styles.actionStatLabel}>target</Text>
           </View>
         )}
         {d.monthly_saving != null && (
           <View style={styles.actionStat}>
-            <Text style={styles.actionStatValue}>{'\u00a3'}{d.monthly_saving}/mo</Text>
+            <Text style={styles.actionStatValue}>{'\u00a3'}{d.monthly_saving.toLocaleString()}/mo</Text>
             <Text style={styles.actionStatLabel}>saving</Text>
           </View>
         )}
@@ -124,13 +126,47 @@ function PlanCard({
       </View>
       {isDismissed ? (
         <View style={styles.dismissedBanner}>
-          <Text style={styles.dismissedBannerText}>Removed</Text>
+          <Text style={styles.dismissedBannerText}>Removed from plan</Text>
         </View>
       ) : (
-        <View style={styles.approvedBanner}>
-          <Text style={styles.approvedBannerText}>{'\u2713'} Added to your action plan</Text>
-        </View>
+        <>
+          <TouchableOpacity style={styles.viewPlanBanner} onPress={onViewPlan} activeOpacity={0.7}>
+            <Text style={styles.viewPlanBannerText}>{'\u2713'} Added to your plan — tap to view {'>'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.dismissLink} onPress={onDismiss} activeOpacity={0.7}>
+            <Text style={styles.dismissLinkText}>Remove from plan</Text>
+          </TouchableOpacity>
+        </>
       )}
+    </View>
+  );
+}
+
+function BudgetItemCard({ action }: { action: ChatAction }) {
+  const d = action.data;
+  return (
+    <View style={[styles.actionCard, styles.actionCardApproved]}>
+      <Text style={styles.actionCardLabel}>BUDGET UPDATED</Text>
+      <Text style={styles.actionCardTitle}>{d.description}</Text>
+      <View style={styles.actionCardStats}>
+        <View style={styles.actionStat}>
+          <Text style={styles.actionStatValue}>{'\u00a3'}{(d.monthly_amount || 0).toLocaleString()}/mo</Text>
+          <Text style={styles.actionStatLabel}>amount</Text>
+        </View>
+        <View style={styles.actionStat}>
+          <Text style={styles.actionStatValue}>{d.is_essential ? 'Essential' : 'Lifestyle'}</Text>
+          <Text style={styles.actionStatLabel}>type</Text>
+        </View>
+        {d.category && (
+          <View style={styles.actionStat}>
+            <Text style={styles.actionStatValue}>{d.category}</Text>
+            <Text style={styles.actionStatLabel}>category</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.approvedBanner}>
+        <Text style={styles.approvedBannerText}>{'\u2713'} Added to your budget</Text>
+      </View>
     </View>
   );
 }
@@ -230,6 +266,7 @@ function GoalUpdateCard({
 // ── Main Chat Component ──
 
 export default function Chat() {
+  const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [inputHeight, setInputHeight] = useState(40);
@@ -783,6 +820,7 @@ export default function Chat() {
                   <PlanCard
                     action={action}
                     onDismiss={() => handleDismissPlan(i, j)}
+                    onViewPlan={() => router.push('/(main)/(tabs)/plan')}
                   />
                 ) : action.type === 'plan_error' ? (
                   <View style={styles.errorCard}>
@@ -790,6 +828,8 @@ export default function Chat() {
                   </View>
                 ) : action.type === 'override_saved' ? (
                   <OverrideCard action={action} />
+                ) : action.type === 'budget_item_saved' ? (
+                  <BudgetItemCard action={action} />
                 ) : action.type === 'goal_update_proposed' ? (
                   <GoalUpdateCard
                     action={action}
@@ -1088,6 +1128,26 @@ const styles = StyleSheet.create({
   dismissedBannerText: {
     fontFamily: fonts.regular,
     fontSize: 13,
+    color: colors.muted,
+  },
+  viewPlanBanner: {
+    backgroundColor: colors.accentDim,
+    borderRadius: radius.sm,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  viewPlanBannerText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.accent,
+  },
+  dismissLink: {
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  dismissLinkText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
     color: colors.muted,
   },
   overrideDescription: {
