@@ -103,17 +103,24 @@ export default async function handler(req, res) {
       ),
     ];
 
-    // Fetch card balances for debt tracking
-    const balancePromises = cards.map((c) =>
+    // Fetch card balances + account balances for debt/overdraft tracking
+    const cardBalancePromises = cards.map((c) =>
       fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/balance`, { headers })
         .then((r) => r.json())
         .then((data) => ({ card: c, balance: (data.results || [])[0] || null }))
         .catch(() => ({ card: c, balance: null }))
     );
+    const accountBalancePromises = accounts.map((a) =>
+      fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/balance`, { headers })
+        .then((r) => r.json())
+        .then((data) => ({ account: a, balance: (data.results || [])[0] || null }))
+        .catch(() => ({ account: a, balance: null }))
+    );
 
-    const [txResults, balanceResults] = await Promise.all([
+    const [txResults, cardBalanceResults, accountBalanceResults] = await Promise.all([
       Promise.all(txPromises),
-      Promise.all(balancePromises),
+      Promise.all(cardBalancePromises),
+      Promise.all(accountBalancePromises),
     ]);
     const allTx = txResults.flatMap((r) => r.results || []);
 
@@ -150,29 +157,47 @@ export default async function handler(req, res) {
       return fail(500, 'Failed to save bank data', dbError.message || dbError.code);
     }
 
-    // Store card balances on bank_data row (best-effort, non-blocking)
+    // Store card + account balances on bank_data row (best-effort, non-blocking)
     // Processing step will read these and upsert into debt_accounts with user_id
-    if (balanceResults.length > 0) {
-      try {
-        const cardBalances = balanceResults
-          .filter((r) => r.balance)
-          .map((r) => ({
-            name: r.card.display_name || r.card.provider?.display_name || 'Card',
-            type: 'credit_card',
-            balance: r.balance.current != null ? Math.abs(r.balance.current) : null,
-            limit: r.balance.credit_limit || null,
-            available: r.balance.available || null,
-          }));
+    try {
+      const cardBalances = cardBalanceResults
+        .filter((r) => r.balance)
+        .map((r) => ({
+          name: r.card.display_name || r.card.provider?.display_name || 'Card',
+          type: 'credit_card',
+          balance: r.balance.current != null ? Math.abs(r.balance.current) : null,
+          limit: r.balance.credit_limit || null,
+          available: r.balance.available || null,
+        }));
 
-        if (cardBalances.length > 0) {
-          console.log('[callback] Card balances:', JSON.stringify(cardBalances));
-          await admin.from('bank_data')
-            .update({ card_balances: cardBalances })
-            .eq('connection_id', connectionId);
-        }
-      } catch (debtErr) {
-        console.warn('[callback] Non-critical: card balance save failed:', debtErr.message);
+      const accountBalances = accountBalanceResults
+        .filter((r) => r.balance)
+        .map((r) => {
+          const bal = r.balance;
+          const hasOverdraft = bal.overdraft != null && bal.overdraft > 0;
+          const isOverdrawn = bal.current != null && bal.current < 0;
+          // Only include accounts with debt exposure (overdraft facility or negative balance)
+          if (!hasOverdraft && !isOverdrawn) return null;
+          return {
+            name: r.account.display_name || r.account.provider?.display_name || 'Account',
+            type: isOverdrawn ? 'overdraft' : 'overdraft_facility',
+            balance: isOverdrawn ? Math.abs(bal.current) : 0,
+            limit: bal.overdraft || null,
+            available: bal.available || null,
+          };
+        })
+        .filter(Boolean);
+
+      const allBalances = [...cardBalances, ...accountBalances];
+
+      if (allBalances.length > 0) {
+        console.log('[callback] Balances:', JSON.stringify(allBalances));
+        await admin.from('bank_data')
+          .update({ card_balances: allBalances })
+          .eq('connection_id', connectionId);
       }
+    } catch (debtErr) {
+      console.warn('[callback] Non-critical: balance save failed:', debtErr.message);
     }
 
     // POST → return JSON to the client

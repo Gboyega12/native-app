@@ -274,7 +274,7 @@ function ProcessingInner() {
             console.warn('[processing] Supabase insert failed:', insertError.message);
           }
 
-          // Save card balances to debt_accounts (from TrueLayer data)
+          // Save card + account balances to debt_accounts (from TrueLayer data)
           try {
             const { data: bankRows } = await supabase
               .from('bank_data')
