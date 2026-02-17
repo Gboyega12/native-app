@@ -52,7 +52,32 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       router.replace('/(auth)/sign-in');
     } else if (session && inAuth) {
       const name = session.user.user_metadata?.full_name;
-      router.replace(name ? '/(main)/(tabs)' : '/(main)/welcome');
+      if (!name) {
+        router.replace('/(main)/welcome');
+      } else {
+        // Check if user has completed identity discovery
+        supabase
+          .from('user_identity')
+          .select('user_id')
+          .eq('user_id', session.user.id)
+          .single()
+          .then(({ data }) => {
+            if (data) {
+              // Identity complete — check if they have an analysis
+              supabase
+                .from('analyses')
+                .select('id')
+                .eq('user_id', session.user.id)
+                .single()
+                .then(({ data: analysis }) => {
+                  router.replace(analysis ? '/(main)/(tabs)' : '/(main)/connect');
+                });
+            } else {
+              // No identity yet — start education flow
+              router.replace('/(main)/education');
+            }
+          });
+      }
     }
   }, [session, ready, segments]);
 

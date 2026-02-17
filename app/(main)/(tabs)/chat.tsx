@@ -414,6 +414,18 @@ export default function Chat() {
       }
     } catch {}
 
+    // Fetch user identity for personalised advice
+    try {
+      const { data: identityData } = await supabase
+        .from('user_identity')
+        .select('work_setup, household, housing, financial_experience, risk_appetite, priorities, upcoming_events, dependents')
+        .eq('user_id', user.id)
+        .single();
+      if (identityData) {
+        (ctx as any).identity = identityData;
+      }
+    } catch {}
+
     setContext(ctx);
 
     // ── Load persisted messages ──

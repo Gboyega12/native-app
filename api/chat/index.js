@@ -605,6 +605,25 @@ Tools:
 
   if (!ctx) return prompt;
 
+  // ── User Identity (from onboarding discovery) ──
+  if (ctx.identity) {
+    const id = ctx.identity;
+    prompt += `\n\nUser's life context (critical for personalisation):`;
+    if (id.work_setup) prompt += `\n- Work setup: ${id.work_setup.replace(/_/g, ' ')}`;
+    if (id.household) prompt += `\n- Household: ${id.household.replace(/_/g, ' ')}`;
+    if (id.housing) prompt += `\n- Housing: ${id.housing.replace(/_/g, ' ')}`;
+    if (id.financial_experience) prompt += `\n- Financial experience: ${id.financial_experience}`;
+    if (id.risk_appetite) prompt += `\n- Risk appetite: ${id.risk_appetite}`;
+    if (id.priorities?.length) prompt += `\n- Top priorities: ${id.priorities.join(', ')}`;
+    if (id.upcoming_events?.length && !id.upcoming_events.includes('none')) {
+      prompt += `\n- Upcoming events: ${id.upcoming_events.join(', ').replace(/_/g, ' ')}`;
+    }
+    if (id.dependents?.length && !id.dependents.includes('none')) {
+      prompt += `\n- Dependents: ${id.dependents.join(', ').replace(/_/g, ' ')}`;
+    }
+    prompt += `\nIMPORTANT: Tailor ALL advice to this life context. A self-employed single parent needs different advice than a salaried office worker in a couple. Reference their specific situation in recommendations. Don't give generic advice — make it personal.`;
+  }
+
   // ── Core financials ──
   prompt += `\n\nUser's financial snapshot:`;
   if (ctx.monthly_income) prompt += `\n- Monthly income: £${Math.round(ctx.monthly_income)}`;

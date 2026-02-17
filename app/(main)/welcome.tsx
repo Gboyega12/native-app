@@ -21,7 +21,7 @@ export default function Welcome() {
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
       const { error } = await supabase.auth.updateUser({ data: { full_name: fullName } });
       if (error) throw error;
-      router.replace('/(main)/connect');
+      router.replace('/(main)/education');
     } catch {
       setLoading(false);
       Alert.alert('Error', 'Could not save your name. Please try again.');

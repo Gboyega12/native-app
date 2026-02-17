@@ -28,7 +28,7 @@ const GOAL_DEFAULTS: Record<string, number> = {
 // This sets the PRIORITY CATEGORY — what type of move matters most.
 // A user with 19% credit card debt should NOT get "cancel Netflix" as #1.
 
-export function determineFlowchartPosition(profile: any, goals: Goals | null, debtAccounts?: any[]): FlowchartPosition {
+export function determineFlowchartPosition(profile: any, goals: Goals | null, debtAccounts?: any[], _identity?: any): FlowchartPosition {
   const surplus = profile.monthly.surplus;
   const debtCount = profile.metrics.debtAccountCount;
   const savingsRate = profile.metrics.savingsRate;

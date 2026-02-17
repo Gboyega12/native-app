@@ -450,18 +450,27 @@ export default function Home() {
         if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
       } catch {}
 
-      // Fetch debt accounts for good/bad debt differentiation
+      // Fetch debt accounts and identity for personalisation
       let debtAccountsData: any[] = [];
+      let identityData: any = null;
       try {
-        const { data: dData } = await supabase
-          .from('debt_accounts')
-          .select('account_name, account_type, outstanding_balance, credit_limit')
-          .eq('user_id', userId);
-        if (dData) debtAccountsData = dData;
+        const [debtRes, idRes] = await Promise.all([
+          supabase
+            .from('debt_accounts')
+            .select('account_name, account_type, outstanding_balance, credit_limit')
+            .eq('user_id', userId),
+          supabase
+            .from('user_identity')
+            .select('*')
+            .eq('user_id', userId)
+            .single(),
+        ]);
+        if (debtRes.data) debtAccountsData = debtRes.data;
+        if (idRes.data) identityData = idRes.data;
       } catch {}
 
       // Re-run enrichment engine with fresh data (fast, ~1 second)
-      const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData);
+      const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
       if (result.enrichedTransactions.length === 0) {
         setSyncing(false);
         return;
@@ -477,7 +486,7 @@ export default function Home() {
       goals = goalsData;
 
       // Run move engine
-      const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData);
+      const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
       const rankedMoves = rankMoves(result.decisionStack, result.profile, goals);
       const topRanked = rankedMoves[0] || null;
       const goalTrajectory = topRanked ? topRanked.trajectory : null;

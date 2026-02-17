@@ -262,7 +262,7 @@ export default function Connect() {
 
   const handleContinue = () => {
     if (!accumulatedCSV) return;
-    router.push({ pathname: '/(main)/goals', params: { csvData: accumulatedCSV } });
+    router.push({ pathname: '/(main)/processing', params: { csvData: accumulatedCSV } });
   };
 
   const anyLoading = loading || loadingCSV || loadingPDF;
