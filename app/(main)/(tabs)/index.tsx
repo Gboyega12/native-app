@@ -584,11 +584,12 @@ export default function Home() {
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Your top moves</Text>
-            <Text style={styles.cardSubtitle}>Ranked by impact</Text>
+            <Text style={styles.cardSubtitle}>Ranked by impact on your finances</Text>
 
             {dashboardMoves.length > 0 ? dashboardMoves.map((move: Move, i: number) => {
               const isOpen = expandedMoves.has(i);
-              const isHigh = move.effort === 'high';
+              const effortColor = move.effort === 'high' ? colors.coral
+                : move.effort === 'medium' ? gold : colors.accent;
               return (
                 <TouchableOpacity
                   key={i}
@@ -597,47 +598,46 @@ export default function Home() {
                   accessibilityLabel={`Move ${i + 1}: ${move.action}, saves ${move.annualImpact} pounds per year`}
                   accessibilityHint="Tap to see details"
                   onPress={() => toggleMove(i)}
-                  style={[styles.recCard, i === dashboardMoves.length - 1 && { marginBottom: 0 }]}
+                  style={styles.moveItem}
                 >
-                  {/* Priority indicator for high effort */}
-                  {isHigh && <View style={styles.priorityStripe} />}
+                  {/* Rank number */}
+                  <Text style={styles.moveRank}>{i + 1}</Text>
 
-                  {/* Collapsed: rank + title + impact */}
-                  <View style={styles.recHeader}>
-                    <View style={styles.recMeta}>
-                      <View style={[styles.rankBadge, isHigh && styles.rankBadgeHigh]}>
-                        <Text style={[styles.rankText, isHigh && styles.rankTextHigh]}>#{i + 1}</Text>
-                      </View>
-                      <View style={styles.recTitleWrap}>
-                        <Text style={styles.recTitle}>{stripMd(move.action)}</Text>
-                        {isHigh && (
-                          <View style={styles.priorityTag}>
-                            <Text style={styles.priorityTagText}>HIGH PRIORITY</Text>
-                          </View>
-                        )}
-                      </View>
-                    </View>
-                    <Text style={styles.recImpact}>
-                      +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}
+                  {/* Content */}
+                  <View style={styles.moveContent}>
+                    {/* Title — the clear hero */}
+                    <Text style={styles.moveTitle} numberOfLines={isOpen ? undefined : 2}>
+                      {stripMd(move.action)}
                     </Text>
-                  </View>
 
-                  {/* Expanded: effort, strategy, CTA */}
-                  {isOpen && (
-                    <View style={styles.recExpanded}>
+                    {/* Impact + effort on one line */}
+                    <View style={styles.moveMeta}>
+                      <Text style={styles.moveImpact}>
+                        +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
+                      </Text>
                       {move.effort && (
-                        <Text style={styles.effortLabel}>{move.effort} effort</Text>
+                        <View style={[styles.effortPill, { backgroundColor: effortColor + '1A' }]}>
+                          <Text style={[styles.effortPillText, { color: effortColor }]}>
+                            {move.effort}
+                          </Text>
+                        </View>
                       )}
-                      <Text style={styles.recDesc}>{stripMd(move.strategy)}</Text>
-                      <TouchableOpacity
-                        style={styles.planLink}
-                        accessibilityRole="link"
-                        onPress={() => router.push('/(main)/(tabs)/plan')}
-                      >
-                        <Text style={styles.planLinkText}>View in plan</Text>
-                      </TouchableOpacity>
                     </View>
-                  )}
+
+                    {/* Expanded details */}
+                    {isOpen && (
+                      <View style={styles.moveExpanded}>
+                        <Text style={styles.moveStrategy}>{stripMd(move.strategy)}</Text>
+                        <TouchableOpacity
+                          style={styles.moveViewPlan}
+                          accessibilityRole="link"
+                          onPress={() => router.push('/(main)/(tabs)/plan')}
+                        >
+                          <Text style={styles.moveViewPlanText}>View in plan {'>'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
                 </TouchableOpacity>
               );
             }) : (
@@ -1214,110 +1214,71 @@ const styles = StyleSheet.create({
   },
 
   // ── Card 1: Recommendations ──
-  recCard: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-    paddingVertical: 16,
-    marginBottom: 0,
-    position: 'relative' as const,
-  },
-  recHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    minHeight: 44,
-  },
-  recMeta: {
+  // ── Card 1: Move items ──
+  moveItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
-    flex: 1,
-    marginRight: 12,
+    paddingVertical: 14,
+    gap: 14,
   },
-  rankBadge: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rankBadgeHigh: {
-    backgroundColor: 'rgba(122,239,199,0.12)',
-  },
-  rankText: {
+  moveRank: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.dim,
+    fontSize: 28,
+    fontWeight: '800',
+    color: 'rgba(255,255,255,0.10)',
+    lineHeight: 32,
+    width: 28,
+    textAlign: 'center',
   },
-  rankTextHigh: {
-    color: colors.accent,
-  },
-  recTitleWrap: {
+  moveContent: {
     flex: 1,
-    gap: 6,
   },
-  recTitle: {
+  moveTitle: {
     fontFamily: fonts.semibold,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.text,
-    lineHeight: 20,
+    lineHeight: 22,
   },
-  priorityStripe: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 3,
-    backgroundColor: colors.accent,
-    borderRadius: 2,
+  moveMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 6,
   },
-  priorityTag: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.accentDim,
-    borderRadius: 4,
-    paddingVertical: 2,
-    paddingHorizontal: 6,
-  },
-  priorityTagText: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.accent,
-    letterSpacing: 1,
-  },
-  recImpact: {
+  moveImpact: {
     fontFamily: fonts.mono,
     fontSize: 13,
     fontWeight: '700',
     color: colors.accent,
   },
-  recExpanded: {
-    paddingLeft: 44,
-    paddingTop: 8,
-    paddingBottom: 4,
-    gap: 8,
+  effortPill: {
+    borderRadius: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 7,
   },
-  effortLabel: {
+  effortPillText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: gold,
-    fontWeight: '500',
+    fontSize: 10,
+    fontWeight: '700',
     textTransform: 'capitalize',
+    letterSpacing: 0.3,
   },
-  recDesc: {
+  moveExpanded: {
+    marginTop: 12,
+    gap: 10,
+  },
+  moveStrategy: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.dim,
     lineHeight: 20,
   },
-  planLink: {
-    paddingVertical: 8,
-    minHeight: 44,
+  moveViewPlan: {
+    paddingVertical: 6,
+    minHeight: 36,
     justifyContent: 'center',
   },
-  planLinkText: {
+  moveViewPlanText: {
     fontFamily: fonts.mono,
     fontSize: 12,
     fontWeight: '600',
