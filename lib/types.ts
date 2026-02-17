@@ -197,6 +197,7 @@ export interface EnrichmentResult {
 export interface ChatAction {
   type: 'plan_proposed' | 'override_saved';
   data: {
+    id?: string;
     action?: string;
     target_amount?: number | null;
     monthly_saving?: number | null;

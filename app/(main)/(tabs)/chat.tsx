@@ -290,12 +290,18 @@ export default function Chat() {
       .then(() => {});
   };
 
-  // ── Handle plan approval ──
+  // ── Handle plan approval (via server API) ──
 
   const handleApprovePlan = async (msgIndex: number, actionIndex: number) => {
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'plan_proposed') return;
+
+    const planId = action.data.id;
+    if (!planId) {
+      Alert.alert('Error', 'No plan ID — this plan may have been created before the fix. Ask Bocy to suggest it again.');
+      return;
+    }
 
     // Get fresh user ID in case state hasn't settled
     let uid = userId;
@@ -313,18 +319,15 @@ export default function Chat() {
     setSavingPlan(key);
 
     try {
-      // Insert into user_plans
-      const { error: insertErr } = await supabase.from('user_plans').insert({
-        user_id: uid,
-        action: action.data.action || '',
-        target_amount: action.data.target_amount || null,
-        monthly_saving: action.data.monthly_saving || null,
-        timeline: action.data.timeline || null,
-        status: 'active',
+      const res = await fetch('/api/plans/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_id: planId, user_id: uid }),
       });
+      const data = await res.json();
 
-      if (insertErr) {
-        Alert.alert('Could not save plan', insertErr.message);
+      if (!res.ok || !data.success) {
+        Alert.alert('Could not save plan', data.error || 'Unknown error');
         setSavingPlan(null);
         return;
       }
@@ -336,8 +339,6 @@ export default function Chat() {
       updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
       setMessages(updated);
       persistMessages(updated);
-
-      Alert.alert('Plan saved', 'Switch to the Plan tab to track your progress.');
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Something went wrong.');
     }
@@ -345,9 +346,33 @@ export default function Chat() {
     setSavingPlan(null);
   };
 
-  // ── Handle plan dismissal ──
+  // ── Handle plan dismissal (via server API) ──
 
-  const handleDismissPlan = (msgIndex: number, actionIndex: number) => {
+  const handleDismissPlan = async (msgIndex: number, actionIndex: number) => {
+    const msg = messages[msgIndex];
+    const action = msg?.actions?.[actionIndex];
+    if (!action) return;
+
+    const planId = action.data.id;
+    let uid = userId;
+    if (!uid) {
+      const { data: { user } } = await supabase.auth.getUser();
+      uid = user?.id || null;
+    }
+
+    // Dismiss server-side if we have a plan ID
+    if (planId && uid) {
+      try {
+        await fetch('/api/plans/dismiss', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_id: planId, user_id: uid }),
+        });
+      } catch {
+        // Non-critical — still update UI
+      }
+    }
+
     const updated = [...messages];
     const updatedActions = [...(updated[msgIndex].actions || [])];
     updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'dismissed' };

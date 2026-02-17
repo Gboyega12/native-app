@@ -57,7 +57,7 @@ export default function Plan() {
         .from('user_plans')
         .select('*')
         .eq('user_id', user.id)
-        .eq('status', 'active')
+        .in('status', ['active', 'proposed'])
         .order('created_at', { ascending: false });
 
       if (plansError) {
@@ -89,11 +89,37 @@ export default function Plan() {
     });
   };
 
+  const handleApprovePlanFromPage = async (planId: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    try {
+      const res = await fetch('/api/plans/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_id: planId, user_id: user.id }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUserPlans((prev) =>
+          prev.map((p) => p.id === planId ? { ...p, status: 'active' } : p),
+        );
+      }
+    } catch {}
+  };
+
   const handleRemovePlan = async (planId: string) => {
-    await supabase
-      .from('user_plans')
-      .update({ status: 'removed' })
-      .eq('id', planId);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    try {
+      await fetch('/api/plans/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_id: planId, user_id: user.id }),
+      });
+    } catch {}
+
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
   };
 
@@ -138,18 +164,24 @@ export default function Plan() {
           <Text style={styles.sectionLabel}>YOUR PLANS</Text>
           {userPlans.map((plan) => {
             const isPlanExpanded = expandedPlan === plan.id;
+            const isProposed = plan.status === 'proposed';
             return (
-              <View key={plan.id} style={[styles.card, styles.userPlanCard]}>
+              <View key={plan.id} style={[styles.card, isProposed ? styles.userPlanPending : styles.userPlanCard]}>
                 <TouchableOpacity
                   onPress={() => setExpandedPlan(isPlanExpanded ? null : plan.id)}
                   activeOpacity={0.8}
                 >
                   <View style={styles.cardHeader}>
-                    <View style={[styles.moveNumberBadge, styles.planBadge]}>
-                      <Text style={styles.planBadgeText}>{'\u2713'}</Text>
+                    <View style={[styles.moveNumberBadge, isProposed ? styles.planBadgePending : styles.planBadge]}>
+                      <Text style={isProposed ? styles.planBadgePendingText : styles.planBadgeText}>
+                        {isProposed ? '?' : '\u2713'}
+                      </Text>
                     </View>
                     <View style={styles.cardContent}>
                       <Text style={styles.moveAction}>{plan.action}</Text>
+                      {isProposed && (
+                        <Text style={styles.pendingLabel}>Pending approval from chat</Text>
+                      )}
                       {plan.timeline && (
                         <Text style={styles.moveTimeline}>{plan.timeline}</Text>
                       )}
@@ -189,6 +221,14 @@ export default function Plan() {
                       </View>
                     )}
                     <View style={styles.actionButtons}>
+                      {isProposed && (
+                        <TouchableOpacity
+                          style={styles.approveBtn}
+                          onPress={() => handleApprovePlanFromPage(plan.id)}
+                        >
+                          <Text style={styles.approveBtnText}>Approve</Text>
+                        </TouchableOpacity>
+                      )}
                       <TouchableOpacity
                         style={styles.unapproveButton}
                         onPress={() => handleRemovePlan(plan.id)}
@@ -455,6 +495,10 @@ const styles = StyleSheet.create({
   userPlanCard: {
     borderColor: colors.accent,
   },
+  userPlanPending: {
+    borderColor: colors.sky,
+    borderStyle: 'dashed',
+  },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -479,6 +523,20 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 13,
     color: colors.bg,
+  },
+  planBadgePending: {
+    backgroundColor: colors.skyDim,
+  },
+  planBadgePendingText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.sky,
+  },
+  pendingLabel: {
+    fontFamily: fonts.medium,
+    fontSize: 11,
+    color: colors.sky,
+    marginBottom: spacing.xs,
   },
   moveNumber: {
     fontFamily: fonts.semibold,

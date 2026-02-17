@@ -318,7 +318,7 @@ async function executeTool(name, input, userId) {
     return executeOverride(input, userId);
   }
   if (name === 'propose_plan') {
-    return executePlan(input);
+    return executePlan(input, userId);
   }
   return { response: { error: 'Unknown tool' }, action: null };
 }
@@ -371,14 +371,48 @@ async function executeOverride(input, userId) {
   };
 }
 
-async function executePlan(input) {
-  // Don't insert yet — return the proposal to the client.
-  // The client renders an Approve button; when tapped, the client inserts.
+async function executePlan(input, userId) {
+  if (!userId) {
+    return {
+      response: { success: false, error: 'No user session' },
+      action: null,
+    };
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    return {
+      response: { success: false, error: 'Server misconfigured' },
+      action: null,
+    };
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  // Insert with status 'proposed' — client updates to 'active' on approve
+  const { data, error } = await admin.from('user_plans').insert({
+    user_id: userId,
+    action: input.action,
+    target_amount: input.target_amount || null,
+    monthly_saving: input.monthly_saving || null,
+    timeline: input.timeline || null,
+    status: 'proposed',
+  }).select('id').single();
+
+  if (error) {
+    return {
+      response: { success: false, error: error.message },
+      action: null,
+    };
+  }
+
   return {
     response: { success: true, message: 'Plan proposed to user for approval.' },
     action: {
       type: 'plan_proposed',
       data: {
+        id: data.id,
         action: input.action,
         target_amount: input.target_amount || null,
         monthly_saving: input.monthly_saving || null,
