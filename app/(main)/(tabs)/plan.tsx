@@ -7,6 +7,9 @@ import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, Move } from '@/lib/types';
 
+/** Strip markdown bold/italic markers from text rendered with plain <Text> */
+const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
+
 interface UserPlan {
   id: string;
   action: string;
@@ -277,7 +280,7 @@ export default function Plan() {
                       <Text style={styles.planBadgeText}>{'\u2713'}</Text>
                     </View>
                     <View style={styles.cardContent}>
-                      <Text style={styles.moveAction}>{plan.action}</Text>
+                      <Text style={styles.moveAction}>{stripMd(plan.action)}</Text>
                       {plan.timeline && (
                         <Text style={styles.moveTimeline}>{plan.timeline}</Text>
                       )}
@@ -356,7 +359,7 @@ export default function Plan() {
                             </View>
                             <View style={styles.checklistContent}>
                               <Text style={[styles.checklistText, isDone && styles.checklistTextDone]}>
-                                {step}
+                                {stripMd(step)}
                               </Text>
                               {isNext && !isDone && (
                                 <Text style={styles.nextStepLabel}>Do this next</Text>
@@ -437,7 +440,7 @@ export default function Plan() {
                   </Text>
                 </View>
                 <View style={styles.cardContent}>
-                  <Text style={[styles.moveAction, isApproved && styles.approvedAction]}>{move.action}</Text>
+                  <Text style={[styles.moveAction, isApproved && styles.approvedAction]}>{stripMd(move.action)}</Text>
                   <View style={styles.moveStats}>
                     <Text style={styles.moveImpact}>
                       {'\u00a3'}{move.monthlyImpact}/mo
@@ -470,7 +473,7 @@ export default function Plan() {
                 {move.strategy && (
                   <View style={styles.detailBlock}>
                     <Text style={styles.detailLabel}>Strategy</Text>
-                    <Text style={styles.detailText}>{move.strategy}</Text>
+                    <Text style={styles.detailText}>{stripMd(move.strategy)}</Text>
                   </View>
                 )}
 
@@ -510,7 +513,7 @@ export default function Plan() {
                               styles.checklistText,
                               isDone && isApproved && styles.checklistTextDone,
                             ]}>
-                              {step}
+                              {stripMd(step)}
                             </Text>
                             {isNext && !isDone && (
                               <Text style={styles.nextStepLabel}>Do this next</Text>
@@ -525,7 +528,7 @@ export default function Plan() {
                 {move.effect && (
                   <View style={styles.detailBlock}>
                     <Text style={styles.detailLabel}>Expected outcome</Text>
-                    <Text style={styles.effectText}>{move.effect}</Text>
+                    <Text style={styles.effectText}>{stripMd(move.effect)}</Text>
                   </View>
                 )}
 

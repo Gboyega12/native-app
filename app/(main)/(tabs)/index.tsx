@@ -12,6 +12,9 @@ import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 
+/** Strip markdown bold/italic markers from text rendered with plain <Text> */
+const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
+
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
@@ -331,7 +334,7 @@ export default function Home() {
                         <Text style={[styles.rankText, isHigh && styles.rankTextHigh]}>#{i + 1}</Text>
                       </View>
                       <View style={styles.recTitleWrap}>
-                        <Text style={styles.recTitle}>{move.action}</Text>
+                        <Text style={styles.recTitle}>{stripMd(move.action)}</Text>
                         {isHigh && (
                           <View style={styles.priorityTag}>
                             <Text style={styles.priorityTagText}>HIGH PRIORITY</Text>
@@ -350,7 +353,7 @@ export default function Home() {
                       {move.effort && (
                         <Text style={styles.effortLabel}>{move.effort} effort</Text>
                       )}
-                      <Text style={styles.recDesc}>{move.strategy}</Text>
+                      <Text style={styles.recDesc}>{stripMd(move.strategy)}</Text>
                       <TouchableOpacity
                         style={styles.planLink}
                         accessibilityRole="link"

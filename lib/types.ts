@@ -195,7 +195,7 @@ export interface EnrichmentResult {
 // ── Chat ──
 
 export interface ChatAction {
-  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed';
+  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed' | 'plan_error';
   data: {
     id?: string;
     action?: string;

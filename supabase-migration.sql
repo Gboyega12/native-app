@@ -237,7 +237,8 @@ CREATE TABLE debt_accounts (
   minimum_payment NUMERIC,
   source TEXT NOT NULL DEFAULT 'truelayer',
   last_updated TIMESTAMPTZ DEFAULT now(),
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, account_name)
 );
 
 ALTER TABLE debt_accounts ENABLE ROW LEVEL SECURITY;

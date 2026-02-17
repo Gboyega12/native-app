@@ -9,6 +9,9 @@ import { colors, fonts, spacing, radius } from '@/theme';
 import Markdown from '@/lib/markdown';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/lib/types';
 
+/** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
+const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
+
 // ── Suggested questions (contextual) ──
 
 function getContextualQuestions(analysis: Analysis | null, goals: Goals | null): string[] {
@@ -98,7 +101,7 @@ function PlanCard({
   return (
     <View style={[styles.actionCard, styles.actionCardApproved]}>
       <Text style={styles.actionCardLabel}>PLAN CREATED</Text>
-      <Text style={styles.actionCardTitle}>{d.action}</Text>
+      <Text style={styles.actionCardTitle}>{stripMd(d.action)}</Text>
       <View style={styles.actionCardStats}>
         {d.target_amount != null && (
           <View style={styles.actionStat}>
@@ -172,7 +175,7 @@ function GoalUpdateCard({
   return (
     <View style={[styles.actionCard, styles.goalUpdateCard, isAccepted && styles.actionCardApproved]}>
       <Text style={styles.goalUpdateLabel}>GOAL CHECK-IN</Text>
-      <Text style={styles.goalUpdateReason}>{d.reason}</Text>
+      <Text style={styles.goalUpdateReason}>{stripMd(d.reason)}</Text>
       <View style={styles.goalUpdateFields}>
         <View style={styles.goalField}>
           <Text style={styles.goalFieldLabel}>Situation</Text>
