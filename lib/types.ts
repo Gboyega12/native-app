@@ -195,7 +195,7 @@ export interface EnrichmentResult {
 // ── Chat ──
 
 export interface ChatAction {
-  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed';
+  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed' | 'plan_error';
   data: {
     id?: string;
     action?: string;
@@ -240,6 +240,7 @@ export interface ChatContext {
   spending_by_category?: { category: string; monthly: number }[];
   recent_transfers?: { description: string; amount: number; date: string }[];
   debt_accounts?: { name: string; type: string; balance: number | null; limit: number | null }[];
+  budget_adjustments?: { description: string; category: string; amount: number; essential: boolean }[];
   behavioral_patterns?: string[];
   goal_trajectory?: {
     goalLabel: string;

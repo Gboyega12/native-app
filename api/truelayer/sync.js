@@ -89,7 +89,7 @@ export default async function handler(req, res) {
     fromDate.setFullYear(fromDate.getFullYear() - 1);
     const from = fromDate.toISOString().split('T')[0];
 
-    // Fetch all transactions
+    // Fetch all transactions + balances in parallel
     const txPromises = [
       ...accounts.map((a) =>
         fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
@@ -99,7 +99,24 @@ export default async function handler(req, res) {
       ),
     ];
 
-    const txResults = await Promise.all(txPromises);
+    const cardBalancePromises = cards.map((c) =>
+      fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/balance`, { headers })
+        .then((r) => r.json())
+        .then((data) => ({ card: c, balance: (data.results || [])[0] || null }))
+        .catch(() => ({ card: c, balance: null }))
+    );
+    const accountBalancePromises = accounts.map((a) =>
+      fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/balance`, { headers })
+        .then((r) => r.json())
+        .then((data) => ({ account: a, balance: (data.results || [])[0] || null }))
+        .catch(() => ({ account: a, balance: null }))
+    );
+
+    const [txResults, cardBalanceResults, accountBalanceResults] = await Promise.all([
+      Promise.all(txPromises),
+      Promise.all(cardBalancePromises),
+      Promise.all(accountBalancePromises),
+    ]);
     const allTx = txResults.flatMap((r) => r.results || []);
 
     // Convert to CSV
@@ -112,11 +129,44 @@ export default async function handler(req, res) {
     }
     const csv = csvLines.join('\n');
 
-    // Update bank_data with fresh CSV and new refresh_token
+    // Build refreshed balance data
+    const cardBalances = cardBalanceResults
+      .filter((r) => r.balance)
+      .map((r) => ({
+        name: r.card.display_name || r.card.provider?.display_name || 'Card',
+        type: 'credit_card',
+        balance: r.balance.current != null ? Math.abs(r.balance.current) : null,
+        limit: r.balance.credit_limit || null,
+        available: r.balance.available || null,
+      }));
+
+    const accountBalances = accountBalanceResults
+      .filter((r) => r.balance)
+      .map((r) => {
+        const bal = r.balance;
+        const hasOverdraft = bal.overdraft != null && bal.overdraft > 0;
+        const isOverdrawn = bal.current != null && bal.current < 0;
+        if (!hasOverdraft && !isOverdrawn) return null;
+        return {
+          name: r.account.display_name || r.account.provider?.display_name || 'Account',
+          type: isOverdrawn ? 'overdraft' : 'overdraft_facility',
+          balance: isOverdrawn ? Math.abs(bal.current) : 0,
+          limit: bal.overdraft || null,
+          available: bal.available || null,
+        };
+      })
+      .filter(Boolean);
+
+    const allBalances = [...cardBalances, ...accountBalances];
+
+    // Update bank_data with fresh CSV, balances, and new refresh_token
     const updateFields = {
       csv_data: csv,
       updated_at: new Date().toISOString(),
     };
+    if (allBalances.length > 0) {
+      updateFields.card_balances = allBalances;
+    }
     // Store the new refresh_token if one was issued
     if (tokenData.refresh_token) {
       updateFields.refresh_token = tokenData.refresh_token;
@@ -126,10 +176,13 @@ export default async function handler(req, res) {
       .update(updateFields)
       .eq('id', bankRow.id);
 
+    console.log('[sync] Refreshed balances:', allBalances.length, 'account(s)');
+
     return res.json({
       success: true,
       csv_data: csv,
       transactions_found: allTx.length,
+      balances_found: allBalances.length,
       updated_at: updateFields.updated_at,
     });
   } catch (err) {

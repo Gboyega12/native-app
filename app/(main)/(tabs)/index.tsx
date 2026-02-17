@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, Platform, UIManager,
+  LayoutAnimation, Platform, UIManager, TextInput, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -11,6 +11,9 @@ import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
+
+/** Strip markdown bold/italic markers from text rendered with plain <Text> */
+const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -27,6 +30,7 @@ export default function Home() {
   const [userName, setUserName] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
+  const [budgetExpanded, setBudgetExpanded] = useState(false);
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -60,6 +64,52 @@ export default function Home() {
   };
 
   const [syncing, setSyncing] = useState(false);
+
+  // Add budget item state
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [addItemDesc, setAddItemDesc] = useState('');
+  const [addItemAmount, setAddItemAmount] = useState('');
+  const [addItemCategory, setAddItemCategory] = useState('');
+  const [addItemEssential, setAddItemEssential] = useState(true);
+  const [addItemSaving, setAddItemSaving] = useState(false);
+
+  const BUDGET_CATEGORIES = [
+    'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport',
+    'Dining', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
+    'Childcare', 'Education', 'Charity', 'Other',
+  ];
+
+  const saveAddItem = async () => {
+    const amount = parseFloat(addItemAmount);
+    if (!addItemDesc.trim() || !addItemCategory || isNaN(amount) || amount <= 0) return;
+
+    setAddItemSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      await supabase.from('budget_adjustments').insert({
+        user_id: user.id,
+        description: addItemDesc.trim(),
+        category: addItemCategory,
+        monthly_amount: amount,
+        is_essential: addItemEssential,
+      });
+
+      // Reset form and close
+      setAddItemDesc('');
+      setAddItemAmount('');
+      setAddItemCategory('');
+      setAddItemEssential(true);
+      setShowAddItem(false);
+
+      // Refresh data to show the new item
+      loadData();
+    } catch (err: any) {
+      console.warn('[home] Failed to save budget item:', err?.message);
+    }
+    setAddItemSaving(false);
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -114,31 +164,60 @@ export default function Home() {
   const syncInBackground = async (userId: string) => {
     try {
       setSyncing(true);
-      const res = await fetch('/api/truelayer/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId }),
-      });
-      const data = await res.json();
 
-      if (!data.success || !data.csv_data) {
-        // No TrueLayer connection, token expired, or no new data — silent fail
+      // Try TrueLayer sync for fresh data
+      let csvData: string | null = null;
+      try {
+        const res = await fetch('/api/truelayer/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId }),
+        });
+        const data = await res.json();
+        if (data.success && data.csv_data) {
+          csvData = data.csv_data;
+        }
+      } catch {}
+
+      // If TrueLayer sync failed, fall back to existing CSV from bank_data
+      if (!csvData) {
+        try {
+          const { data: bankRow } = await supabase
+            .from('bank_data')
+            .select('csv_data')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+          if (bankRow?.csv_data) csvData = bankRow.csv_data;
+        } catch {}
+      }
+
+      if (!csvData) {
         setSyncing(false);
         return;
       }
 
-      // Fetch user's transaction overrides
+      // Fetch user's transaction overrides + budget adjustments
       let overrides: any[] = [];
+      let budgetAdjustments: any[] = [];
       try {
-        const { data: overrideData } = await supabase
-          .from('transaction_overrides')
-          .select('match_description, category, is_essential')
-          .eq('user_id', userId);
-        if (overrideData) overrides = overrideData;
+        const [overrideRes, adjustmentRes] = await Promise.all([
+          supabase
+            .from('transaction_overrides')
+            .select('match_description, category, is_essential')
+            .eq('user_id', userId),
+          supabase
+            .from('budget_adjustments')
+            .select('description, category, monthly_amount, is_essential')
+            .eq('user_id', userId),
+        ]);
+        if (overrideRes.data) overrides = overrideRes.data;
+        if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
       } catch {}
 
       // Re-run enrichment engine with fresh data (fast, ~1 second)
-      const result = EnrichmentEngine.enrich(data.csv_data, overrides);
+      const result = EnrichmentEngine.enrich(csvData, overrides);
       if (result.enrichedTransactions.length === 0) {
         setSyncing(false);
         return;
@@ -162,15 +241,51 @@ export default function Home() {
       const allMoves = rankedMoves;
       const topMove = allMoves[0] || null;
 
+      // Merge manual budget adjustments into the enrichment result
+      const nonDisc = { ...result.profile.budgetReality.nonDiscretionary };
+      const disc = { ...result.profile.budgetReality.discretionary };
+      nonDisc.items = [...(nonDisc.items || [])];
+      disc.items = [...(disc.items || [])];
+
+      for (const adj of budgetAdjustments) {
+        const section = adj.is_essential ? nonDisc : disc;
+        const existing = section.items.find((i: BudgetCategory) => i.category === adj.category);
+        if (existing) {
+          existing.monthly += adj.monthly_amount;
+          existing.txs += 1;
+          existing.transactions = [...(existing.transactions || []), {
+            date: new Date().toISOString().split('T')[0],
+            merchant: adj.description,
+            description: adj.description + ' (manual)',
+            amount: -Math.abs(adj.monthly_amount),
+          }];
+        } else {
+          section.items.push({
+            category: adj.category,
+            monthly: adj.monthly_amount,
+            txs: 1,
+            transactions: [{
+              date: new Date().toISOString().split('T')[0],
+              merchant: adj.description,
+              description: adj.description + ' (manual)',
+              amount: -Math.abs(adj.monthly_amount),
+            }],
+          });
+        }
+        section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+      }
+
+      const totalManualSpend = budgetAdjustments.reduce((s: number, a: any) => s + a.monthly_amount, 0);
+
       const updatedAnalysis: Analysis = {
         user_id: userId,
         archetype: result.archetype.key,
         decision_score: result.decisionScore.score,
         monthly_income: Math.round(result.profile.monthly.income),
-        monthly_spending: Math.round(result.profile.monthly.spending),
-        surplus: Math.round(result.profile.monthly.surplus),
-        non_discretionary: result.profile.budgetReality.nonDiscretionary,
-        discretionary: result.profile.budgetReality.discretionary,
+        monthly_spending: Math.round(result.profile.monthly.spending + totalManualSpend),
+        surplus: Math.round(result.profile.monthly.surplus - totalManualSpend),
+        non_discretionary: nonDisc,
+        discretionary: disc,
         income_sources: result.profile.incomeSources,
         top_move: topMove || ({} as any),
         all_moves: allMoves,
@@ -262,6 +377,34 @@ export default function Home() {
     return floored as [number, number, number];
   })();
 
+  // ── Safe-to-spend weekly calculation ──
+  const weeklyBudget = leftToDecide / 4.33;
+
+  // Get start of current week (Monday)
+  const getWeekStart = () => {
+    const now = new Date();
+    const day = now.getDay();
+    const diff = day === 0 ? 6 : day - 1; // Monday = 0 offset
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - diff);
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+  };
+
+  const weekStart = getWeekStart();
+  const allDiscTxs: TransactionDetail[] = discItems.flatMap(
+    (item: BudgetCategory) => item.transactions ?? []
+  );
+  const spentThisWeek = allDiscTxs
+    .filter((tx) => new Date(tx.date) >= weekStart)
+    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+
+  const weeklyRemaining = Math.max(0, weeklyBudget - spentThisWeek);
+  const weeklyUsedPct = weeklyBudget > 0
+    ? Math.min(100, Math.round((spentThisWeek / weeklyBudget) * 100))
+    : 0;
+  const weeklyHealthy = spentThisWeek <= weeklyBudget;
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       {/* ── Header ── */}
@@ -331,7 +474,7 @@ export default function Home() {
                         <Text style={[styles.rankText, isHigh && styles.rankTextHigh]}>#{i + 1}</Text>
                       </View>
                       <View style={styles.recTitleWrap}>
-                        <Text style={styles.recTitle}>{move.action}</Text>
+                        <Text style={styles.recTitle}>{stripMd(move.action)}</Text>
                         {isHigh && (
                           <View style={styles.priorityTag}>
                             <Text style={styles.priorityTagText}>HIGH PRIORITY</Text>
@@ -350,7 +493,7 @@ export default function Home() {
                       {move.effort && (
                         <Text style={styles.effortLabel}>{move.effort} effort</Text>
                       )}
-                      <Text style={styles.recDesc}>{move.strategy}</Text>
+                      <Text style={styles.recDesc}>{stripMd(move.strategy)}</Text>
                       <TouchableOpacity
                         style={styles.planLink}
                         accessibilityRole="link"
@@ -412,10 +555,64 @@ export default function Home() {
           </View>
 
           {/* ══════════════════════════════════════════════
-              CARD 3 — YOUR BUDGET REALITY
+              CARD 3 — SAFE TO SPEND
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Your budget reality</Text>
+            <Text style={styles.cardTitle}>Safe to spend</Text>
+            <Text style={styles.cardSubtitle}>Your weekly lifestyle allowance</Text>
+
+            {/* Big remaining number */}
+            <View style={styles.safeToSpendHero}>
+              <Text style={[styles.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }]}>
+                {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
+              </Text>
+              <Text style={styles.safeToSpendLabel}>left this week</Text>
+            </View>
+
+            {/* Progress bar */}
+            <View style={styles.safeToSpendBar}>
+              <View
+                style={[
+                  styles.safeToSpendBarFill,
+                  {
+                    width: `${weeklyUsedPct}%`,
+                    backgroundColor: weeklyHealthy ? colors.accent : colors.coral,
+                  },
+                ]}
+              />
+            </View>
+
+            {/* Spent vs budget row */}
+            <View style={styles.safeToSpendRow}>
+              <View>
+                <Text style={styles.safeToSpendMeta}>
+                  {'\u00a3'}{Math.round(spentThisWeek).toLocaleString()} spent
+                </Text>
+              </View>
+              <View>
+                <Text style={styles.safeToSpendMeta}>
+                  {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()} budget
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* ══════════════════════════════════════════════
+              CARD 4 — YOUR BUDGET REALITY
+              ══════════════════════════════════════════════ */}
+          <View style={styles.card}>
+            {/* Tappable header to toggle breakdown */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => {
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setBudgetExpanded((prev) => !prev);
+              }}
+              style={styles.budgetHeaderRow}
+            >
+              <Text style={styles.cardTitle}>Your budget reality</Text>
+              <Text style={styles.chevron}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
+            </TouchableOpacity>
 
             {/* 3-segment stacked bar */}
             <View style={styles.budgetBar}>
@@ -430,8 +627,8 @@ export default function Home() {
               )}
             </View>
 
-            {/* Summary row */}
-            <View style={styles.summaryRow}>
+            {/* Summary row — always visible */}
+            <View style={[styles.summaryRow, !budgetExpanded && { marginBottom: 0 }]}>
               <View style={styles.summaryItem}>
                 <Text style={[styles.summaryAmount, { color: colors.coral }]}>
                   {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
@@ -455,124 +652,228 @@ export default function Home() {
               </View>
             </View>
 
-            {/* Non-negotiable breakdown */}
-            {nonDiscItems.length > 0 && (
+            {/* Collapsible breakdown sections */}
+            {budgetExpanded && (
               <>
-                <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
-                {nonDiscItems.map((item: BudgetCategory, i: number) => {
-                  const key = `nd-${item.category}`;
-                  const isExpanded = expandedCategories.has(key);
-                  const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
-                  const pctOfSection = nonDiscTotal > 0 ? Math.round((item.monthly / nonDiscTotal) * 100) : 0;
-                  return (
-                    <View key={i}>
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        onPress={() => toggleCategory(key)}
-                        style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
-                      >
-                        <View style={styles.dataRowLeft}>
-                          <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && [styles.bulletExpanded, { borderTopColor: colors.coral }]]} />
-                          <View>
-                            <Text style={styles.dataLabel}>{item.category}</Text>
-                            <Text style={styles.dataMeta}>
-                              {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of essentials
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.dataRowRight}>
-                          <Text style={[styles.dataValue, { color: colors.coral }]}>
-                            {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                      {isExpanded && txs.length > 0 && (
-                        <View style={styles.txDropdown}>
-                          {txs.map((tx, j) => (
-                            <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
-                              <View style={styles.txLeft}>
-                                <Text style={styles.txMerchant}>{tx.merchant}</Text>
-                                <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                {/* Non-negotiable breakdown */}
+                {nonDiscItems.length > 0 && (
+                  <>
+                    <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
+                    {nonDiscItems.map((item: BudgetCategory, i: number) => {
+                      const key = `nd-${item.category}`;
+                      const isExpanded = expandedCategories.has(key);
+                      const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
+                      const pctOfSection = nonDiscTotal > 0 ? Math.round((item.monthly / nonDiscTotal) * 100) : 0;
+                      return (
+                        <View key={i}>
+                          <TouchableOpacity
+                            activeOpacity={0.7}
+                            onPress={() => toggleCategory(key)}
+                            style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                          >
+                            <View style={styles.dataRowLeft}>
+                              <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && [styles.bulletExpanded, { borderTopColor: colors.coral }]]} />
+                              <View>
+                                <Text style={styles.dataLabel}>{item.category}</Text>
+                                <Text style={styles.dataMeta}>
+                                  {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of essentials
+                                </Text>
                               </View>
-                              <Text style={[styles.txAmount, { color: colors.coral }]}>
-                                {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                            </View>
+                            <View style={styles.dataRowRight}>
+                              <Text style={[styles.dataValue, { color: colors.coral }]}>
+                                {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
                             </View>
-                          ))}
+                          </TouchableOpacity>
+                          {isExpanded && txs.length > 0 && (
+                            <View style={styles.txDropdown}>
+                              {txs.map((tx, j) => (
+                                <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                                  <View style={styles.txLeft}>
+                                    <Text style={styles.txMerchant}>{tx.merchant}</Text>
+                                    <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                                  </View>
+                                  <Text style={[styles.txAmount, { color: colors.coral }]}>
+                                    {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                          {isExpanded && txs.length === 0 && (
+                            <View style={styles.txDropdown}>
+                              <Text style={styles.txEmpty}>No transaction details available</Text>
+                            </View>
+                          )}
                         </View>
-                      )}
-                      {isExpanded && txs.length === 0 && (
-                        <View style={styles.txDropdown}>
-                          <Text style={styles.txEmpty}>No transaction details available</Text>
+                      );
+                    })}
+                  </>
+                )}
+
+                {/* Lifestyle spending */}
+                {discItems.length > 0 && (
+                  <>
+                    <Text style={[styles.breakdownHeader, { marginTop: 28 }]}>
+                      LIFESTYLE
+                    </Text>
+                    {discItems.map((item: BudgetCategory, i: number) => {
+                      const key = `d-${item.category}`;
+                      const isExpanded = expandedCategories.has(key);
+                      const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
+                      const pctOfSection = discTotal > 0 ? Math.round((item.monthly / discTotal) * 100) : 0;
+                      return (
+                        <View key={i}>
+                          <TouchableOpacity
+                            activeOpacity={0.7}
+                            onPress={() => toggleCategory(key)}
+                            style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                          >
+                            <View style={styles.dataRowLeft}>
+                              <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && [styles.bulletExpanded, { borderTopColor: gold }]]} />
+                              <View>
+                                <Text style={styles.dataLabel}>{item.category}</Text>
+                                <Text style={styles.dataMeta}>
+                                  {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
+                                </Text>
+                              </View>
+                            </View>
+                            <View style={styles.dataRowRight}>
+                              <Text style={[styles.dataValue, { color: gold }]}>
+                                {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                          {isExpanded && txs.length > 0 && (
+                            <View style={styles.txDropdown}>
+                              {txs.map((tx, j) => (
+                                <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                                  <View style={styles.txLeft}>
+                                    <Text style={styles.txMerchant}>{tx.merchant}</Text>
+                                    <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                                  </View>
+                                  <Text style={[styles.txAmount, { color: gold }]}>
+                                    {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                          {isExpanded && txs.length === 0 && (
+                            <View style={styles.txDropdown}>
+                              <Text style={styles.txEmpty}>No transaction details available</Text>
+                            </View>
+                          )}
                         </View>
-                      )}
-                    </View>
-                  );
-                })}
+                      );
+                    })}
+                  </>
+                )}
+
+                <Text style={styles.cardFooter}>Tap a category to see this month's transactions</Text>
               </>
             )}
 
-            {/* Lifestyle spending */}
-            {discItems.length > 0 && (
-              <>
-                <Text style={[styles.breakdownHeader, { marginTop: 28 }]}>
-                  LIFESTYLE
-                </Text>
-                {discItems.map((item: BudgetCategory, i: number) => {
-                  const key = `d-${item.category}`;
-                  const isExpanded = expandedCategories.has(key);
-                  const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
-                  const pctOfSection = discTotal > 0 ? Math.round((item.monthly / discTotal) * 100) : 0;
-                  return (
-                    <View key={i}>
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        onPress={() => toggleCategory(key)}
-                        style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
-                      >
-                        <View style={styles.dataRowLeft}>
-                          <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && [styles.bulletExpanded, { borderTopColor: gold }]]} />
-                          <View>
-                            <Text style={styles.dataLabel}>{item.category}</Text>
-                            <Text style={styles.dataMeta}>
-                              {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.dataRowRight}>
-                          <Text style={[styles.dataValue, { color: gold }]}>
-                            {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                      {isExpanded && txs.length > 0 && (
-                        <View style={styles.txDropdown}>
-                          {txs.map((tx, j) => (
-                            <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
-                              <View style={styles.txLeft}>
-                                <Text style={styles.txMerchant}>{tx.merchant}</Text>
-                                <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
-                              </View>
-                              <Text style={[styles.txAmount, { color: gold }]}>
-                                {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
-                      {isExpanded && txs.length === 0 && (
-                        <View style={styles.txDropdown}>
-                          <Text style={styles.txEmpty}>No transaction details available</Text>
-                        </View>
-                      )}
-                    </View>
-                  );
-                })}
-              </>
-            )}
-
-            <Text style={styles.cardFooter}>Tap a category to see this month's transactions</Text>
+            {/* Add item button */}
+            <TouchableOpacity
+              style={styles.addItemButton}
+              onPress={() => {
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setShowAddItem(true);
+              }}
+            >
+              <Text style={styles.addItemButtonText}>+ Add item</Text>
+            </TouchableOpacity>
           </View>
+
+          {/* Add budget item modal */}
+          <Modal visible={showAddItem} transparent animationType="fade">
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Add budget item</Text>
+                <Text style={styles.modalSubtitle}>
+                  For expenses not in your bank data (rent via partner, cash, etc.)
+                </Text>
+
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Description (e.g. Rent)"
+                  placeholderTextColor={colors.muted}
+                  value={addItemDesc}
+                  onChangeText={setAddItemDesc}
+                />
+
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Monthly amount"
+                  placeholderTextColor={colors.muted}
+                  keyboardType="numeric"
+                  value={addItemAmount}
+                  onChangeText={setAddItemAmount}
+                />
+
+                {/* Category picker */}
+                <Text style={styles.modalLabel}>Category</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+                  {BUDGET_CATEGORIES.map((cat) => (
+                    <TouchableOpacity
+                      key={cat}
+                      style={[styles.categoryChip, addItemCategory === cat && styles.categoryChipActive]}
+                      onPress={() => setAddItemCategory(cat)}
+                    >
+                      <Text style={[styles.categoryChipText, addItemCategory === cat && styles.categoryChipTextActive]}>
+                        {cat}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {/* Essential toggle */}
+                <View style={styles.essentialRow}>
+                  <Text style={styles.modalLabel}>Type</Text>
+                  <View style={styles.toggleRow}>
+                    <TouchableOpacity
+                      style={[styles.toggleOption, addItemEssential && styles.toggleOptionActive]}
+                      onPress={() => setAddItemEssential(true)}
+                    >
+                      <Text style={[styles.toggleText, addItemEssential && styles.toggleTextActive]}>Essential</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.toggleOption, !addItemEssential && styles.toggleOptionLifestyle]}
+                      onPress={() => setAddItemEssential(false)}
+                    >
+                      <Text style={[styles.toggleText, !addItemEssential && styles.toggleTextLifestyle]}>Lifestyle</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Actions */}
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={styles.modalCancel}
+                    onPress={() => setShowAddItem(false)}
+                  >
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.modalSave,
+                      (!addItemDesc.trim() || !addItemCategory || !addItemAmount) && styles.modalSaveDisabled,
+                    ]}
+                    onPress={saveAddItem}
+                    disabled={addItemSaving || !addItemDesc.trim() || !addItemCategory || !addItemAmount}
+                  >
+                    {addItemSaving ? (
+                      <ActivityIndicator color={colors.bg} size="small" />
+                    ) : (
+                      <Text style={styles.modalSaveText}>Add</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
 
           {/* ── Upload new statement ── */}
           <TouchableOpacity
@@ -917,7 +1218,58 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // ── Card 3: Budget Reality ──
+  // ── Card 3: Safe to Spend ──
+  safeToSpendHero: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingBottom: 20,
+  },
+  safeToSpendAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 44,
+    fontWeight: '800',
+    color: colors.accent,
+    letterSpacing: -1,
+  },
+  safeToSpendLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+    marginTop: 4,
+  },
+  safeToSpendBar: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  safeToSpendBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  safeToSpendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  safeToSpendMeta: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.muted,
+  },
+
+  // ── Card 4: Budget Reality ──
+  budgetHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  chevron: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.dim,
+  },
   budgetBar: {
     flexDirection: 'row',
     height: 8,
@@ -1098,5 +1450,156 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 15,
     color: colors.accent,
+  },
+
+  // ── Add item button ──
+  addItemButton: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderStyle: 'dashed' as any,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  addItemButtonText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+  },
+
+  // ── Modal ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalContent: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+  },
+  modalTitle: {
+    fontFamily: fonts.heading,
+    fontSize: 20,
+    color: colors.text,
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  modalInput: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: colors.text,
+    marginBottom: 12,
+  },
+  modalLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  categoryScroll: {
+    marginBottom: 16,
+    maxHeight: 36,
+  },
+  categoryChip: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginRight: 8,
+  },
+  categoryChipActive: {
+    backgroundColor: colors.accentDim,
+  },
+  categoryChipText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.dim,
+  },
+  categoryChipTextActive: {
+    color: colors.accent,
+  },
+  essentialRow: {
+    marginBottom: 20,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toggleOption: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  toggleOptionActive: {
+    borderColor: colors.coral,
+    backgroundColor: 'rgba(232,96,99,0.1)',
+  },
+  toggleOptionLifestyle: {
+    borderColor: '#E8C55A',
+    backgroundColor: 'rgba(232,197,90,0.1)',
+  },
+  toggleText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+  },
+  toggleTextActive: {
+    color: colors.coral,
+  },
+  toggleTextLifestyle: {
+    color: '#E8C55A',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalCancel: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  modalCancelText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.dim,
+  },
+  modalSave: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    backgroundColor: colors.accent,
+  },
+  modalSaveDisabled: {
+    opacity: 0.4,
+  },
+  modalSaveText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.bg,
   },
 });

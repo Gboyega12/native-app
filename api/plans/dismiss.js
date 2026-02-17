@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     .update({ status: 'dismissed', updated_at: new Date().toISOString() })
     .eq('id', plan_id)
     .eq('user_id', user_id)
-    .eq('status', 'proposed');
+    .neq('status', 'dismissed');
 
   if (error) {
     return res.status(400).json({ error: error.message });

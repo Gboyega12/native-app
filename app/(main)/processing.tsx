@@ -7,7 +7,7 @@ import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib
 import type { RankedMove } from '@/lib/move-engine';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { colors, fonts, spacing } from '@/theme';
-import type { Analysis, Goals } from '@/lib/types';
+import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
 
 const STEPS = [
   'Scanning transactions',
@@ -55,16 +55,24 @@ function ProcessingInner() {
       setCurrentStep(0);
       await delay(400);
 
-      // Fetch user's transaction overrides (corrections made via chat)
+      // Fetch user's transaction overrides + manual budget items
       let overrides: any[] = [];
+      let budgetAdjustments: any[] = [];
       try {
         const { data: { user: authUser } } = await supabase.auth.getUser();
         if (authUser) {
-          const { data: overrideData } = await supabase
-            .from('transaction_overrides')
-            .select('match_description, category, is_essential')
-            .eq('user_id', authUser.id);
-          if (overrideData) overrides = overrideData;
+          const [overrideRes, adjustmentRes] = await Promise.all([
+            supabase
+              .from('transaction_overrides')
+              .select('match_description, category, is_essential')
+              .eq('user_id', authUser.id),
+            supabase
+              .from('budget_adjustments')
+              .select('description, category, monthly_amount, is_essential')
+              .eq('user_id', authUser.id),
+          ]);
+          if (overrideRes.data) overrides = overrideRes.data;
+          if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
         }
       } catch {}
 
@@ -235,6 +243,42 @@ function ProcessingInner() {
 
       await delay(300);
 
+      // ── Merge manual budget adjustments ──
+      const nonDiscSection = { ...result.profile.budgetReality.nonDiscretionary };
+      const discSection = { ...result.profile.budgetReality.discretionary };
+      nonDiscSection.items = [...(nonDiscSection.items || [])];
+      discSection.items = [...(discSection.items || [])];
+
+      for (const adj of budgetAdjustments) {
+        const section = adj.is_essential ? nonDiscSection : discSection;
+        const existing = section.items.find((i: BudgetCategory) => i.category === adj.category);
+        if (existing) {
+          existing.monthly += adj.monthly_amount;
+          existing.txs += 1;
+          existing.transactions = [...(existing.transactions || []), {
+            date: new Date().toISOString().split('T')[0],
+            merchant: adj.description,
+            description: adj.description + ' (manual)',
+            amount: -Math.abs(adj.monthly_amount),
+          }];
+        } else {
+          section.items.push({
+            category: adj.category,
+            monthly: adj.monthly_amount,
+            txs: 1,
+            transactions: [{
+              date: new Date().toISOString().split('T')[0],
+              merchant: adj.description,
+              description: adj.description + ' (manual)',
+              amount: -Math.abs(adj.monthly_amount),
+            }],
+          });
+        }
+        section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+      }
+
+      const totalManualSpend = budgetAdjustments.reduce((s: number, a: any) => s + a.monthly_amount, 0);
+
       // ── Save to Supabase ──
       const topMove = allMoves[0] || null;
       const analysis: Analysis = {
@@ -242,10 +286,10 @@ function ProcessingInner() {
         archetype: result.archetype.key,
         decision_score: result.decisionScore.score,
         monthly_income: Math.round(result.profile.monthly.income),
-        monthly_spending: Math.round(result.profile.monthly.spending),
-        surplus: Math.round(result.profile.monthly.surplus),
-        non_discretionary: result.profile.budgetReality.nonDiscretionary,
-        discretionary: result.profile.budgetReality.discretionary,
+        monthly_spending: Math.round(result.profile.monthly.spending + totalManualSpend),
+        surplus: Math.round(result.profile.monthly.surplus - totalManualSpend),
+        non_discretionary: nonDiscSection,
+        discretionary: discSection,
         income_sources: result.profile.incomeSources,
         top_move: topMove || ({} as any),
         all_moves: allMoves,
@@ -274,7 +318,7 @@ function ProcessingInner() {
             console.warn('[processing] Supabase insert failed:', insertError.message);
           }
 
-          // Save card balances to debt_accounts (from TrueLayer data)
+          // Save card + account balances to debt_accounts (from TrueLayer data)
           try {
             const { data: bankRows } = await supabase
               .from('bank_data')
