@@ -30,6 +30,7 @@ export default function Home() {
   const [userName, setUserName] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
+  const [budgetExpanded, setBudgetExpanded] = useState(false);
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -265,6 +266,34 @@ export default function Home() {
     return floored as [number, number, number];
   })();
 
+  // ── Safe-to-spend weekly calculation ──
+  const weeklyBudget = leftToDecide / 4.33;
+
+  // Get start of current week (Monday)
+  const getWeekStart = () => {
+    const now = new Date();
+    const day = now.getDay();
+    const diff = day === 0 ? 6 : day - 1; // Monday = 0 offset
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - diff);
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+  };
+
+  const weekStart = getWeekStart();
+  const allDiscTxs: TransactionDetail[] = discItems.flatMap(
+    (item: BudgetCategory) => item.transactions ?? []
+  );
+  const spentThisWeek = allDiscTxs
+    .filter((tx) => new Date(tx.date) >= weekStart)
+    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+
+  const weeklyRemaining = Math.max(0, weeklyBudget - spentThisWeek);
+  const weeklyUsedPct = weeklyBudget > 0
+    ? Math.min(100, Math.round((spentThisWeek / weeklyBudget) * 100))
+    : 0;
+  const weeklyHealthy = spentThisWeek <= weeklyBudget;
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
       {/* ── Header ── */}
@@ -415,10 +444,64 @@ export default function Home() {
           </View>
 
           {/* ══════════════════════════════════════════════
-              CARD 3 — YOUR BUDGET REALITY
+              CARD 3 — SAFE TO SPEND
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Your budget reality</Text>
+            <Text style={styles.cardTitle}>Safe to spend</Text>
+            <Text style={styles.cardSubtitle}>Your weekly lifestyle allowance</Text>
+
+            {/* Big remaining number */}
+            <View style={styles.safeToSpendHero}>
+              <Text style={[styles.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }]}>
+                {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
+              </Text>
+              <Text style={styles.safeToSpendLabel}>left this week</Text>
+            </View>
+
+            {/* Progress bar */}
+            <View style={styles.safeToSpendBar}>
+              <View
+                style={[
+                  styles.safeToSpendBarFill,
+                  {
+                    width: `${weeklyUsedPct}%`,
+                    backgroundColor: weeklyHealthy ? colors.accent : colors.coral,
+                  },
+                ]}
+              />
+            </View>
+
+            {/* Spent vs budget row */}
+            <View style={styles.safeToSpendRow}>
+              <View>
+                <Text style={styles.safeToSpendMeta}>
+                  {'\u00a3'}{Math.round(spentThisWeek).toLocaleString()} spent
+                </Text>
+              </View>
+              <View>
+                <Text style={styles.safeToSpendMeta}>
+                  {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()} budget
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* ══════════════════════════════════════════════
+              CARD 4 — YOUR BUDGET REALITY
+              ══════════════════════════════════════════════ */}
+          <View style={styles.card}>
+            {/* Tappable header to toggle breakdown */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => {
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setBudgetExpanded((prev) => !prev);
+              }}
+              style={styles.budgetHeaderRow}
+            >
+              <Text style={styles.cardTitle}>Your budget reality</Text>
+              <Text style={styles.chevron}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
+            </TouchableOpacity>
 
             {/* 3-segment stacked bar */}
             <View style={styles.budgetBar}>
@@ -433,8 +516,8 @@ export default function Home() {
               )}
             </View>
 
-            {/* Summary row */}
-            <View style={styles.summaryRow}>
+            {/* Summary row — always visible */}
+            <View style={[styles.summaryRow, !budgetExpanded && { marginBottom: 0 }]}>
               <View style={styles.summaryItem}>
                 <Text style={[styles.summaryAmount, { color: colors.coral }]}>
                   {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
@@ -458,123 +541,128 @@ export default function Home() {
               </View>
             </View>
 
-            {/* Non-negotiable breakdown */}
-            {nonDiscItems.length > 0 && (
+            {/* Collapsible breakdown sections */}
+            {budgetExpanded && (
               <>
-                <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
-                {nonDiscItems.map((item: BudgetCategory, i: number) => {
-                  const key = `nd-${item.category}`;
-                  const isExpanded = expandedCategories.has(key);
-                  const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
-                  const pctOfSection = nonDiscTotal > 0 ? Math.round((item.monthly / nonDiscTotal) * 100) : 0;
-                  return (
-                    <View key={i}>
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        onPress={() => toggleCategory(key)}
-                        style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
-                      >
-                        <View style={styles.dataRowLeft}>
-                          <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && [styles.bulletExpanded, { borderTopColor: colors.coral }]]} />
-                          <View>
-                            <Text style={styles.dataLabel}>{item.category}</Text>
-                            <Text style={styles.dataMeta}>
-                              {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of essentials
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.dataRowRight}>
-                          <Text style={[styles.dataValue, { color: colors.coral }]}>
-                            {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                      {isExpanded && txs.length > 0 && (
-                        <View style={styles.txDropdown}>
-                          {txs.map((tx, j) => (
-                            <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
-                              <View style={styles.txLeft}>
-                                <Text style={styles.txMerchant}>{tx.merchant}</Text>
-                                <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                {/* Non-negotiable breakdown */}
+                {nonDiscItems.length > 0 && (
+                  <>
+                    <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
+                    {nonDiscItems.map((item: BudgetCategory, i: number) => {
+                      const key = `nd-${item.category}`;
+                      const isExpanded = expandedCategories.has(key);
+                      const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
+                      const pctOfSection = nonDiscTotal > 0 ? Math.round((item.monthly / nonDiscTotal) * 100) : 0;
+                      return (
+                        <View key={i}>
+                          <TouchableOpacity
+                            activeOpacity={0.7}
+                            onPress={() => toggleCategory(key)}
+                            style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                          >
+                            <View style={styles.dataRowLeft}>
+                              <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && [styles.bulletExpanded, { borderTopColor: colors.coral }]]} />
+                              <View>
+                                <Text style={styles.dataLabel}>{item.category}</Text>
+                                <Text style={styles.dataMeta}>
+                                  {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of essentials
+                                </Text>
                               </View>
-                              <Text style={[styles.txAmount, { color: colors.coral }]}>
-                                {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                            </View>
+                            <View style={styles.dataRowRight}>
+                              <Text style={[styles.dataValue, { color: colors.coral }]}>
+                                {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
                             </View>
-                          ))}
+                          </TouchableOpacity>
+                          {isExpanded && txs.length > 0 && (
+                            <View style={styles.txDropdown}>
+                              {txs.map((tx, j) => (
+                                <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                                  <View style={styles.txLeft}>
+                                    <Text style={styles.txMerchant}>{tx.merchant}</Text>
+                                    <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                                  </View>
+                                  <Text style={[styles.txAmount, { color: colors.coral }]}>
+                                    {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                          {isExpanded && txs.length === 0 && (
+                            <View style={styles.txDropdown}>
+                              <Text style={styles.txEmpty}>No transaction details available</Text>
+                            </View>
+                          )}
                         </View>
-                      )}
-                      {isExpanded && txs.length === 0 && (
-                        <View style={styles.txDropdown}>
-                          <Text style={styles.txEmpty}>No transaction details available</Text>
-                        </View>
-                      )}
-                    </View>
-                  );
-                })}
-              </>
-            )}
+                      );
+                    })}
+                  </>
+                )}
 
-            {/* Lifestyle spending */}
-            {discItems.length > 0 && (
-              <>
-                <Text style={[styles.breakdownHeader, { marginTop: 28 }]}>
-                  LIFESTYLE
-                </Text>
-                {discItems.map((item: BudgetCategory, i: number) => {
-                  const key = `d-${item.category}`;
-                  const isExpanded = expandedCategories.has(key);
-                  const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
-                  const pctOfSection = discTotal > 0 ? Math.round((item.monthly / discTotal) * 100) : 0;
-                  return (
-                    <View key={i}>
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        onPress={() => toggleCategory(key)}
-                        style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
-                      >
-                        <View style={styles.dataRowLeft}>
-                          <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && [styles.bulletExpanded, { borderTopColor: gold }]]} />
-                          <View>
-                            <Text style={styles.dataLabel}>{item.category}</Text>
-                            <Text style={styles.dataMeta}>
-                              {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.dataRowRight}>
-                          <Text style={[styles.dataValue, { color: gold }]}>
-                            {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                      {isExpanded && txs.length > 0 && (
-                        <View style={styles.txDropdown}>
-                          {txs.map((tx, j) => (
-                            <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
-                              <View style={styles.txLeft}>
-                                <Text style={styles.txMerchant}>{tx.merchant}</Text>
-                                <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                {/* Lifestyle spending */}
+                {discItems.length > 0 && (
+                  <>
+                    <Text style={[styles.breakdownHeader, { marginTop: 28 }]}>
+                      LIFESTYLE
+                    </Text>
+                    {discItems.map((item: BudgetCategory, i: number) => {
+                      const key = `d-${item.category}`;
+                      const isExpanded = expandedCategories.has(key);
+                      const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
+                      const pctOfSection = discTotal > 0 ? Math.round((item.monthly / discTotal) * 100) : 0;
+                      return (
+                        <View key={i}>
+                          <TouchableOpacity
+                            activeOpacity={0.7}
+                            onPress={() => toggleCategory(key)}
+                            style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                          >
+                            <View style={styles.dataRowLeft}>
+                              <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && [styles.bulletExpanded, { borderTopColor: gold }]]} />
+                              <View>
+                                <Text style={styles.dataLabel}>{item.category}</Text>
+                                <Text style={styles.dataMeta}>
+                                  {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
+                                </Text>
                               </View>
-                              <Text style={[styles.txAmount, { color: gold }]}>
-                                {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                            </View>
+                            <View style={styles.dataRowRight}>
+                              <Text style={[styles.dataValue, { color: gold }]}>
+                                {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
                             </View>
-                          ))}
+                          </TouchableOpacity>
+                          {isExpanded && txs.length > 0 && (
+                            <View style={styles.txDropdown}>
+                              {txs.map((tx, j) => (
+                                <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                                  <View style={styles.txLeft}>
+                                    <Text style={styles.txMerchant}>{tx.merchant}</Text>
+                                    <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                                  </View>
+                                  <Text style={[styles.txAmount, { color: gold }]}>
+                                    {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                          {isExpanded && txs.length === 0 && (
+                            <View style={styles.txDropdown}>
+                              <Text style={styles.txEmpty}>No transaction details available</Text>
+                            </View>
+                          )}
                         </View>
-                      )}
-                      {isExpanded && txs.length === 0 && (
-                        <View style={styles.txDropdown}>
-                          <Text style={styles.txEmpty}>No transaction details available</Text>
-                        </View>
-                      )}
-                    </View>
-                  );
-                })}
+                      );
+                    })}
+                  </>
+                )}
+
+                <Text style={styles.cardFooter}>Tap a category to see this month's transactions</Text>
               </>
             )}
-
-            <Text style={styles.cardFooter}>Tap a category to see this month's transactions</Text>
           </View>
 
           {/* ── Upload new statement ── */}
@@ -920,7 +1008,58 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // ── Card 3: Budget Reality ──
+  // ── Card 3: Safe to Spend ──
+  safeToSpendHero: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingBottom: 20,
+  },
+  safeToSpendAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 44,
+    fontWeight: '800',
+    color: colors.accent,
+    letterSpacing: -1,
+  },
+  safeToSpendLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+    marginTop: 4,
+  },
+  safeToSpendBar: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  safeToSpendBarFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  safeToSpendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  safeToSpendMeta: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.muted,
+  },
+
+  // ── Card 4: Budget Reality ──
+  budgetHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  chevron: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.dim,
+  },
   budgetBar: {
     flexDirection: 'row',
     height: 8,
