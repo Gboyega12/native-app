@@ -12,11 +12,14 @@ import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
 const STEPS = [
   'Scanning transactions',
   'Identifying merchants',
+  'Enriching transactions',
   'Verifying with AI',
   'Detecting spending patterns',
   'Ranking by financial priority',
   'Refining your action plan',
 ];
+
+const CLASSIFY_BATCH_SIZE = 25; // Send to Claude in batches of 25
 
 // Global holder so dashboard can pick it up without re-fetching
 let _lastResult: Analysis | null = null;
@@ -27,6 +30,7 @@ function ProcessingInner() {
   const { csvData } = useLocalSearchParams<{ csvData: string }>();
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState('');
+  const [enrichProgress, setEnrichProgress] = useState('');
   const fadeAnims = useRef(STEPS.map(() => new Animated.Value(0))).current;
 
   useEffect(() => {
@@ -85,11 +89,15 @@ function ProcessingInner() {
       }
       await delay(400);
 
-      // ── Layer 1.5: Claude AI Verification ──
-      // Batch all low-confidence transactions to Claude for classification.
-      // Claude's world knowledge catches merchants the rule-based system misses:
-      //   "to Amex" → Debt Payments, "Claude.ai" → Subscriptions, etc.
+      // ── Layer 1.5: Enrichment — every transaction goes through enrichment ──
       setCurrentStep(2);
+      setEnrichProgress(`${result.enrichedTransactions.length} transactions enriched`);
+      await delay(400);
+
+      // ── Layer 2: Claude AI Verification ──
+      // Batch low-confidence transactions to Claude in chunks of CLASSIFY_BATCH_SIZE
+      // so nothing falls off during enrichment.
+      setCurrentStep(3);
       try {
         const unclassified = result.enrichedTransactions
           .map((tx, i) => ({ tx, originalIndex: i }))
@@ -102,46 +110,59 @@ function ProcessingInner() {
           );
 
         if (unclassified.length > 0) {
-          const classifyRes = await fetch('/api/claude/classify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              transactions: unclassified.map(({ tx }) => ({
-                description: tx.description,
-                amount: tx.amount,
-              })),
-            }),
-          });
-          const classifyData = await classifyRes.json();
+          const updated = [...result.enrichedTransactions];
+          const totalBatches = Math.ceil(unclassified.length / CLASSIFY_BATCH_SIZE);
 
-          if (classifyData.success && Array.isArray(classifyData.classifications)) {
-            // Merge Claude's classifications back into enriched transactions
-            const updated = [...result.enrichedTransactions];
-            classifyData.classifications.forEach((c: any, i: number) => {
-              const entry = unclassified[i];
-              if (!entry || c.category === 'Other') return;
+          for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
+            const batchStart = batchIdx * CLASSIFY_BATCH_SIZE;
+            const batch = unclassified.slice(batchStart, batchStart + CLASSIFY_BATCH_SIZE);
 
-              const tx = { ...updated[entry.originalIndex] };
-              tx.merchant = c.merchant || tx.merchant;
-              tx.category = c.category;
-              tx.isEssential = c.isEssential;
-              tx.isSubscription = c.isSubscription || tx.isSubscription;
-              tx.isDebt = c.isDebt || tx.isDebt;
-              tx.isBNPL = c.isBNPL || tx.isBNPL;
-              tx.isIncome = c.isIncome || tx.isIncome;
-              tx.confidence = c.confidence || 'medium';
-              updated[entry.originalIndex] = tx;
-            });
+            setEnrichProgress(`Verifying batch ${batchIdx + 1} of ${totalBatches} (${batch.length} transactions)`);
 
-            // Rebuild profile, archetype, score, and moves with improved data
-            result = EnrichmentEngine.rebuild(updated);
+            try {
+              const classifyRes = await fetch('/api/claude/classify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  transactions: batch.map(({ tx }) => ({
+                    description: tx.description,
+                    amount: tx.amount,
+                  })),
+                }),
+              });
+              const classifyData = await classifyRes.json();
+
+              if (classifyData.success && Array.isArray(classifyData.classifications)) {
+                classifyData.classifications.forEach((c: any, i: number) => {
+                  const entry = batch[i];
+                  if (!entry || c.category === 'Other') return;
+
+                  const tx = { ...updated[entry.originalIndex] };
+                  tx.merchant = c.merchant || tx.merchant;
+                  tx.category = c.category;
+                  tx.isEssential = c.isEssential;
+                  tx.isSubscription = c.isSubscription || tx.isSubscription;
+                  tx.isDebt = c.isDebt || tx.isDebt;
+                  tx.isBNPL = c.isBNPL || tx.isBNPL;
+                  tx.isIncome = c.isIncome || tx.isIncome;
+                  tx.confidence = c.confidence || 'medium';
+                  updated[entry.originalIndex] = tx;
+                });
+              }
+            } catch (batchErr: any) {
+              console.warn(`[processing] Batch ${batchIdx + 1} classify failed:`, batchErr?.message);
+              // Continue with remaining batches
+            }
+
+            await delay(200);
           }
+
+          // Rebuild profile with all improved data
+          result = EnrichmentEngine.rebuild(updated);
+          setEnrichProgress(`${unclassified.length} transactions verified`);
         }
       } catch (classifyErr: any) {
         console.warn('[processing] Claude classify failed, falling back to rule-based enrichment:', classifyErr?.message || classifyErr);
-        // Surface the failure count so it's visible in logs. If this fires,
-        // check that CLAUDE_API_KEY is set in .env — without it, ALL unknown
-        // merchants (restaurants, SaaS tools, niche brands) stay as "Other".
         const lowConfCount = result.enrichedTransactions.filter((t) => t.confidence === 'low' && !t.isIncome && !t.isTransfer).length;
         if (lowConfCount > 0) {
           console.warn(`[processing] ${lowConfCount} transactions stuck as "Other" — Claude AI fallback unavailable`);
@@ -149,7 +170,8 @@ function ProcessingInner() {
       }
       await delay(400);
 
-      setCurrentStep(3);
+      setCurrentStep(4);
+      setEnrichProgress('');
       await delay(400);
 
       // Fetch user goals
@@ -172,7 +194,7 @@ function ProcessingInner() {
 
       // ── Layer 2: Move Engine ──
       // UKPF flowchart priority + goal-aware ranking + trajectories
-      setCurrentStep(4);
+      setCurrentStep(5);
       const ukpf = determineFlowchartPosition(result.profile, goals);
       const rankedMoves = rankMoves(result.decisionStack, result.profile, goals);
       const topRanked = rankedMoves[0] || null;
@@ -181,7 +203,7 @@ function ProcessingInner() {
 
       // ── Layer 3: Claude Refinement ──
       // Takes top 3 ranked moves + raw data → rewrites into BOCY-style language
-      setCurrentStep(5);
+      setCurrentStep(6);
       const top3 = rankedMoves.slice(0, 3);
       let refinedMoves = top3 as RankedMove[];
 
@@ -385,9 +407,14 @@ function ProcessingInner() {
             <Text style={[styles.stepIcon, i <= currentStep && styles.stepIconActive]}>
               {i < currentStep ? '>' : i === currentStep ? '...' : ' '}
             </Text>
-            <Text style={[styles.stepText, i <= currentStep && styles.stepTextActive]}>
-              {step}
-            </Text>
+            <View>
+              <Text style={[styles.stepText, i <= currentStep && styles.stepTextActive]}>
+                {step}
+              </Text>
+              {i === currentStep && enrichProgress ? (
+                <Text style={styles.enrichProgress}>{enrichProgress}</Text>
+              ) : null}
+            </View>
           </Animated.View>
         ))}
       </View>
@@ -443,6 +470,12 @@ const styles = StyleSheet.create({
   },
   stepTextActive: {
     color: colors.text,
+  },
+  enrichProgress: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.accent,
+    marginTop: 2,
   },
   errorIcon: {
     fontFamily: fonts.medium,

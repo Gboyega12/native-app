@@ -615,18 +615,23 @@ Tools:
 
   // ── Spending breakdown ──
   if (ctx.spending_by_category?.length) {
-    prompt += `\n\nSpending by category (monthly):`;
+    prompt += `\n\nSpending by category (MONTHLY AVERAGES — these are per-month figures, not totals):`;
     for (const c of ctx.spending_by_category) {
-      prompt += `\n- ${c.category}: £${Math.round(c.monthly)}`;
+      prompt += `\n- ${c.category}: £${Math.round(c.monthly)}/month`;
     }
   }
 
   // ── Subscriptions ──
+  // IMPORTANT: Each entry is a UNIQUE subscription with its average monthly cost.
+  // These are NOT individual transactions — they are deduplicated recurring payments.
+  // E.g. "netflix: £10/month" means ONE Netflix subscription costing £10 each month,
+  // NOT multiple £10 charges accumulated.
   if (ctx.subscriptions?.length) {
-    prompt += `\n\nActive subscriptions:`;
+    prompt += `\n\nActive subscriptions (each is one recurring subscription, showing the average per-payment amount):`;
     for (const s of ctx.subscriptions) {
       prompt += `\n- ${s.merchant}: £${Math.abs(s.amount).toFixed(2)}/month`;
     }
+    prompt += `\nIMPORTANT: Do NOT multiply these amounts by months when discussing current spending. Each figure is already the monthly cost. If a user pays £10/month for Netflix, their monthly Netflix spend is £10, not £40 (even if they've had it for 4 months).`;
   }
 
   // ── All moves (action plan) ──

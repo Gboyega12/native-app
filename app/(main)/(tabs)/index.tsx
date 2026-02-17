@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, Platform, UIManager, TextInput, Modal,
+  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -65,6 +65,13 @@ export default function Home() {
   };
 
   const [syncing, setSyncing] = useState(false);
+  const [verifyMove, setVerifyMove] = useState<Move | null>(null);
+  const [infoCard, setInfoCard] = useState<string | null>(null);
+  const [recatTx, setRecatTx] = useState<{ tx: TransactionDetail; catKey: string; section: 'essential' | 'lifestyle' } | null>(null);
+  const [recatTarget, setRecatTarget] = useState('');
+  const [recatEssential, setRecatEssential] = useState(true);
+  const [savingRecat, setSavingRecat] = useState(false);
+  const [removingSource, setRemovingSource] = useState<string | null>(null);
 
   // Add budget item state
   const [showAddItem, setShowAddItem] = useState(false);
@@ -146,6 +153,122 @@ export default function Home() {
       console.warn('[home] Failed to save budget item:', err?.message);
     }
     setAddItemSaving(false);
+  };
+
+  const saveRecategorize = async () => {
+    if (!recatTx || !recatTarget) return;
+    setSavingRecat(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Save override so future enrichment uses this category
+        await supabase.from('transaction_overrides').upsert({
+          user_id: user.id,
+          match_description: recatTx.tx.merchant || recatTx.tx.description,
+          category: recatTarget,
+          is_essential: recatEssential,
+        }, { onConflict: 'user_id,match_description' });
+      }
+
+      // Optimistic UI update: move transaction between categories
+      if (analysis) {
+        const updated = { ...analysis };
+        const fromKey = recatTx.section === 'essential' ? 'non_discretionary' : 'discretionary';
+        const toKey = recatEssential ? 'non_discretionary' : 'discretionary';
+        const fromSection = { ...(updated as any)[fromKey] };
+        const toSection = fromKey === toKey ? fromSection : { ...(updated as any)[toKey] };
+        fromSection.items = [...(fromSection.items || [])];
+        if (fromKey !== toKey) toSection.items = [...(toSection.items || [])];
+
+        // Remove tx from source category
+        const srcCatIdx = fromSection.items.findIndex((i: BudgetCategory) => i.category === recatTx.catKey);
+        if (srcCatIdx >= 0) {
+          const srcCat = { ...fromSection.items[srcCatIdx] };
+          const txAmt = Math.abs(recatTx.tx.amount);
+          srcCat.transactions = (srcCat.transactions || []).filter(
+            (t: TransactionDetail) => !(t.description === recatTx.tx.description && t.date === recatTx.tx.date && t.amount === recatTx.tx.amount)
+          );
+          srcCat.monthly = Math.max(0, srcCat.monthly - txAmt / Math.max(1, (analysis.monthly_spending || 1) / (srcCat.monthly || 1)));
+          srcCat.txs = Math.max(0, srcCat.txs - 1);
+          if (srcCat.txs === 0) fromSection.items.splice(srcCatIdx, 1);
+          else fromSection.items[srcCatIdx] = srcCat;
+        }
+
+        // Add tx to target category
+        const destCatIdx = toSection.items.findIndex((i: BudgetCategory) => i.category === recatTarget);
+        const txAmt = Math.abs(recatTx.tx.amount);
+        if (destCatIdx >= 0) {
+          const destCat = { ...toSection.items[destCatIdx] };
+          destCat.transactions = [...(destCat.transactions || []), recatTx.tx];
+          destCat.monthly += txAmt;
+          destCat.txs += 1;
+          toSection.items[destCatIdx] = destCat;
+        } else {
+          toSection.items.push({ category: recatTarget, monthly: txAmt, txs: 1, transactions: [recatTx.tx] });
+        }
+
+        fromSection.total = fromSection.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+        if (fromKey !== toKey) toSection.total = toSection.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+
+        (updated as any)[fromKey] = fromSection;
+        if (fromKey !== toKey) (updated as any)[toKey] = toSection;
+
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        setAnalysis(updated);
+      }
+
+      setRecatTx(null);
+      setRecatTarget('');
+    } catch (err: any) {
+      console.warn('[home] Recategorize failed:', err?.message);
+    }
+    setSavingRecat(false);
+  };
+
+  const handleRemoveIncomeSource = (sourceName: string) => {
+    Alert.alert(
+      'Remove income source?',
+      `"${sourceName}" will no longer be counted as income. This affects your surplus and recommendations.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setRemovingSource(sourceName);
+            try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (user) {
+                // Save override to mark this as a transfer (not income)
+                await supabase.from('transaction_overrides').upsert({
+                  user_id: user.id,
+                  match_description: sourceName,
+                  category: 'Transfers',
+                  is_essential: false,
+                }, { onConflict: 'user_id,match_description' });
+              }
+
+              // Optimistic update
+              if (analysis) {
+                const updated = { ...analysis };
+                const sources = [...(updated.income_sources || [])];
+                const removed = sources.find((s) => s.source === sourceName);
+                updated.income_sources = sources.filter((s) => s.source !== sourceName);
+                if (removed) {
+                  updated.monthly_income = Math.max(0, (updated.monthly_income || 0) - removed.monthly);
+                  updated.surplus = (updated.surplus || 0) - removed.monthly;
+                }
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setAnalysis(updated);
+              }
+            } catch (err: any) {
+              console.warn('[home] Remove income source failed:', err?.message);
+            }
+            setRemovingSource(null);
+          },
+        },
+      ],
+    );
   };
 
   useFocusEffect(
@@ -591,7 +714,19 @@ export default function Home() {
               CARD 1 — YOUR TOP MONEY MOVES
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Your top moves</Text>
+            <View style={styles.cardTitleRow}>
+              <Text style={styles.cardTitle}>Your top moves</Text>
+              <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'moves' ? null : 'moves')}>
+                <Text style={styles.infoIcon}>i</Text>
+              </TouchableOpacity>
+            </View>
+            {infoCard === 'moves' && (
+              <View style={styles.infoBox}>
+                <Text style={styles.infoBoxText}>
+                  These recommendations are ranked by financial impact using the UKPF flowchart priority system, weighted by your goals and effort level. Higher-impact, lower-effort actions rank first.
+                </Text>
+              </View>
+            )}
             <Text style={styles.cardSubtitle}>Ranked by impact on your finances</Text>
 
             {dashboardMoves.length > 0 ? dashboardMoves.map((move: Move, i: number) => {
@@ -632,17 +767,24 @@ export default function Home() {
                       )}
                     </View>
 
-                    {/* Expanded details */}
+                    {/* Expanded: strategy + action buttons */}
                     {isOpen && (
                       <View style={styles.moveExpanded}>
                         <Text style={styles.moveStrategy}>{stripMd(move.strategy)}</Text>
-                        <TouchableOpacity
-                          style={styles.moveViewPlan}
-                          accessibilityRole="link"
-                          onPress={() => router.push('/(main)/(tabs)/plan')}
-                        >
-                          <Text style={styles.moveViewPlanText}>View in plan {'>'}</Text>
-                        </TouchableOpacity>
+                        <View style={styles.moveActions}>
+                          <TouchableOpacity
+                            style={styles.moveApproveBtn}
+                            onPress={() => router.push('/(main)/(tabs)/plan')}
+                          >
+                            <Text style={styles.moveApproveBtnText}>Approve</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.moveVerifyBtn}
+                            onPress={() => setVerifyMove(move)}
+                          >
+                            <Text style={styles.moveVerifyBtnText}>Verify</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     )}
                   </View>
@@ -659,7 +801,19 @@ export default function Home() {
               CARD 2 — YOUR INCOME
               ══════════════════════════════════════════════ */}
           <View style={styles.card} accessibilityRole="summary" accessibilityLabel={`Monthly income: ${Math.round(income)} pounds`}>
-            <Text style={styles.cardTitle}>Your income</Text>
+            <View style={styles.cardTitleRow}>
+              <Text style={styles.cardTitle}>Your income</Text>
+              <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'income' ? null : 'income')}>
+                <Text style={styles.infoIcon}>i</Text>
+              </TouchableOpacity>
+            </View>
+            {infoCard === 'income' && (
+              <View style={styles.infoBox}>
+                <Text style={styles.infoBoxText}>
+                  Income is detected from your bank account transactions only (not credit cards). Regular credits matching salary, benefit, or employer patterns are identified. Remove any that aren't real income.
+                </Text>
+              </View>
+            )}
 
             <View style={styles.bigNumberWrap}>
               <Text style={styles.bigNumber} accessibilityRole="text">
@@ -668,32 +822,52 @@ export default function Home() {
               <Text style={styles.bigNumberLabel}>monthly</Text>
             </View>
 
-            {primaryIncome && (
+            {incomeSources.length > 0 ? (
               <>
                 <View style={styles.divider} />
-                <View style={styles.sourceCard}>
-                  <View style={styles.sourceRow}>
-                    <View style={styles.sourceInfo}>
-                      <Text style={styles.sourceName}>{primaryIncome.source}</Text>
-                      <Text style={styles.sourceFreq}>
-                        {primaryIncome.frequency.charAt(0).toUpperCase() + primaryIncome.frequency.slice(1)}
-                      </Text>
+                <Text style={styles.incomeSourcesHeader}>
+                  {incomeSources.length} source{incomeSources.length !== 1 ? 's' : ''}
+                </Text>
+                {incomeSources.map((src: IncomeSource, i: number) => (
+                  <View key={i} style={styles.sourceCard}>
+                    <View style={styles.sourceRow}>
+                      <View style={styles.sourceInfo}>
+                        <Text style={styles.sourceName}>{src.source}</Text>
+                        <View style={styles.sourceTagRow}>
+                          <Text style={styles.sourceFreq}>
+                            {src.frequency.charAt(0).toUpperCase() + src.frequency.slice(1)}
+                          </Text>
+                          {src.isSalary && (
+                            <View style={styles.primaryTag}>
+                              <Text style={styles.primaryTagText}>PRIMARY</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                      <View style={styles.sourceAmountWrap}>
+                        <Text style={styles.sourceAmount}>
+                          {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
+                        </Text>
+                        <Text style={styles.sourceAmountPer}>
+                          per {src.frequency === 'weekly' ? 'week' : src.frequency === 'fortnightly' ? 'fortnight' : 'month'}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={styles.sourceAmountWrap}>
-                      <Text style={styles.sourceAmount}>
-                        {'\u00a3'}{Math.round(primaryIncome.avgAmount).toLocaleString()}
+                    {/* Remove non-income */}
+                    <TouchableOpacity
+                      style={styles.removeSourceBtn}
+                      onPress={() => handleRemoveIncomeSource(src.source)}
+                      disabled={removingSource === src.source}
+                    >
+                      <Text style={styles.removeSourceText}>
+                        {removingSource === src.source ? 'Removing...' : 'Not income? Remove'}
                       </Text>
-                      <Text style={styles.sourceAmountPer}>
-                        per {primaryIncome.frequency === 'weekly' ? 'week' : 'month'}
-                      </Text>
-                    </View>
+                    </TouchableOpacity>
                   </View>
-                </View>
+                ))}
               </>
-            )}
-
-            {!primaryIncome && (
-              <Text style={styles.noDataText}>No income sources detected.</Text>
+            ) : (
+              <Text style={styles.noDataText}>No income sources detected from bank accounts.</Text>
             )}
           </View>
 
@@ -701,7 +875,19 @@ export default function Home() {
               CARD 3 — SAFE TO SPEND
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Safe to spend</Text>
+            <View style={styles.cardTitleRow}>
+              <Text style={styles.cardTitle}>Safe to spend</Text>
+              <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'safe' ? null : 'safe')}>
+                <Text style={styles.infoIcon}>i</Text>
+              </TouchableOpacity>
+            </View>
+            {infoCard === 'safe' && (
+              <View style={styles.infoBox}>
+                <Text style={styles.infoBoxText}>
+                  This is your weekly lifestyle budget: (Monthly income - Essentials) / 4.33, minus what you've already spent on lifestyle this month. It tells you how much discretionary spending you can still afford this week.
+                </Text>
+              </View>
+            )}
             <Text style={styles.cardSubtitle}>Your weekly lifestyle allowance</Text>
 
             {/* Big remaining number */}
@@ -744,6 +930,21 @@ export default function Home() {
               CARD 4 — YOUR BUDGET REALITY
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
+            {/* Info icon for budget card */}
+            <View style={styles.cardTitleRow}>
+              <View style={{ flex: 1 }} />
+              <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'budget' ? null : 'budget')}>
+                <Text style={styles.infoIcon}>i</Text>
+              </TouchableOpacity>
+            </View>
+            {infoCard === 'budget' && (
+              <View style={styles.infoBox}>
+                <Text style={styles.infoBoxText}>
+                  Your spending is split into Essentials (rent, bills, groceries) and Lifestyle (dining, shopping, entertainment). Categories are determined by transaction enrichment and merchant matching. You can re-categorize any transaction by tapping it.
+                </Text>
+              </View>
+            )}
+
             {/* Tappable header to toggle breakdown */}
             <TouchableOpacity
               activeOpacity={0.7}
@@ -811,12 +1012,14 @@ export default function Home() {
                     <View style={styles.breakdownHeaderRow}>
                       <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
                       <TouchableOpacity
+                        style={styles.addItemBtn}
                         onPress={() => {
                           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                           setShowAddItem(true);
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
+                        <Text style={styles.addItemLabel}>Add item</Text>
                         <Text style={styles.addItemIcon}>+</Text>
                       </TouchableOpacity>
                     </View>
@@ -850,15 +1053,27 @@ export default function Home() {
                           {isExpanded && txs.length > 0 && (
                             <View style={styles.txDropdown}>
                               {txs.map((tx, j) => (
-                                <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                                <TouchableOpacity
+                                  key={j}
+                                  style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}
+                                  onLongPress={() => {
+                                    setRecatTx({ tx, catKey: item.category, section: 'essential' });
+                                    setRecatTarget('');
+                                    setRecatEssential(true);
+                                  }}
+                                  activeOpacity={0.7}
+                                >
                                   <View style={styles.txLeft}>
                                     <Text style={styles.txMerchant}>{tx.merchant}</Text>
                                     <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
                                   </View>
-                                  <Text style={[styles.txAmount, { color: colors.coral }]}>
-                                    {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
-                                  </Text>
-                                </View>
+                                  <View style={styles.txRightCol}>
+                                    <Text style={[styles.txAmount, { color: colors.coral }]}>
+                                      {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                                    </Text>
+                                    <Text style={styles.txRecatHint}>Hold to move</Text>
+                                  </View>
+                                </TouchableOpacity>
                               ))}
                             </View>
                           )}
@@ -879,12 +1094,14 @@ export default function Home() {
                     <View style={[styles.breakdownHeaderRow, { marginTop: 28 }]}>
                       <Text style={styles.breakdownHeader}>LIFESTYLE</Text>
                       <TouchableOpacity
+                        style={styles.addItemBtn}
                         onPress={() => {
                           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                           setShowAddItem(true);
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
+                        <Text style={styles.addItemLabel}>Add item</Text>
                         <Text style={styles.addItemIcon}>+</Text>
                       </TouchableOpacity>
                     </View>
@@ -918,15 +1135,27 @@ export default function Home() {
                           {isExpanded && txs.length > 0 && (
                             <View style={styles.txDropdown}>
                               {txs.map((tx, j) => (
-                                <View key={j} style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}>
+                                <TouchableOpacity
+                                  key={j}
+                                  style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}
+                                  onLongPress={() => {
+                                    setRecatTx({ tx, catKey: item.category, section: 'lifestyle' });
+                                    setRecatTarget('');
+                                    setRecatEssential(false);
+                                  }}
+                                  activeOpacity={0.7}
+                                >
                                   <View style={styles.txLeft}>
                                     <Text style={styles.txMerchant}>{tx.merchant}</Text>
                                     <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
                                   </View>
-                                  <Text style={[styles.txAmount, { color: gold }]}>
-                                    {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
-                                  </Text>
-                                </View>
+                                  <View style={styles.txRightCol}>
+                                    <Text style={[styles.txAmount, { color: gold }]}>
+                                      {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                                    </Text>
+                                    <Text style={styles.txRecatHint}>Hold to move</Text>
+                                  </View>
+                                </TouchableOpacity>
                               ))}
                             </View>
                           )}
@@ -956,7 +1185,19 @@ export default function Home() {
             const overallUtil = totalLimit > 0 ? Math.round((totalDebt / totalLimit) * 100) : null;
             return (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Your debt</Text>
+                <View style={styles.cardTitleRow}>
+                  <Text style={styles.cardTitle}>Your debt</Text>
+                  <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'debt' ? null : 'debt')}>
+                    <Text style={styles.infoIcon}>i</Text>
+                  </TouchableOpacity>
+                </View>
+                {infoCard === 'debt' && (
+                  <View style={styles.infoBox}>
+                    <Text style={styles.infoBoxText}>
+                      Debt balances are pulled from your connected credit cards via Open Banking (TrueLayer). Utilisation shows how much of your credit limit is currently used. Over 75% utilisation can affect your credit score.
+                    </Text>
+                  </View>
+                )}
                 <Text style={styles.cardSubtitle}>
                   {debtAccounts.length} account{debtAccounts.length !== 1 ? 's' : ''}
                   {overallUtil != null ? ` · ${overallUtil}% utilised` : ''}
@@ -1090,6 +1331,119 @@ export default function Home() {
                     )}
                   </TouchableOpacity>
                 </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Verify move detail modal */}
+          <Modal visible={!!verifyMove} transparent animationType="fade">
+            <View style={styles.modalOverlay}>
+              <ScrollView style={{ maxHeight: '80%' }}>
+                <View style={styles.modalContent}>
+                  <Text style={styles.modalTitle}>Verify recommendation</Text>
+
+                  {verifyMove && (
+                    <>
+                      <Text style={styles.verifySection}>WHAT</Text>
+                      <Text style={styles.verifyText}>{stripMd(verifyMove.action)}</Text>
+
+                      <Text style={styles.verifySection}>WHY</Text>
+                      <Text style={styles.verifyText}>{stripMd(verifyMove.strategy)}</Text>
+
+                      <Text style={styles.verifySection}>HOW</Text>
+                      {(verifyMove.steps || []).map((step, i) => (
+                        <Text key={i} style={styles.verifyStep}>{i + 1}. {stripMd(step)}</Text>
+                      ))}
+
+                      <Text style={styles.verifySection}>EFFECT</Text>
+                      <Text style={styles.verifyText}>
+                        {stripMd(verifyMove.effect || '')}
+                        {verifyMove.timeline ? `\n${stripMd(verifyMove.timeline)}` : ''}
+                      </Text>
+
+                      <View style={styles.verifyActions}>
+                        <TouchableOpacity
+                          style={styles.moveApproveBtn}
+                          onPress={() => { setVerifyMove(null); router.push('/(main)/(tabs)/plan'); }}
+                        >
+                          <Text style={styles.moveApproveBtnText}>Continue to plan</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.moveVerifyBtn}
+                          onPress={() => setVerifyMove(null)}
+                        >
+                          <Text style={styles.moveVerifyBtnText}>Discard</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  )}
+                </View>
+              </ScrollView>
+            </View>
+          </Modal>
+
+          {/* Re-categorize transaction modal */}
+          <Modal visible={!!recatTx} transparent animationType="fade">
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Move transaction</Text>
+                {recatTx && (
+                  <>
+                    <Text style={styles.modalSubtitle}>
+                      "{recatTx.tx.merchant}" ({'\u00a3'}{Math.abs(recatTx.tx.amount).toFixed(2)}) is currently in {recatTx.catKey}. Choose the correct category:
+                    </Text>
+
+                    <Text style={styles.modalLabel}>Category</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+                      {BUDGET_CATEGORIES.map((cat) => (
+                        <TouchableOpacity
+                          key={cat}
+                          style={[styles.categoryChip, recatTarget === cat && styles.categoryChipActive]}
+                          onPress={() => setRecatTarget(cat)}
+                        >
+                          <Text style={[styles.categoryChipText, recatTarget === cat && styles.categoryChipTextActive]}>
+                            {cat}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+
+                    <View style={styles.essentialRow}>
+                      <Text style={styles.modalLabel}>Type</Text>
+                      <View style={styles.toggleRow}>
+                        <TouchableOpacity
+                          style={[styles.toggleOption, recatEssential && styles.toggleOptionActive]}
+                          onPress={() => setRecatEssential(true)}
+                        >
+                          <Text style={[styles.toggleText, recatEssential && styles.toggleTextActive]}>Essential</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.toggleOption, !recatEssential && styles.toggleOptionLifestyle]}
+                          onPress={() => setRecatEssential(false)}
+                        >
+                          <Text style={[styles.toggleText, !recatEssential && styles.toggleTextLifestyle]}>Lifestyle</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <View style={styles.modalActions}>
+                      <TouchableOpacity style={styles.modalCancel} onPress={() => setRecatTx(null)}>
+                        <Text style={styles.modalCancelText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.modalSave, !recatTarget && styles.modalSaveDisabled]}
+                        onPress={saveRecategorize}
+                        disabled={savingRecat || !recatTarget}
+                      >
+                        {savingRecat ? (
+                          <ActivityIndicator color={colors.bg} size="small" />
+                        ) : (
+                          <Text style={styles.modalSaveText}>Move</Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
               </View>
             </View>
           </Modal>
@@ -1231,6 +1585,39 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
+  // ── Card title row with info icon ──
+  cardTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  infoIcon: {
+    fontFamily: fonts.semibold,
+    fontSize: 12,
+    color: colors.dim,
+    width: 22,
+    height: 22,
+    lineHeight: 22,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 11,
+    overflow: 'hidden',
+  },
+  infoBox: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  infoBoxText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+    lineHeight: 18,
+  },
+
   // ── Card 1: Recommendations ──
   // ── Card 1: Move items ──
   moveItem: {
@@ -1291,17 +1678,36 @@ const styles = StyleSheet.create({
     color: colors.dim,
     lineHeight: 20,
   },
-  moveViewPlan: {
-    paddingVertical: 6,
-    minHeight: 36,
-    justifyContent: 'center',
+  moveActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
   },
-  moveViewPlanText: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.accent,
-    letterSpacing: 0.3,
+  moveApproveBtn: {
+    flex: 1,
+    backgroundColor: colors.accent,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  moveApproveBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.bg,
+  },
+  moveVerifyBtn: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  moveVerifyBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.dim,
   },
 
   // ── Card 2: Income ──
@@ -1389,6 +1795,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.muted,
     marginTop: 2,
+  },
+  incomeSourcesHeader: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+    marginTop: 8,
+  },
+  removeSourceBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  removeSourceText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.dim,
   },
 
   // ── Card 3: Safe to Spend ──
@@ -1506,17 +1929,27 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: colors.muted,
   },
+  addItemBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  addItemLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.accent,
+  },
   addItemIcon: {
     fontFamily: fonts.semibold,
     fontSize: 18,
     color: colors.accent,
-    width: 26,
-    height: 26,
-    lineHeight: 24,
+    width: 22,
+    height: 22,
+    lineHeight: 20,
     textAlign: 'center',
     borderWidth: 1,
     borderColor: colors.accentDim,
-    borderRadius: 13,
+    borderRadius: 11,
     overflow: 'hidden',
   },
   dataRow: {
@@ -1605,6 +2038,15 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 13,
     fontWeight: '600',
+  },
+  txRightCol: {
+    alignItems: 'flex-end',
+  },
+  txRecatHint: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.muted,
+    marginTop: 2,
   },
   txEmpty: {
     fontFamily: fonts.regular,
@@ -1823,5 +2265,33 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 15,
     color: colors.bg,
+  },
+
+  // ── Verify modal ──
+  verifySection: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: colors.accent,
+    marginTop: 16,
+    marginBottom: 6,
+  },
+  verifyText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text2,
+    lineHeight: 22,
+  },
+  verifyStep: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.text2,
+    lineHeight: 22,
+    marginLeft: 4,
+  },
+  verifyActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 24,
   },
 });
