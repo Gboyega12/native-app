@@ -321,13 +321,23 @@ export default function Home() {
                   onPress={() => toggleMove(i)}
                   style={[styles.recCard, i === dashboardMoves.length - 1 && { marginBottom: 0 }]}
                 >
+                  {/* Priority indicator for high effort */}
+                  {isHigh && <View style={styles.priorityStripe} />}
+
                   {/* Collapsed: rank + title + impact */}
                   <View style={styles.recHeader}>
                     <View style={styles.recMeta}>
                       <View style={[styles.rankBadge, isHigh && styles.rankBadgeHigh]}>
                         <Text style={[styles.rankText, isHigh && styles.rankTextHigh]}>#{i + 1}</Text>
                       </View>
-                      <Text style={styles.recTitle} numberOfLines={isOpen ? undefined : 1}>{move.action}</Text>
+                      <View style={styles.recTitleWrap}>
+                        <Text style={styles.recTitle}>{move.action}</Text>
+                        {isHigh && (
+                          <View style={styles.priorityTag}>
+                            <Text style={styles.priorityTagText}>HIGH PRIORITY</Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
                     <Text style={styles.recImpact}>
                       +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}
@@ -716,6 +726,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.06)',
     paddingVertical: 16,
     marginBottom: 0,
+    position: 'relative' as const,
   },
   recHeader: {
     flexDirection: 'row',
@@ -725,7 +736,7 @@ const styles = StyleSheet.create({
   },
   recMeta: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 12,
     flex: 1,
     marginRight: 12,
@@ -750,12 +761,38 @@ const styles = StyleSheet.create({
   rankTextHigh: {
     color: colors.accent,
   },
+  recTitleWrap: {
+    flex: 1,
+    gap: 6,
+  },
   recTitle: {
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: colors.text,
     lineHeight: 20,
-    flex: 1,
+  },
+  priorityStripe: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: colors.accent,
+    borderRadius: 2,
+  },
+  priorityTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.accentDim,
+    borderRadius: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+  },
+  priorityTagText: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.accent,
+    letterSpacing: 1,
   },
   recImpact: {
     fontFamily: fonts.mono,

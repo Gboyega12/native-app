@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, Animated, Easing,
+  KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -89,10 +89,12 @@ function PlanCard({
   action,
   onApprove,
   onDismiss,
+  saving,
 }: {
   action: ChatAction;
   onApprove: () => void;
   onDismiss: () => void;
+  saving?: boolean;
 }) {
   const d = action.data;
   const isApproved = action.status === 'approved';
@@ -132,10 +134,19 @@ function PlanCard({
         </View>
       ) : (
         <View style={styles.actionCardButtons}>
-          <TouchableOpacity style={styles.approveBtn} onPress={onApprove} activeOpacity={0.8}>
-            <Text style={styles.approveBtnText}>Approve</Text>
+          <TouchableOpacity
+            style={[styles.approveBtn, saving && styles.approveBtnSaving]}
+            onPress={onApprove}
+            activeOpacity={0.8}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={colors.bg} />
+            ) : (
+              <Text style={styles.approveBtnText}>Approve</Text>
+            )}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss} activeOpacity={0.8} disabled={saving}>
             <Text style={styles.dismissBtnText}>Dismiss</Text>
           </TouchableOpacity>
         </View>
@@ -150,7 +161,7 @@ function OverrideCard({ action }: { action: ChatAction }) {
     <View style={styles.actionCard}>
       <Text style={styles.actionCardLabel}>TRANSACTION UPDATED</Text>
       <Text style={styles.overrideDescription}>
-        &ldquo;{d.match_description}&rdquo; {'\u2192'} {d.category}
+        {'\u201C'}{d.match_description}{'\u201D'} {'\u2192'} {d.category}
         {d.is_essential ? ' (essential)' : ' (discretionary)'}
       </Text>
       <Text style={styles.overrideNote}>Will apply on your next analysis.</Text>
@@ -169,6 +180,7 @@ export default function Chat() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [goals, setGoals] = useState<Goals | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [savingPlan, setSavingPlan] = useState<string | null>(null); // "msgIdx-actionIdx"
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
 
@@ -282,30 +294,52 @@ export default function Chat() {
   const handleApprovePlan = async (msgIndex: number, actionIndex: number) => {
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
-    if (!action || action.type !== 'plan_proposed' || !userId) return;
+    if (!action || action.type !== 'plan_proposed') return;
 
-    // Insert into user_plans
-    const { error: insertErr } = await supabase.from('user_plans').insert({
-      user_id: userId,
-      action: action.data.action || '',
-      target_amount: action.data.target_amount || null,
-      monthly_saving: action.data.monthly_saving || null,
-      timeline: action.data.timeline || null,
-      status: 'active',
-    });
-
-    if (insertErr) {
-      console.warn('[chat] Failed to save plan:', insertErr.message);
-      return;
+    // Get fresh user ID in case state hasn't settled
+    let uid = userId;
+    if (!uid) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Not signed in', 'Please sign in to save plans.');
+        return;
+      }
+      uid = user.id;
+      setUserId(uid);
     }
 
-    // Update action status
-    const updated = [...messages];
-    const updatedActions = [...(updated[msgIndex].actions || [])];
-    updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'approved' };
-    updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
-    setMessages(updated);
-    persistMessages(updated);
+    const key = `${msgIndex}-${actionIndex}`;
+    setSavingPlan(key);
+
+    try {
+      // Insert into user_plans
+      const { error: insertErr } = await supabase.from('user_plans').insert({
+        user_id: uid,
+        action: action.data.action || '',
+        target_amount: action.data.target_amount || null,
+        monthly_saving: action.data.monthly_saving || null,
+        timeline: action.data.timeline || null,
+        status: 'active',
+      });
+
+      if (insertErr) {
+        Alert.alert('Could not save plan', insertErr.message);
+        setSavingPlan(null);
+        return;
+      }
+
+      // Update action status
+      const updated = [...messages];
+      const updatedActions = [...(updated[msgIndex].actions || [])];
+      updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'approved' };
+      updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+      setMessages(updated);
+      persistMessages(updated);
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Something went wrong.');
+    }
+
+    setSavingPlan(null);
   };
 
   // ── Handle plan dismissal ──
@@ -545,6 +579,7 @@ export default function Chat() {
                     action={action}
                     onApprove={() => handleApprovePlan(i, j)}
                     onDismiss={() => handleDismissPlan(i, j)}
+                    saving={savingPlan === `${i}-${j}`}
                   />
                 ) : action.type === 'override_saved' ? (
                   <OverrideCard action={action} />
@@ -784,6 +819,9 @@ const styles = StyleSheet.create({
     minHeight: 44,
     justifyContent: 'center',
   },
+  approveBtnSaving: {
+    opacity: 0.7,
+  },
   approveBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
@@ -877,7 +915,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     fontSize: 14,
     color: colors.text,
-    maxHeight: 100,
+    maxHeight: 200,
   },
   sendButton: {
     backgroundColor: colors.accent,

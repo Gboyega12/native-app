@@ -102,7 +102,10 @@ export default function Plan() {
     );
   }
 
-  const moves: Move[] = analysis?.all_moves || [];
+  const effortOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  const moves: Move[] = [...(analysis?.all_moves || [])].sort(
+    (a, b) => (effortOrder[a.effort] ?? 2) - (effortOrder[b.effort] ?? 2),
+  );
   const approvedCount = approved.size;
   const totalMonthly = moves.reduce((s, m) => s + (m.monthlyImpact || 0), 0);
   const approvedMonthly = moves.reduce((s, m, i) => approved.has(i) ? s + (m.monthlyImpact || 0) : s, 0);
