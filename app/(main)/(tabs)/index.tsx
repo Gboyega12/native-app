@@ -26,6 +26,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -37,9 +38,25 @@ export default function Home() {
     });
   };
 
+  const toggleMove = (idx: number) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedMoves((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
+
+  const isCurrentMonth = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const now = new Date();
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   };
 
   const [syncing, setSyncing] = useState(false);
@@ -110,8 +127,18 @@ export default function Home() {
         return;
       }
 
+      // Fetch user's transaction overrides
+      let overrides: any[] = [];
+      try {
+        const { data: overrideData } = await supabase
+          .from('transaction_overrides')
+          .select('match_description, category, is_essential')
+          .eq('user_id', userId);
+        if (overrideData) overrides = overrideData;
+      } catch {}
+
       // Re-run enrichment engine with fresh data (fast, ~1 second)
-      const result = EnrichmentEngine.enrich(data.csv_data);
+      const result = EnrichmentEngine.enrich(data.csv_data, overrides);
       if (result.enrichedTransactions.length === 0) {
         setSyncing(false);
         return;
@@ -188,6 +215,18 @@ export default function Home() {
   const moves = analysis?.all_moves ?? [];
   const income = analysis?.monthly_income ?? 0;
   const incomeSources = analysis?.income_sources ?? [];
+
+  // Only show high + medium effort moves on dashboard; low effort → plan page only
+  // Sort: high effort first, then medium
+  const highEffortMoves = moves.filter((m: Move) => m.effort === 'high');
+  const mediumEffortMoves = moves.filter((m: Move) => m.effort === 'medium');
+  const dashboardMoves = [...highEffortMoves, ...mediumEffortMoves];
+
+  // Primary income source only
+  const primaryIncome = incomeSources.find((s: IncomeSource) => s.isSalary)
+    || (incomeSources.length > 0
+      ? incomeSources.reduce((a, b) => a.avgAmount > b.avgAmount ? a : b)
+      : null);
 
   const nonDisc = analysis?.non_discretionary as any;
   const disc = analysis?.discretionary as any;
@@ -266,49 +305,64 @@ export default function Home() {
               CARD 1 — YOUR TOP MONEY MOVES
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Your top money moves</Text>
-            <Text style={styles.cardSubtitle}>Ranked by impact. Start with #1.</Text>
+            <Text style={styles.cardTitle}>Your top moves</Text>
+            <Text style={styles.cardSubtitle}>Ranked by impact</Text>
 
-            {moves.length > 0 ? moves.slice(0, 3).map((move: Move, i: number) => (
-              <View key={i} style={styles.recCard}>
-                {/* Rank / effort / impact header */}
-                <View style={styles.recHeader}>
-                  <View style={styles.recMeta}>
-                    <View style={styles.rankBadge}>
-                      <Text style={styles.rankText}>#{i + 1}</Text>
+            {dashboardMoves.length > 0 ? dashboardMoves.map((move: Move, i: number) => {
+              const isOpen = expandedMoves.has(i);
+              const isHigh = move.effort === 'high';
+              return (
+                <TouchableOpacity
+                  key={i}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Move ${i + 1}: ${move.action}, saves ${move.annualImpact} pounds per year`}
+                  accessibilityHint="Tap to see details"
+                  onPress={() => toggleMove(i)}
+                  style={[styles.recCard, i === dashboardMoves.length - 1 && { marginBottom: 0 }]}
+                >
+                  {/* Priority indicator for high effort */}
+                  {isHigh && <View style={styles.priorityStripe} />}
+
+                  {/* Collapsed: rank + title + impact */}
+                  <View style={styles.recHeader}>
+                    <View style={styles.recMeta}>
+                      <View style={[styles.rankBadge, isHigh && styles.rankBadgeHigh]}>
+                        <Text style={[styles.rankText, isHigh && styles.rankTextHigh]}>#{i + 1}</Text>
+                      </View>
+                      <View style={styles.recTitleWrap}>
+                        <Text style={styles.recTitle}>{move.action}</Text>
+                        {isHigh && (
+                          <View style={styles.priorityTag}>
+                            <Text style={styles.priorityTagText}>HIGH PRIORITY</Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
-                    {move.effort && (
-                      <Text style={styles.effortLabel}>
-                        {move.effort} effort
-                      </Text>
-                    )}
+                    <Text style={styles.recImpact}>
+                      +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}
+                    </Text>
                   </View>
-                  <Text style={styles.recImpact}>
-                    +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
-                  </Text>
-                </View>
 
-                {/* Title + description */}
-                <Text style={styles.recTitle}>{move.action}</Text>
-                <Text style={styles.recDesc}>{move.strategy}</Text>
-
-                {/* Approve / Modify */}
-                <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={styles.approveBtn}
-                    onPress={() => router.push('/(main)/(tabs)/plan')}
-                  >
-                    <Text style={styles.approveBtnText}>Approve</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.modifyBtn}
-                    onPress={() => router.push('/(main)/(tabs)/plan')}
-                  >
-                    <Text style={styles.modifyBtnText}>Modify</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )) : (
+                  {/* Expanded: effort, strategy, CTA */}
+                  {isOpen && (
+                    <View style={styles.recExpanded}>
+                      {move.effort && (
+                        <Text style={styles.effortLabel}>{move.effort} effort</Text>
+                      )}
+                      <Text style={styles.recDesc}>{move.strategy}</Text>
+                      <TouchableOpacity
+                        style={styles.planLink}
+                        accessibilityRole="link"
+                        onPress={() => router.push('/(main)/(tabs)/plan')}
+                      >
+                        <Text style={styles.planLinkText}>View in plan</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            }) : (
               <Text style={styles.noDataText}>
                 No actionable moves yet. Upload a statement to get started.
               </Text>
@@ -318,49 +372,41 @@ export default function Home() {
           {/* ══════════════════════════════════════════════
               CARD 2 — YOUR INCOME
               ══════════════════════════════════════════════ */}
-          <View style={styles.card}>
+          <View style={styles.card} accessibilityRole="summary" accessibilityLabel={`Monthly income: ${Math.round(income)} pounds`}>
             <Text style={styles.cardTitle}>Your income</Text>
 
-            {/* Big centered number */}
             <View style={styles.bigNumberWrap}>
-              <Text style={styles.bigNumber}>
+              <Text style={styles.bigNumber} accessibilityRole="text">
                 {'\u00a3'}{Math.round(income).toLocaleString()}
               </Text>
-              <Text style={styles.bigNumberLabel}>total monthly income</Text>
+              <Text style={styles.bigNumberLabel}>monthly</Text>
             </View>
 
-            <View style={styles.divider} />
-
-            {/* Income sources */}
-            {incomeSources.map((src: IncomeSource, i: number) => (
-              <View key={i} style={styles.sourceCard}>
-                <View style={styles.sourceRow}>
-                  <View style={styles.sourceInfo}>
-                    <Text style={styles.sourceName}>{src.source}</Text>
-                    <View style={styles.sourceTagRow}>
+            {primaryIncome && (
+              <>
+                <View style={styles.divider} />
+                <View style={styles.sourceCard}>
+                  <View style={styles.sourceRow}>
+                    <View style={styles.sourceInfo}>
+                      <Text style={styles.sourceName}>{primaryIncome.source}</Text>
                       <Text style={styles.sourceFreq}>
-                        {src.frequency.charAt(0).toUpperCase() + src.frequency.slice(1)}
+                        {primaryIncome.frequency.charAt(0).toUpperCase() + primaryIncome.frequency.slice(1)}
                       </Text>
-                      {src.isSalary && (
-                        <View style={styles.primaryTag}>
-                          <Text style={styles.primaryTagText}>PRIMARY</Text>
-                        </View>
-                      )}
+                    </View>
+                    <View style={styles.sourceAmountWrap}>
+                      <Text style={styles.sourceAmount}>
+                        {'\u00a3'}{Math.round(primaryIncome.avgAmount).toLocaleString()}
+                      </Text>
+                      <Text style={styles.sourceAmountPer}>
+                        per {primaryIncome.frequency === 'weekly' ? 'week' : 'month'}
+                      </Text>
                     </View>
                   </View>
-                  <View style={styles.sourceAmountWrap}>
-                    <Text style={styles.sourceAmount}>
-                      {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
-                    </Text>
-                    <Text style={styles.sourceAmountPer}>
-                      per {src.frequency === 'weekly' ? 'week' : 'month'}
-                    </Text>
-                  </View>
                 </View>
-              </View>
-            ))}
+              </>
+            )}
 
-            {incomeSources.length === 0 && (
+            {!primaryIncome && (
               <Text style={styles.noDataText}>No income sources detected.</Text>
             )}
           </View>
@@ -412,14 +458,11 @@ export default function Home() {
             {/* Non-negotiable breakdown */}
             {nonDiscItems.length > 0 && (
               <>
-                <Text style={styles.breakdownHeader}>ESSENTIALS BREAKDOWN</Text>
-                <Text style={styles.breakdownSubtext}>
-                  Fixed costs and necessities — bills, groceries, transport
-                </Text>
+                <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
                 {nonDiscItems.map((item: BudgetCategory, i: number) => {
                   const key = `nd-${item.category}`;
                   const isExpanded = expandedCategories.has(key);
-                  const txs: TransactionDetail[] = item.transactions ?? [];
+                  const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
                   const pctOfSection = nonDiscTotal > 0 ? Math.round((item.monthly / nonDiscTotal) * 100) : 0;
                   return (
                     <View key={i}>
@@ -429,7 +472,7 @@ export default function Home() {
                         style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
                       >
                         <View style={styles.dataRowLeft}>
-                          <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && styles.bulletExpanded]} />
+                          <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && [styles.bulletExpanded, { borderTopColor: colors.coral }]]} />
                           <View>
                             <Text style={styles.dataLabel}>{item.category}</Text>
                             <Text style={styles.dataMeta}>
@@ -441,7 +484,6 @@ export default function Home() {
                           <Text style={[styles.dataValue, { color: colors.coral }]}>
                             {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                           </Text>
-                          <Text style={styles.chevron}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                         </View>
                       </TouchableOpacity>
                       {isExpanded && txs.length > 0 && (
@@ -473,16 +515,13 @@ export default function Home() {
             {/* Lifestyle spending */}
             {discItems.length > 0 && (
               <>
-                <Text style={[styles.breakdownHeader, { marginTop: 20 }]}>
-                  LIFESTYLE SPENDING
-                </Text>
-                <Text style={styles.breakdownSubtext}>
-                  Discretionary spending — dining, shopping, entertainment
+                <Text style={[styles.breakdownHeader, { marginTop: 28 }]}>
+                  LIFESTYLE
                 </Text>
                 {discItems.map((item: BudgetCategory, i: number) => {
                   const key = `d-${item.category}`;
                   const isExpanded = expandedCategories.has(key);
-                  const txs: TransactionDetail[] = item.transactions ?? [];
+                  const txs: TransactionDetail[] = (item.transactions ?? []).filter(tx => isCurrentMonth(tx.date));
                   const pctOfSection = discTotal > 0 ? Math.round((item.monthly / discTotal) * 100) : 0;
                   return (
                     <View key={i}>
@@ -492,7 +531,7 @@ export default function Home() {
                         style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
                       >
                         <View style={styles.dataRowLeft}>
-                          <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && styles.bulletExpanded]} />
+                          <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && [styles.bulletExpanded, { borderTopColor: gold }]]} />
                           <View>
                             <Text style={styles.dataLabel}>{item.category}</Text>
                             <Text style={styles.dataMeta}>
@@ -504,7 +543,6 @@ export default function Home() {
                           <Text style={[styles.dataValue, { color: gold }]}>
                             {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                           </Text>
-                          <Text style={styles.chevron}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                         </View>
                       </TouchableOpacity>
                       {isExpanded && txs.length > 0 && (
@@ -533,7 +571,7 @@ export default function Home() {
               </>
             )}
 
-            <Text style={styles.cardFooter}>Tap a category to view transactions</Text>
+            <Text style={styles.cardFooter}>Tap a category to see this month's transactions</Text>
           </View>
 
           {/* ── Upload new statement ── */}
@@ -557,9 +595,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   scroll: {
-    padding: 18,
-    paddingTop: 52,
-    paddingBottom: 40,
+    padding: 20,
+    paddingTop: 56,
+    paddingBottom: 48,
   },
   loadingContainer: {
     flex: 1,
@@ -573,7 +611,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 28,
+    marginBottom: 32,
   },
   greeting: {
     fontFamily: fonts.heading,
@@ -582,8 +620,12 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   menuButton: {
-    padding: 4,
+    padding: 10,
     gap: 5,
+    minWidth: 44,
+    minHeight: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   menuLine: {
     width: 22,
@@ -648,25 +690,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.accentDim,
-    borderRadius: 14,
-    padding: 22,
-    paddingTop: 24,
-    marginBottom: 28,
+    borderRadius: 16,
+    padding: 24,
+    paddingTop: 28,
+    paddingBottom: 28,
+    marginBottom: 24,
     overflow: 'hidden',
   },
   cardTitle: {
     fontFamily: fonts.heading,
-    fontSize: 22,
+    fontSize: 20,
     color: colors.text,
     letterSpacing: -0.2,
-    marginBottom: 4,
+    marginBottom: 6,
   },
   cardSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 13,
     color: colors.dim,
-    lineHeight: 21,
-    marginBottom: 20,
+    lineHeight: 20,
+    marginBottom: 24,
   },
   noDataText: {
     fontFamily: fonts.regular,
@@ -677,30 +720,35 @@ const styles = StyleSheet.create({
 
   // ── Card 1: Recommendations ──
   recCard: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    padding: 16,
-    paddingTop: 18,
-    marginBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 16,
+    marginBottom: 0,
+    position: 'relative' as const,
   },
   recHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    minHeight: 44,
   },
   recMeta: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    alignItems: 'flex-start',
+    gap: 12,
+    flex: 1,
+    marginRight: 12,
   },
   rankBadge: {
     backgroundColor: 'rgba(255,255,255,0.06)',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rankBadgeHigh: {
+    backgroundColor: 'rgba(122,239,199,0.12)',
   },
   rankText: {
     fontFamily: fonts.mono,
@@ -708,75 +756,85 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.dim,
   },
-  effortLabel: {
+  rankTextHigh: {
+    color: colors.accent,
+  },
+  recTitleWrap: {
+    flex: 1,
+    gap: 6,
+  },
+  recTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.text,
+    lineHeight: 20,
+  },
+  priorityStripe: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: colors.accent,
+    borderRadius: 2,
+  },
+  priorityTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.accentDim,
+    borderRadius: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+  },
+  priorityTagText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: gold,
-    fontWeight: '500',
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.accent,
+    letterSpacing: 1,
   },
   recImpact: {
     fontFamily: fonts.mono,
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.accent,
   },
-  recTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 17,
-    color: colors.text,
-    lineHeight: 23,
-    marginBottom: 6,
+  recExpanded: {
+    paddingLeft: 44,
+    paddingTop: 8,
+    paddingBottom: 4,
+    gap: 8,
+  },
+  effortLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: gold,
+    fontWeight: '500',
+    textTransform: 'capitalize',
   },
   recDesc: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.dim,
-    lineHeight: 19.5,
-    marginBottom: 4,
+    lineHeight: 20,
   },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
+  planLink: {
+    paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
   },
-  approveBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(122,239,199,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(122,239,199,0.3)',
-    alignItems: 'center',
-  },
-  approveBtnText: {
+  planLinkText: {
     fontFamily: fonts.mono,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     color: colors.accent,
-    letterSpacing: 0.3,
-  },
-  modifyBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-  },
-  modifyBtnText: {
-    fontFamily: fonts.mono,
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.dim,
     letterSpacing: 0.3,
   },
 
   // ── Card 2: Income ──
   bigNumberWrap: {
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingBottom: 24,
+    paddingVertical: 12,
+    paddingBottom: 28,
   },
   bigNumber: {
     fontFamily: fonts.mono,
@@ -865,7 +923,7 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     overflow: 'hidden',
-    marginBottom: 14,
+    marginBottom: 20,
   },
   barSeg: {
     borderRadius: 0,
@@ -873,7 +931,7 @@ const styles = StyleSheet.create({
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 24,
+    marginBottom: 28,
   },
   summaryItem: {
     alignItems: 'center',
@@ -908,7 +966,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 13,
+    paddingVertical: 14,
+    minHeight: 48,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',
   },
@@ -929,6 +988,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 5,
     borderBottomColor: 'transparent',
     borderLeftWidth: 7,
+    marginTop: 2,
   },
   dataLabel: {
     fontFamily: fonts.mono,
@@ -951,13 +1011,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  chevron: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: colors.muted,
-  },
   bulletExpanded: {
-    borderLeftColor: colors.text,
+    borderLeftColor: 'transparent',
+    borderTopWidth: 7,
+    borderBottomWidth: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderRightColor: 'transparent',
   },
 
   // ── Transaction dropdown ──
@@ -1011,7 +1071,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     color: colors.muted,
-    marginBottom: 8,
+    marginBottom: 12,
     lineHeight: 18,
   },
   cardFooter: {
@@ -1030,6 +1090,9 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: radius.md,
     alignItems: 'center',
+    marginTop: 8,
+    minHeight: 52,
+    justifyContent: 'center',
   },
   uploadText: {
     fontFamily: fonts.semibold,

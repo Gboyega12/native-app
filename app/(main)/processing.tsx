@@ -55,8 +55,21 @@ function ProcessingInner() {
       setCurrentStep(0);
       await delay(400);
 
+      // Fetch user's transaction overrides (corrections made via chat)
+      let overrides: any[] = [];
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        if (authUser) {
+          const { data: overrideData } = await supabase
+            .from('transaction_overrides')
+            .select('match_description, category, is_essential')
+            .eq('user_id', authUser.id);
+          if (overrideData) overrides = overrideData;
+        }
+      } catch {}
+
       setCurrentStep(1);
-      let result = EnrichmentEngine.enrich(csvData);
+      let result = EnrichmentEngine.enrich(csvData, overrides);
 
       if (result.enrichedTransactions.length === 0) {
         setError('No transactions found in your data. Check the file format — it should have Date, Description, and Amount columns.');
@@ -259,6 +272,35 @@ function ProcessingInner() {
           });
           if (insertError) {
             console.warn('[processing] Supabase insert failed:', insertError.message);
+          }
+
+          // Save card balances to debt_accounts (from TrueLayer data)
+          try {
+            const { data: bankRows } = await supabase
+              .from('bank_data')
+              .select('card_balances')
+              .eq('user_id', user.id)
+              .not('card_balances', 'is', null)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+
+            if (bankRows?.card_balances && Array.isArray(bankRows.card_balances)) {
+              for (const card of bankRows.card_balances) {
+                await supabase.from('debt_accounts').upsert({
+                  user_id: user.id,
+                  account_name: card.name || 'Card',
+                  account_type: card.type || 'credit_card',
+                  outstanding_balance: card.balance,
+                  credit_limit: card.limit,
+                  source: 'truelayer',
+                  last_updated: new Date().toISOString(),
+                }, { onConflict: 'user_id,account_name' }).then(() => {});
+              }
+              console.log('[processing] Saved', bankRows.card_balances.length, 'debt account(s)');
+            }
+          } catch (debtErr: any) {
+            console.warn('[processing] Non-critical: debt accounts save failed:', debtErr?.message);
           }
         } catch (dbErr: any) {
           console.warn('[processing] Supabase insert threw:', dbErr?.message);

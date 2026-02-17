@@ -93,7 +93,7 @@ export default async function handler(req, res) {
     fromDate.setFullYear(fromDate.getFullYear() - 1);
     const from = fromDate.toISOString().split('T')[0];
 
-    // Fetch all transactions
+    // Fetch transactions + card balances in parallel
     const txPromises = [
       ...accounts.map((a) =>
         fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
@@ -103,7 +103,18 @@ export default async function handler(req, res) {
       ),
     ];
 
-    const txResults = await Promise.all(txPromises);
+    // Fetch card balances for debt tracking
+    const balancePromises = cards.map((c) =>
+      fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/balance`, { headers })
+        .then((r) => r.json())
+        .then((data) => ({ card: c, balance: (data.results || [])[0] || null }))
+        .catch(() => ({ card: c, balance: null }))
+    );
+
+    const [txResults, balanceResults] = await Promise.all([
+      Promise.all(txPromises),
+      Promise.all(balancePromises),
+    ]);
     const allTx = txResults.flatMap((r) => r.results || []);
 
     // Convert to CSV
@@ -137,6 +148,31 @@ export default async function handler(req, res) {
     if (dbError) {
       console.error('Failed to save bank data:', dbError);
       return fail(500, 'Failed to save bank data', dbError.message || dbError.code);
+    }
+
+    // Store card balances on bank_data row (best-effort, non-blocking)
+    // Processing step will read these and upsert into debt_accounts with user_id
+    if (balanceResults.length > 0) {
+      try {
+        const cardBalances = balanceResults
+          .filter((r) => r.balance)
+          .map((r) => ({
+            name: r.card.display_name || r.card.provider?.display_name || 'Card',
+            type: 'credit_card',
+            balance: r.balance.current != null ? Math.abs(r.balance.current) : null,
+            limit: r.balance.credit_limit || null,
+            available: r.balance.available || null,
+          }));
+
+        if (cardBalances.length > 0) {
+          console.log('[callback] Card balances:', JSON.stringify(cardBalances));
+          await admin.from('bank_data')
+            .update({ card_balances: cardBalances })
+            .eq('connection_id', connectionId);
+        }
+      } catch (debtErr) {
+        console.warn('[callback] Non-critical: card balance save failed:', debtErr.message);
+      }
     }
 
     // POST → return JSON to the client

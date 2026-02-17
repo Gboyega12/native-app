@@ -48,10 +48,16 @@ function parseDate(str: string): Date | null {
   return isNaN(named.getTime()) ? null : named;
 }
 
+export type TransactionOverride = {
+  match_description: string;
+  category: string;
+  is_essential: boolean;
+};
+
 const EnrichmentEngine = {
-  enrich(rawCSV: string): EnrichmentResult {
+  enrich(rawCSV: string, overrides?: TransactionOverride[]): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
-    const enriched = transactions.map((tx) => this.enrichTransaction(tx));
+    const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
@@ -144,7 +150,31 @@ const EnrichmentEngine = {
     return transactions;
   },
 
-  enrichTransaction(tx: RawTransaction): EnrichedTransaction {
+  enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[]): EnrichedTransaction {
+    // Check user overrides first — short-circuit if matched
+    if (overrides?.length) {
+      const descLower = tx.description.toLowerCase();
+      const override = overrides.find((o) => descLower.includes(o.match_description.toLowerCase()));
+      if (override) {
+        return {
+          date: tx.date,
+          description: tx.description,
+          amount: tx.amount,
+          merchant: tx.description,
+          category: override.category,
+          isEssential: override.is_essential,
+          isSubscription: false,
+          isBNPL: false,
+          isDebt: override.category === 'Debt Payments',
+          isIncome: tx.amount > 0,
+          isTransfer: false,
+          isRefund: false,
+          isSavings: override.category === 'Savings',
+          confidence: 'high' as const,
+        };
+      }
+    }
+
     const normalised = normaliseDescription(tx.description);
     const merchantMatch = matchMerchant(tx.description, normalised);
     let isPerson = isPersonTransfer(tx.description);
@@ -547,7 +577,7 @@ const EnrichmentEngine = {
         category: 'spending',
         merchants: subNames,
         strategy: `${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month total.`,
-        steps: ['Review all subscriptions', 'Cancel unused ones', 'Rotate streaming services monthly'],
+        steps: ['Review your subscriptions — I\'ve listed them below', 'Cancel the ones you haven\'t used in 30 days', 'Rotate streaming services monthly — I\'ll remind you'],
         effect: `Saves \u00a3${saving}/month (\u00a3${saving * 12}/year).`,
       });
     }
@@ -564,7 +594,7 @@ const EnrichmentEngine = {
         category: 'spending',
         merchants: deliveryMerchants,
         strategy: `\u00a3${Math.round(m.foodDelivery)}/month on food delivery.`,
-        steps: ['Batch-cook twice a week', 'Delete saved payment cards from delivery apps', 'Set a monthly delivery budget cap'],
+        steps: ['Batch-cook twice a week', 'Delete saved payment cards from delivery apps', 'I\'ll track your delivery spend weekly'],
         effect: `Frees \u00a3${saving}/month.`,
       });
     }
@@ -616,7 +646,7 @@ const EnrichmentEngine = {
         category: 'debt',
         merchants: debtMerchants,
         strategy: `${m.debtAccountCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.`,
-        steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Throw surplus at smallest debt first', 'Roll payments into next debt when cleared'],
+        steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Direct your surplus at the smallest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'],
         effect: `Saves \u00a3${debtSaving * 12}/year in interest.`,
       });
     }
@@ -634,7 +664,7 @@ const EnrichmentEngine = {
         category: 'debt',
         merchants: debtMerchants,
         strategy: `1 debt account with \u00a3${Math.round(p.debtPayments)}/month in payments.`,
-        steps: ['Check if overpayments are allowed without penalty', 'Set up a monthly overpayment standing order', 'Redirect any savings from other moves into debt payoff'],
+        steps: ['Check if overpayments are allowed without penalty', 'Set up a monthly overpayment standing order', 'I\'ll redirect savings from other moves into this automatically'],
         effect: `Reduces total interest paid and clears debt sooner.`,
       });
     }
@@ -669,7 +699,7 @@ const EnrichmentEngine = {
         category: 'buffer',
         merchants: [],
         strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Monthly surplus is \u00a3${Math.round(p.surplus)}.`,
-        steps: ['Open a separate savings pot', 'Set up standing order on payday', 'Target 1 month of expenses, then build to 3'],
+        steps: ['Set aside this amount on payday — I\'ll track it', 'Target 1 month of expenses first, then build to 3', 'I\'ll update your progress each month'],
         effect: `\u00a3${bufferTarget} safety net in ${monthsToTarget} months.`,
       });
     }
@@ -686,7 +716,7 @@ const EnrichmentEngine = {
         category: 'savings',
         merchants: [],
         strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Surplus is \u00a3${Math.round(p.surplus)}/month.`,
-        steps: ['Open a separate savings account with the best rate you can find', 'Auto-transfer surplus on payday', 'Review rates every 6 months and switch if needed'],
+        steps: ['Put surplus into a savings account on payday', 'Automate the transfer so it\'s hands-free', 'I\'ll flag when it\'s time to review your rate'],
         effect: `\u00a3${interestGain}/year in passive interest.`,
       });
     }
@@ -703,7 +733,7 @@ const EnrichmentEngine = {
         category: 'spending',
         merchants: coffeeMerchants,
         strategy: `\u00a3${Math.round(m.coffeeAndCafes)}/month on coffee and caf\u00e9s.`,
-        steps: ['Make coffee at home 3 mornings per week', 'Keep one treat coffee day', 'Track weekly spending'],
+        steps: ['Make coffee at home 3 mornings per week', 'Keep one treat coffee day', 'I\'ll track your weekly café spend'],
         effect: `Saves \u00a3${saving}/month.`,
       });
     }

@@ -194,9 +194,32 @@ export interface EnrichmentResult {
 
 // ── Chat ──
 
+export interface ChatAction {
+  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed';
+  data: {
+    id?: string;
+    action?: string;
+    target_amount?: number | null;
+    monthly_saving?: number | null;
+    timeline?: string | null;
+    match_description?: string;
+    category?: string;
+    is_essential?: boolean;
+    notes?: string | null;
+    // goal update fields
+    reason?: string;
+    new_situation?: string;
+    new_one_year_goal?: string;
+    new_two_year_goal?: string;
+    new_target_amount?: number | null;
+  };
+  status?: 'pending' | 'approved' | 'dismissed';
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  actions?: ChatAction[];
 }
 
 export interface ChatContext {
@@ -215,6 +238,8 @@ export interface ChatContext {
   all_moves?: { action: string; monthlyImpact: number; effort: string }[];
   subscriptions?: { merchant: string; amount: number }[];
   spending_by_category?: { category: string; monthly: number }[];
+  recent_transfers?: { description: string; amount: number; date: string }[];
+  debt_accounts?: { name: string; type: string; balance: number | null; limit: number | null }[];
   behavioral_patterns?: string[];
   goal_trajectory?: {
     goalLabel: string;
