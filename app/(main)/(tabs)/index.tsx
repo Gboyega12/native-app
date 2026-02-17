@@ -472,7 +472,7 @@ export default function Home() {
                         style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
                       >
                         <View style={styles.dataRowLeft}>
-                          <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && styles.bulletExpanded]} />
+                          <View style={[styles.bullet, { borderLeftColor: colors.coral }, isExpanded && [styles.bulletExpanded, { borderTopColor: colors.coral }]]} />
                           <View>
                             <Text style={styles.dataLabel}>{item.category}</Text>
                             <Text style={styles.dataMeta}>
@@ -484,7 +484,6 @@ export default function Home() {
                           <Text style={[styles.dataValue, { color: colors.coral }]}>
                             {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                           </Text>
-                          <Text style={styles.chevron}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                         </View>
                       </TouchableOpacity>
                       {isExpanded && txs.length > 0 && (
@@ -532,7 +531,7 @@ export default function Home() {
                         style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
                       >
                         <View style={styles.dataRowLeft}>
-                          <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && styles.bulletExpanded]} />
+                          <View style={[styles.bullet, { borderLeftColor: gold }, isExpanded && [styles.bulletExpanded, { borderTopColor: gold }]]} />
                           <View>
                             <Text style={styles.dataLabel}>{item.category}</Text>
                             <Text style={styles.dataMeta}>
@@ -544,7 +543,6 @@ export default function Home() {
                           <Text style={[styles.dataValue, { color: gold }]}>
                             {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                           </Text>
-                          <Text style={styles.chevron}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                         </View>
                       </TouchableOpacity>
                       {isExpanded && txs.length > 0 && (
@@ -990,6 +988,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 5,
     borderBottomColor: 'transparent',
     borderLeftWidth: 7,
+    marginTop: 2,
   },
   dataLabel: {
     fontFamily: fonts.mono,
@@ -1012,13 +1011,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  chevron: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: colors.muted,
-  },
   bulletExpanded: {
-    borderLeftColor: colors.text,
+    borderLeftColor: 'transparent',
+    borderTopWidth: 7,
+    borderBottomWidth: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderRightColor: 'transparent',
   },
 
   // ── Transaction dropdown ──

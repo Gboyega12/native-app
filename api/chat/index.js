@@ -506,7 +506,7 @@ Rules:
 - No filler, no preamble, no "Great question!" — just answer.
 
 Tools:
-- When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction.
+- When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction. For the match_description, use the EXACT bank description shown in the transfers list if available — partial matches work (e.g. "JOHN" will match "TFR TO JOHN SMITH"). Common cases: rent paid to partner/housemate, bill splits, debt repayments showing as transfers.
 - When you recommend a concrete financial plan with a target amount or savings goal, use propose_plan so they can approve it directly in the chat.
 - When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis and recommendations. Don't suggest this casually — only when a real shift has happened.`;
 
@@ -542,6 +542,15 @@ Tools:
     for (const m of ctx.all_moves) {
       prompt += `\n- ${m.action} → saves £${Math.round(m.monthlyImpact)}/month (effort: ${m.effort})`;
     }
+  }
+
+  // ── Recent transfers / uncategorised (for override matching) ──
+  if (ctx.recent_transfers?.length) {
+    prompt += `\n\nRecent transfers & uncategorised payments (may need reclassifying):`;
+    for (const t of ctx.recent_transfers) {
+      prompt += `\n- "${t.description}" £${Math.abs(t.amount).toFixed(2)}`;
+    }
+    prompt += `\nIf the user mentions a payment that matches one of these, use save_transaction_override with the exact description above as match_description.`;
   }
 
   // ── Goals + staleness detection ──

@@ -238,6 +238,7 @@ export interface ChatContext {
   all_moves?: { action: string; monthlyImpact: number; effort: string }[];
   subscriptions?: { merchant: string; amount: number }[];
   spending_by_category?: { category: string; monthly: number }[];
+  recent_transfers?: { description: string; amount: number; date: string }[];
   behavioral_patterns?: string[];
   goal_trajectory?: {
     goalLabel: string;

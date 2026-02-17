@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Linking,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, Move } from '@/lib/types';
@@ -21,13 +21,61 @@ function effortColor(effort: string) {
   return effort === 'low' ? colors.accent : effort === 'medium' ? colors.sky : colors.coral;
 }
 
+// Generate actionable steps for user plans that don't have them
+function getPlanSteps(plan: UserPlan): string[] {
+  const action = (plan.action || '').toLowerCase();
+  if (action.includes('emergency') || action.includes('buffer')) {
+    return [
+      'Open a separate savings pot today',
+      'Set up a standing order on your next payday',
+      'Automate so you don\'t have to think about it',
+    ];
+  }
+  if (action.includes('debt') || action.includes('credit') || action.includes('pay off')) {
+    return [
+      'List all debts with their interest rates',
+      'Set up minimum payments on all debts',
+      'Direct any extra to the highest-rate debt first',
+    ];
+  }
+  if (action.includes('save') || action.includes('saving')) {
+    return [
+      'Pick a high-interest savings account',
+      'Set up automatic monthly transfer on payday',
+      'Review progress at the end of each month',
+    ];
+  }
+  if (action.includes('invest')) {
+    return [
+      'Research a stocks & shares ISA provider',
+      'Start with a small monthly amount you won\'t miss',
+      'Set it and forget it — don\'t check daily',
+    ];
+  }
+  if (action.includes('subscript') || action.includes('cancel')) {
+    return [
+      'List all active subscriptions this week',
+      'Cancel the ones you haven\'t used in 30 days',
+      'Set a reminder to review again next month',
+    ];
+  }
+  return [
+    'Break this goal into a weekly action',
+    'Set a calendar reminder for your first step',
+    'Review progress with Bocy next week',
+  ];
+}
+
 export default function Plan() {
+  const router = useRouter();
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [userPlans, setUserPlans] = useState<UserPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [approved, setApproved] = useState<Set<number>>(new Set());
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
+  // Step completion tracking: key = "move-{index}" or "plan-{id}", value = set of completed step indices
+  const [completedSteps, setCompletedSteps] = useState<Record<string, Set<number>>>({});
 
   useFocusEffect(
     useCallback(() => {
@@ -71,6 +119,16 @@ export default function Plan() {
     }
 
     setLoading(false);
+  };
+
+  const toggleStep = (key: string, stepIndex: number) => {
+    setCompletedSteps((prev) => {
+      const current = prev[key] || new Set<number>();
+      const next = new Set(current);
+      if (next.has(stepIndex)) next.delete(stepIndex);
+      else next.add(stepIndex);
+      return { ...prev, [key]: next };
+    });
   };
 
   const handleApprove = (index: number) => {
@@ -165,6 +223,12 @@ export default function Plan() {
           {userPlans.map((plan) => {
             const isPlanExpanded = expandedPlan === plan.id;
             const isProposed = plan.status === 'proposed';
+            const planKey = `plan-${plan.id}`;
+            const planSteps = getPlanSteps(plan);
+            const doneSteps = completedSteps[planKey] || new Set<number>();
+            const stepProgress = planSteps.length > 0 ? doneSteps.size / planSteps.length : 0;
+            const nextStepIdx = planSteps.findIndex((_, idx) => !doneSteps.has(idx));
+
             return (
               <View key={plan.id} style={[styles.card, isProposed ? styles.userPlanPending : styles.userPlanCard]}>
                 <TouchableOpacity
@@ -198,6 +262,18 @@ export default function Plan() {
                         )}
                         <Text style={styles.expandIcon}>{isPlanExpanded ? '\u25B2' : '\u25BC'}</Text>
                       </View>
+
+                      {/* Step progress bar (collapsed view) */}
+                      {!isProposed && !isPlanExpanded && (
+                        <View style={styles.stepProgressWrap}>
+                          <View style={styles.stepProgressBar}>
+                            <View style={[styles.stepProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                          </View>
+                          <Text style={styles.stepProgressText}>
+                            {doneSteps.size}/{planSteps.length} steps
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -205,6 +281,7 @@ export default function Plan() {
                 {isPlanExpanded && (
                   <View style={styles.expandedSection}>
                     <View style={styles.separator} />
+
                     {plan.target_amount != null && plan.monthly_saving != null && plan.monthly_saving > 0 && (
                       <View style={styles.detailBlock}>
                         <Text style={styles.detailLabel}>Projection</Text>
@@ -220,6 +297,54 @@ export default function Plan() {
                         </View>
                       </View>
                     )}
+
+                    {/* Actionable checklist */}
+                    {!isProposed && (
+                      <View style={styles.detailBlock}>
+                        <Text style={styles.detailLabel}>Action checklist</Text>
+                        <View style={styles.stepProgressWrap}>
+                          <View style={styles.stepProgressBar}>
+                            <View style={[styles.stepProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                          </View>
+                          <Text style={styles.stepProgressText}>
+                            {doneSteps.size}/{planSteps.length} done
+                          </Text>
+                        </View>
+                        {planSteps.map((step, j) => {
+                          const isDone = doneSteps.has(j);
+                          const isNext = j === nextStepIdx;
+                          return (
+                            <TouchableOpacity
+                              key={j}
+                              style={[styles.checklistRow, isNext && styles.checklistRowNext]}
+                              onPress={() => toggleStep(planKey, j)}
+                              activeOpacity={0.7}
+                            >
+                              <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
+                                {isDone && <Text style={styles.checkmark}>{'\u2713'}</Text>}
+                              </View>
+                              <View style={styles.checklistContent}>
+                                <Text style={[styles.checklistText, isDone && styles.checklistTextDone]}>
+                                  {step}
+                                </Text>
+                                {isNext && !isDone && (
+                                  <Text style={styles.nextStepLabel}>Do this next</Text>
+                                )}
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
+
+                    {/* Ask Bocy for help */}
+                    <TouchableOpacity
+                      style={styles.chatBtn}
+                      onPress={() => router.push('/(main)/(tabs)/chat')}
+                    >
+                      <Text style={styles.chatBtnText}>Ask Bocy about this</Text>
+                    </TouchableOpacity>
+
                     <View style={styles.actionButtons}>
                       {isProposed && (
                         <TouchableOpacity
@@ -272,6 +397,11 @@ export default function Plan() {
       {moves.map((move, i) => {
         const isExpanded = expanded === i;
         const isApproved = approved.has(i);
+        const moveKey = `move-${i}`;
+        const steps = move.steps || [];
+        const doneSteps = completedSteps[moveKey] || new Set<number>();
+        const stepProgress = steps.length > 0 ? doneSteps.size / steps.length : 0;
+        const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.has(idx));
 
         return (
           <View key={i} style={[styles.card, isApproved && styles.cardApproved]}>
@@ -299,6 +429,18 @@ export default function Plan() {
                     </View>
                     <Text style={styles.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                   </View>
+
+                  {/* Step progress bar (collapsed view) */}
+                  {isApproved && steps.length > 0 && !isExpanded && (
+                    <View style={styles.stepProgressWrap}>
+                      <View style={styles.stepProgressBar}>
+                        <View style={[styles.stepProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                      </View>
+                      <Text style={styles.stepProgressText}>
+                        {doneSteps.size}/{steps.length} steps
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </View>
             </TouchableOpacity>
@@ -314,15 +456,51 @@ export default function Plan() {
                   </View>
                 )}
 
-                {move.steps && move.steps.length > 0 && (
+                {/* Actionable checklist — replaces old numbered list */}
+                {steps.length > 0 && (
                   <View style={styles.detailBlock}>
-                    <Text style={styles.detailLabel}>Steps to execute</Text>
-                    {move.steps.map((step, j) => (
-                      <View key={j} style={styles.stepRow}>
-                        <Text style={styles.stepNumber}>{j + 1}</Text>
-                        <Text style={styles.stepText}>{step}</Text>
+                    <Text style={styles.detailLabel}>Action checklist</Text>
+                    {isApproved && (
+                      <View style={styles.stepProgressWrap}>
+                        <View style={styles.stepProgressBar}>
+                          <View style={[styles.stepProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                        </View>
+                        <Text style={styles.stepProgressText}>
+                          {doneSteps.size}/{steps.length} done
+                        </Text>
                       </View>
-                    ))}
+                    )}
+                    {steps.map((step, j) => {
+                      const isDone = doneSteps.has(j);
+                      const isNext = j === nextStepIdx && isApproved;
+                      return (
+                        <TouchableOpacity
+                          key={j}
+                          style={[styles.checklistRow, isNext && styles.checklistRowNext]}
+                          onPress={() => isApproved ? toggleStep(moveKey, j) : null}
+                          activeOpacity={isApproved ? 0.7 : 1}
+                        >
+                          {isApproved ? (
+                            <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
+                              {isDone && <Text style={styles.checkmark}>{'\u2713'}</Text>}
+                            </View>
+                          ) : (
+                            <Text style={styles.stepNumber}>{j + 1}</Text>
+                          )}
+                          <View style={styles.checklistContent}>
+                            <Text style={[
+                              styles.checklistText,
+                              isDone && isApproved && styles.checklistTextDone,
+                            ]}>
+                              {step}
+                            </Text>
+                            {isNext && !isDone && (
+                              <Text style={styles.nextStepLabel}>Do this next</Text>
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                 )}
 
@@ -347,6 +525,14 @@ export default function Plan() {
                   </View>
                 </View>
 
+                {/* Ask Bocy for help */}
+                <TouchableOpacity
+                  style={styles.chatBtn}
+                  onPress={() => router.push('/(main)/(tabs)/chat')}
+                >
+                  <Text style={styles.chatBtnText}>Ask Bocy about this</Text>
+                </TouchableOpacity>
+
                 <View style={styles.actionButtons}>
                   {isApproved ? (
                     <TouchableOpacity
@@ -361,10 +547,13 @@ export default function Plan() {
                         style={styles.approveBtn}
                         onPress={() => handleApprove(i)}
                       >
-                        <Text style={styles.approveBtnText}>Approve</Text>
+                        <Text style={styles.approveBtnText}>Start this</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={styles.modifyBtn}>
-                        <Text style={styles.modifyBtnText}>Modify</Text>
+                      <TouchableOpacity
+                        style={styles.modifyBtn}
+                        onPress={() => router.push('/(main)/(tabs)/chat')}
+                      >
+                        <Text style={styles.modifyBtnText}>Ask Bocy</Text>
                       </TouchableOpacity>
                     </>
                   )}
@@ -619,22 +808,96 @@ const styles = StyleSheet.create({
     color: colors.text2,
     lineHeight: 22,
   },
-  stepRow: {
+  // ── Interactive checklist ──
+  checklistRow: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  checklistRowNext: {
+    backgroundColor: 'rgba(122,239,199,0.06)',
+    marginHorizontal: -spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    borderBottomWidth: 0,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.muted,
+    marginRight: spacing.sm,
+    marginTop: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxDone: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  checkmark: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.bg,
+  },
+  checklistContent: {
+    flex: 1,
+  },
+  checklistText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text2,
+    lineHeight: 22,
+  },
+  checklistTextDone: {
+    textDecorationLine: 'line-through',
+    color: colors.muted,
+  },
+  nextStepLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    color: colors.accent,
+    marginTop: 2,
+    textTransform: 'uppercase',
+  },
+  stepProgressWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
     marginBottom: spacing.xs,
   },
+  stepProgressBar: {
+    flex: 1,
+    height: 4,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  stepProgressFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+    borderRadius: 2,
+    minWidth: 1,
+  },
+  stepProgressText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+  },
+  // ── Old step number (for non-approved moves) ──
   stepNumber: {
     fontFamily: fonts.semibold,
     fontSize: 13,
     color: colors.accent,
-    width: 20,
-  },
-  stepText: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: colors.text2,
-    flex: 1,
-    lineHeight: 22,
+    width: 22,
+    marginRight: spacing.sm,
+    textAlign: 'center',
+    marginTop: 1,
   },
   effectText: {
     fontFamily: fonts.medium,
@@ -664,10 +927,24 @@ const styles = StyleSheet.create({
     color: colors.accent,
     marginTop: 2,
   },
+  // ── Chat button ──
+  chatBtn: {
+    borderWidth: 1.5,
+    borderColor: colors.accentDim,
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  chatBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.accent,
+  },
   actionButtons: {
     flexDirection: 'row',
     gap: spacing.sm,
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
   },
   approveBtn: {
     flex: 1,

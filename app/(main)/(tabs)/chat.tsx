@@ -325,6 +325,21 @@ export default function Chat() {
       } : null,
     };
 
+    // Add recent person-to-person transfers so Claude can spot miscategorised rent/bills
+    const transferItems: { description: string; amount: number; date: string }[] = [];
+    for (const section of [a?.non_discretionary, a?.discretionary]) {
+      if (!section?.items) continue;
+      for (const item of section.items) {
+        if (item.category !== 'Transfers' && item.category !== 'Other') continue;
+        for (const tx of (item.transactions || []).slice(0, 10)) {
+          transferItems.push({ description: tx.merchant || tx.description, amount: tx.amount, date: tx.date });
+        }
+      }
+    }
+    if (transferItems.length > 0) {
+      ctx.recent_transfers = transferItems.slice(0, 15);
+    }
+
     // Add subscriptions from discretionary budget if available
     if (a?.discretionary?.items) {
       const subItems = a.discretionary.items.filter(
