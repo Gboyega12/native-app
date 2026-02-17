@@ -221,6 +221,40 @@ export default function Plan() {
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
   };
 
+  const handleDeleteRecommendation = async (index: number) => {
+    if (!analysis) return;
+    const uid = userIdRef.current;
+    if (!uid) return;
+
+    const updatedMoves = [...(analysis.all_moves || [])];
+    updatedMoves.splice(index, 1);
+    setAnalysis({ ...analysis, all_moves: updatedMoves });
+
+    // Also remove from progress if it was started
+    const key = `move-${index}`;
+    setProgress((prev) => {
+      const updated = { ...prev };
+      delete updated[key];
+      return updated;
+    });
+
+    // Persist to Supabase
+    try {
+      const { data: latest } = await supabase.from('analyses')
+        .select('id')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      if (latest?.id) {
+        await supabase.from('analyses')
+          .update({ all_moves: updatedMoves })
+          .eq('id', latest.id);
+      }
+      await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', key);
+    } catch {}
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -313,23 +347,23 @@ export default function Plan() {
                   </View>
                 </TouchableOpacity>
 
-                {/* Quick discard button — always visible */}
+                {/* Quick delete button — always visible */}
                 {!isPlanExpanded && (
                   <TouchableOpacity
                     style={styles.quickDiscardBtn}
                     onPress={() => {
                       Alert.alert(
-                        'Discard plan?',
+                        'Delete plan?',
                         `Remove "${stripMd(plan.action)}" from your plans?`,
                         [
                           { text: 'Keep', style: 'cancel' },
-                          { text: 'Discard', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
+                          { text: 'Delete', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
                         ],
                       );
                     }}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
-                    <Text style={styles.quickDiscardText}>Discard</Text>
+                    <Text style={styles.quickDiscardText}>Delete</Text>
                   </TouchableOpacity>
                 )}
 
@@ -402,7 +436,7 @@ export default function Plan() {
                         style={styles.removeButton}
                         onPress={() => handleRemovePlan(plan.id)}
                       >
-                        <Text style={styles.removeText}>Discard plan</Text>
+                        <Text style={styles.removeText}>Delete plan</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -589,6 +623,21 @@ export default function Plan() {
                       <Text style={styles.startBtnText}>Start this</Text>
                     </TouchableOpacity>
                   )}
+                  <TouchableOpacity
+                    style={styles.deleteBtn}
+                    onPress={() => {
+                      Alert.alert(
+                        'Delete recommendation?',
+                        `Permanently remove "${stripMd(move.action)}"?`,
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'Delete', style: 'destructive', onPress: () => handleDeleteRecommendation(i) },
+                        ],
+                      );
+                    }}
+                  >
+                    <Text style={styles.deleteBtnText}>Delete</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             )}
@@ -683,6 +732,8 @@ const styles = StyleSheet.create({
   startBtnText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.bg },
   removeButton: { flex: 1, borderWidth: 1, borderColor: colors.border, paddingVertical: 14, borderRadius: radius.md, alignItems: 'center' },
   removeText: { fontFamily: fonts.medium, fontSize: 14, color: colors.dim },
+  deleteBtn: { flex: 1, backgroundColor: 'rgba(232,114,114,0.08)', borderWidth: 1, borderColor: 'rgba(232,114,114,0.2)', paddingVertical: 14, borderRadius: radius.md, alignItems: 'center' },
+  deleteBtnText: { fontFamily: fonts.medium, fontSize: 14, color: colors.coral },
   quickDiscardBtn: { position: 'absolute', top: spacing.lg, right: spacing.lg, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, backgroundColor: 'rgba(232,96,99,0.08)' },
   quickDiscardText: { fontFamily: fonts.medium, fontSize: 11, color: colors.coral },
   sectionLabel: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 1.5, color: colors.accent, marginBottom: spacing.sm, marginTop: spacing.xl },
