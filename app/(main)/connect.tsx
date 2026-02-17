@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform,
+  LayoutAnimation,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -14,28 +15,32 @@ export default function Connect() {
   const params = useLocalSearchParams<{
     connection_id?: string; status?: string; error?: string;
     code?: string; state?: string;
+    from?: string; // 'profile' | 'onboarding'
+    csvData?: string; // carried from prior connections during onboarding
   }>();
   const [loading, setLoading] = useState(false);
   const [loadingCSV, setLoadingCSV] = useState(false);
   const [loadingPDF, setLoadingPDF] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  // Accumulated CSV data when connecting multiple accounts during onboarding
+  const [accumulatedCSV, setAccumulatedCSV] = useState(params.csvData || '');
+  const [connectedCount, setConnectedCount] = useState(params.csvData ? 1 : 0);
+  const [lastConnectedName, setLastConnectedName] = useState('');
+
+  const isFromProfile = params.from === 'profile';
 
   // Handle redirect params — arriving back from TrueLayer server redirect or popup
   useEffect(() => {
     if (params.status === 'success' && params.connection_id) {
-      // Server-side callback already processed data — fetch CSV from our API
       fetchBankData(params.connection_id);
     } else if (params.status === 'error' && params.error) {
-      // Server-side callback failed and redirected back with error
       setErrorMsg(decodeURIComponent(params.error));
     } else if (params.code && params.state) {
-      // Fallback: client-side code+state flow (e.g. native popup returned code)
       exchangeTrueLayerCode(params.code, params.state);
     }
   }, [params.connection_id, params.status, params.code, params.state]);
 
-  // POST the auth code to our callback API for token exchange + data fetch
   const exchangeTrueLayerCode = async (code: string, state: string) => {
     setLoading(true);
     setErrorMsg('');
@@ -67,13 +72,11 @@ export default function Connect() {
     }
   };
 
-  // Fetch bank data via server-side API (bypasses RLS)
   const fetchBankData = async (connId: string) => {
     setLoading(true);
     setErrorMsg('');
     setStatusMsg('Loading transactions...');
     try {
-      // Pass user_id so the API can claim this bank_data row for future sync
       let userId = '';
       try {
         const { data: { user } } = await supabase.auth.getUser();
@@ -92,12 +95,30 @@ export default function Connect() {
 
       setStatusMsg('');
       setLoading(false);
-      router.push({ pathname: '/(main)/goals', params: { csvData: result.csv_data } });
+
+      if (isFromProfile) {
+        // From profile — go back to profile with success, don't go to goals
+        router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
+        return;
+      }
+
+      // Onboarding flow — accumulate data for multiple accounts
+      handleConnectionSuccess(result.csv_data, 'Bank account');
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to fetch bank data');
       setStatusMsg('');
       setLoading(false);
     }
+  };
+
+  const handleConnectionSuccess = (csvData: string, label: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    const combined = accumulatedCSV
+      ? accumulatedCSV + '\n' + csvData.split('\n').slice(1).join('\n')  // skip header of 2nd CSV
+      : csvData;
+    setAccumulatedCSV(combined);
+    setConnectedCount((c) => c + 1);
+    setLastConnectedName(label);
   };
 
   const handleTrueLayer = async () => {
@@ -109,15 +130,10 @@ export default function Connect() {
       const authUrl = getTrueLayerAuthUrl(connectionId);
 
       if (Platform.OS === 'web') {
-        // On web: full page redirect — most reliable approach.
-        // Popups are often blocked and openAuthSessionAsync can't handle
-        // the 5-10 second server processing time reliably.
-        // After bank auth → callback processes → redirects back here with params.
         window.location.href = authUrl;
-        return; // page is navigating away
+        return;
       }
 
-      // On native: use auth session popup
       const returnUrl = 'bocy://callback';
       const result = await WebBrowser.openAuthSessionAsync(authUrl, returnUrl);
 
@@ -165,8 +181,6 @@ export default function Connect() {
       }
 
       const file = result.assets[0];
-
-      // On web, read the File object directly (more reliable than fetching blob URIs)
       let csvText: string;
       const webFile = Platform.OS === 'web' && (file as any).file;
       if (webFile) {
@@ -183,7 +197,13 @@ export default function Connect() {
       }
 
       setLoadingCSV(false);
-      router.push({ pathname: '/(main)/goals', params: { csvData: csvText } });
+
+      if (isFromProfile) {
+        router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
+        return;
+      }
+
+      handleConnectionSuccess(csvText, 'CSV statement');
     } catch (err) {
       setLoadingCSV(false);
       Alert.alert('Error', 'Could not read the file. Please check the format and try again.');
@@ -206,8 +226,6 @@ export default function Connect() {
       }
 
       const file = result.assets[0];
-
-      // Convert PDF to base64
       const base64 = await fileToBase64(file);
       if (!base64) {
         Alert.alert('Error', 'Could not read the PDF file.');
@@ -215,7 +233,6 @@ export default function Connect() {
         return;
       }
 
-      // Send to API for Claude-powered extraction
       const res = await fetch('/api/parse-statement', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -224,20 +241,28 @@ export default function Connect() {
       const data = await res.json();
 
       if (!data.success || !data.csv_data) {
-        Alert.alert(
-          'Could not parse statement',
-          data.error || 'Please try a CSV export instead.',
-        );
+        Alert.alert('Could not parse statement', data.error || 'Please try a CSV export instead.');
         setLoadingPDF(false);
         return;
       }
 
       setLoadingPDF(false);
-      router.push({ pathname: '/(main)/goals', params: { csvData: data.csv_data } });
+
+      if (isFromProfile) {
+        router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
+        return;
+      }
+
+      handleConnectionSuccess(data.csv_data, 'PDF statement');
     } catch (err) {
       setLoadingPDF(false);
       Alert.alert('Error', 'Could not process the PDF. Please try a CSV export instead.');
     }
+  };
+
+  const handleContinue = () => {
+    if (!accumulatedCSV) return;
+    router.push({ pathname: '/(main)/goals', params: { csvData: accumulatedCSV } });
   };
 
   const anyLoading = loading || loadingCSV || loadingPDF;
@@ -245,9 +270,26 @@ export default function Connect() {
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>Connect your bank</Text>
+        {/* Success banner for connected accounts */}
+        {connectedCount > 0 && !isFromProfile && (
+          <View style={styles.successBanner}>
+            <Text style={styles.successIcon}>{'>'}</Text>
+            <Text style={styles.successText}>
+              {connectedCount} account{connectedCount > 1 ? 's' : ''} connected
+              {lastConnectedName ? ` (${lastConnectedName})` : ''}
+            </Text>
+          </View>
+        )}
+
+        <Text style={styles.title}>
+          {isFromProfile ? 'Add a connection' : connectedCount > 0 ? 'Add another account?' : 'Connect your bank'}
+        </Text>
         <Text style={styles.subtitle}>
-          We need your transaction data to identify your most material financial move.
+          {isFromProfile
+            ? 'Connect a bank account for transactions or a credit card for balance tracking.'
+            : connectedCount > 0
+              ? 'Connect more accounts for a complete picture, or continue to set your goals.'
+              : 'We need your transaction data to identify your most material financial move.'}
         </Text>
 
         <TouchableOpacity
@@ -310,6 +352,15 @@ export default function Connect() {
           Download your statement from your banking app as PDF or CSV
         </Text>
 
+        {/* Continue button — only in onboarding when at least one account connected */}
+        {connectedCount > 0 && !isFromProfile && (
+          <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
+            <Text style={styles.continueText}>
+              Continue with {connectedCount} account{connectedCount > 1 ? 's' : ''} {'>'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {statusMsg ? (
           <Text style={styles.statusText}>{statusMsg}</Text>
         ) : null}
@@ -327,7 +378,6 @@ async function fileToBase64(
   file: DocumentPicker.DocumentPickerAsset,
 ): Promise<string | null> {
   try {
-    // On web, use the File API directly
     if (Platform.OS === 'web') {
       const webFile = (file as any).file as File | undefined;
       if (webFile) {
@@ -335,8 +385,6 @@ async function fileToBase64(
         return arrayBufferToBase64(buffer);
       }
     }
-
-    // On native (or web fallback), fetch the URI and convert
     const response = await fetch(file.uri);
     const blob = await response.blob();
     return await blobToBase64(blob);
@@ -348,7 +396,6 @@ async function fileToBase64(
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  // Process in chunks to avoid max call stack size
   const chunkSize = 8192;
   for (let i = 0; i < bytes.length; i += chunkSize) {
     const chunk = bytes.subarray(i, i + chunkSize);
@@ -364,7 +411,6 @@ function blobToBase64(blob: Blob): Promise<string> {
     const reader = new FileReader();
     reader.onloadend = () => {
       const dataUrl = reader.result as string;
-      // Strip "data:application/pdf;base64," prefix
       const base64 = dataUrl.split(',')[1] || '';
       resolve(base64);
     };
@@ -390,6 +436,27 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: spacing.xl,
+  },
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(122,239,199,0.08)',
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderRadius: radius.md,
+    padding: 12,
+    marginBottom: spacing.lg,
+    gap: 8,
+  },
+  successIcon: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.accent,
+  },
+  successText: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.accent,
   },
   title: {
     fontFamily: fonts.heading,
@@ -490,6 +557,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
     textAlign: 'center',
+  },
+  continueButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  continueText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.bg,
   },
   statusText: {
     fontFamily: fonts.regular,

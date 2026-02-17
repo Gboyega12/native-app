@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
   LayoutAnimation,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 
@@ -33,10 +33,12 @@ function getConsentStatus(createdAt: string) {
 
 export default function Profile() {
   const router = useRouter();
+  const { connected } = useLocalSearchParams<{ connected?: string }>();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [securityOpen, setSecurityOpen] = useState(false);
   const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
+  const [showSuccess, setShowSuccess] = useState(connected === 'true');
 
   useEffect(() => {
     loadUser();
@@ -76,7 +78,7 @@ export default function Profile() {
   };
 
   const handleReconnect = () => {
-    router.push('/(main)/connect');
+    router.push({ pathname: '/(main)/connect', params: { from: 'profile' } });
   };
 
   const initials = name
@@ -146,6 +148,16 @@ export default function Profile() {
         <Text style={styles.backArrow}>{'\u2190'}</Text>
         <Text style={styles.backLabel}>Home</Text>
       </TouchableOpacity>
+
+      {/* Connection success banner */}
+      {showSuccess && (
+        <View style={styles.successBanner}>
+          <Text style={styles.successBannerText}>Connection successful</Text>
+          <TouchableOpacity onPress={() => setShowSuccess(false)}>
+            <Text style={styles.successDismiss}>{'x'}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Avatar */}
       <View style={styles.avatarSection}>
@@ -397,6 +409,28 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     fontSize: 14,
     color: colors.accent,
+  },
+  successBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(122,239,199,0.08)',
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderRadius: radius.md,
+    padding: 12,
+    marginBottom: spacing.md,
+  },
+  successBannerText: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.accent,
+  },
+  successDismiss: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.dim,
+    padding: 4,
   },
   avatarSection: {
     alignItems: 'center',

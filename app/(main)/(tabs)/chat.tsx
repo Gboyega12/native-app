@@ -373,18 +373,28 @@ export default function Chat() {
       }
     } catch {}
 
-    // Add subscriptions from discretionary budget if available
+    // Add subscriptions from discretionary budget if available.
+    // IMPORTANT: Deduplicate by merchant name to avoid counting recurring
+    // payments (e.g. £10/month Netflix x 4 months) as separate subscriptions.
+    // Show only the average monthly cost per merchant.
     if (a?.discretionary?.items) {
       const subItems = a.discretionary.items.filter(
         (item: { category: string }) => item.category === 'Subscriptions' || item.category === 'Streaming',
       );
       if (subItems.length) {
-        ctx.subscriptions = [];
+        const merchantMap: Record<string, { total: number; count: number }> = {};
         for (const item of subItems) {
           for (const tx of (item.transactions || [])) {
-            ctx.subscriptions.push({ merchant: tx.merchant, amount: tx.amount });
+            const key = (tx.merchant || tx.description).toLowerCase();
+            if (!merchantMap[key]) merchantMap[key] = { total: 0, count: 0 };
+            merchantMap[key].total += Math.abs(tx.amount);
+            merchantMap[key].count += 1;
           }
         }
+        ctx.subscriptions = Object.entries(merchantMap).map(([merchant, data]) => ({
+          merchant,
+          amount: Math.round(data.total / data.count), // avg per occurrence, not total
+        }));
       }
     }
 
