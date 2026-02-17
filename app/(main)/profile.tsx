@@ -38,6 +38,7 @@ export default function Profile() {
   const [email, setEmail] = useState('');
   const [securityOpen, setSecurityOpen] = useState(false);
   const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
+  const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
   const [showSuccess, setShowSuccess] = useState(connected === 'true');
 
   useEffect(() => {
@@ -49,12 +50,19 @@ export default function Profile() {
     if (user) {
       setName(user.user_metadata?.full_name || '');
       setEmail(user.email || '');
-      const { data: banks } = await supabase
-        .from('bank_data')
-        .select('id, connection_id, source, created_at, updated_at, account_type, provider_name')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true });
-      if (banks) setConnectedBanks(banks as BankConnection[]);
+      const [banksRes, debtRes] = await Promise.all([
+        supabase
+          .from('bank_data')
+          .select('id, connection_id, source, created_at, updated_at, account_type, provider_name')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('debt_accounts')
+          .select('id, account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, source, last_updated')
+          .eq('user_id', user.id),
+      ]);
+      if (banksRes.data) setConnectedBanks(banksRes.data as BankConnection[]);
+      if (debtRes.data) setDebtAccounts(debtRes.data);
     }
   };
 
@@ -71,6 +79,25 @@ export default function Profile() {
             await supabase.from('bank_data').delete().eq('id', bankId);
             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
             setConnectedBanks((prev) => prev.filter((b) => b.id !== bankId));
+          },
+        },
+      ],
+    );
+  };
+
+  const handleRemoveDebtAccount = (debtId: string, label: string) => {
+    Alert.alert(
+      `Remove ${label}?`,
+      'This will remove this debt account from your profile.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase.from('debt_accounts').delete().eq('id', debtId);
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setDebtAccounts((prev) => prev.filter((d) => d.id !== debtId));
           },
         },
       ],
@@ -237,6 +264,66 @@ export default function Profile() {
               <Text style={styles.emptyCardLink}>Connect a credit card</Text>
             </TouchableOpacity>
           </View>
+        )}
+
+        {/* Show debt accounts with balances */}
+        {debtAccounts.length > 0 && (
+          <>
+            <Text style={[styles.sectionHint, { marginTop: 12, marginBottom: 8 }]}>Account balances</Text>
+            {debtAccounts.map((d) => {
+              const bal = d.outstanding_balance || 0;
+              const lim = d.credit_limit || 0;
+              const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
+              const isHigh = util != null && util > 75;
+              return (
+                <View key={d.id} style={styles.bankCard}>
+                  <View style={styles.bankCardTop}>
+                    <View style={styles.bankCardInfo}>
+                      <Text style={styles.bankCardName}>{d.account_name}</Text>
+                      <Text style={styles.bankCardMeta}>
+                        {d.account_type === 'credit_card' ? 'Credit card' : d.account_type || 'Account'}
+                        {d.last_updated ? ` · Updated ${new Date(d.last_updated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[styles.bankCardName, isHigh && { color: colors.coral }]}>
+                        {'\u00a3'}{Math.round(bal).toLocaleString()}
+                      </Text>
+                      {lim > 0 && (
+                        <Text style={[styles.bankCardMeta, isHigh && { color: colors.coral }]}>
+                          / {'\u00a3'}{Math.round(lim).toLocaleString()} ({util}%)
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                  {/* Utilization bar */}
+                  {lim > 0 && (
+                    <View style={styles.consentBar}>
+                      <View
+                        style={[
+                          styles.consentBarFill,
+                          {
+                            flex: Math.min(100, util || 0),
+                            backgroundColor: isHigh ? colors.coral : (util || 0) > 50 ? '#E8C55A' : colors.accent,
+                          },
+                        ]}
+                      />
+                      <View style={{ flex: Math.max(0, 100 - (util || 0)) }} />
+                    </View>
+                  )}
+                  <View style={styles.bankCardActions}>
+                    <View />
+                    <TouchableOpacity
+                      onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.removeText}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </>
         )}
       </View>
 

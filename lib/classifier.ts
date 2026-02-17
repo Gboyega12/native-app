@@ -53,7 +53,7 @@ const KEYWORD_RULES: KeywordRule[] = [
     category: 'Council Tax', isEssential: true },
   { patterns: [/\bwater\s*bill\b/, /\bsewerage\b/],
     category: 'Water', isEssential: true },
-  { patterns: [/\benergy\s*bill\b/, /\belectricity\b/, /\bgas\s*bill\b/],
+  { patterns: [/\benergy\s*bill\b/, /\belectricity\b/, /\bgas\s*bill\b/, /\benergy\b/],
     category: 'Energy', isEssential: true },
   { patterns: [/\bbroadband\b/, /\binternet\b/, /\bfibre\b/, /\bwifi\b/],
     category: 'Broadband & Phone', isEssential: true },
@@ -77,8 +77,8 @@ const KEYWORD_RULES: KeywordRule[] = [
   // ── Discretionary keyword rules ──
   // Catches common spending that the merchant DB doesn't cover.
 
-  // Eating Out / Restaurants
-  { patterns: [/\brestaurant\b/, /\bbistro\b/, /\bbrasserie\b/, /\bpizzeria\b/, /\bchippy\b/, /\bfish\s*(?:&|and)\s*chips?\b/, /\btakeaway\b/, /\btake\s*away\b/],
+  // Eating Out / Restaurants / Street food
+  { patterns: [/\brestaurant\b/, /\bbistro\b/, /\bbrasserie\b/, /\bpizzeria\b/, /\bchippy\b/, /\bfish\s*(?:&|and)\s*chips?\b/, /\btakeaway\b/, /\btake\s*away\b/, /\bgrill\b/, /\bkebab\b/, /\bchicken\s*shop\b/, /\bfried\s*chicken\b/, /\bstreet\s*food\b/, /\bfood\s*truck\b/, /\bburger\b/, /\bpizza\b/, /\bsushi\b/, /\bnoodle\b/, /\bcurry\s*house\b/, /\bindian\s*(?:restaurant|kitchen)\b/, /\bchinese\s*(?:restaurant|kitchen)\b/, /\bthai\s*(?:restaurant|kitchen)\b/],
     category: 'Eating Out', isEssential: false },
 
   // Coffee & Cafes
@@ -98,11 +98,11 @@ const KEYWORD_RULES: KeywordRule[] = [
     category: 'Personal Care', isEssential: false },
 
   // Shopping (catch-all for retail descriptions)
-  { patterns: [/\boutlet\b/, /\bretail\b/, /\bfashion\b/, /\bclothing\b/, /\bjeweller\w*\b/, /\bwatches\b/, /\bgadget\b/, /\belectronics\b/],
+  { patterns: [/\boutlet\b/, /\bretail\b/, /\bfashion\b/, /\bclothing\b/, /\bjeweller\w*\b/, /\bwatches\b/, /\bgadget\b/, /\belectronics\b/, /\bflorist\b/, /\bflower\s*shop\b/, /\bflowers?\b/, /\bbouquet\b/, /\bgift\s*shop\b/, /\bcard\s*shop\b/, /\btoy\s*shop\b/, /\bbook\s*shop\b/, /\bbookstore\b/],
     category: 'Shopping', isEssential: false },
 
   // Delivery
-  { patterns: [/\bdelivery\b/, /\btakeaway\s*order\b/],
+  { patterns: [/\bdelivery\b/, /\btakeaway\s*order\b/, /\bonline\s*order\b/, /\bparcel\b/, /\bcourier\b/, /\bdpd\b/, /\bhermes\b/, /\bevri\b/, /\broyal\s*mail\b/, /\byodel\b/],
     category: 'Delivery', isEssential: false },
 
   // Gambling (discretionary, worth flagging)
@@ -112,6 +112,10 @@ const KEYWORD_RULES: KeywordRule[] = [
   // Subscriptions / memberships (generic)
   { patterns: [/\bsubscription\b/, /\bmembership\b/, /\bmonthly\s*fee\b/, /\bannual\s*fee\b/],
     category: 'Subscriptions', isEssential: false },
+
+  // International transfers
+  { patterns: [/\binternational\s*transfer\b/, /\binternational\s*payment\b/, /\bforeign\s*transfer\b/, /\bremittance\b/, /\bmoney\s*transfer\b/],
+    category: 'Transfers', isEssential: false },
 
   // Charity (discretionary but worth categorising)
   { patterns: [/\bcharity\b/, /\bdonat\w+\b/, /\bcancer\s*research\b/, /\boxfam\b/, /\bred\s*cross\b/, /\bsave\s*the\s*children\b/, /\bbhf\b/, /\bmacmillan\b/],

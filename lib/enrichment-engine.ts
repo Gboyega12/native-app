@@ -55,7 +55,7 @@ export type TransactionOverride = {
 };
 
 const EnrichmentEngine = {
-  enrich(rawCSV: string, overrides?: TransactionOverride[]): EnrichmentResult {
+  enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[]): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
     const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
     const recurring = this.detectRecurring(enriched);
@@ -63,7 +63,7 @@ const EnrichmentEngine = {
     const archetype = this.determineArchetype(profile);
     const patterns = this.detectBehavioralPatterns(profile);
     const score = this.calcDecisionScore(profile);
-    const stack = this.genDecisionStack(profile, enriched);
+    const stack = this.genDecisionStack(profile, enriched, debtAccounts);
 
     const metrics = profile.metrics;
     const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
@@ -221,7 +221,15 @@ const EnrichmentEngine = {
     if (isCredit) {
       if (isRefund) {
         category = 'Refunds';
+      } else if (this._isCreditCardRepayment(tx.description)) {
+        // Credit card repayment received — NOT income
+        category = 'Debt Payments';
+        isEssential = true;
+        confidence = 'high';
       } else if (isPerson) {
+        category = 'Transfers';
+      } else if (this._isInternationalTransfer(tx.description)) {
+        // Inbound international transfer — NOT income
         category = 'Transfers';
       } else if (isLikelyIncomeCredit(tx.description)) {
         isIncome = true;
@@ -318,7 +326,7 @@ const EnrichmentEngine = {
     const recent = transactions.filter((t) => new Date(t.date) >= cutoff);
 
     const spending = recent.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
-    const income = recent.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer);
+    const income = recent.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer && !t.isDebt);
 
     const dates = recent.map((t) => new Date(t.date).getTime()).filter(Boolean);
     const span = dates.length >= 2
@@ -554,7 +562,7 @@ const EnrichmentEngine = {
     return { score, verdict, breakdown };
   },
 
-  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[]): Move[] {
+  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[], debtAccounts?: any[]): Move[] {
     const moves: Move[] = [];
     const m = profile.metrics;
     const p = profile.monthly;
@@ -634,39 +642,78 @@ const EnrichmentEngine = {
       });
     }
 
-    // Debt snowball
+    // ── Debt analysis with good/bad debt differentiation ──
+    // Check connected debt accounts for utilization rates
+    const connectedDebts = debtAccounts || [];
+    const totalLimit = connectedDebts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
+    const totalBalance = connectedDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+    const overallUtil = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : -1;
+    const isGoodDebt = overallUtil >= 0 && overallUtil <= 30;
+    const isMediumUtil = overallUtil > 30 && overallUtil <= 75;
+    const isHighUtil = overallUtil > 75;
+
+    // Debt snowball — only for bad/medium debt, not for good debt users
     if (m.debtAccountCount >= 2) {
-      const debtSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
-      moves.push({
-        action: `Attack ${m.debtAccountCount} debts with snowball method`,
-        annualImpact: debtSaving * 12,
-        monthlyImpact: debtSaving,
-        effort: 'high',
-        category: 'debt',
-        merchants: debtMerchants,
-        strategy: `${m.debtAccountCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.`,
-        steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Direct your surplus at the smallest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'],
-        effect: `Saves \u00a3${debtSaving * 12}/year in interest.`,
-      });
+      if (isGoodDebt) {
+        // Low utilization, paying on time — good debt for points
+        moves.push({
+          action: `Maximise credit card rewards across ${m.debtAccountCount} cards`,
+          annualImpact: Math.round(totalBalance * 0.02), // ~2% rewards
+          monthlyImpact: Math.round(totalBalance * 0.02 / 12),
+          effort: 'low',
+          category: 'savings',
+          merchants: debtMerchants,
+          strategy: `${m.debtAccountCount} credit cards with ${Math.round(overallUtil)}% utilisation — well managed. Focus on maximising points and cashback.`,
+          steps: ['Route all regular spending through your rewards card', 'Always pay in full to avoid interest', 'Review whether your card gives the best rewards for your spend', 'I\'ll flag if utilisation creeps up'],
+          effect: `Earn more from spending you're already doing.`,
+        });
+      } else {
+        const debtSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
+        moves.push({
+          action: `Attack ${m.debtAccountCount} debts with snowball method`,
+          annualImpact: debtSaving * 12,
+          monthlyImpact: debtSaving,
+          effort: 'high',
+          category: 'debt',
+          merchants: debtMerchants,
+          strategy: `${m.debtAccountCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}`,
+          steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Direct your surplus at the smallest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'],
+          effect: `Saves \u00a3${debtSaving * 12}/year in interest.`,
+        });
+      }
     }
 
     // Single debt account
     if (m.debtAccountCount === 1) {
-      const debtSaving = Math.round(p.debtPayments * T.singleDebtOverpayPct);
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
-      const overpay = Math.round(Math.min(p.surplus * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
-      moves.push({
-        action: `Overpay debt by \u00a3${overpay}/month to clear faster`,
-        annualImpact: debtSaving * 12,
-        monthlyImpact: debtSaving,
-        effort: 'medium',
-        category: 'debt',
-        merchants: debtMerchants,
-        strategy: `1 debt account with \u00a3${Math.round(p.debtPayments)}/month in payments.`,
-        steps: ['Check if overpayments are allowed without penalty', 'Set up a monthly overpayment standing order', 'I\'ll redirect savings from other moves into this automatically'],
-        effect: `Reduces total interest paid and clears debt sooner.`,
-      });
+      if (isGoodDebt) {
+        moves.push({
+          action: 'Keep using your credit card strategically for rewards',
+          annualImpact: Math.round(totalBalance * 0.02),
+          monthlyImpact: Math.round(totalBalance * 0.02 / 12),
+          effort: 'low',
+          category: 'savings',
+          merchants: debtMerchants,
+          strategy: `1 card with ${Math.round(overallUtil)}% utilisation — excellent management. You're earning rewards without paying interest.`,
+          steps: ['Keep paying the full balance each month', 'Use this card for all eligible spending', 'Check if a different rewards card offers better value', 'I\'ll track your utilisation'],
+          effect: 'Continue earning rewards on responsible credit card use.',
+        });
+      } else {
+        const debtSaving = Math.round(p.debtPayments * T.singleDebtOverpayPct);
+        const overpay = Math.round(Math.min(p.surplus * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
+        moves.push({
+          action: `Overpay debt by \u00a3${overpay}/month to clear faster`,
+          annualImpact: debtSaving * 12,
+          monthlyImpact: debtSaving,
+          effort: 'medium',
+          category: 'debt',
+          merchants: debtMerchants,
+          strategy: `1 debt account with \u00a3${Math.round(p.debtPayments)}/month in payments.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''}`,
+          steps: ['Check if overpayments are allowed without penalty', 'Set up a monthly overpayment standing order', 'I\'ll redirect savings from other moves into this automatically'],
+          effect: `Reduces total interest paid and clears debt sooner.`,
+        });
+      }
     }
 
     // Transport
@@ -738,6 +785,89 @@ const EnrichmentEngine = {
       });
     }
 
+    // ── High-level intelligent moves for financially healthy users ──
+    if (m.savingsRate >= 20 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
+      // ISA maximization
+      const isaLimit = 20000;
+      const annualSurplus = Math.round(p.surplus * 12);
+      if (annualSurplus > 3000) {
+        const isaContribution = Math.min(annualSurplus, isaLimit);
+        const isaReturn = Math.round(isaContribution * 0.05); // ~5% return estimate
+        moves.push({
+          action: `Max out your ISA with \u00a3${Math.round(isaContribution / 12)}/month tax-free`,
+          annualImpact: isaReturn,
+          monthlyImpact: Math.round(isaReturn / 12),
+          effort: 'low',
+          category: 'invest',
+          merchants: [],
+          strategy: `You have \u00a3${Math.round(p.surplus)}/month surplus and a ${Math.round(m.savingsRate)}% savings rate. Your ISA allowance is \u00a3${isaLimit.toLocaleString()}/year — this grows tax-free.`,
+          steps: ['Open a Stocks & Shares ISA if you don\'t have one', 'Set up monthly direct debit on payday', 'Choose a global index fund for long-term growth', 'I\'ll track your ISA utilisation'],
+          effect: `\u00a3${isaReturn.toLocaleString()}/year in tax-free returns (estimated at 5%).`,
+        });
+      }
+
+      // Salary sacrifice pension
+      if (p.income > 2500) {
+        const pensionExtra = Math.round(p.surplus * 0.15);
+        const taxRelief = Math.round(pensionExtra * 0.25); // Basic rate relief
+        moves.push({
+          action: `Boost pension by \u00a3${pensionExtra}/month via salary sacrifice`,
+          annualImpact: taxRelief * 12,
+          monthlyImpact: taxRelief,
+          effort: 'medium',
+          category: 'invest',
+          merchants: [],
+          strategy: `Salary sacrifice reduces your taxable income. Every \u00a3100 you contribute costs you \u00a3${p.income > 4167 ? '60' : '80'} after tax relief. Free money from HMRC.`,
+          steps: ['Check your employer\'s salary sacrifice scheme', 'Calculate how much extra you can afford', 'Request the change through HR/payroll', 'I\'ll factor the reduced take-home into your budget'],
+          effect: `\u00a3${(taxRelief * 12).toLocaleString()}/year in tax relief + employer NI savings.`,
+        });
+      }
+
+      // Premium bonds for emergency fund
+      if (p.surplus > 200) {
+        moves.push({
+          action: 'Move emergency fund to Premium Bonds for tax-free prizes',
+          annualImpact: Math.round(p.surplus * 12 * 0.04),
+          monthlyImpact: Math.round(p.surplus * 0.04),
+          effort: 'low',
+          category: 'savings',
+          merchants: [],
+          strategy: `Your emergency fund can work harder. Premium Bonds offer prize rates equivalent to ~4% — all tax-free. Max \u00a350,000.`,
+          steps: ['Open an NS&I account if you don\'t have one', 'Transfer your emergency fund into Premium Bonds', 'Keep 1 month of expenses in easy access for true emergencies', 'I\'ll track any prizes you win'],
+          effect: 'Tax-free returns on money you\'d keep in savings anyway.',
+        });
+      }
+
+      // Income growth / career move
+      if (p.income > 0) {
+        const raiseTarget = Math.round(p.income * 0.1);
+        moves.push({
+          action: `Target a \u00a3${raiseTarget}/month raise or income boost`,
+          annualImpact: raiseTarget * 12,
+          monthlyImpact: raiseTarget,
+          effort: 'high',
+          category: 'savings',
+          merchants: [],
+          strategy: `Your spending is well-managed. The biggest lever now is increasing income. A 10% raise or side income would add \u00a3${raiseTarget}/month.`,
+          steps: ['Research market rate for your role on Glassdoor/LinkedIn', 'Document your achievements for a pay review conversation', 'Consider freelance or side income opportunities', 'I\'ll model the impact of any income change on your goals'],
+          effect: `\u00a3${(raiseTarget * 12).toLocaleString()}/year extra to invest, save, or enjoy.`,
+        });
+      }
+
+      // Smart spending: cashback & rewards optimization
+      moves.push({
+        action: 'Optimise cashback and rewards across all spending',
+        annualImpact: Math.round(p.spending * 12 * 0.015),
+        monthlyImpact: Math.round(p.spending * 0.015),
+        effort: 'low',
+        category: 'savings',
+        merchants: [],
+        strategy: `You spend \u00a3${Math.round(p.spending)}/month. Even 1-2% back across all spending adds up to \u00a3${Math.round(p.spending * 12 * 0.015)}/year.`,
+        steps: ['Use a rewards credit card for all spending and pay in full', 'Stack cashback sites (TopCashback/Quidco) for online purchases', 'Review if your current cards offer the best rewards for your categories', 'I\'ll track your rewards earnings'],
+        effect: `\u00a3${Math.round(p.spending * 12 * 0.015)}/year in cashback and rewards.`,
+      });
+    }
+
     // Break-even move if in deficit
     if (p.surplus < 0) {
       const deficit = Math.abs(Math.round(p.surplus));
@@ -766,13 +896,13 @@ const EnrichmentEngine = {
    * transactions into proper categories — the profile, archetype, score,
    * and moves all recompute with the improved data.
    */
-  rebuild(enriched: EnrichedTransaction[]): EnrichmentResult {
+  rebuild(enriched: EnrichedTransaction[], debtAccounts?: any[]): EnrichmentResult {
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
     const patterns = this.detectBehavioralPatterns(profile);
     const score = this.calcDecisionScore(profile);
-    const stack = this.genDecisionStack(profile, enriched);
+    const stack = this.genDecisionStack(profile, enriched, debtAccounts);
 
     const metrics = profile.metrics;
     const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
@@ -790,6 +920,36 @@ const EnrichmentEngine = {
       behavioralPatterns: patterns.map((p: any) => p.pattern || p),
       enrichedTransactions: enriched,
     };
+  },
+
+  _isCreditCardRepayment(description: string): boolean {
+    const lower = description.toLowerCase();
+    const patterns = [
+      /\bpayment\s*received\b/,
+      /\bpayment\s*thank\s*you\b/,
+      /\bcredit\s*card\s*payment\b/,
+      /\bcard\s*repayment\b/,
+      /\bcard\s*payment\s*received\b/,
+      /\bdebt\s*repayment\b/,
+      /\bdirect\s*debit\s*payment\b.*(?:amex|barclaycard|capital\s*one|mbna|vanquis|aqua|newday)/,
+      /\b(?:amex|american\s*express|barclaycard|capital\s*one|mbna|vanquis|aqua|newday)\b.*\bpayment\b/,
+      /\bminimum\s*payment\b/,
+      /\boverpayment\b/,
+      /\bcc\s*payment\b/,
+      /\bcredit\s*balance\s*transfer\b/,
+    ];
+    return patterns.some((rx) => rx.test(lower));
+  },
+
+  _isInternationalTransfer(description: string): boolean {
+    const lower = description.toLowerCase();
+    const patterns = [
+      /\blemfi\b/, /\bwise\b/, /\btransferwise\b/, /\bremitly\b/,
+      /\bworld\s*remit\b/, /\bwestern\s*union\b/, /\bmoneygram\b/,
+      /\binternational\s*(?:transfer|payment)\b/, /\bforeign\s*(?:transfer|payment)\b/,
+      /\bremittance\b/,
+    ];
+    return patterns.some((rx) => rx.test(lower));
   },
 
   _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {

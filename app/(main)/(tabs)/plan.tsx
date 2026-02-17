@@ -313,6 +313,26 @@ export default function Plan() {
                   </View>
                 </TouchableOpacity>
 
+                {/* Quick discard button — always visible */}
+                {!isPlanExpanded && (
+                  <TouchableOpacity
+                    style={styles.quickDiscardBtn}
+                    onPress={() => {
+                      Alert.alert(
+                        'Discard plan?',
+                        `Remove "${stripMd(plan.action)}" from your plans?`,
+                        [
+                          { text: 'Keep', style: 'cancel' },
+                          { text: 'Discard', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
+                        ],
+                      );
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={styles.quickDiscardText}>Discard</Text>
+                  </TouchableOpacity>
+                )}
+
                 {isPlanExpanded && (
                   <View style={styles.expandedSection}>
                     <View style={styles.separator} />
@@ -382,7 +402,7 @@ export default function Plan() {
                         style={styles.removeButton}
                         onPress={() => handleRemovePlan(plan.id)}
                       >
-                        <Text style={styles.removeText}>Remove plan</Text>
+                        <Text style={styles.removeText}>Discard plan</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -663,6 +683,8 @@ const styles = StyleSheet.create({
   startBtnText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.bg },
   removeButton: { flex: 1, borderWidth: 1, borderColor: colors.border, paddingVertical: 14, borderRadius: radius.md, alignItems: 'center' },
   removeText: { fontFamily: fonts.medium, fontSize: 14, color: colors.dim },
+  quickDiscardBtn: { position: 'absolute', top: spacing.lg, right: spacing.lg, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, backgroundColor: 'rgba(232,96,99,0.08)' },
+  quickDiscardText: { fontFamily: fonts.medium, fontSize: 11, color: colors.coral },
   sectionLabel: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 1.5, color: colors.accent, marginBottom: spacing.sm, marginTop: spacing.xl },
   resourceLink: { fontFamily: fonts.regular, fontSize: 14, color: colors.sky, paddingVertical: spacing.xs, textDecorationLine: 'underline' },
 });

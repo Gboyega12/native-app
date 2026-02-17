@@ -57,6 +57,18 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['subway'], merchant: 'Subway', category: 'Eating Out' },
   { patterns: ['kokoro'], merchant: 'Kokoro', category: 'Eating Out' },
   { patterns: ['fillishack', 'filli shack'], merchant: 'Fillishack', category: 'Eating Out' },
+  { patterns: ['bungrill', 'bun grill'], merchant: 'BunGrill', category: 'Eating Out' },
+  { patterns: ['leon'], merchant: 'Leon', category: 'Eating Out' },
+  { patterns: ['itsu'], merchant: 'Itsu', category: 'Eating Out' },
+  { patterns: ['eat.'], merchant: 'EAT.', category: 'Eating Out' },
+  { patterns: ['tortilla'], merchant: 'Tortilla', category: 'Eating Out' },
+  { patterns: ['wasabi'], merchant: 'Wasabi', category: 'Eating Out' },
+  { patterns: ['chick-fil-a', 'chickfila'], merchant: 'Chick-fil-A', category: 'Eating Out' },
+  { patterns: ['wingstop'], merchant: 'Wingstop', category: 'Eating Out' },
+  { patterns: ['franco manca'], merchant: 'Franco Manca', category: 'Eating Out' },
+  { patterns: ['chipotle'], merchant: 'Chipotle', category: 'Eating Out' },
+  { patterns: ['german doner', 'gdk'], merchant: 'German Doner Kebab', category: 'Eating Out' },
+  { patterns: ['morleys'], merchant: 'Morleys', category: 'Eating Out' },
 
   // ── Transport (essential) ──
   { patterns: ['uber', 'uber *trip', 'uber bv'], merchant: 'Uber', category: 'Transport', isEssential: true },
@@ -89,7 +101,7 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['notion'], merchant: 'Notion', category: 'Subscriptions', isSubscription: true },
   { patterns: ['canva'], merchant: 'Canva', category: 'Subscriptions', isSubscription: true },
   { patterns: ['adobe'], merchant: 'Adobe', category: 'Subscriptions', isSubscription: true },
-  { patterns: ['twitter', 'x premium'], merchant: 'Twitter / X', category: 'Subscriptions', isSubscription: true },
+  { patterns: ['twitter', 'x premium', 'x developer', 'x.com'], merchant: 'Twitter / X', category: 'Subscriptions', isSubscription: true },
   { patterns: ['linkedin premium', 'linkedin'], merchant: 'LinkedIn', category: 'Subscriptions', isSubscription: true },
   { patterns: ['google storage', 'google one'], merchant: 'Google One', category: 'Subscriptions', isSubscription: true },
   { patterns: ['icloud', 'icloud+'], merchant: 'iCloud+', category: 'Subscriptions', isSubscription: true },
@@ -113,6 +125,21 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['nike'], merchant: 'Nike', category: 'Shopping' },
   { patterns: ['boohoo'], merchant: 'Boohoo', category: 'Shopping' },
   { patterns: ['plt', 'prettylittlething'], merchant: 'PrettyLittleThing', category: 'Shopping' },
+  { patterns: ['vinted'], merchant: 'Vinted', category: 'Shopping' },
+  { patterns: ['tiktok shop', 'tiktokshop', 'tiktok.com'], merchant: 'TikTok Shop', category: 'Shopping' },
+  { patterns: ['etsy', 'etsy.com'], merchant: 'Etsy', category: 'Shopping' },
+  { patterns: ['depop'], merchant: 'Depop', category: 'Shopping' },
+  { patterns: ['wish.com', 'wish shopping'], merchant: 'Wish', category: 'Shopping' },
+  { patterns: ['aliexpress', 'ali express'], merchant: 'AliExpress', category: 'Shopping' },
+  { patterns: ['tk maxx', 'tkmaxx', 'tj maxx'], merchant: 'TK Maxx', category: 'Shopping' },
+  { patterns: ['sports direct', 'sportsdirect'], merchant: 'Sports Direct', category: 'Shopping' },
+  { patterns: ['jd sports'], merchant: 'JD Sports', category: 'Shopping' },
+  { patterns: ['currys', 'currys pc world'], merchant: 'Currys', category: 'Shopping' },
+  { patterns: ['halfords'], merchant: 'Halfords', category: 'Shopping' },
+  { patterns: ['wilko', 'wilkinsons'], merchant: 'Wilko', category: 'Shopping' },
+  { patterns: ['home bargains'], merchant: 'Home Bargains', category: 'Shopping' },
+  { patterns: ['b&m', 'b and m'], merchant: 'B&M', category: 'Shopping' },
+  { patterns: ['poundland'], merchant: 'Poundland', category: 'Shopping' },
 
   // ── BNPL (discretionary) ──
   { patterns: ['klarna'], merchant: 'Klarna', category: 'BNPL', isBNPL: true },
@@ -143,6 +170,10 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['ovo energy', 'ovo'], merchant: 'OVO Energy', category: 'Energy', isEssential: true },
   { patterns: ['bulb energy', 'bulb'], merchant: 'Bulb', category: 'Energy', isEssential: true },
   { patterns: ['scottish power', 'scottishpower'], merchant: 'Scottish Power', category: 'Energy', isEssential: true },
+  { patterns: ['welcomeenergy', 'welcome energy'], merchant: 'Welcome Energy', category: 'Energy', isEssential: true },
+  { patterns: ['utilita'], merchant: 'Utilita', category: 'Energy', isEssential: true },
+  { patterns: ['shell energy'], merchant: 'Shell Energy', category: 'Energy', isEssential: true },
+  { patterns: ['boost energy', 'boost power'], merchant: 'Boost Energy', category: 'Energy', isEssential: true },
 
   // ── Water (essential) ──
   { patterns: ['thames water', 'united utilities', 'severn trent', 'anglian water', 'southern water', 'yorkshire water', 'welsh water', 'northumbrian water'], merchant: 'Water', category: 'Water', isEssential: true },
@@ -167,6 +198,8 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['goodlord'], merchant: 'Goodlord', category: 'Rent', isEssential: true },
   { patterns: ['foxtons'], merchant: 'Foxtons', category: 'Rent', isEssential: true },
   { patterns: ['rightmove'], merchant: 'Rightmove', category: 'Rent', isEssential: true },
+  { patterns: ['grainger', 'grainger plc'], merchant: 'Grainger', category: 'Rent', isEssential: true },
+  { patterns: ['countrywide', 'hamptons'], merchant: 'Hamptons', category: 'Rent', isEssential: true },
 
   // ── Entertainment (discretionary) ──
   { patterns: ['cineworld', 'odeon', 'vue cinema'], merchant: 'Cinema', category: 'Entertainment' },
@@ -224,6 +257,29 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['trading 212', 'trading212'], merchant: 'Trading 212', category: 'Savings' },
   { patterns: ['nutmeg'], merchant: 'Nutmeg', category: 'Savings' },
   { patterns: ['moneybox'], merchant: 'Moneybox', category: 'Savings' },
+
+  // ── International Transfers (not income, not spending — transfers) ──
+  { patterns: ['lemfi'], merchant: 'LemFi', category: 'Transfers' },
+  { patterns: ['wise', 'transferwise'], merchant: 'Wise', category: 'Transfers' },
+  { patterns: ['remitly'], merchant: 'Remitly', category: 'Transfers' },
+  { patterns: ['world remit', 'worldremit'], merchant: 'WorldRemit', category: 'Transfers' },
+  { patterns: ['western union'], merchant: 'Western Union', category: 'Transfers' },
+  { patterns: ['moneygram'], merchant: 'MoneyGram', category: 'Transfers' },
+  { patterns: ['paypal'], merchant: 'PayPal', category: 'Transfers' },
+  { patterns: ['revolut transfer'], merchant: 'Revolut Transfer', category: 'Transfers' },
+
+  // ── Delivery services (discretionary) ──
+  { patterns: ['getir'], merchant: 'Getir', category: 'Delivery' },
+  { patterns: ['gorillas'], merchant: 'Gorillas', category: 'Delivery' },
+  { patterns: ['gopuff'], merchant: 'GoPuff', category: 'Delivery' },
+  { patterns: ['zapp'], merchant: 'Zapp', category: 'Delivery' },
+  { patterns: ['amazon fresh', 'amzn fresh'], merchant: 'Amazon Fresh', category: 'Delivery' },
+
+  // ── Florists (discretionary shopping) ──
+  { patterns: ['interflora'], merchant: 'Interflora', category: 'Shopping' },
+  { patterns: ['bloom & wild', 'bloomandwild', 'bloom and wild'], merchant: 'Bloom & Wild', category: 'Shopping' },
+  { patterns: ['moonpig'], merchant: 'Moonpig', category: 'Shopping' },
+  { patterns: ['bunches'], merchant: 'Bunches', category: 'Shopping' },
 ];
 
 // Short patterns (<=3 chars) use word-boundary matching to avoid false positives.
