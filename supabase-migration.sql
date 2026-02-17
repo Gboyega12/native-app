@@ -72,6 +72,7 @@ CREATE TABLE bank_data (
   csv_data TEXT NOT NULL,
   source TEXT NOT NULL DEFAULT 'truelayer',
   refresh_token TEXT,
+  card_balances JSONB,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -184,3 +185,74 @@ CREATE POLICY "Users can delete own plans"
 
 CREATE POLICY "Service role can insert plans"
   ON user_plans FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "Service role can update plans"
+  ON user_plans FOR UPDATE USING (true);
+
+
+-- ============================================================
+-- Table: plan_progress
+-- Tracks which moves the user has started and step completion.
+-- Persisted so progress survives app reloads.
+-- ============================================================
+CREATE TABLE plan_progress (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  move_key TEXT NOT NULL,
+  move_action TEXT NOT NULL,
+  approved BOOLEAN DEFAULT false,
+  completed_steps INTEGER[] DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(user_id, move_key)
+);
+
+ALTER TABLE plan_progress ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own progress"
+  ON plan_progress FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own progress"
+  ON plan_progress FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own progress"
+  ON plan_progress FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own progress"
+  ON plan_progress FOR DELETE USING (auth.uid() = user_id);
+
+
+-- ============================================================
+-- Table: debt_accounts
+-- Stores outstanding debt balances from TrueLayer or manual entry.
+-- ============================================================
+CREATE TABLE debt_accounts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  account_name TEXT NOT NULL,
+  account_type TEXT NOT NULL DEFAULT 'credit_card',
+  outstanding_balance NUMERIC,
+  credit_limit NUMERIC,
+  interest_rate NUMERIC,
+  minimum_payment NUMERIC,
+  source TEXT NOT NULL DEFAULT 'truelayer',
+  last_updated TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE debt_accounts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own debt accounts"
+  ON debt_accounts FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own debt accounts"
+  ON debt_accounts FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own debt accounts"
+  ON debt_accounts FOR UPDATE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own debt accounts"
+  ON debt_accounts FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Service role can manage debt accounts"
+  ON debt_accounts FOR ALL USING (true);

@@ -410,42 +410,51 @@ async function executeOverride(input, userId) {
 
 async function executePlan(input, userId) {
   if (!userId) {
+    console.error('[executePlan] No userId provided');
     return {
       response: { success: false, error: 'No user session' },
-      action: null,
+      action: { type: 'plan_error', data: { error: 'Not signed in — please sign in to create plans.' } },
     };
   }
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) {
+    console.error('[executePlan] Missing env vars:', { url: !!supabaseUrl, key: !!serviceKey });
     return {
       response: { success: false, error: 'Server misconfigured' },
-      action: null,
+      action: { type: 'plan_error', data: { error: 'Server configuration issue — plan could not be saved.' } },
     };
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
 
-  // Insert with status 'proposed' — client updates to 'active' on approve
-  const { data, error } = await admin.from('user_plans').insert({
+  // Insert as 'active' directly — no approval step needed, Bocy is agentic
+  const planRow = {
     user_id: userId,
     action: input.action,
     target_amount: input.target_amount || null,
     monthly_saving: input.monthly_saving || null,
     timeline: input.timeline || null,
-    status: 'proposed',
-  }).select('id').single();
+    status: 'active',
+  };
+
+  console.log('[executePlan] Inserting plan:', JSON.stringify(planRow));
+
+  const { data, error } = await admin.from('user_plans').insert(planRow).select('id').single();
 
   if (error) {
+    console.error('[executePlan] Insert failed:', error.message, error.code);
     return {
       response: { success: false, error: error.message },
-      action: null,
+      action: { type: 'plan_error', data: { error: `Could not save plan: ${error.message}` } },
     };
   }
 
+  console.log('[executePlan] Plan created successfully:', data.id);
+
   return {
-    response: { success: true, message: 'Plan proposed to user for approval.' },
+    response: { success: true, message: 'Plan created and added to the user\'s action plan.' },
     action: {
       type: 'plan_proposed',
       data: {
@@ -486,7 +495,7 @@ async function executeGoalUpdate(input, userId) {
 // ── System prompt builder ──
 
 function buildSystemPrompt(ctx) {
-  let prompt = `You are Bocy — a sharp, no-nonsense financial advisor the user can text anytime. Think: a smart friend who happens to be great with money.
+  let prompt = `You are Bocy — the user's financial decisions platform. You're not an add-on or a third-party tool. You ARE their financial brain. You've already analysed their bank data, you track their spending, you manage their plans, and you hold them accountable.
 
 Voice:
 - Talk like a real person texting. Short sentences. Direct.
@@ -494,20 +503,21 @@ Voice:
 - Be warm but decisive. Confident, not corporate.
 - Use the user's actual numbers — that's what makes you useful.
 - One clear point per message. If they need more, they'll ask.
+- Own the relationship: "I've analysed your spending" not "Based on the analysis." "I'll track this for you" not "You could track this."
 
 Rules:
 - Keep replies to 2-4 short sentences when possible. Max 1-2 short paragraphs for complex questions.
 - **Bold** the key number or action in each reply — just one or two things, not everything.
 - Use £ and British English.
 - Be specific: "Cut those 2 subs and you free up **£94/month**" not "look at your subscriptions."
-- Never name specific banks, apps, or products. Say "a high-interest savings account" not "Chase" or "Monzo."
-- Never give regulated financial advice. For investments or debt restructuring, tell them to speak to a qualified advisor.
+- Never recommend other apps, tools, or services. Everything happens here — you track, plan, and monitor for them.
+- For regulated financial advice (e.g. specific investment products, tax), note that legally that requires a qualified advisor — but frame it as a legal thing, not your limitation. You can still help them think it through.
 - No bullet lists unless they ask for steps. Keep it conversational.
 - No filler, no preamble, no "Great question!" — just answer.
 
 Tools:
 - When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction. For the match_description, use the EXACT bank description shown in the transfers list if available — partial matches work (e.g. "JOHN" will match "TFR TO JOHN SMITH"). Common cases: rent paid to partner/housemate, bill splits, debt repayments showing as transfers.
-- When you recommend a concrete financial plan with a target amount or savings goal, use propose_plan so they can approve it directly in the chat.
+- When you recommend a concrete financial plan, use propose_plan to create it directly. It will be added to the user's action plan automatically — no approval step needed. Be decisive.
 - When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis and recommendations. Don't suggest this casually — only when a real shift has happened.`;
 
   if (!ctx) return prompt;
@@ -551,6 +561,25 @@ Tools:
       prompt += `\n- "${t.description}" £${Math.abs(t.amount).toFixed(2)}`;
     }
     prompt += `\nIf the user mentions a payment that matches one of these, use save_transaction_override with the exact description above as match_description.`;
+  }
+
+  // ── Debt accounts (from TrueLayer or manual entry) ──
+  if (ctx.debt_accounts?.length) {
+    prompt += `\n\nDebt accounts:`;
+    let totalDebt = 0;
+    for (const d of ctx.debt_accounts) {
+      const bal = d.balance != null ? `£${Math.round(d.balance)}` : 'unknown balance';
+      const lim = d.limit != null ? ` / £${Math.round(d.limit)} limit` : '';
+      const util = (d.balance != null && d.limit != null && d.limit > 0)
+        ? ` (${Math.round((d.balance / d.limit) * 100)}% utilised)`
+        : '';
+      prompt += `\n- ${d.name} (${d.type}): ${bal}${lim}${util}`;
+      if (d.balance != null) totalDebt += d.balance;
+    }
+    if (totalDebt > 0) {
+      prompt += `\nTotal outstanding debt: £${Math.round(totalDebt)}`;
+    }
+    prompt += `\nUse these actual balances when discussing debt strategy. Be specific — "Pay down your £${Math.round(totalDebt)} across ${ctx.debt_accounts.length} account(s)" not "attack your debts."`;
   }
 
   // ── Goals + staleness detection ──

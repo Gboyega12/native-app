@@ -87,22 +87,17 @@ function TypingIndicator() {
 
 function PlanCard({
   action,
-  onApprove,
   onDismiss,
-  saving,
 }: {
   action: ChatAction;
-  onApprove: () => void;
   onDismiss: () => void;
-  saving?: boolean;
 }) {
   const d = action.data;
-  const isApproved = action.status === 'approved';
   const isDismissed = action.status === 'dismissed';
 
   return (
-    <View style={[styles.actionCard, isApproved && styles.actionCardApproved]}>
-      <Text style={styles.actionCardLabel}>SUGGESTED PLAN</Text>
+    <View style={[styles.actionCard, styles.actionCardApproved]}>
+      <Text style={styles.actionCardLabel}>PLAN CREATED</Text>
       <Text style={styles.actionCardTitle}>{d.action}</Text>
       <View style={styles.actionCardStats}>
         {d.target_amount != null && (
@@ -124,31 +119,13 @@ function PlanCard({
           </View>
         )}
       </View>
-      {isApproved ? (
-        <View style={styles.approvedBanner}>
-          <Text style={styles.approvedBannerText}>{'\u2713'} Added to your plan</Text>
-        </View>
-      ) : isDismissed ? (
+      {isDismissed ? (
         <View style={styles.dismissedBanner}>
-          <Text style={styles.dismissedBannerText}>Dismissed</Text>
+          <Text style={styles.dismissedBannerText}>Removed</Text>
         </View>
       ) : (
-        <View style={styles.actionCardButtons}>
-          <TouchableOpacity
-            style={[styles.approveBtn, saving && styles.approveBtnSaving]}
-            onPress={onApprove}
-            activeOpacity={0.8}
-            disabled={saving}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color={colors.bg} />
-            ) : (
-              <Text style={styles.approveBtnText}>Approve</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss} activeOpacity={0.8} disabled={saving}>
-            <Text style={styles.dismissBtnText}>Dismiss</Text>
-          </TouchableOpacity>
+        <View style={styles.approvedBanner}>
+          <Text style={styles.approvedBannerText}>{'\u2713'} Added to your action plan</Text>
         </View>
       )}
     </View>
@@ -339,6 +316,22 @@ export default function Chat() {
     if (transferItems.length > 0) {
       ctx.recent_transfers = transferItems.slice(0, 15);
     }
+
+    // Add debt account balances if available
+    try {
+      const { data: debtData } = await supabase
+        .from('debt_accounts')
+        .select('account_name, account_type, outstanding_balance, credit_limit')
+        .eq('user_id', user.id);
+      if (debtData && debtData.length > 0) {
+        ctx.debt_accounts = debtData.map((d: any) => ({
+          name: d.account_name,
+          type: d.account_type,
+          balance: d.outstanding_balance,
+          limit: d.credit_limit,
+        }));
+      }
+    } catch {}
 
     // Add subscriptions from discretionary budget if available
     if (a?.discretionary?.items) {
@@ -623,7 +616,7 @@ export default function Chat() {
               collectedActions.push({
                 type: event.action.type,
                 data: event.action.data,
-                status: (event.action.type === 'plan_proposed' || event.action.type === 'goal_update_proposed') ? 'pending' : undefined,
+                status: event.action.type === 'goal_update_proposed' ? 'pending' : undefined,
               });
             }
           } catch {
@@ -665,7 +658,7 @@ export default function Chat() {
         ? data.actions.map((a: { type: string; data: ChatAction['data'] }) => ({
             type: a.type,
             data: a.data,
-            status: (a.type === 'plan_proposed' || a.type === 'goal_update_proposed') ? 'pending' : undefined,
+            status: a.type === 'goal_update_proposed' ? 'pending' : undefined,
           }))
         : undefined;
 
@@ -736,7 +729,7 @@ export default function Chat() {
         {messages.length === 0 && (
           <View style={styles.suggestedContainer}>
             <Text style={styles.suggestedTitle}>Ask Bocy</Text>
-            <Text style={styles.suggestedSubtitle}>Your AI financial advisor</Text>
+            <Text style={styles.suggestedSubtitle}>Your financial decisions platform</Text>
             {suggestedQuestions.map((q, i) => (
               <TouchableOpacity
                 key={i}
@@ -770,10 +763,12 @@ export default function Chat() {
                 {action.type === 'plan_proposed' ? (
                   <PlanCard
                     action={action}
-                    onApprove={() => handleApprovePlan(i, j)}
                     onDismiss={() => handleDismissPlan(i, j)}
-                    saving={savingPlan === `${i}-${j}`}
                   />
+                ) : action.type === 'plan_error' ? (
+                  <View style={styles.errorCard}>
+                    <Text style={styles.errorCardText}>{action.data.error || 'Plan could not be saved.'}</Text>
+                  </View>
                 ) : action.type === 'override_saved' ? (
                   <OverrideCard action={action} />
                 ) : action.type === 'goal_update_proposed' ? (
@@ -963,6 +958,19 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     maxWidth: '85%',
     marginBottom: spacing.sm,
+  },
+  errorCard: {
+    backgroundColor: 'rgba(255,100,100,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,100,100,0.2)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  errorCardText: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.coral,
+    lineHeight: 20,
   },
   actionCard: {
     backgroundColor: colors.surface,
