@@ -64,6 +64,40 @@ const TOOLS = [
       required: ['action'],
     },
   },
+  {
+    name: 'suggest_goal_update',
+    description:
+      'Suggest the user update their financial goals when their situation has clearly changed. Use this when: (1) The user says their circumstances changed (got a raise, paid off debt, new expense, job loss). (2) Their financial data shows they\'ve achieved or outgrown their current goal (e.g. debt is nearly cleared but goal is still "clear debt"). (3) They explicitly ask to change their goals. Do NOT use this for minor progress updates — only for genuine goal shifts.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        reason: {
+          type: 'string',
+          description: 'Brief explanation of why the goal should change. E.g. "Your debt is nearly cleared — time to shift focus."',
+        },
+        new_situation: {
+          type: 'string',
+          description: 'Updated financial situation. One of: in_debt, breaking_even, saving_slowly, saving_well, other.',
+          enum: ['in_debt', 'breaking_even', 'saving_slowly', 'saving_well', 'other'],
+        },
+        new_one_year_goal: {
+          type: 'string',
+          description: 'Updated 1-year goal. One of: clear_debt, emergency_fund, save_target, reduce_spending, invest, other.',
+          enum: ['clear_debt', 'emergency_fund', 'save_target', 'reduce_spending', 'invest', 'other'],
+        },
+        new_two_year_goal: {
+          type: 'string',
+          description: 'Updated 2-year goal. One of: buy_home, go_freelance, financial_freedom, clear_debt, invest, other.',
+          enum: ['buy_home', 'go_freelance', 'financial_freedom', 'clear_debt', 'invest', 'other'],
+        },
+        new_target_amount: {
+          type: 'number',
+          description: 'Updated target amount in pounds (optional).',
+        },
+      },
+      required: ['reason', 'new_situation', 'new_one_year_goal', 'new_two_year_goal'],
+    },
+  },
 ];
 
 // ── Main handler ──
@@ -320,6 +354,9 @@ async function executeTool(name, input, userId) {
   if (name === 'propose_plan') {
     return executePlan(input, userId);
   }
+  if (name === 'suggest_goal_update') {
+    return executeGoalUpdate(input, userId);
+  }
   return { response: { error: 'Unknown tool' }, action: null };
 }
 
@@ -422,6 +459,30 @@ async function executePlan(input, userId) {
   };
 }
 
+async function executeGoalUpdate(input, userId) {
+  if (!userId) {
+    return {
+      response: { success: false, error: 'No user session' },
+      action: null,
+    };
+  }
+
+  // Don't insert yet — return proposal to client for confirmation
+  return {
+    response: { success: true, message: 'Goal update suggested to user for confirmation.' },
+    action: {
+      type: 'goal_update_proposed',
+      data: {
+        reason: input.reason,
+        new_situation: input.new_situation,
+        new_one_year_goal: input.new_one_year_goal,
+        new_two_year_goal: input.new_two_year_goal,
+        new_target_amount: input.new_target_amount || null,
+      },
+    },
+  };
+}
+
 // ── System prompt builder ──
 
 function buildSystemPrompt(ctx) {
@@ -446,7 +507,8 @@ Rules:
 
 Tools:
 - When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction.
-- When you recommend a concrete financial plan with a target amount or savings goal, use propose_plan so they can approve it directly in the chat.`;
+- When you recommend a concrete financial plan with a target amount or savings goal, use propose_plan so they can approve it directly in the chat.
+- When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis and recommendations. Don't suggest this casually — only when a real shift has happened.`;
 
   if (!ctx) return prompt;
 
@@ -482,13 +544,43 @@ Tools:
     }
   }
 
-  // ── Goals ──
+  // ── Goals + staleness detection ──
   if (ctx.goals) {
     prompt += `\n\nGoals:`;
     if (ctx.goals.current_situation) prompt += `\n- Situation: ${ctx.goals.current_situation}`;
     if (ctx.goals.one_year_goal) prompt += `\n- 1-year goal: ${ctx.goals.one_year_goal}`;
     if (ctx.goals.two_year_goal) prompt += `\n- 2-year goal: ${ctx.goals.two_year_goal}`;
     if (ctx.goals.target_amount) prompt += `\n- Target amount: £${ctx.goals.target_amount}`;
+
+    // Detect potential goal staleness — give Claude hints
+    const hints = [];
+    const situation = ctx.goals.current_situation;
+    const oneYear = ctx.goals.one_year_goal;
+    const surplus = ctx.surplus || 0;
+
+    if (situation === 'in_debt' && surplus > 200) {
+      hints.push('User says "in debt" but has £' + Math.round(surplus) + ' monthly surplus — situation may have improved.');
+    }
+    if (oneYear === 'clear_debt' && surplus > 300) {
+      hints.push('Goal is "clear debt" but surplus is strong — they may have already cleared it or be close.');
+    }
+    if (situation === 'breaking_even' && surplus > 400) {
+      hints.push('User says "breaking even" but surplus is £' + Math.round(surplus) + '/month — they\'re actually saving.');
+    }
+    if (oneYear === 'emergency_fund' && surplus > 500) {
+      hints.push('Goal is "emergency fund" — with £' + Math.round(surplus) + '/month surplus, they may have already built one.');
+    }
+    if (situation === 'saving_slowly' && surplus > 600) {
+      hints.push('User says "saving slowly" but surplus of £' + Math.round(surplus) + '/month suggests they\'re saving well.');
+    }
+
+    if (hints.length > 0) {
+      prompt += `\n\n⚠ Goal alignment check (only mention if user brings up goals or asks about progress):`;
+      for (const h of hints) {
+        prompt += `\n- ${h}`;
+      }
+      prompt += `\nIf the user mentions their goals or progress, consider suggesting a goal update using suggest_goal_update.`;
+    }
   }
 
   // ── Goal trajectory ──

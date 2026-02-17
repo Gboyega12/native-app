@@ -169,6 +169,84 @@ function OverrideCard({ action }: { action: ChatAction }) {
   );
 }
 
+const GOAL_LABELS: Record<string, string> = {
+  in_debt: 'In debt', breaking_even: 'Breaking even', saving_slowly: 'Saving slowly',
+  saving_well: 'Saving well', other: 'Other',
+  clear_debt: 'Clear debt', emergency_fund: 'Emergency fund', save_target: 'Savings target',
+  reduce_spending: 'Reduce spending', invest: 'Start investing',
+  buy_home: 'Buy a home', go_freelance: 'Go freelance', financial_freedom: 'Financial freedom',
+};
+
+function GoalUpdateCard({
+  action,
+  onAccept,
+  onKeep,
+  saving,
+}: {
+  action: ChatAction;
+  onAccept: () => void;
+  onKeep: () => void;
+  saving?: boolean;
+}) {
+  const d = action.data;
+  const isAccepted = action.status === 'approved';
+  const isDismissed = action.status === 'dismissed';
+
+  return (
+    <View style={[styles.actionCard, styles.goalUpdateCard, isAccepted && styles.actionCardApproved]}>
+      <Text style={styles.goalUpdateLabel}>GOAL CHECK-IN</Text>
+      <Text style={styles.goalUpdateReason}>{d.reason}</Text>
+      <View style={styles.goalUpdateFields}>
+        <View style={styles.goalField}>
+          <Text style={styles.goalFieldLabel}>Situation</Text>
+          <Text style={styles.goalFieldValue}>{GOAL_LABELS[d.new_situation || ''] || d.new_situation}</Text>
+        </View>
+        <View style={styles.goalField}>
+          <Text style={styles.goalFieldLabel}>1-year goal</Text>
+          <Text style={styles.goalFieldValue}>{GOAL_LABELS[d.new_one_year_goal || ''] || d.new_one_year_goal}</Text>
+        </View>
+        <View style={styles.goalField}>
+          <Text style={styles.goalFieldLabel}>2-year goal</Text>
+          <Text style={styles.goalFieldValue}>{GOAL_LABELS[d.new_two_year_goal || ''] || d.new_two_year_goal}</Text>
+        </View>
+        {d.new_target_amount != null && (
+          <View style={styles.goalField}>
+            <Text style={styles.goalFieldLabel}>Target</Text>
+            <Text style={styles.goalFieldValue}>{'\u00a3'}{d.new_target_amount}</Text>
+          </View>
+        )}
+      </View>
+      {isAccepted ? (
+        <View style={styles.approvedBanner}>
+          <Text style={styles.approvedBannerText}>{'\u2713'} Goals updated</Text>
+        </View>
+      ) : isDismissed ? (
+        <View style={styles.dismissedBanner}>
+          <Text style={styles.dismissedBannerText}>Keeping current goals</Text>
+        </View>
+      ) : (
+        <View style={styles.actionCardButtons}>
+          <TouchableOpacity
+            style={[styles.approveBtn, saving && styles.approveBtnSaving]}
+            onPress={onAccept}
+            activeOpacity={0.8}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={colors.bg} />
+            ) : (
+              <Text style={styles.approveBtnText}>Update goals</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.dismissBtn} onPress={onKeep} activeOpacity={0.8} disabled={saving}>
+            <Text style={styles.dismissBtnText}>Keep current</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+}
+
 // ── Main Chat Component ──
 
 export default function Chat() {
@@ -381,6 +459,77 @@ export default function Chat() {
     persistMessages(updated);
   };
 
+  // ── Handle goal update acceptance ──
+
+  const handleAcceptGoalUpdate = async (msgIndex: number, actionIndex: number) => {
+    const msg = messages[msgIndex];
+    const action = msg?.actions?.[actionIndex];
+    if (!action || action.type !== 'goal_update_proposed') return;
+
+    let uid = userId;
+    if (!uid) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Not signed in', 'Please sign in to update goals.');
+        return;
+      }
+      uid = user.id;
+      setUserId(uid);
+    }
+
+    const key = `${msgIndex}-${actionIndex}`;
+    setSavingPlan(key);
+
+    try {
+      const res = await fetch('/api/goals/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: uid,
+          current_situation: action.data.new_situation,
+          one_year_goal: action.data.new_one_year_goal,
+          two_year_goal: action.data.new_two_year_goal,
+          target_amount: action.data.new_target_amount || null,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        Alert.alert('Could not update goals', data.error || 'Unknown error');
+        setSavingPlan(null);
+        return;
+      }
+
+      // Update local goals state so chat context reflects the change
+      setGoals({
+        current_situation: action.data.new_situation || '',
+        one_year_goal: action.data.new_one_year_goal || '',
+        two_year_goal: action.data.new_two_year_goal || '',
+        target_amount: action.data.new_target_amount || undefined,
+      } as Goals);
+
+      const updated = [...messages];
+      const updatedActions = [...(updated[msgIndex].actions || [])];
+      updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'approved' };
+      updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+      setMessages(updated);
+      persistMessages(updated);
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Something went wrong.');
+    }
+
+    setSavingPlan(null);
+  };
+
+  const handleKeepGoals = (msgIndex: number, actionIndex: number) => {
+    const updated = [...messages];
+    const updatedActions = [...(updated[msgIndex].actions || [])];
+    updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'dismissed' };
+    updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+    setMessages(updated);
+    persistMessages(updated);
+  };
+
   // ── Send message (with streaming + fallback) ──
 
   const sendMessage = async (text: string) => {
@@ -459,7 +608,7 @@ export default function Chat() {
               collectedActions.push({
                 type: event.action.type,
                 data: event.action.data,
-                status: event.action.type === 'plan_proposed' ? 'pending' : undefined,
+                status: (event.action.type === 'plan_proposed' || event.action.type === 'goal_update_proposed') ? 'pending' : undefined,
               });
             }
           } catch {
@@ -501,7 +650,7 @@ export default function Chat() {
         ? data.actions.map((a: { type: string; data: ChatAction['data'] }) => ({
             type: a.type,
             data: a.data,
-            status: a.type === 'plan_proposed' ? 'pending' : undefined,
+            status: (a.type === 'plan_proposed' || a.type === 'goal_update_proposed') ? 'pending' : undefined,
           }))
         : undefined;
 
@@ -612,6 +761,13 @@ export default function Chat() {
                   />
                 ) : action.type === 'override_saved' ? (
                   <OverrideCard action={action} />
+                ) : action.type === 'goal_update_proposed' ? (
+                  <GoalUpdateCard
+                    action={action}
+                    onAccept={() => handleAcceptGoalUpdate(i, j)}
+                    onKeep={() => handleKeepGoals(i, j)}
+                    saving={savingPlan === `${i}-${j}`}
+                  />
                 ) : null}
               </View>
             ))}
@@ -903,6 +1059,45 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.dim,
     marginTop: spacing.xs,
+  },
+  // ── Goal update card ──
+  goalUpdateCard: {
+    borderColor: colors.skyDim,
+  },
+  goalUpdateLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 10,
+    letterSpacing: 1,
+    color: colors.sky,
+    marginBottom: spacing.xs,
+  },
+  goalUpdateReason: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.text,
+    lineHeight: 22,
+    marginBottom: spacing.sm,
+  },
+  goalUpdateFields: {
+    gap: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  goalField: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  goalFieldLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+  },
+  goalFieldValue: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.sky,
   },
   // ── Retry banner ──
   retryBanner: {

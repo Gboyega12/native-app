@@ -195,7 +195,7 @@ export interface EnrichmentResult {
 // ── Chat ──
 
 export interface ChatAction {
-  type: 'plan_proposed' | 'override_saved';
+  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed';
   data: {
     id?: string;
     action?: string;
@@ -206,6 +206,12 @@ export interface ChatAction {
     category?: string;
     is_essential?: boolean;
     notes?: string | null;
+    // goal update fields
+    reason?: string;
+    new_situation?: string;
+    new_one_year_goal?: string;
+    new_two_year_goal?: string;
+    new_target_amount?: number | null;
   };
   status?: 'pending' | 'approved' | 'dismissed';
 }
