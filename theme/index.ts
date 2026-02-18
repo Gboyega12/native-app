@@ -1,5 +1,6 @@
 // ── Nothing Phone OS-inspired design system ──
-// Pure AMOLED black, monochrome philosophy, electric green accent.
+// Pure AMOLED black, monochrome philosophy.
+// Primary accent: white. Secondary accent: electric green.
 // Typography: SpaceMono for dot-matrix feel, Poppins for body.
 
 export const colors = {
@@ -8,9 +9,11 @@ export const colors = {
   surface: '#141414',
   border: 'rgba(255,255,255,0.10)',
 
-  // Accent — Electric green (used sparingly, never as a fill)
-  accent: '#00FF87',
-  accentDim: 'rgba(0,255,135,0.12)',
+  // Accent — White primary, electric green secondary
+  accent: '#FFFFFF',
+  accentDim: 'rgba(255,255,255,0.12)',
+  green: '#00FF87',
+  greenDim: 'rgba(0,255,135,0.12)',
 
   // Semantic — red for debt / shortages / destructive actions
   coral: '#E05252',

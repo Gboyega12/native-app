@@ -865,7 +865,7 @@ export default function Home() {
             <Text style={styles.cardTitle}>Your Insights</Text>
 
             {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
-              const effortClr = move.effort === 'high' ? colors.accent
+              const effortClr = move.effort === 'high' ? colors.green
                 : move.effort === 'medium' ? colors.dim : '#666666';
               return (
                 <View
@@ -899,12 +899,7 @@ export default function Home() {
                       )}
                     </View>
 
-                    {/* Strategy — always visible */}
-                    {move.strategy && (
-                      <Text style={styles.moveStrategy}>{stripMd(move.strategy)}</Text>
-                    )}
-
-                    {/* Action buttons — always visible */}
+                    {/* Action buttons */}
                     <View style={styles.moveActions}>
                       <TouchableOpacity
                         style={styles.moveApproveBtn}
@@ -1631,9 +1626,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   scroll: {
-    padding: 20,
-    paddingTop: 60,
-    paddingBottom: 48,
+    padding: 24,
+    paddingTop: 68,
+    paddingBottom: 60,
   },
   loadingContainer: {
     flex: 1,
@@ -1647,11 +1642,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 36,
+    marginBottom: 40,
   },
   greeting: {
     fontFamily: fonts.mono,
-    fontSize: 20,
+    fontSize: 22,
     color: colors.text,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
@@ -1733,26 +1728,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
     borderRadius: 24,
-    padding: 24,
-    paddingTop: 28,
-    paddingBottom: 28,
-    marginBottom: 20,
+    padding: 28,
+    paddingTop: 32,
+    paddingBottom: 32,
+    marginBottom: 24,
     overflow: 'hidden',
   },
   cardTitle: {
     fontFamily: fonts.mono,
     fontSize: 13,
-    color: colors.dim,
+    color: colors.text2,
     letterSpacing: 1.5,
     textTransform: 'uppercase',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   cardSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.muted,
-    lineHeight: 20,
-    marginBottom: 24,
+    fontSize: 14,
+    color: colors.dim,
+    lineHeight: 22,
+    marginBottom: 28,
   },
   noDataText: {
     fontFamily: fonts.regular,
@@ -1800,7 +1795,7 @@ const styles = StyleSheet.create({
   moveItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 16,
+    paddingVertical: 20,
     gap: 16,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
@@ -1819,21 +1814,21 @@ const styles = StyleSheet.create({
   },
   moveTitle: {
     fontFamily: fonts.medium,
-    fontSize: 15,
+    fontSize: 16,
     color: colors.text,
-    lineHeight: 22,
+    lineHeight: 24,
   },
   moveMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginTop: 6,
+    marginTop: 8,
   },
   moveImpact: {
     fontFamily: fonts.mono,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.green,
   },
   effortPill: {
     borderRadius: 100,
@@ -1864,11 +1859,11 @@ const styles = StyleSheet.create({
   moveActions: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 14,
+    marginTop: 18,
   },
   moveApproveBtn: {
     flex: 1,
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -1896,7 +1891,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(224,82,82,0.3)',
+    borderColor: 'rgba(255,255,255,0.12)',
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -1904,7 +1899,7 @@ const styles = StyleSheet.create({
   moveDeleteBtnText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.coral,
+    color: colors.dim,
   },
   viewAllBtn: {
     alignItems: 'center',
@@ -1924,8 +1919,8 @@ const styles = StyleSheet.create({
   // ── Card 2: Income ──
   bigNumberWrap: {
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingBottom: 28,
+    paddingVertical: 24,
+    paddingBottom: 32,
   },
   bigNumber: {
     fontFamily: fonts.mono,
@@ -1966,9 +1961,9 @@ const styles = StyleSheet.create({
   },
   sourceName: {
     fontFamily: fonts.medium,
-    fontSize: 15,
+    fontSize: 16,
     color: colors.text,
-    lineHeight: 21,
+    lineHeight: 24,
     marginBottom: 8,
   },
   sourceTagRow: {
@@ -1978,8 +1973,8 @@ const styles = StyleSheet.create({
   },
   sourceFreq: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.dim,
+    fontSize: 12,
+    color: colors.text2,
     letterSpacing: 0.3,
   },
   primaryTag: {
@@ -2041,8 +2036,8 @@ const styles = StyleSheet.create({
   // ── Card 3: Safe to Spend ──
   safeToSpendHero: {
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingBottom: 24,
+    paddingVertical: 24,
+    paddingBottom: 28,
   },
   safeToSpendAmount: {
     fontFamily: fonts.mono,
@@ -2076,8 +2071,8 @@ const styles = StyleSheet.create({
   },
   safeToSpendMeta: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.dim,
+    fontSize: 12,
+    color: colors.text2,
     letterSpacing: 0.3,
   },
 
@@ -2114,7 +2109,7 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     overflow: 'hidden',
-    marginBottom: 24,
+    marginBottom: 28,
     gap: 2,
   },
   barSeg: {
@@ -2123,7 +2118,7 @@ const styles = StyleSheet.create({
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 28,
+    marginBottom: 32,
   },
   summaryItem: {
     alignItems: 'center',
@@ -2131,20 +2126,20 @@ const styles = StyleSheet.create({
   },
   summaryAmount: {
     fontFamily: fonts.mono,
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '300',
   },
   summaryLabel: {
     fontFamily: fonts.regular,
-    fontSize: 11,
-    color: colors.dim,
-    marginTop: 4,
+    fontSize: 12,
+    color: colors.text2,
+    marginTop: 6,
   },
   summaryPct: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    color: colors.muted,
-    marginTop: 2,
+    fontSize: 11,
+    color: colors.dim,
+    marginTop: 3,
     letterSpacing: 0.5,
   },
   breakdownHeaderRow: {
@@ -2213,15 +2208,15 @@ const styles = StyleSheet.create({
   },
   dataLabel: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    color: colors.text2,
+    fontSize: 14,
+    color: colors.text,
     letterSpacing: 0.2,
   },
   dataMeta: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    color: colors.muted,
-    marginTop: 3,
+    fontSize: 11,
+    color: colors.dim,
+    marginTop: 4,
     letterSpacing: 0.3,
   },
   dataRowRight: {
@@ -2324,8 +2319,8 @@ const styles = StyleSheet.create({
   // ── Card 5: Debt accounts ──
   debtHero: {
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingBottom: 24,
+    paddingVertical: 20,
+    paddingBottom: 28,
   },
   debtHeroAmount: {
     fontFamily: fonts.mono,

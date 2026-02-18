@@ -120,7 +120,7 @@ interface ProgressRow {
 }
 
 function effortColor(effort: string) {
-  return effort === 'low' ? '#666666' : effort === 'medium' ? colors.dim : colors.accent;
+  return effort === 'low' ? '#666666' : effort === 'medium' ? colors.dim : colors.green;
 }
 
 function effortLabel(effort: string) {
@@ -523,7 +523,7 @@ export default function Plan() {
               {goalCtx.monthsSaved > 0 && goalCtx.currentMonths > 0 && (
                 <View style={styles.trajCompareRow}>
                   <View style={styles.trajCompareItem}>
-                    <Text style={[styles.trajCompareValue, { color: colors.accent }]}>
+                    <Text style={[styles.trajCompareValue, { color: colors.green }]}>
                       {goalCtx.monthsSaved} months faster
                     </Text>
                     <Text style={styles.trajCompareLabel}>
@@ -817,18 +817,6 @@ export default function Plan() {
         </>
       )}
 
-      {/* ══════════════════════════════════════════════
-          SECTION 4 — RESOURCES
-          ══════════════════════════════════════════════ */}
-      <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>NEED HELP WITH DEBT?</Text>
-      <View style={styles.card}>
-        <TouchableOpacity onPress={() => Linking.openURL('https://www.stepchange.org')}>
-          <Text style={styles.resourceLink}>StepChange — Free debt advice</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => Linking.openURL('https://www.citizensadvice.org.uk/debt-and-money')}>
-          <Text style={styles.resourceLink}>Citizens Advice — Debt guidance</Text>
-        </TouchableOpacity>
-      </View>
     </ScrollView>
   );
 
@@ -1030,15 +1018,15 @@ export default function Plan() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: spacing.lg, paddingTop: spacing.xxl + spacing.lg, paddingBottom: spacing.xxl },
+  scroll: { padding: spacing.lg, paddingTop: spacing.xxl + spacing.xl, paddingBottom: spacing.xxl + spacing.lg },
   loadingContainer: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
   emptyTitle: { fontFamily: fonts.medium, fontSize: 18, color: colors.text, marginBottom: spacing.sm },
-  emptyText: { fontFamily: fonts.regular, fontSize: 14, color: colors.dim, textAlign: 'center', lineHeight: 22 },
+  emptyText: { fontFamily: fonts.regular, fontSize: 15, color: colors.dim, textAlign: 'center', lineHeight: 24 },
 
   // ── Header ──
-  heading: { fontFamily: fonts.mono, fontSize: 20, color: colors.text, marginBottom: 2, letterSpacing: 0.5, textTransform: 'uppercase' },
-  headingSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.dim, marginBottom: spacing.lg },
+  heading: { fontFamily: fonts.mono, fontSize: 22, color: colors.text, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' },
+  headingSub: { fontFamily: fonts.regular, fontSize: 14, color: colors.dim, marginBottom: spacing.xl },
 
   // ── Goal trajectory ──
   trajectoryCard: {
@@ -1046,20 +1034,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
     borderRadius: 24,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
+    padding: spacing.xl,
+    marginBottom: spacing.xl,
   },
   trajGoal: {
     fontFamily: fonts.medium,
-    fontSize: 18,
+    fontSize: 19,
     color: colors.text,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
+    lineHeight: 26,
   },
   trajTarget: {
     fontFamily: fonts.mono,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.dim,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   trajTimeline: {
     marginTop: spacing.sm,
@@ -1108,20 +1097,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginTop: spacing.xl,
-    marginBottom: spacing.sm,
+    marginTop: spacing.xxl,
+    marginBottom: spacing.md,
   },
   sectionLabel: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 11,
     letterSpacing: 2,
-    color: colors.dim,
+    color: colors.text2,
     textTransform: 'uppercase',
   },
   sectionMeta: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.muted,
+    fontSize: 12,
+    color: colors.dim,
   },
 
   // ── Cards ──
@@ -1130,8 +1119,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
     borderRadius: 24,
-    padding: spacing.lg,
-    marginBottom: spacing.sm,
+    padding: spacing.xl,
+    marginBottom: spacing.md,
   },
   activeCard: {
     borderColor: 'rgba(255,255,255,0.20)',
@@ -1167,8 +1156,8 @@ const styles = StyleSheet.create({
     color: colors.dim,
   },
   badgeActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    backgroundColor: colors.green,
+    borderColor: colors.green,
   },
   badgeActiveText: {
     fontFamily: fonts.mono,
@@ -1179,10 +1168,10 @@ const styles = StyleSheet.create({
   // ── Move content ──
   moveAction: {
     fontFamily: fonts.medium,
-    fontSize: 15,
+    fontSize: 16,
     color: colors.text,
-    marginBottom: spacing.xs,
-    lineHeight: 22,
+    marginBottom: spacing.sm,
+    lineHeight: 24,
   },
   moveStats: {
     flexDirection: 'row',
@@ -1191,7 +1180,7 @@ const styles = StyleSheet.create({
   },
   impactText: {
     fontFamily: fonts.mono,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text,
   },
   effortBadge: {
@@ -1256,7 +1245,7 @@ const styles = StyleSheet.create({
   },
   miniProgressFill: {
     height: '100%',
-    backgroundColor: colors.accent,
+    backgroundColor: colors.green,
     borderRadius: 2,
     minWidth: 1,
   },
@@ -1317,22 +1306,22 @@ const styles = StyleSheet.create({
   },
 
   // ── Expanded section ──
-  expandedSection: { marginTop: spacing.sm },
-  separator: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: spacing.md },
-  detailBlock: { marginBottom: spacing.md },
+  expandedSection: { marginTop: spacing.md },
+  separator: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: spacing.lg },
+  detailBlock: { marginBottom: spacing.lg },
   detailLabel: {
     fontFamily: fonts.mono,
-    fontSize: 9,
+    fontSize: 10,
     letterSpacing: 2,
-    color: colors.dim,
+    color: colors.text2,
     textTransform: 'uppercase',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   detailText: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.text2,
-    lineHeight: 22,
+    lineHeight: 24,
   },
 
   // ── Merchant list ──
@@ -1384,8 +1373,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   checkboxDone: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    backgroundColor: colors.green,
+    borderColor: colors.green,
   },
   checkmark: {
     fontFamily: fonts.semibold,
@@ -1395,9 +1384,9 @@ const styles = StyleSheet.create({
   checklistContent: { flex: 1 },
   checklistText: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.text2,
-    lineHeight: 22,
+    lineHeight: 24,
   },
   checklistTextDone: {
     textDecorationLine: 'line-through',
@@ -1424,9 +1413,9 @@ const styles = StyleSheet.create({
   // ── Impact grid ──
   effectText: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.text,
-    lineHeight: 22,
+    lineHeight: 24,
   },
   impactGrid: {
     flexDirection: 'row',
@@ -1533,7 +1522,7 @@ const styles = StyleSheet.create({
   },
   startBtn: {
     flex: 1,
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
     paddingVertical: 14,
     borderRadius: 100,
     alignItems: 'center',
@@ -1570,12 +1559,4 @@ const styles = StyleSheet.create({
     color: colors.coral,
   },
 
-  // ── Resources ──
-  resourceLink: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: colors.text2,
-    paddingVertical: spacing.xs,
-    textDecorationLine: 'underline',
-  },
 });
