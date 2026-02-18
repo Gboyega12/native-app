@@ -860,28 +860,37 @@ export default function Home() {
               CARD 1 — YOUR INSIGHTS
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Your Insights</Text>
+            <AnimGlyph delay={0}>
+              <Text style={styles.cardTitle}>Your Insights</Text>
+            </AnimGlyph>
 
             {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
               const effortClr = move.effort === 'high' ? colors.green
                 : move.effort === 'medium' ? colors.dim : '#666666';
+              const isEmergencyFund = (move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.category || '') === 'buffer';
               return (
-                <View
-                  key={i}
-                  accessibilityRole="summary"
-                  accessibilityLabel={`Insight: ${move.action}, saves ${move.annualImpact} pounds per year`}
-                  style={styles.moveItem}
-                >
-                  {/* Animated glyph */}
-                  <AnimGlyph delay={i * 120}>
-                    <Text style={styles.moveRank}>{'•'}</Text>
-                  </AnimGlyph>
-
-                  {/* Content */}
-                  <View style={styles.moveContent}>
+                <AnimGlyph key={i} delay={i * 120}>
+                  <View
+                    accessibilityRole="summary"
+                    accessibilityLabel={`Insight: ${move.action}, saves ${move.annualImpact} pounds per year`}
+                    style={styles.moveItemFull}
+                  >
                     <Text style={styles.moveTitle}>
                       {stripMd(move.action)}
                     </Text>
+
+                    {/* Emergency fund info tooltip */}
+                    {isEmergencyFund && (
+                      <View style={styles.emergencyInfoBox}>
+                        <View style={styles.emergencyInfoHeader}>
+                          <Text style={styles.emergencyInfoIcon}>i</Text>
+                          <Text style={styles.emergencyInfoTitle}>What is an emergency fund?</Text>
+                        </View>
+                        <Text style={styles.emergencyInfoText}>
+                          An emergency fund is 3–6 months of essential expenses saved in an easy-access account. It protects you from unexpected costs like car repairs, medical bills, or job loss — so you don't need to rely on credit cards or loans.
+                        </Text>
+                      </View>
+                    )}
 
                     {/* Impact + effort on one line */}
                     <View style={styles.moveMeta}>
@@ -913,7 +922,7 @@ export default function Home() {
                       </TouchableOpacity>
                     </View>
                   </View>
-                </View>
+                </AnimGlyph>
               );
             }) : (
               <Text style={styles.noDataText}>
@@ -927,7 +936,7 @@ export default function Home() {
                 onPress={() => router.push('/(main)/(tabs)/plan')}
                 activeOpacity={0.7}
               >
-                <Text style={styles.viewAllText}>
+                <Text style={[styles.viewAllText, { color: colors.green }]}>
                   View plan {'\u203A'}
                 </Text>
               </TouchableOpacity>
@@ -938,12 +947,14 @@ export default function Home() {
               CARD 2 — YOUR INCOME
               ══════════════════════════════════════════════ */}
           <View style={styles.card} accessibilityRole="summary" accessibilityLabel={`Monthly income: ${Math.round(income)} pounds`}>
-            <View style={styles.cardTitleRow}>
-              <Text style={styles.cardTitle}>Your income</Text>
-              <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'income' ? null : 'income')}>
-                <Text style={styles.infoIcon}>i</Text>
-              </TouchableOpacity>
-            </View>
+            <AnimGlyph delay={50}>
+              <View style={styles.cardTitleRow}>
+                <Text style={styles.cardTitle}>Your income</Text>
+                <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'income' ? null : 'income')}>
+                  <Text style={styles.infoIcon}>i</Text>
+                </TouchableOpacity>
+              </View>
+            </AnimGlyph>
             {infoCard === 'income' && (
               <View style={styles.infoBox}>
                 <Text style={styles.infoBoxText}>
@@ -968,19 +979,20 @@ export default function Home() {
                   {incomeSources.length} source{incomeSources.length !== 1 ? 's' : ''}
                 </Text>
                 {incomeSources.map((src: IncomeSource, i: number) => (
-                  <View key={i} style={styles.sourceCard}>
-                    <View style={styles.sourceRow}>
-                      <View style={styles.sourceInfo}>
-                        <Text style={styles.sourceName}>{src.source}</Text>
-                        <View style={styles.sourceTagRow}>
-                          <Text style={styles.sourceFreq}>
-                            {src.frequency.charAt(0).toUpperCase() + src.frequency.slice(1)}
-                          </Text>
-                          {src.isSalary && (
-                            <View style={styles.primaryTag}>
-                              <Text style={styles.primaryTagText}>PRIMARY</Text>
-                            </View>
-                          )}
+                  <AnimGlyph key={i} delay={150 + i * 80}>
+                    <View style={styles.sourceCard}>
+                      <View style={styles.sourceRow}>
+                        <View style={styles.sourceInfo}>
+                          <Text style={styles.sourceName}>{src.source}</Text>
+                          <View style={styles.sourceTagRow}>
+                            <Text style={styles.sourceFreq}>
+                              {src.frequency.charAt(0).toUpperCase() + src.frequency.slice(1)}
+                            </Text>
+                            {src.isSalary && (
+                              <View style={[styles.primaryTag, { backgroundColor: colors.greenDim, borderColor: colors.green + '30' }]}>
+                                <Text style={[styles.primaryTagText, { color: colors.green }]}>PRIMARY</Text>
+                              </View>
+                            )}
                         </View>
                       </View>
                       <View style={styles.sourceAmountWrap}>
@@ -1004,7 +1016,8 @@ export default function Home() {
                         {removingSource === src.source ? 'Removing...' : 'Not income? Remove'}
                       </Text>
                     </TouchableOpacity>
-                  </View>
+                    </View>
+                  </AnimGlyph>
                 ))}
               </>
             ) : (
@@ -1016,12 +1029,14 @@ export default function Home() {
               CARD 3 — SAFE TO SPEND
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <View style={styles.cardTitleRow}>
-              <Text style={styles.cardTitle}>Safe to spend</Text>
-              <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'safe' ? null : 'safe')}>
-                <Text style={styles.infoIcon}>i</Text>
-              </TouchableOpacity>
-            </View>
+            <AnimGlyph delay={100}>
+              <View style={styles.cardTitleRow}>
+                <Text style={styles.cardTitle}>Safe to spend</Text>
+                <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'safe' ? null : 'safe')}>
+                  <Text style={styles.infoIcon}>i</Text>
+                </TouchableOpacity>
+              </View>
+            </AnimGlyph>
             {infoCard === 'safe' && (
               <View style={styles.infoBox}>
                 <Text style={styles.infoBoxText}>
@@ -1048,7 +1063,7 @@ export default function Home() {
                   styles.safeToSpendBarFill,
                   {
                     width: `${weeklyUsedPct}%`,
-                    backgroundColor: weeklyHealthy ? '#FFFFFF' : colors.coral,
+                    backgroundColor: weeklyHealthy ? colors.green : colors.coral,
                   },
                 ]}
               />
@@ -1102,40 +1117,39 @@ export default function Home() {
                 <View style={[styles.barSeg, { flex: discFlex, backgroundColor: '#666666' }]} />
               )}
               {leftFlex > 0 && (
-                <View style={[styles.barSeg, { flex: leftFlex, backgroundColor: '#2A2A2A' }]} />
+                <View style={[styles.barSeg, { flex: leftFlex, backgroundColor: colors.green + '30' }]} />
               )}
             </View>
 
             {/* Summary row — always visible */}
             <View style={[styles.summaryRow, !budgetExpanded && { marginBottom: 0 }]}>
-              <View style={styles.summaryItem}>
+              <AnimGlyph delay={80} style={styles.summaryItem}>
                 <Text style={[styles.summaryAmount, { color: '#FFFFFF' }]}>
                   {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
                 </Text>
                 <Text style={styles.summaryLabel}>Non-negotiable</Text>
                 <Text style={styles.summaryPct}>{nonDiscPct}%</Text>
-              </View>
-              <View style={styles.summaryItem}>
+              </AnimGlyph>
+              <AnimGlyph delay={160} style={styles.summaryItem}>
                 <Text style={[styles.summaryAmount, { color: '#999999' }]}>
                   {'\u00a3'}{Math.round(discTotal).toLocaleString()}
                 </Text>
                 <Text style={styles.summaryLabel}>Lifestyle</Text>
                 <Text style={styles.summaryPct}>{discPct}%</Text>
-              </View>
-              <View style={styles.summaryItem}>
-                <Text style={[styles.summaryAmount, { color: '#555555' }]}>
+              </AnimGlyph>
+              <AnimGlyph delay={240} style={styles.summaryItem}>
+                <Text style={[styles.summaryAmount, { color: colors.green }]}>
                   {'\u00a3'}{Math.round(leftToDecide).toLocaleString()}
                 </Text>
                 <Text style={styles.summaryLabel}>Left to decide</Text>
-                <Text style={styles.summaryPct}>{leftPct}%</Text>
-              </View>
+                <Text style={[styles.summaryPct, { color: colors.green }]}>{leftPct}%</Text>
+              </AnimGlyph>
             </View>
 
             {/* Collapsible breakdown sections */}
             {budgetExpanded && (
               <>
                 {/* Non-negotiable breakdown */}
-                {nonDiscItems.length > 0 && (
                   <>
                     <View style={styles.breakdownHeaderRow}>
                       <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
@@ -1149,10 +1163,13 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={styles.addItemLabel}>Add item</Text>
-                        <Text style={styles.addItemIcon}>+</Text>
+                        <Text style={[styles.addItemLabel, { color: colors.green }]}>Add item</Text>
+                        <Text style={[styles.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
                       </TouchableOpacity>
                     </View>
+                    {nonDiscItems.length === 0 && (
+                      <Text style={styles.noDataText}>No essential items yet. Add one to track it.</Text>
+                    )}
                     {nonDiscItems.map((item: BudgetCategory, i: number) => {
                       const key = `nd-${item.category}`;
                       const isExpanded = expandedCategories.has(key);
@@ -1216,10 +1233,8 @@ export default function Home() {
                       );
                     })}
                   </>
-                )}
 
                 {/* Lifestyle spending */}
-                {discItems.length > 0 && (
                   <>
                     <View style={[styles.breakdownHeaderRow, { marginTop: 28 }]}>
                       <Text style={styles.breakdownHeader}>LIFESTYLE</Text>
@@ -1233,10 +1248,13 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={styles.addItemLabel}>Add item</Text>
-                        <Text style={styles.addItemIcon}>+</Text>
+                        <Text style={[styles.addItemLabel, { color: colors.green }]}>Add item</Text>
+                        <Text style={[styles.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
                       </TouchableOpacity>
                     </View>
+                    {discItems.length === 0 && (
+                      <Text style={styles.noDataText}>No lifestyle items yet. Add one to track it.</Text>
+                    )}
                     {discItems.map((item: BudgetCategory, i: number) => {
                       const key = `d-${item.category}`;
                       const isExpanded = expandedCategories.has(key);
@@ -1300,7 +1318,6 @@ export default function Home() {
                       );
                     })}
                   </>
-                )}
 
                 <Text style={styles.cardFooter}>Tap any category to expand transactions</Text>
 
@@ -1340,12 +1357,14 @@ export default function Home() {
             const overallUtil = totalLimit > 0 ? Math.round((totalDebt / totalLimit) * 100) : null;
             return (
               <View style={styles.card}>
-                <View style={styles.cardTitleRow}>
-                  <Text style={styles.cardTitle}>Your debt</Text>
-                  <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'debt' ? null : 'debt')}>
-                    <Text style={styles.infoIcon}>i</Text>
-                  </TouchableOpacity>
-                </View>
+                <AnimGlyph delay={50}>
+                  <View style={styles.cardTitleRow}>
+                    <Text style={styles.cardTitle}>Your debt</Text>
+                    <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'debt' ? null : 'debt')}>
+                      <Text style={styles.infoIcon}>i</Text>
+                    </TouchableOpacity>
+                  </View>
+                </AnimGlyph>
                 {infoCard === 'debt' && (
                   <View style={styles.infoBox}>
                     <Text style={styles.infoBoxText}>
@@ -1379,10 +1398,10 @@ export default function Home() {
                     : d.account_type === 'overdraft_facility' ? 'Overdraft facility'
                     : d.account_type || 'Account';
                   return (
-                    <View
-                      key={i}
-                      style={[styles.debtRow, i === debtAccounts.length - 1 && styles.debtRowLast]}
-                    >
+                    <AnimGlyph key={i} delay={150 + i * 80}>
+                      <View
+                        style={[styles.debtRow, i === debtAccounts.length - 1 && styles.debtRowLast]}
+                      >
                       <View style={styles.debtRowLeft}>
                         <Text style={styles.debtName}>{d.account_name}</Text>
                         <Text style={styles.debtType}>{typeLabel}</Text>
@@ -1397,7 +1416,8 @@ export default function Home() {
                           </Text>
                         )}
                       </View>
-                    </View>
+                      </View>
+                    </AnimGlyph>
                   );
                 })}
               </View>
@@ -1789,26 +1809,53 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ── Card 1: Move items ──
-  moveItem: {
+  // ── Emergency fund info ──
+  emergencyInfoBox: {
+    backgroundColor: colors.greenDim,
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 10,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: colors.green + '20',
+  },
+  emergencyInfoHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  emergencyInfoIcon: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.green,
+    width: 20,
+    height: 20,
+    lineHeight: 20,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: colors.green + '40',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  emergencyInfoTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 12,
+    color: colors.green,
+    letterSpacing: 0.3,
+  },
+  emergencyInfoText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+    lineHeight: 18,
+  },
+
+  // ── Card 1: Move items ──
+  moveItemFull: {
     paddingVertical: 20,
-    gap: 16,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
-  },
-  moveRank: {
-    fontFamily: fonts.mono,
-    fontSize: 32,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.08)',
-    lineHeight: 36,
-    width: 28,
-    textAlign: 'center',
-  },
-  moveContent: {
-    flex: 1,
   },
   moveTitle: {
     fontFamily: fonts.medium,
@@ -2309,7 +2356,7 @@ const styles = StyleSheet.create({
   viewTransactionsText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.text,
+    color: colors.green,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },

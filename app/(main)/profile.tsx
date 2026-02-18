@@ -1,11 +1,40 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
-  LayoutAnimation,
+  LayoutAnimation, Animated, Easing,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
+
+// ── Glyph micro-animation: fade+scale on mount ──
+const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 500,
+      delay,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        style,
+        {
+          opacity: anim,
+          transform: [{
+            scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
+          }],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+};
 
 const CONSENT_DAYS = 90;
 const WARN_DAYS = 14;
@@ -185,15 +214,17 @@ export default function Profile() {
       )}
 
       {/* Profile card */}
-      <View style={s.profileCard}>
-        <View style={s.avatar}>
-          <Text style={s.avatarText}>{initials || '?'}</Text>
+      <AnimGlyph delay={0}>
+        <View style={s.profileCard}>
+          <View style={s.avatar}>
+            <Text style={s.avatarText}>{initials || '?'}</Text>
+          </View>
+          <View style={s.profileInfo}>
+            <Text style={s.profileName}>{name || 'User'}</Text>
+            <Text style={s.profileEmail}>{email}</Text>
+          </View>
         </View>
-        <View style={s.profileInfo}>
-          <Text style={s.profileName}>{name || 'User'}</Text>
-          <Text style={s.profileEmail}>{email}</Text>
-        </View>
-      </View>
+      </AnimGlyph>
 
       {/* ── Accounts ── */}
       <View style={s.section}>
@@ -201,28 +232,36 @@ export default function Profile() {
 
         {allAccounts.map((bank, i) => {
           const displayName = bank.provider_name || (bank.account_type === 'credit' ? `Credit card ${i + 1}` : `Bank account ${i + 1}`);
-          const typeLabel = bank.account_type === 'credit' ? 'Credit' : 'Bank';
+          const isBank = bank.account_type !== 'credit';
+          const typeLabel = isBank ? 'Bank' : 'Credit';
           const { daysLeft, expired, expiring } = getConsentStatus(bank.created_at);
           const lastSync = bank.updated_at ? new Date(bank.updated_at) : null;
 
           return (
-            <View key={bank.id} style={[s.accountCard, expired && s.accountCardExpired]}>
-              <View style={s.accountRow}>
-                {/* Icon */}
-                <View style={[s.accountIcon, expired && s.accountIconExpired]}>
-                  <Text style={[s.accountIconText, expired && s.accountIconTextExpired]}>
-                    {getProviderInitial(displayName)}
-                  </Text>
-                </View>
-
-                {/* Info */}
-                <View style={s.accountInfo}>
-                  <View style={s.accountNameRow}>
-                    <Text style={s.accountName}>{displayName}</Text>
-                    <View style={[s.typeBadge, bank.account_type === 'credit' && s.typeBadgeCredit]}>
-                      <Text style={[s.typeBadgeText, bank.account_type === 'credit' && s.typeBadgeTextCredit]}>{typeLabel}</Text>
-                    </View>
+            <AnimGlyph key={bank.id} delay={100 + i * 80}>
+              <View style={[s.accountCard, expired && s.accountCardExpired, isBank && !expired && s.accountCardBank]}>
+                <View style={s.accountRow}>
+                  {/* Icon */}
+                  <View style={[s.accountIcon, expired && s.accountIconExpired, isBank && !expired && s.accountIconBank]}>
+                    <Text style={[s.accountIconText, expired && s.accountIconTextExpired, isBank && !expired && s.accountIconTextBank]}>
+                      {getProviderInitial(displayName)}
+                    </Text>
                   </View>
+
+                  {/* Info */}
+                  <View style={s.accountInfo}>
+                    <View style={s.accountNameRow}>
+                      <Text style={s.accountName}>{displayName}</Text>
+                      <View style={[s.typeBadge, bank.account_type === 'credit' && s.typeBadgeCredit, isBank && s.typeBadgeBank]}>
+                        <Text style={[s.typeBadgeText, bank.account_type === 'credit' && s.typeBadgeTextCredit, isBank && s.typeBadgeTextBank]}>{typeLabel}</Text>
+                      </View>
+                      {isBank && !expired && (
+                        <View style={s.connectedBadge}>
+                          <View style={s.connectedDot} />
+                          <Text style={s.connectedText}>Connected</Text>
+                        </View>
+                      )}
+                    </View>
                   <Text style={s.accountMeta}>
                     {lastSync ? `Synced ${lastSync.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : `Connected ${new Date(bank.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`}
                     {!expired && !expiring ? ` · ${daysLeft}d remaining` : ''}
@@ -235,7 +274,7 @@ export default function Profile() {
                         s.consentFill,
                         {
                           flex: Math.max(0, Math.min(CONSENT_DAYS, CONSENT_DAYS - daysLeft)),
-                          backgroundColor: expired ? colors.coral : expiring ? '#E8C55A' : colors.accent,
+                          backgroundColor: expired ? colors.coral : expiring ? '#E8C55A' : isBank ? colors.green : colors.accent,
                         },
                       ]}
                     />
@@ -249,7 +288,7 @@ export default function Profile() {
                 ) : expiring ? (
                   <View style={[s.statusDot, { backgroundColor: '#E8C55A' }]} />
                 ) : (
-                  <View style={[s.statusDot, { backgroundColor: colors.accent }]} />
+                  <View style={[s.statusDot, { backgroundColor: isBank ? colors.green : colors.accent }]} />
                 )}
               </View>
 
@@ -273,19 +312,21 @@ export default function Profile() {
                   <Text style={s.removeLink}>Remove</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+              </View>
+            </AnimGlyph>
           );
         })}
 
         {/* Debt / balance accounts */}
-        {debtAccounts.map((d) => {
+        {debtAccounts.map((d, idx) => {
           const bal = d.outstanding_balance || 0;
           const lim = d.credit_limit || 0;
           const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
           const isHigh = util != null && util > 75;
 
           return (
-            <View key={d.id} style={s.accountCard}>
+            <AnimGlyph key={d.id} delay={200 + idx * 80}>
+              <View style={s.accountCard}>
               <View style={s.accountRow}>
                 <View style={[s.accountIcon, isHigh && { backgroundColor: colors.coralDim }]}>
                   <Text style={[s.accountIconText, isHigh && { color: colors.coral }]}>
@@ -340,7 +381,8 @@ export default function Profile() {
                   <Text style={s.removeLink}>Remove</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+              </View>
+            </AnimGlyph>
           );
         })}
 
@@ -518,6 +560,9 @@ const s = StyleSheet.create({
   accountCardExpired: {
     borderColor: 'rgba(232,114,114,0.25)',
   },
+  accountCardBank: {
+    borderColor: 'rgba(0,255,135,0.20)',
+  },
   accountRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -534,6 +579,9 @@ const s = StyleSheet.create({
   accountIconExpired: {
     backgroundColor: colors.coralDim,
   },
+  accountIconBank: {
+    backgroundColor: colors.greenDim,
+  },
   accountIconText: {
     fontFamily: fonts.semibold,
     fontSize: 16,
@@ -541,6 +589,9 @@ const s = StyleSheet.create({
   },
   accountIconTextExpired: {
     color: colors.coral,
+  },
+  accountIconTextBank: {
+    color: colors.green,
   },
   accountInfo: {
     flex: 1,
@@ -565,6 +616,9 @@ const s = StyleSheet.create({
   typeBadgeCredit: {
     backgroundColor: colors.skyDim,
   },
+  typeBadgeBank: {
+    backgroundColor: colors.greenDim,
+  },
   typeBadgeText: {
     fontFamily: fonts.medium,
     fontSize: 9,
@@ -574,6 +628,27 @@ const s = StyleSheet.create({
   },
   typeBadgeTextCredit: {
     color: colors.sky,
+  },
+  typeBadgeTextBank: {
+    color: colors.green,
+  },
+  connectedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  connectedDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.green,
+  },
+  connectedText: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.green,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   accountMeta: {
     fontFamily: fonts.regular,

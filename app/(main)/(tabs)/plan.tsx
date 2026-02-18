@@ -501,18 +501,20 @@ export default function Plan() {
 
   return (
     <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.scroll}>
-      <View style={styles.headingRow}>
-        <View>
-          <Text style={styles.heading}>Your Plan</Text>
-          <Text style={styles.headingSub}>
-            {activeMoves.length + userPlans.length} in progress
-            {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} recommended` : ''}
-          </Text>
+      <AnimGlyph delay={0}>
+        <View style={styles.headingRow}>
+          <View>
+            <Text style={styles.heading}>Your Plan</Text>
+            <Text style={styles.headingSub}>
+              {activeMoves.length + userPlans.length} in progress
+              {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} recommended` : ''}
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.infoBtn} onPress={() => setShowInfo(true)} activeOpacity={0.7}>
+            <Text style={styles.infoBtnText}>{'\u24D8'}</Text>
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity style={styles.infoBtn} onPress={() => setShowInfo(true)} activeOpacity={0.7}>
-          <Text style={styles.infoBtnText}>{'\u24D8'}</Text>
-        </TouchableOpacity>
-      </View>
+      </AnimGlyph>
 
       {/* ── Info modal ── */}
       <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}>
@@ -543,6 +545,11 @@ export default function Plan() {
             <Text style={styles.infoHeading}>Take action</Text>
             <Text style={styles.infoBody}>
               Each move has direct links or buttons to help you act — compare rates, call providers, or ask Bocy for personalised advice.
+            </Text>
+
+            <Text style={styles.infoHeading}>Automatic tracking</Text>
+            <Text style={styles.infoBody}>
+              Recommendations are automatically tracked when Bocy re-analyses your bank data. As your spending patterns change, new transactions come in, and debts are paid down, Bocy re-evaluates your recommendations and updates progress automatically — no manual input needed. Dismissed or completed recommendations won't reappear.
             </Text>
 
             <TouchableOpacity style={styles.infoClose} onPress={() => setShowInfo(false)} activeOpacity={0.8}>
@@ -604,12 +611,14 @@ export default function Plan() {
           ══════════════════════════════════════════════ */}
       {(activeMoves.length > 0 || userPlans.length > 0) && (
         <>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionLabel}>IN PROGRESS</Text>
-            <Text style={styles.sectionMeta}>
-              saving {'\u00a3'}{Math.round(activeMonthly + planMonthly)}/mo
-            </Text>
-          </View>
+          <AnimGlyph delay={100}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>IN PROGRESS</Text>
+              <Text style={[styles.sectionMeta, { color: colors.green }]}>
+                saving {'\u00a3'}{Math.round(activeMonthly + planMonthly)}/mo
+              </Text>
+            </View>
+          </AnimGlyph>
 
           {/* User plans (from chat or auto-created) */}
           {userPlans.map((plan) => {
@@ -770,12 +779,14 @@ export default function Plan() {
           ══════════════════════════════════════════════ */}
       {opportunities.length > 0 && (
         <>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionLabel}>RECOMMENDED</Text>
-            <Text style={styles.sectionMeta}>
-              {'\u00a3'}{Math.round(totalMonthlyImpact - activeMonthly)}/mo potential
-            </Text>
-          </View>
+          <AnimGlyph delay={100}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>RECOMMENDED</Text>
+              <Text style={[styles.sectionMeta, { color: colors.green }]}>
+                {'\u00a3'}{Math.round(totalMonthlyImpact - activeMonthly)}/mo potential
+              </Text>
+            </View>
+          </AnimGlyph>
 
           {/* Impact comparison bar */}
           <View style={styles.impactCompare}>
@@ -893,6 +904,19 @@ export default function Plan() {
     return (
       <View style={styles.expandedSection}>
         <View style={styles.separator} />
+
+        {/* Emergency fund info */}
+        {((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.category || '') === 'buffer') && (
+          <View style={styles.emergencyInfoBox}>
+            <View style={styles.emergencyInfoHeader}>
+              <Text style={styles.emergencyInfoIcon}>i</Text>
+              <Text style={styles.emergencyInfoTitle}>What is an emergency fund?</Text>
+            </View>
+            <Text style={styles.emergencyInfoText}>
+              An emergency fund is 3–6 months of essential expenses saved in an easy-access account. It protects you from unexpected costs like car repairs, medical bills, or job loss — so you don't need to rely on credit cards or loans.
+            </Text>
+          </View>
+        )}
 
         {/* Strategy */}
         {move.strategy && (
@@ -1266,7 +1290,7 @@ const styles = StyleSheet.create({
   impactText: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    color: colors.text,
+    color: colors.green,
   },
   effortBadge: {
     borderRadius: 100,
@@ -1388,6 +1412,47 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 2,
     letterSpacing: 0.3,
+  },
+
+  // ── Emergency fund info ──
+  emergencyInfoBox: {
+    backgroundColor: 'rgba(0,255,135,0.06)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,135,0.12)',
+  },
+  emergencyInfoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  emergencyInfoIcon: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.green,
+    width: 20,
+    height: 20,
+    lineHeight: 20,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,135,0.4)',
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  emergencyInfoTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 12,
+    color: colors.green,
+    letterSpacing: 0.3,
+  },
+  emergencyInfoText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.text2,
+    lineHeight: 18,
   },
 
   // ── Expanded section ──
@@ -1519,7 +1584,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 18,
     fontWeight: '300',
-    color: colors.text,
+    color: colors.green,
   },
   impactLabel: {
     fontFamily: fonts.mono,

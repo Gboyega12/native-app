@@ -145,11 +145,19 @@ export default async function handler(req, res) {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
+    // Determine account type and provider name from TrueLayer data
+    const providerName = accounts[0]?.provider?.display_name || cards[0]?.provider?.display_name || null;
+    const accountType = accounts.length > 0 && cards.length === 0 ? 'bank'
+      : cards.length > 0 && accounts.length === 0 ? 'credit'
+      : accounts.length > 0 ? 'bank' : null;
+
     const { error: dbError } = await admin.from('bank_data').insert({
       connection_id: connectionId,
       csv_data: csv,
       source: 'truelayer',
       refresh_token: tokenData.refresh_token || null,
+      provider_name: providerName,
+      account_type: accountType,
     });
 
     if (dbError) {

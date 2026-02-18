@@ -41,9 +41,20 @@ export default async function handler(req, res) {
     }
 
     // Claim the row for this user so sync can find it later
+    // Also derive account_type from card_balances if not already set
     if (userId) {
+      const { data: row } = await admin.from('bank_data')
+        .select('card_balances, account_type')
+        .eq('connection_id', connectionId)
+        .single();
+
+      const updates = { user_id: userId };
+      if (!row?.account_type) {
+        updates.account_type = (row?.card_balances && row.card_balances.length > 0) ? 'credit' : 'bank';
+      }
+
       await admin.from('bank_data')
-        .update({ user_id: userId })
+        .update(updates)
         .eq('connection_id', connectionId)
         .is('user_id', null);
     }
