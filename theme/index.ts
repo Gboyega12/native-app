@@ -1,36 +1,36 @@
-// ── Nothing Phone OS-inspired design system ──
-// Pure AMOLED black, monochrome philosophy, red accent only.
-// Typography: SpaceMono for dot-matrix feel, Poppins for body.
+// ── Design System ──
+// AMOLED black, blue accent, square edges, generous whitespace.
+// WCAG AA compliant: all text ≥ 4.5:1 contrast on #000000.
 
 export const colors = {
-  // Surfaces — true black for AMOLED, subtle grays for separation
+  // Surfaces
   bg: '#000000',
-  surface: '#141414',
+  surface: '#0A0A0A',
   border: 'rgba(255,255,255,0.10)',
 
-  // Accent — Nothing Red (used sparingly, never as a fill)
-  accent: '#D71A21',
-  accentDim: 'rgba(215,26,33,0.12)',
+  // Accent — confident blue
+  accent: '#5B9CF5',
+  accentDim: 'rgba(91,156,245,0.12)',
 
-  // Semantic — coral for warnings, kept for API compat
-  coral: '#D71A21',
-  coralDim: 'rgba(215,26,33,0.10)',
+  // Semantic — warm red for destructive/warnings only
+  coral: '#E05252',
+  coralDim: 'rgba(224,82,82,0.10)',
 
-  // Functional tones — monochrome-first, subtle when needed
+  // Functional
   mint: '#FFFFFF',
   mintDim: 'rgba(255,255,255,0.06)',
-  sky: '#A0A0A0',
-  skyDim: 'rgba(160,160,160,0.10)',
+  sky: '#5B9CF5',
+  skyDim: 'rgba(91,156,245,0.10)',
   lavender: '#666666',
 
-  // Text hierarchy
-  text: '#FFFFFF',
-  text2: '#A7A7A7',
-  dim: '#848484',
-  muted: '#3D3D3D',
+  // Text hierarchy — all pass WCAG AA on #000
+  text: '#FFFFFF',       // 21:1
+  text2: '#B0B0B0',      // 9.6:1
+  dim: '#8A8A8A',        // 5.9:1
+  muted: '#444444',      // 3.3:1 (decorative only)
 
-  // Card surface
-  card: '#0A0A0A',
+  // Card
+  card: '#060606',
 };
 
 export const fonts = {
@@ -42,17 +42,17 @@ export const fonts = {
 };
 
 export const spacing = {
-  xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-  xxl: 48,
+  xs: 6,
+  sm: 12,
+  md: 20,
+  lg: 32,
+  xl: 44,
+  xxl: 64,
 };
 
 export const radius = {
-  sm: 8,
-  md: 14,
-  lg: 20,
-  xl: 28,
+  sm: 0,
+  md: 0,
+  lg: 0,
+  xl: 0,
 };

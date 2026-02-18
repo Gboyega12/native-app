@@ -1,7 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert,
+  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Animated, Easing,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -19,8 +19,16 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// Nothing OS — monochrome extended palette
-const gold = '#A7A7A7';
+// Smooth layout animation config for micro-interactions
+const SMOOTH_ANIM = {
+  duration: 280,
+  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+  update: { type: LayoutAnimation.Types.easeInEaseOut },
+  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+};
+
+// Monochrome extended palette
+const gold = '#B0B0B0';
 const goldSoft = 'rgba(255,255,255,0.04)';
 
 export default function Home() {
@@ -34,7 +42,7 @@ export default function Home() {
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
 
   const toggleCategory = (key: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedCategories((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -44,7 +52,7 @@ export default function Home() {
   };
 
   const toggleMove = (idx: number) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedMoves((prev) => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx);
@@ -160,7 +168,7 @@ export default function Home() {
         updated.monthly_spending = (updated.monthly_spending || 0) + amount;
         updated.surplus = (updated.surplus || 0) - amount;
 
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
       }
 
@@ -236,7 +244,7 @@ export default function Home() {
         (updated as any)[fromKey] = fromSection;
         if (fromKey !== toKey) (updated as any)[toKey] = toSection;
 
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
       }
 
@@ -270,7 +278,7 @@ export default function Home() {
           updated.monthly_income = Math.max(0, (updated.monthly_income || 0) - removed.monthly);
           updated.surplus = (updated.surplus || 0) - removed.monthly;
         }
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
       }
     } catch (err: any) {
@@ -285,7 +293,7 @@ export default function Home() {
       const updatedMoves = (analysis.all_moves || []).filter(m => m.action !== move.action);
       const updated = { ...analysis, all_moves: updatedMoves };
 
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      LayoutAnimation.configureNext(SMOOTH_ANIM);
       setAnalysis(updated);
 
       // Persist to Supabase
@@ -698,7 +706,7 @@ export default function Home() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#FFFFFF" size="large" />
+        <ActivityIndicator color={colors.accent} size="large" />
       </View>
     );
   }
@@ -840,8 +848,8 @@ export default function Home() {
             )}
 
             {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
-              const effortColor = move.effort === 'high' ? colors.accent
-                : move.effort === 'medium' ? colors.dim : '#666666';
+              const effortColor = move.effort === 'high' ? colors.coral
+                : move.effort === 'medium' ? colors.accent : colors.dim;
               return (
                 <View
                   key={i}
@@ -1011,7 +1019,7 @@ export default function Home() {
 
             {/* Big remaining number */}
             <View style={styles.safeToSpendHero}>
-              <Text style={[styles.safeToSpendAmount, !weeklyHealthy && { color: colors.accent }]}>
+              <Text style={[styles.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }]}>
                 {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
               </Text>
               <Text style={styles.safeToSpendLabel}>left this week</Text>
@@ -1024,7 +1032,7 @@ export default function Home() {
                   styles.safeToSpendBarFill,
                   {
                     width: `${weeklyUsedPct}%`,
-                    backgroundColor: weeklyHealthy ? '#FFFFFF' : colors.accent,
+                    backgroundColor: weeklyHealthy ? colors.accent : colors.coral,
                   },
                 ]}
               />
@@ -1069,16 +1077,16 @@ export default function Home() {
               <Text style={styles.cardTitle}>Your budget reality</Text>
             </View>
 
-            {/* 3-segment stacked bar — monochrome */}
+            {/* 3-segment stacked bar */}
             <View style={styles.budgetBar}>
               {nonDiscFlex > 0 && (
                 <View style={[styles.barSeg, { flex: nonDiscFlex, backgroundColor: '#FFFFFF' }]} />
               )}
               {discFlex > 0 && (
-                <View style={[styles.barSeg, { flex: discFlex, backgroundColor: '#666666' }]} />
+                <View style={[styles.barSeg, { flex: discFlex, backgroundColor: colors.accent }]} />
               )}
               {leftFlex > 0 && (
-                <View style={[styles.barSeg, { flex: leftFlex, backgroundColor: '#2A2A2A' }]} />
+                <View style={[styles.barSeg, { flex: leftFlex, backgroundColor: '#1A1A1A' }]} />
               )}
             </View>
 
@@ -1092,14 +1100,14 @@ export default function Home() {
                 <Text style={styles.summaryPct}>{nonDiscPct}%</Text>
               </View>
               <View style={styles.summaryItem}>
-                <Text style={[styles.summaryAmount, { color: '#999999' }]}>
+                <Text style={[styles.summaryAmount, { color: colors.accent }]}>
                   {'\u00a3'}{Math.round(discTotal).toLocaleString()}
                 </Text>
                 <Text style={styles.summaryLabel}>Lifestyle</Text>
                 <Text style={styles.summaryPct}>{discPct}%</Text>
               </View>
               <View style={styles.summaryItem}>
-                <Text style={[styles.summaryAmount, { color: '#555555' }]}>
+                <Text style={[styles.summaryAmount, { color: colors.muted }]}>
                   {'\u00a3'}{Math.round(leftToDecide).toLocaleString()}
                 </Text>
                 <Text style={styles.summaryLabel}>Left to decide</Text>
@@ -1118,7 +1126,7 @@ export default function Home() {
                       <TouchableOpacity
                         style={styles.addItemBtn}
                         onPress={() => {
-                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          LayoutAnimation.configureNext(SMOOTH_ANIM);
                           setAddItemEssential(true);
                           setAddItemError('');
                           setShowAddItem(true);
@@ -1202,7 +1210,7 @@ export default function Home() {
                       <TouchableOpacity
                         style={styles.addItemBtn}
                         onPress={() => {
-                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          LayoutAnimation.configureNext(SMOOTH_ANIM);
                           setAddItemEssential(false);
                           setAddItemError('');
                           setShowAddItem(true);
@@ -1226,7 +1234,7 @@ export default function Home() {
                             style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
                           >
                             <View style={styles.dataRowLeft}>
-                              <Text style={[styles.catArrow, { color: colors.dim }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
+                              <Text style={[styles.catArrow, { color: colors.accent }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
                               <View style={styles.catInfo}>
                                 <Text style={styles.dataLabel}>{item.category}</Text>
                                 <Text style={styles.dataMeta}>
@@ -1235,7 +1243,7 @@ export default function Home() {
                               </View>
                             </View>
                             <View style={styles.dataRowRight}>
-                              <Text style={[styles.dataValue, { color: colors.dim }]}>
+                              <Text style={[styles.dataValue, { color: colors.accent }]}>
                                 {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
                             </View>
@@ -1258,7 +1266,7 @@ export default function Home() {
                                     <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
                                   </View>
                                   <View style={styles.txRightCol}>
-                                    <Text style={[styles.txAmount, { color: colors.dim }]}>
+                                    <Text style={[styles.txAmount, { color: colors.accent }]}>
                                       {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
                                     </Text>
                                     <Text style={styles.txRecatHint}>Hold to move</Text>
@@ -1282,7 +1290,7 @@ export default function Home() {
 
                 <TouchableOpacity
                   onPress={() => {
-                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    LayoutAnimation.configureNext(SMOOTH_ANIM);
                     setBudgetExpanded(false);
                   }}
                   style={styles.viewTransactionsBtn}
@@ -1296,7 +1304,7 @@ export default function Home() {
             {!budgetExpanded && (
               <TouchableOpacity
                 onPress={() => {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  LayoutAnimation.configureNext(SMOOTH_ANIM);
                   setBudgetExpanded(true);
                 }}
                 style={styles.viewTransactionsBtn}
@@ -1461,7 +1469,7 @@ export default function Home() {
                     disabled={addItemSaving}
                   >
                     {addItemSaving ? (
-                      <ActivityIndicator color={colors.bg} size="small" />
+                      <ActivityIndicator color="#FFFFFF" size="small" />
                     ) : (
                       <Text style={styles.modalSaveText}>Add</Text>
                     )}
@@ -1572,7 +1580,7 @@ export default function Home() {
                         disabled={savingRecat || !recatTarget}
                       >
                         {savingRecat ? (
-                          <ActivityIndicator color={colors.bg} size="small" />
+                          <ActivityIndicator color="#FFFFFF" size="small" />
                         ) : (
                           <Text style={styles.modalSaveText}>Move</Text>
                         )}
@@ -1590,7 +1598,7 @@ export default function Home() {
   );
 }
 
-// ── Nothing OS Design System Styles ──
+// ── Styles: Square edges, generous whitespace, WCAG AA ──
 
 const styles = StyleSheet.create({
   container: {
@@ -1598,9 +1606,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   scroll: {
-    padding: 20,
-    paddingTop: 60,
-    paddingBottom: 48,
+    padding: 24,
+    paddingTop: 72,
+    paddingBottom: 64,
   },
   loadingContainer: {
     flex: 1,
@@ -1614,118 +1622,112 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 36,
+    marginBottom: 48,
   },
   greeting: {
-    fontFamily: fonts.mono,
-    fontSize: 20,
+    fontFamily: fonts.heading,
+    fontSize: 28,
     color: colors.text,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    letterSpacing: -0.5,
   },
   menuButton: {
-    padding: 10,
-    gap: 4,
-    minWidth: 44,
-    minHeight: 44,
+    padding: 12,
+    gap: 5,
+    minWidth: 48,
+    minHeight: 48,
     justifyContent: 'center',
     alignItems: 'flex-end',
   },
   menuLine: {
-    width: 20,
-    height: 1.5,
+    width: 24,
+    height: 2,
     backgroundColor: colors.text,
-    borderRadius: 1,
   },
   menuLineShort: {
-    width: 12,
+    width: 14,
     backgroundColor: colors.dim,
   },
   syncText: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    color: colors.dim,
-    marginTop: 6,
+    fontSize: 11,
+    color: colors.accent,
+    marginTop: 8,
     letterSpacing: 0.5,
-    textTransform: 'uppercase',
   },
 
   // ── Empty State ──
   emptyState: {
     marginTop: spacing.xxl,
     alignItems: 'center',
+    paddingHorizontal: spacing.md,
   },
   emptyIcon: {
-    fontFamily: fonts.mono,
-    fontSize: 48,
-    color: colors.text,
-    marginBottom: spacing.lg,
-    letterSpacing: 2,
+    fontFamily: fonts.heading,
+    fontSize: 56,
+    color: colors.accent,
+    marginBottom: spacing.xl,
   },
   emptyTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 18,
+    fontFamily: fonts.heading,
+    fontSize: 24,
     color: colors.text,
     textAlign: 'center',
     marginBottom: spacing.sm,
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
   },
   emptyDesc: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 16,
     color: colors.dim,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 26,
     marginBottom: spacing.xl,
-    paddingHorizontal: spacing.md,
   },
   ctaButton: {
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 16,
+    backgroundColor: colors.accent,
+    paddingVertical: 18,
     paddingHorizontal: spacing.xl,
-    borderRadius: 100,
+    borderRadius: 0,
     alignItems: 'center',
     width: '100%',
   },
   ctaText: {
     fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: '#000000',
-    letterSpacing: 0.3,
+    fontSize: 16,
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
 
-  // ── Shared Card — Nothing OS: border-defined, no fill ──
+  // ── Shared Card — square, border-defined, generous padding ──
   card: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 24,
-    padding: 24,
-    paddingTop: 28,
-    paddingBottom: 28,
-    marginBottom: 20,
-    overflow: 'hidden',
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 0,
+    padding: 28,
+    paddingTop: 32,
+    paddingBottom: 32,
+    marginBottom: 28,
   },
   cardTitle: {
-    fontFamily: fonts.mono,
-    fontSize: 13,
-    color: colors.dim,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginBottom: 6,
+    fontFamily: fonts.heading,
+    fontSize: 16,
+    color: colors.text,
+    letterSpacing: -0.2,
+    marginBottom: 8,
   },
   cardSubtitle: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.muted,
-    lineHeight: 20,
-    marginBottom: 24,
-  },
-  noDataText: {
     fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     lineHeight: 22,
+    marginBottom: 28,
+  },
+  noDataText: {
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: colors.dim,
+    lineHeight: 24,
   },
 
   // ── Card title row with info icon ──
@@ -1733,78 +1735,79 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 4,
   },
   infoIcon: {
     fontFamily: fonts.mono,
     fontSize: 11,
     color: colors.dim,
-    width: 22,
-    height: 22,
-    lineHeight: 22,
+    width: 28,
+    height: 28,
+    lineHeight: 28,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 11,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 0,
     overflow: 'hidden',
   },
   infoBox: {
     backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 10,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 0,
+    padding: 16,
+    marginTop: 12,
+    marginBottom: 16,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.accent,
   },
   infoBoxText: {
     fontFamily: fonts.regular,
-    fontSize: 12,
+    fontSize: 13,
     color: colors.dim,
-    lineHeight: 18,
+    lineHeight: 20,
   },
 
   // ── Card 1: Move items ──
   moveItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 16,
-    gap: 16,
+    paddingVertical: 20,
+    gap: 18,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   moveRank: {
-    fontFamily: fonts.mono,
-    fontSize: 32,
-    fontWeight: '300',
-    color: 'rgba(255,255,255,0.08)',
-    lineHeight: 36,
-    width: 28,
+    fontFamily: fonts.heading,
+    fontSize: 36,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.06)',
+    lineHeight: 40,
+    width: 32,
     textAlign: 'center',
   },
   moveContent: {
     flex: 1,
   },
   moveTitle: {
-    fontFamily: fonts.medium,
-    fontSize: 15,
+    fontFamily: fonts.semibold,
+    fontSize: 16,
     color: colors.text,
-    lineHeight: 22,
+    lineHeight: 24,
   },
   moveMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginTop: 6,
+    gap: 12,
+    marginTop: 8,
   },
   moveImpact: {
     fontFamily: fonts.mono,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.accent,
   },
   effortPill: {
-    borderRadius: 100,
-    paddingVertical: 3,
+    borderRadius: 0,
+    paddingVertical: 4,
     paddingHorizontal: 10,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
@@ -1812,115 +1815,120 @@ const styles = StyleSheet.create({
   },
   effortPillText: {
     fontFamily: fonts.mono,
-    fontSize: 9,
+    fontSize: 10,
     fontWeight: '600',
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    letterSpacing: 1,
   },
   moveExpanded: {
-    marginTop: 12,
-    gap: 10,
+    marginTop: 16,
+    gap: 12,
   },
   moveStrategy: {
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.dim,
-    lineHeight: 20,
-    marginTop: 8,
+    lineHeight: 22,
+    marginTop: 10,
   },
   moveActions: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 14,
+    gap: 12,
+    marginTop: 18,
   },
   moveApproveBtn: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 10,
-    borderRadius: 100,
+    backgroundColor: colors.accent,
+    paddingVertical: 14,
+    borderRadius: 0,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   moveApproveBtnText: {
     fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: '#000000',
+    fontSize: 14,
+    color: '#FFFFFF',
   },
   moveVerifyBtn: {
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
-    paddingVertical: 10,
-    borderRadius: 100,
+    paddingVertical: 14,
+    borderRadius: 0,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   moveVerifyBtnText: {
     fontFamily: fonts.semibold,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.dim,
   },
   moveDeleteBtn: {
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(215,26,33,0.3)',
-    paddingVertical: 10,
-    borderRadius: 100,
+    borderColor: colors.coralDim,
+    paddingVertical: 14,
+    borderRadius: 0,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   moveDeleteBtnText: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    color: colors.accent,
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.coral,
   },
   viewAllBtn: {
     alignItems: 'center',
-    paddingVertical: 16,
-    marginTop: 4,
+    paddingVertical: 20,
+    marginTop: 8,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
   },
   viewAllText: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    color: colors.text,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.accent,
+    letterSpacing: 0.3,
   },
 
   // ── Card 2: Income ──
   bigNumberWrap: {
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingBottom: 28,
+    paddingVertical: 28,
+    paddingBottom: 36,
   },
   bigNumber: {
     fontFamily: fonts.mono,
-    fontSize: 52,
-    fontWeight: '300',
+    fontSize: 56,
+    fontWeight: '700',
     color: colors.text,
-    letterSpacing: -2,
+    letterSpacing: -3,
   },
   bigNumberLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.muted,
-    marginTop: 8,
-    letterSpacing: 1,
+    fontSize: 12,
+    color: colors.dim,
+    marginTop: 10,
+    letterSpacing: 2,
     textTransform: 'uppercase',
   },
   divider: {
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.06)',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   sourceCard: {
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 12,
+    borderRadius: 0,
+    padding: 20,
+    marginTop: 16,
   },
   sourceRow: {
     flexDirection: 'row',
@@ -1929,39 +1937,37 @@ const styles = StyleSheet.create({
   },
   sourceInfo: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 16,
   },
   sourceName: {
-    fontFamily: fonts.medium,
-    fontSize: 15,
+    fontFamily: fonts.semibold,
+    fontSize: 16,
     color: colors.text,
-    lineHeight: 21,
+    lineHeight: 22,
     marginBottom: 8,
   },
   sourceTagRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   sourceFreq: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 12,
     color: colors.dim,
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
   },
   primaryTag: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 100,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: colors.accentDim,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 0,
   },
   primaryTagText: {
     fontFamily: fonts.mono,
-    fontSize: 9,
-    fontWeight: '600',
-    color: colors.text,
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.accent,
     letterSpacing: 1,
   },
   sourceAmountWrap: {
@@ -1969,73 +1975,75 @@ const styles = StyleSheet.create({
   },
   sourceAmount: {
     fontFamily: fonts.mono,
-    fontSize: 20,
-    fontWeight: '300',
+    fontSize: 22,
+    fontWeight: '700',
     color: colors.text,
   },
   sourceAmountPer: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 12,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 4,
   },
   incomeSourcesHeader: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    color: colors.muted,
-    letterSpacing: 1,
+    fontSize: 11,
+    color: colors.dim,
+    letterSpacing: 1.5,
     marginBottom: 4,
-    marginTop: 8,
+    marginTop: 12,
     textTransform: 'uppercase',
   },
   removeSourceBtn: {
-    marginTop: 10,
+    marginTop: 14,
     alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 100,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 0,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(215,26,33,0.25)',
+    borderColor: colors.coralDim,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   removeSourceText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.accent,
+    fontSize: 12,
+    color: colors.coral,
     letterSpacing: 0.3,
   },
 
   // ── Card 3: Safe to Spend ──
   safeToSpendHero: {
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingBottom: 24,
+    paddingVertical: 28,
+    paddingBottom: 32,
   },
   safeToSpendAmount: {
     fontFamily: fonts.mono,
-    fontSize: 48,
-    fontWeight: '300',
+    fontSize: 56,
+    fontWeight: '700',
     color: colors.text,
-    letterSpacing: -2,
+    letterSpacing: -3,
   },
   safeToSpendLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.muted,
-    marginTop: 8,
-    letterSpacing: 1,
+    fontSize: 12,
+    color: colors.dim,
+    marginTop: 10,
+    letterSpacing: 2,
     textTransform: 'uppercase',
   },
   safeToSpendBar: {
-    height: 4,
-    borderRadius: 2,
+    height: 6,
+    borderRadius: 0,
     backgroundColor: 'rgba(255,255,255,0.06)',
     overflow: 'hidden',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   safeToSpendBarFill: {
     height: '100%',
-    borderRadius: 2,
+    borderRadius: 0,
   },
   safeToSpendRow: {
     flexDirection: 'row',
@@ -2043,7 +2051,7 @@ const styles = StyleSheet.create({
   },
   safeToSpendMeta: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 12,
     color: colors.dim,
     letterSpacing: 0.3,
   },
@@ -2053,18 +2061,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   expandHint: {
     fontFamily: fonts.regular,
-    fontSize: 12,
+    fontSize: 13,
     color: colors.muted,
     marginTop: 2,
   },
   expandToggle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 0,
     backgroundColor: 'rgba(255,255,255,0.04)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2073,24 +2081,24 @@ const styles = StyleSheet.create({
   },
   expandToggleText: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 11,
     color: colors.dim,
   },
   budgetBar: {
     flexDirection: 'row',
-    height: 4,
-    borderRadius: 2,
+    height: 6,
+    borderRadius: 0,
     overflow: 'hidden',
-    marginBottom: 24,
-    gap: 2,
+    marginBottom: 28,
+    gap: 3,
   },
   barSeg: {
-    borderRadius: 2,
+    borderRadius: 0,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 28,
+    marginBottom: 32,
   },
   summaryItem: {
     alignItems: 'center',
@@ -2098,66 +2106,68 @@ const styles = StyleSheet.create({
   },
   summaryAmount: {
     fontFamily: fonts.mono,
-    fontSize: 18,
-    fontWeight: '300',
+    fontSize: 20,
+    fontWeight: '700',
   },
   summaryLabel: {
     fontFamily: fonts.regular,
-    fontSize: 11,
+    fontSize: 12,
     color: colors.dim,
-    marginTop: 4,
+    marginTop: 6,
   },
   summaryPct: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 11,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 4,
     letterSpacing: 0.5,
   },
   breakdownHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   breakdownHeader: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    letterSpacing: 1.5,
+    fontSize: 11,
+    letterSpacing: 2,
     textTransform: 'uppercase',
     color: colors.dim,
   },
   addItemBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 4,
   },
   addItemLabel: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    color: colors.text,
+    fontSize: 11,
+    color: colors.accent,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   addItemIcon: {
     fontFamily: fonts.mono,
-    fontSize: 14,
-    color: colors.text,
-    width: 20,
-    height: 20,
-    lineHeight: 18,
+    fontSize: 16,
+    color: colors.accent,
+    width: 24,
+    height: 24,
+    lineHeight: 22,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 10,
+    borderColor: colors.accentDim,
+    borderRadius: 0,
     overflow: 'hidden',
   },
   dataRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 14,
-    minHeight: 48,
+    paddingVertical: 16,
+    minHeight: 52,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',
   },
@@ -2167,28 +2177,28 @@ const styles = StyleSheet.create({
   dataRowLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   catArrow: {
     fontFamily: fonts.mono,
-    fontSize: 8,
+    fontSize: 9,
     marginTop: 4,
-    width: 14,
+    width: 16,
   },
   catInfo: {
     flex: 1,
   },
   dataLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 13,
+    fontFamily: fonts.medium,
+    fontSize: 14,
     color: colors.text2,
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
   },
   dataMeta: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 11,
     color: colors.muted,
-    marginTop: 3,
+    marginTop: 4,
     letterSpacing: 0.3,
   },
   dataRowRight: {
@@ -2196,25 +2206,26 @@ const styles = StyleSheet.create({
   },
   dataValue: {
     fontFamily: fonts.mono,
-    fontSize: 14,
-    fontWeight: '400',
+    fontSize: 15,
+    fontWeight: '600',
   },
 
   // ── Transaction dropdown ──
   txDropdown: {
     backgroundColor: 'transparent',
-    borderLeftWidth: 1,
-    borderLeftColor: 'rgba(255,255,255,0.08)',
-    marginLeft: 10,
-    marginBottom: 8,
-    paddingLeft: 14,
-    paddingVertical: 6,
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(255,255,255,0.06)',
+    marginLeft: 12,
+    marginBottom: 10,
+    paddingLeft: 16,
+    paddingVertical: 8,
   },
   txRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
+    minHeight: 48,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.03)',
   },
@@ -2223,97 +2234,98 @@ const styles = StyleSheet.create({
   },
   txLeft: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 16,
   },
   txMerchant: {
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text2,
   },
   txDate: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 11,
     color: colors.muted,
-    marginTop: 3,
+    marginTop: 4,
     letterSpacing: 0.3,
   },
   txAmount: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    fontWeight: '400',
+    fontSize: 14,
+    fontWeight: '600',
   },
   txRightCol: {
     alignItems: 'flex-end',
   },
   txRecatHint: {
     fontFamily: fonts.mono,
-    fontSize: 8,
+    fontSize: 9,
     color: colors.muted,
-    marginTop: 3,
-    letterSpacing: 0.5,
+    marginTop: 4,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
   txEmpty: {
     fontFamily: fonts.regular,
-    fontSize: 12,
+    fontSize: 13,
     color: colors.muted,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
   breakdownSubtext: {
     fontFamily: fonts.regular,
-    fontSize: 12,
+    fontSize: 13,
     color: colors.muted,
-    marginBottom: 12,
-    lineHeight: 18,
+    marginBottom: 14,
+    lineHeight: 20,
   },
   cardFooter: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 11,
     color: colors.muted,
     textAlign: 'center',
-    marginTop: 16,
+    marginTop: 20,
     letterSpacing: 0.5,
-    textTransform: 'uppercase',
   },
   viewTransactionsBtn: {
     alignItems: 'center',
-    paddingVertical: 16,
-    marginTop: 8,
+    paddingVertical: 20,
+    marginTop: 12,
+    minHeight: 48,
+    justifyContent: 'center',
   },
   viewTransactionsText: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    color: colors.text,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.accent,
+    letterSpacing: 0.3,
   },
 
   // ── Card 5: Debt accounts ──
   debtHero: {
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingBottom: 24,
+    paddingVertical: 24,
+    paddingBottom: 32,
   },
   debtHeroAmount: {
     fontFamily: fonts.mono,
-    fontSize: 44,
-    fontWeight: '300',
-    color: colors.accent,
-    letterSpacing: -2,
+    fontSize: 48,
+    fontWeight: '700',
+    color: colors.coral,
+    letterSpacing: -3,
   },
   debtHeroLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.muted,
-    marginTop: 8,
-    letterSpacing: 1,
+    fontSize: 12,
+    color: colors.dim,
+    marginTop: 10,
+    letterSpacing: 2,
     textTransform: 'uppercase',
   },
   debtRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
+    minHeight: 52,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',
   },
@@ -2322,19 +2334,19 @@ const styles = StyleSheet.create({
   },
   debtRowLeft: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 16,
   },
   debtName: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
+    fontFamily: fonts.semibold,
+    fontSize: 15,
     color: colors.text,
   },
   debtType: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 11,
     color: colors.muted,
-    marginTop: 3,
-    letterSpacing: 0.3,
+    marginTop: 4,
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   debtRowRight: {
@@ -2342,129 +2354,133 @@ const styles = StyleSheet.create({
   },
   debtBalance: {
     fontFamily: fonts.mono,
-    fontSize: 16,
-    fontWeight: '400',
+    fontSize: 17,
+    fontWeight: '700',
     color: colors.text,
   },
   debtUtil: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 11,
     color: colors.muted,
-    marginTop: 3,
+    marginTop: 4,
     letterSpacing: 0.3,
   },
 
   // ── Add item button ──
 
-  // ── Modal — Nothing OS: dark glass, border-defined ──
+  // ── Modal — square, bold ──
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
+    backgroundColor: 'rgba(0,0,0,0.88)',
     justifyContent: 'center',
     padding: 24,
   },
   modalContent: {
-    backgroundColor: '#0A0A0A',
-    borderRadius: 24,
-    padding: 24,
+    backgroundColor: '#060606',
+    borderRadius: 0,
+    padding: 28,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
   },
   modalTitle: {
-    fontFamily: fonts.mono,
-    fontSize: 14,
+    fontFamily: fonts.heading,
+    fontSize: 18,
     color: colors.text,
-    marginBottom: 6,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
+    marginBottom: 8,
+    letterSpacing: -0.2,
   },
   modalSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.dim,
-    marginBottom: 20,
-    lineHeight: 18,
+    marginBottom: 24,
+    lineHeight: 22,
   },
   modalInput: {
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
-    borderRadius: 12,
-    paddingVertical: 14,
+    borderRadius: 0,
+    paddingVertical: 16,
     paddingHorizontal: 16,
     fontFamily: fonts.regular,
-    fontSize: 15,
+    fontSize: 16,
     color: colors.text,
-    marginBottom: 12,
+    marginBottom: 14,
+    minHeight: 52,
   },
   modalLabel: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 11,
     color: colors.dim,
-    letterSpacing: 1,
-    marginBottom: 8,
+    letterSpacing: 1.5,
+    marginBottom: 10,
     textTransform: 'uppercase',
   },
   categoryScroll: {
-    marginBottom: 16,
-    maxHeight: 36,
+    marginBottom: 20,
+    maxHeight: 40,
   },
   categoryChip: {
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
-    borderRadius: 100,
-    paddingVertical: 8,
+    borderRadius: 0,
+    paddingVertical: 10,
     paddingHorizontal: 14,
     marginRight: 8,
+    minHeight: 40,
+    justifyContent: 'center',
   },
   categoryChipActive: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#FFFFFF',
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
   categoryChipText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 12,
     color: colors.dim,
   },
   categoryChipTextActive: {
-    color: '#000000',
+    color: '#FFFFFF',
   },
   essentialRow: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   toggleRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
   toggleOption: {
     flex: 1,
     backgroundColor: 'transparent',
-    borderRadius: 100,
-    paddingVertical: 10,
+    borderRadius: 0,
+    paddingVertical: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
+    minHeight: 48,
+    justifyContent: 'center',
   },
   toggleOptionActive: {
-    borderColor: '#FFFFFF',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: colors.accent,
+    backgroundColor: colors.accentDim,
   },
   toggleOptionLifestyle: {
-    borderColor: '#FFFFFF',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: colors.accent,
+    backgroundColor: colors.accentDim,
   },
   toggleText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
+    fontSize: 13,
     color: colors.dim,
     letterSpacing: 0.3,
   },
   toggleTextActive: {
-    color: colors.text,
+    color: colors.accent,
   },
   toggleTextLifestyle: {
-    color: colors.text,
+    color: colors.accent,
   },
   modalActions: {
     flexDirection: 'row',
@@ -2472,67 +2488,71 @@ const styles = StyleSheet.create({
   },
   modalCancel: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 100,
+    paddingVertical: 16,
+    borderRadius: 0,
     alignItems: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
+    minHeight: 52,
+    justifyContent: 'center',
   },
   modalCancelText: {
     fontFamily: fonts.semibold,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.dim,
   },
   modalSave: {
     flex: 1,
-    paddingVertical: 14,
-    borderRadius: 100,
+    paddingVertical: 16,
+    borderRadius: 0,
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.accent,
+    minHeight: 52,
+    justifyContent: 'center',
   },
   modalSaveDisabled: {
     opacity: 0.3,
   },
   addItemErrorText: {
     fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.accent,
-    marginBottom: 12,
-    lineHeight: 18,
+    fontSize: 14,
+    color: colors.coral,
+    marginBottom: 14,
+    lineHeight: 22,
   },
   modalSaveText: {
     fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: '#000000',
+    fontSize: 15,
+    color: '#FFFFFF',
   },
 
   // ── Verify modal ──
   verifySection: {
     fontFamily: fonts.mono,
-    fontSize: 9,
+    fontSize: 10,
     letterSpacing: 2,
-    color: colors.dim,
-    marginTop: 16,
-    marginBottom: 6,
+    color: colors.accent,
+    marginTop: 20,
+    marginBottom: 8,
     textTransform: 'uppercase',
   },
   verifyText: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.text2,
-    lineHeight: 22,
+    lineHeight: 24,
   },
   verifyStep: {
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text2,
-    lineHeight: 22,
+    lineHeight: 24,
     marginLeft: 4,
   },
   verifyActions: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 24,
+    marginTop: 28,
   },
 });
