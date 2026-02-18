@@ -146,8 +146,8 @@ CREATE POLICY "Users can insert own overrides"
 CREATE POLICY "Users can delete own overrides"
   ON transaction_overrides FOR DELETE USING (auth.uid() = user_id);
 
-CREATE POLICY "Service role can insert overrides"
-  ON transaction_overrides FOR INSERT WITH CHECK (true);
+-- No additional INSERT policy needed.
+-- Server-side writes use the service role client (which bypasses RLS).
 
 
 -- ============================================================
@@ -180,11 +180,8 @@ CREATE POLICY "Users can update own plans"
 CREATE POLICY "Users can delete own plans"
   ON user_plans FOR DELETE USING (auth.uid() = user_id);
 
-CREATE POLICY "Service role can insert plans"
-  ON user_plans FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Service role can update plans"
-  ON user_plans FOR UPDATE USING (true);
+-- No additional INSERT/UPDATE policies needed.
+-- Server-side writes use the service role client (which bypasses RLS).
 
 
 -- ============================================================
@@ -252,8 +249,8 @@ CREATE POLICY "Users can update own debt accounts"
 CREATE POLICY "Users can delete own debt accounts"
   ON debt_accounts FOR DELETE USING (auth.uid() = user_id);
 
-CREATE POLICY "Service role can manage debt accounts"
-  ON debt_accounts FOR ALL USING (true);
+-- No additional ALL policy needed.
+-- Server-side writes (TrueLayer sync) use the service role client (which bypasses RLS).
 
 
 -- ============================================================
@@ -286,5 +283,5 @@ CREATE POLICY "Users can update own budget adjustments"
 CREATE POLICY "Users can delete own budget adjustments"
   ON budget_adjustments FOR DELETE USING (auth.uid() = user_id);
 
-CREATE POLICY "Service role can manage budget adjustments"
-  ON budget_adjustments FOR ALL USING (true);
+-- No additional ALL policy needed.
+-- Server-side writes (chat tool) use the service role client (which bypasses RLS).
