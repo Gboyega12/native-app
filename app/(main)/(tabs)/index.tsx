@@ -96,13 +96,20 @@ export default function Home() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      await supabase.from('budget_adjustments').insert({
+      const { error: insertError } = await supabase.from('budget_adjustments').insert({
         user_id: user.id,
         description: addItemDesc.trim(),
         category: addItemCategory,
         monthly_amount: amount,
         is_essential: addItemEssential,
       });
+
+      if (insertError) {
+        console.warn('[home] Failed to insert budget item:', insertError.message);
+        Alert.alert('Save failed', 'Could not save budget item. Please try again.');
+        setAddItemSaving(false);
+        return;
+      }
 
       // Optimistic update: merge the new item directly into current analysis state
       if (analysis) {
@@ -535,6 +542,22 @@ export default function Home() {
       const goalTrajectory = topRanked ? topRanked.trajectory : null;
 
       const allMoves = rankedMoves;
+      // Filter out recommendations the user has dismissed so they don't reappear.
+      // Dismissed moves are stored in plan_progress with a 'dismissed-' key prefix.
+      try {
+        const { data: progressRows } = await supabase
+          .from('plan_progress')
+          .select('move_key, move_action')
+          .eq('user_id', userId)
+          .like('move_key', 'dismissed-%');
+        if (progressRows && progressRows.length > 0) {
+          const dismissedActions = new Set(progressRows.map((r: any) => r.move_action));
+          for (let i = allMoves.length - 1; i >= 0; i--) {
+            if (dismissedActions.has(allMoves[i].action)) allMoves.splice(i, 1);
+          }
+        }
+      } catch {}
+
       const topMove = allMoves[0] || null;
 
       // Build raw analysis WITHOUT budget adjustments (those are applied at display time)
@@ -598,6 +621,16 @@ export default function Home() {
           goal_context: rawAnalysis.goal_context,
         });
       }
+
+      // Re-fetch budget adjustments right before merging so we capture
+      // any items the user added while the sync was running.
+      try {
+        const { data: freshAdj } = await supabase
+          .from('budget_adjustments')
+          .select('description, category, monthly_amount, is_essential')
+          .eq('user_id', userId);
+        if (freshAdj) budgetAdjustments = freshAdj;
+      } catch {}
 
       // Apply budget adjustments for display only (not saved)
       const updatedAnalysis = mergeAdjustments(rawAnalysis, budgetAdjustments);
@@ -832,9 +865,9 @@ export default function Home() {
                     <View style={styles.moveActions}>
                       <TouchableOpacity
                         style={styles.moveApproveBtn}
-                        onPress={() => router.push('/(main)/(tabs)/plan')}
+                        onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlight: String(i) } })}
                       >
-                        <Text style={styles.moveApproveBtnText}>Approve</Text>
+                        <Text style={styles.moveApproveBtnText}>View</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.moveDeleteBtn}
