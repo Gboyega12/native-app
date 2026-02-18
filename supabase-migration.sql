@@ -20,13 +20,13 @@ CREATE TABLE goals (
 ALTER TABLE goals ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can read own goals"
-  ON goals FOR SELECT USING (auth.uid() = user_id);
+  ON goals FOR SELECT USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can insert own goals"
-  ON goals FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON goals FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can update own goals"
-  ON goals FOR UPDATE USING (auth.uid() = user_id);
+  ON goals FOR UPDATE USING ((select auth.uid()) = user_id);
 
 
 -- ============================================================
@@ -54,10 +54,10 @@ CREATE TABLE analyses (
 ALTER TABLE analyses ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can read own analyses"
-  ON analyses FOR SELECT USING (auth.uid() = user_id);
+  ON analyses FOR SELECT USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can insert own analyses"
-  ON analyses FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON analyses FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
 
 -- ============================================================
@@ -80,19 +80,19 @@ CREATE TABLE bank_data (
 ALTER TABLE bank_data ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can read own bank data"
-  ON bank_data FOR SELECT USING (auth.uid() = user_id);
+  ON bank_data FOR SELECT USING ((select auth.uid()) = user_id);
 
 -- Allow authenticated users to read unclaimed bank_data rows (user_id is NULL)
 -- after TrueLayer callback. The connection_id is a random string that acts as
 -- an ephemeral secret — knowing it is proof you initiated the connection.
 CREATE POLICY "Authenticated users can read unclaimed bank data"
-  ON bank_data FOR SELECT USING (user_id IS NULL AND auth.role() = 'authenticated');
+  ON bank_data FOR SELECT USING (user_id IS NULL AND (select auth.role()) = 'authenticated');
 
 -- No INSERT or UPDATE policies needed for client-side access.
 -- All writes to bank_data are performed via the service role (which bypasses RLS).
 
 CREATE POLICY "Users can delete own bank data"
-  ON bank_data FOR DELETE USING (auth.uid() = user_id);
+  ON bank_data FOR DELETE USING ((select auth.uid()) = user_id);
 
 
 -- ============================================================
@@ -108,16 +108,16 @@ CREATE TABLE chat_messages (
 ALTER TABLE chat_messages ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can read own chat messages"
-  ON chat_messages FOR SELECT USING (auth.uid() = user_id);
+  ON chat_messages FOR SELECT USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can upsert own chat messages"
-  ON chat_messages FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON chat_messages FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can update own chat messages"
-  ON chat_messages FOR UPDATE USING (auth.uid() = user_id);
+  ON chat_messages FOR UPDATE USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can delete own chat messages"
-  ON chat_messages FOR DELETE USING (auth.uid() = user_id);
+  ON chat_messages FOR DELETE USING ((select auth.uid()) = user_id);
 
 
 -- ============================================================
@@ -138,13 +138,13 @@ CREATE TABLE transaction_overrides (
 ALTER TABLE transaction_overrides ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can read own overrides"
-  ON transaction_overrides FOR SELECT USING (auth.uid() = user_id);
+  ON transaction_overrides FOR SELECT USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can insert own overrides"
-  ON transaction_overrides FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON transaction_overrides FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can delete own overrides"
-  ON transaction_overrides FOR DELETE USING (auth.uid() = user_id);
+  ON transaction_overrides FOR DELETE USING ((select auth.uid()) = user_id);
 
 -- No additional INSERT policy needed.
 -- Server-side writes use the service role client (which bypasses RLS).
@@ -169,16 +169,16 @@ CREATE TABLE user_plans (
 ALTER TABLE user_plans ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can read own plans"
-  ON user_plans FOR SELECT USING (auth.uid() = user_id);
+  ON user_plans FOR SELECT USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can insert own plans"
-  ON user_plans FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON user_plans FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can update own plans"
-  ON user_plans FOR UPDATE USING (auth.uid() = user_id);
+  ON user_plans FOR UPDATE USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can delete own plans"
-  ON user_plans FOR DELETE USING (auth.uid() = user_id);
+  ON user_plans FOR DELETE USING ((select auth.uid()) = user_id);
 
 -- No additional INSERT/UPDATE policies needed.
 -- Server-side writes use the service role client (which bypasses RLS).
@@ -204,16 +204,16 @@ CREATE TABLE plan_progress (
 ALTER TABLE plan_progress ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can read own progress"
-  ON plan_progress FOR SELECT USING (auth.uid() = user_id);
+  ON plan_progress FOR SELECT USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can insert own progress"
-  ON plan_progress FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON plan_progress FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can update own progress"
-  ON plan_progress FOR UPDATE USING (auth.uid() = user_id);
+  ON plan_progress FOR UPDATE USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can delete own progress"
-  ON plan_progress FOR DELETE USING (auth.uid() = user_id);
+  ON plan_progress FOR DELETE USING ((select auth.uid()) = user_id);
 
 
 -- ============================================================
@@ -238,16 +238,16 @@ CREATE TABLE debt_accounts (
 ALTER TABLE debt_accounts ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can read own debt accounts"
-  ON debt_accounts FOR SELECT USING (auth.uid() = user_id);
+  ON debt_accounts FOR SELECT USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can insert own debt accounts"
-  ON debt_accounts FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON debt_accounts FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can update own debt accounts"
-  ON debt_accounts FOR UPDATE USING (auth.uid() = user_id);
+  ON debt_accounts FOR UPDATE USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can delete own debt accounts"
-  ON debt_accounts FOR DELETE USING (auth.uid() = user_id);
+  ON debt_accounts FOR DELETE USING ((select auth.uid()) = user_id);
 
 -- No additional ALL policy needed.
 -- Server-side writes (TrueLayer sync) use the service role client (which bypasses RLS).
@@ -272,16 +272,16 @@ CREATE TABLE budget_adjustments (
 ALTER TABLE budget_adjustments ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Users can read own budget adjustments"
-  ON budget_adjustments FOR SELECT USING (auth.uid() = user_id);
+  ON budget_adjustments FOR SELECT USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can insert own budget adjustments"
-  ON budget_adjustments FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON budget_adjustments FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can update own budget adjustments"
-  ON budget_adjustments FOR UPDATE USING (auth.uid() = user_id);
+  ON budget_adjustments FOR UPDATE USING ((select auth.uid()) = user_id);
 
 CREATE POLICY "Users can delete own budget adjustments"
-  ON budget_adjustments FOR DELETE USING (auth.uid() = user_id);
+  ON budget_adjustments FOR DELETE USING ((select auth.uid()) = user_id);
 
 -- No additional ALL policy needed.
 -- Server-side writes (chat tool) use the service role client (which bypasses RLS).
