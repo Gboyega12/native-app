@@ -66,8 +66,7 @@ export default function Connect() {
 
   const isFromProfile = params.from === 'profile';
 
-  // On mount: restore state from sessionStorage (handles TrueLayer web redirect)
-  // and count existing bank_data rows
+  // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
     const init = async () => {
       // Restore session state (from before TrueLayer redirect)
@@ -77,16 +76,32 @@ export default function Connect() {
         setConnectedCount((prev) => Math.max(prev, saved.count));
       }
 
-      // Count existing bank_data rows for this user
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
+          // Count existing bank_data rows
           const { count } = await supabase
             .from('bank_data')
             .select('id', { count: 'exact', head: true })
             .eq('user_id', user.id);
           if (count && count > 0) {
             setConnectedCount((prev) => Math.max(prev, count));
+          }
+
+          // Guard: if not from profile and not returning from TrueLayer,
+          // redirect to dashboard if analysis already exists
+          if (!isFromProfile && !isRedirecting) {
+            const { data: existing } = await supabase
+              .from('analyses')
+              .select('id')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false })
+              .limit(1);
+            if (existing && existing.length > 0) {
+              clearConnectState();
+              router.replace('/(main)/(tabs)');
+              return;
+            }
           }
         }
       } catch {}
