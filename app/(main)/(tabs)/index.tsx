@@ -80,6 +80,7 @@ export default function Home() {
   const [addItemCategory, setAddItemCategory] = useState('');
   const [addItemEssential, setAddItemEssential] = useState(true);
   const [addItemSaving, setAddItemSaving] = useState(false);
+  const [addItemError, setAddItemError] = useState('');
 
   const BUDGET_CATEGORIES = [
     'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport',
@@ -88,25 +89,38 @@ export default function Home() {
   ];
 
   const saveAddItem = async () => {
+    setAddItemError('');
     const amount = parseFloat(addItemAmount);
-    if (!addItemDesc.trim() || !addItemCategory || isNaN(amount) || amount <= 0) return;
+    if (!addItemDesc.trim() || !addItemCategory || isNaN(amount) || amount <= 0) {
+      setAddItemError('Please fill in all fields with a valid amount.');
+      return;
+    }
 
     setAddItemSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setAddItemError('Not signed in. Please sign in and try again.');
+        setAddItemSaving(false);
+        return;
+      }
 
-      const { error: insertError } = await supabase.from('budget_adjustments').insert({
-        user_id: user.id,
-        description: addItemDesc.trim(),
-        category: addItemCategory,
-        monthly_amount: amount,
-        is_essential: addItemEssential,
-      });
+      // Use .select() to confirm the row was actually inserted (catches silent RLS failures)
+      const { data: inserted, error: insertError } = await supabase
+        .from('budget_adjustments')
+        .insert({
+          user_id: user.id,
+          description: addItemDesc.trim(),
+          category: addItemCategory,
+          monthly_amount: amount,
+          is_essential: addItemEssential,
+        })
+        .select('id')
+        .single();
 
-      if (insertError) {
-        console.warn('[home] Failed to insert budget item:', insertError.message);
-        Alert.alert('Save failed', 'Could not save budget item. Please try again.');
+      if (insertError || !inserted) {
+        console.warn('[home] Failed to insert budget item:', insertError?.message || 'no row returned');
+        setAddItemError('Could not save budget item. Please try again.');
         setAddItemSaving(false);
         return;
       }
@@ -155,9 +169,11 @@ export default function Home() {
       setAddItemAmount('');
       setAddItemCategory('');
       setAddItemEssential(true);
+      setAddItemError('');
       setShowAddItem(false);
     } catch (err: any) {
       console.warn('[home] Failed to save budget item:', err?.message);
+      setAddItemError('Something went wrong. Please try again.');
     }
     setAddItemSaving(false);
   };
@@ -1103,6 +1119,8 @@ export default function Home() {
                         style={styles.addItemBtn}
                         onPress={() => {
                           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          setAddItemEssential(true);
+                          setAddItemError('');
                           setShowAddItem(true);
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -1185,6 +1203,8 @@ export default function Home() {
                         style={styles.addItemBtn}
                         onPress={() => {
                           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          setAddItemEssential(false);
+                          setAddItemError('');
                           setShowAddItem(true);
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -1419,11 +1439,16 @@ export default function Home() {
                   </View>
                 </View>
 
+                {/* Error message */}
+                {addItemError ? (
+                  <Text style={styles.addItemErrorText}>{addItemError}</Text>
+                ) : null}
+
                 {/* Actions */}
                 <View style={styles.modalActions}>
                   <TouchableOpacity
                     style={styles.modalCancel}
-                    onPress={() => setShowAddItem(false)}
+                    onPress={() => { setAddItemError(''); setShowAddItem(false); }}
                   >
                     <Text style={styles.modalCancelText}>Cancel</Text>
                   </TouchableOpacity>
@@ -1433,7 +1458,7 @@ export default function Home() {
                       (!addItemDesc.trim() || !addItemCategory || !addItemAmount) && styles.modalSaveDisabled,
                     ]}
                     onPress={saveAddItem}
-                    disabled={addItemSaving || !addItemDesc.trim() || !addItemCategory || !addItemAmount}
+                    disabled={addItemSaving}
                   >
                     {addItemSaving ? (
                       <ActivityIndicator color={colors.bg} size="small" />
@@ -2412,6 +2437,13 @@ const styles = StyleSheet.create({
   },
   modalSaveDisabled: {
     opacity: 0.4,
+  },
+  addItemErrorText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.coral,
+    marginBottom: 12,
+    lineHeight: 18,
   },
   modalSaveText: {
     fontFamily: fonts.semibold,
