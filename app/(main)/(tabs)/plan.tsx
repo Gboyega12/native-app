@@ -79,16 +79,16 @@ const PROVIDER_ACTIONS: Record<string, ProviderAction[]> = {
     { label: 'Citizens Advice', sub: 'Debt guidance', phone: '0800 144 8848', url: 'https://www.citizensadvice.org.uk/debt-and-money' },
   ],
   buffer: [
-    { label: 'Compare savings accounts', sub: 'MoneyHelper', url: 'https://www.moneyhelper.org.uk/en/savings/how-to-save/use-our-savings-calculator' },
-    { label: 'Open a Cash ISA', sub: 'Tax-free savings', url: 'https://www.moneyhelper.org.uk/en/savings/types-of-savings/cash-isas' },
+    { label: 'Compare savings accounts', sub: 'Find the best rate', url: 'https://www.bocy.io/savings-comparison.html' },
+    { label: 'Compare ISAs', sub: 'Tax-free savings', url: 'https://www.bocy.io/isa-comparison.html' },
   ],
   savings: [
-    { label: 'Compare savings rates', sub: 'MSE', url: 'https://www.moneysavingexpert.com/savings/savings-accounts-best-interest/' },
-    { label: 'Call MoneyHelper', sub: 'Savings advice', phone: '0800 138 7777' },
+    { label: 'Compare savings rates', sub: 'Find the best rate', url: 'https://www.bocy.io/savings-comparison.html' },
+    { label: 'Compare ISAs', sub: 'Tax-free savings', url: 'https://www.bocy.io/isa-comparison.html' },
   ],
   invest: [
-    { label: 'Learn about investing', sub: 'MoneyHelper guide', url: 'https://www.moneyhelper.org.uk/en/investments' },
-    { label: 'Compare S&S ISAs', sub: 'MSE', url: 'https://www.moneysavingexpert.com/savings/stocks-shares-isas/' },
+    { label: 'Compare ISAs', sub: 'Stocks & Shares ISAs', url: 'https://www.bocy.io/isa-comparison.html' },
+    { label: 'Compare savings rates', sub: 'Cash alternatives', url: 'https://www.bocy.io/savings-comparison.html' },
   ],
   subscriptions: [
     { label: 'Review with free tool', sub: 'Trim subscriptions', url: 'https://www.moneysavingexpert.com/broadband-and-tv/cancel-direct-debit/' },
