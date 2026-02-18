@@ -542,6 +542,22 @@ export default function Home() {
       const goalTrajectory = topRanked ? topRanked.trajectory : null;
 
       const allMoves = rankedMoves;
+      // Filter out recommendations the user has dismissed so they don't reappear.
+      // Dismissed moves are stored in plan_progress with a 'dismissed-' key prefix.
+      try {
+        const { data: progressRows } = await supabase
+          .from('plan_progress')
+          .select('move_key, move_action')
+          .eq('user_id', userId)
+          .like('move_key', 'dismissed-%');
+        if (progressRows && progressRows.length > 0) {
+          const dismissedActions = new Set(progressRows.map((r: any) => r.move_action));
+          for (let i = allMoves.length - 1; i >= 0; i--) {
+            if (dismissedActions.has(allMoves[i].action)) allMoves.splice(i, 1);
+          }
+        }
+      } catch {}
+
       const topMove = allMoves[0] || null;
 
       // Build raw analysis WITHOUT budget adjustments (those are applied at display time)

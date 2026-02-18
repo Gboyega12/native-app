@@ -109,19 +109,34 @@ export default function Plan() {
       supabase.from('plan_progress').select('*').eq('user_id', user.id),
     ]);
 
-    setAnalysis(analysisRes.data);
     setUserPlans(plansRes.data || []);
 
-    // Build progress map
+    // Build progress map and collect dismissed move actions
     const progressMap: Record<string, ProgressRow> = {};
+    const dismissedActions = new Set<string>();
     for (const row of (progressRes.data || [])) {
-      progressMap[row.move_key] = {
-        move_key: row.move_key,
-        move_action: row.move_action,
-        approved: row.approved,
-        completed_steps: row.completed_steps || [],
-      };
+      if (row.move_key.startsWith('dismissed-')) {
+        dismissedActions.add(row.move_action);
+      } else {
+        progressMap[row.move_key] = {
+          move_key: row.move_key,
+          move_action: row.move_action,
+          approved: row.approved,
+          completed_steps: row.completed_steps || [],
+        };
+      }
     }
+
+    // Filter out dismissed recommendations so they don't reappear after sync
+    if (analysisRes.data && dismissedActions.size > 0) {
+      const filtered = (analysisRes.data.all_moves || []).filter(
+        (m: Move) => !dismissedActions.has(m.action),
+      );
+      setAnalysis({ ...analysisRes.data, all_moves: filtered });
+    } else {
+      setAnalysis(analysisRes.data);
+    }
+
     setProgress(progressMap);
     setLoading(false);
   };
@@ -221,38 +236,65 @@ export default function Plan() {
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
   };
 
-  const handleDeleteRecommendation = async (index: number) => {
+  const handleDeleteRecommendation = async (sortedIndex: number) => {
     if (!analysis) return;
     const uid = userIdRef.current;
     if (!uid) return;
 
-    const updatedMoves = [...(analysis.all_moves || [])];
-    updatedMoves.splice(index, 1);
+    // `moves` is sorted by effort — find the actual move object, then locate
+    // it in the original unsorted `all_moves` by matching the action text.
+    const moveToDelete = moves[sortedIndex];
+    if (!moveToDelete) return;
+
+    const originalMoves = analysis.all_moves || [];
+    const originalIndex = originalMoves.findIndex((m) => m.action === moveToDelete.action);
+    if (originalIndex === -1) return;
+
+    const updatedMoves = [...originalMoves];
+    updatedMoves.splice(originalIndex, 1);
     setAnalysis({ ...analysis, all_moves: updatedMoves });
 
     // Also remove from progress if it was started
-    const key = `move-${index}`;
+    const progressKey = `move-${sortedIndex}`;
     setProgress((prev) => {
       const updated = { ...prev };
-      delete updated[key];
+      delete updated[progressKey];
       return updated;
     });
 
-    // Persist to Supabase
+    // Persist dismissal to plan_progress so it survives background sync.
+    // Uses a 'dismissed-' prefix key; loadData filters these out on load.
     try {
+      await supabase.from('plan_progress').upsert({
+        user_id: uid,
+        move_key: `dismissed-${moveToDelete.action.slice(0, 80)}`,
+        move_action: moveToDelete.action,
+        approved: false,
+        completed_steps: [],
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,move_key' });
+
+      // Also update analyses table so home page picks it up immediately
       const { data: latest } = await supabase.from('analyses')
-        .select('id')
+        .select('id, all_moves')
         .eq('user_id', uid)
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
       if (latest?.id) {
+        const dbMoves = (latest.all_moves || []).filter(
+          (m: any) => m.action !== moveToDelete.action,
+        );
         await supabase.from('analyses')
-          .update({ all_moves: updatedMoves })
+          .update({ all_moves: dbMoves })
           .eq('id', latest.id);
       }
-      await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', key);
-    } catch {}
+
+      // Clean up any progress tracking for this move
+      await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', progressKey);
+    } catch (err: any) {
+      console.warn('[plan] Failed to persist recommendation deletion:', err?.message);
+    }
   };
 
   if (loading) {
