@@ -83,7 +83,7 @@ interface ProgressRow {
 }
 
 function effortColor(effort: string) {
-  return effort === 'low' ? colors.accent : effort === 'medium' ? colors.sky : colors.coral;
+  return effort === 'low' ? '#666666' : effort === 'medium' ? colors.dim : colors.accent;
 }
 
 function effortLabel(effort: string) {
@@ -414,7 +414,7 @@ export default function Plan() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color={colors.accent} size="large" />
+        <ActivityIndicator color="#FFFFFF" size="large" />
       </View>
     );
   }
@@ -502,8 +502,8 @@ export default function Plan() {
                   )}
                   {goalCtx.monthsSaved > 0 && (
                     <View style={[styles.trajMonthItem, styles.trajSavedItem]}>
-                      <Text style={[styles.trajMonthValue, { color: colors.accent }]}>-{goalCtx.monthsSaved}</Text>
-                      <Text style={[styles.trajMonthLabel, { color: colors.accent }]}>months{'\n'}saved</Text>
+                      <Text style={[styles.trajMonthValue, { color: colors.text }]}>-{goalCtx.monthsSaved}</Text>
+                      <Text style={[styles.trajMonthLabel, { color: colors.text }]}>months{'\n'}saved</Text>
                     </View>
                   )}
                 </>
@@ -1005,31 +1005,32 @@ const styles = StyleSheet.create({
   scroll: { padding: spacing.lg, paddingTop: spacing.xxl + spacing.lg, paddingBottom: spacing.xxl },
   loadingContainer: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
-  emptyTitle: { fontFamily: fonts.semibold, fontSize: 18, color: colors.text, marginBottom: spacing.sm },
+  emptyTitle: { fontFamily: fonts.medium, fontSize: 18, color: colors.text, marginBottom: spacing.sm },
   emptyText: { fontFamily: fonts.regular, fontSize: 14, color: colors.dim, textAlign: 'center', lineHeight: 22 },
 
   // ── Header ──
-  heading: { fontFamily: fonts.heading, fontSize: 24, color: colors.text, marginBottom: 2 },
+  heading: { fontFamily: fonts.mono, fontSize: 20, color: colors.text, marginBottom: 2, letterSpacing: 0.5, textTransform: 'uppercase' },
   headingSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.dim, marginBottom: spacing.lg },
 
   // ── Goal trajectory ──
   trajectoryCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.accentDim,
-    borderRadius: radius.lg,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 24,
     padding: spacing.lg,
     marginBottom: spacing.lg,
   },
   trajLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2,
+    color: colors.dim,
     marginBottom: spacing.sm,
+    textTransform: 'uppercase',
   },
   trajGoal: {
-    fontFamily: fonts.heading,
+    fontFamily: fonts.medium,
     fontSize: 18,
     color: colors.text,
     marginBottom: spacing.xs,
@@ -1047,15 +1048,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   trajBarBg: {
-    height: 8,
-    backgroundColor: colors.muted,
-    borderRadius: 4,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 2,
     overflow: 'hidden',
   },
   trajBarFill: {
     height: '100%',
-    backgroundColor: colors.accent,
-    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 2,
   },
   trajMonthsRow: {
     flexDirection: 'row',
@@ -1068,8 +1069,9 @@ const styles = StyleSheet.create({
     marginLeft: 'auto',
   },
   trajMonthValue: {
-    fontFamily: fonts.heading,
+    fontFamily: fonts.mono,
     fontSize: 24,
+    fontWeight: '300',
     color: colors.text,
   },
   trajMonthLabel: {
@@ -1096,31 +1098,32 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   sectionLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 11,
-    letterSpacing: 1.5,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 2,
+    color: colors.dim,
+    textTransform: 'uppercase',
   },
   sectionMeta: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.dim,
+    color: colors.muted,
   },
 
   // ── Cards ──
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 24,
     padding: spacing.lg,
     marginBottom: spacing.sm,
   },
   activeCard: {
-    borderColor: colors.accentDim,
+    borderColor: 'rgba(255,255,255,0.20)',
   },
   cardHighlight: {
-    borderColor: colors.accent,
+    borderColor: '#FFFFFF',
     borderWidth: 2,
   },
   cardHeader: {
@@ -1136,29 +1139,32 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.accentDim,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.sm,
     marginTop: 2,
   },
   badgeText: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.dim,
   },
   badgeActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
   },
   badgeActiveText: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.bg,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: '#000000',
   },
 
   // ── Move content ──
   moveAction: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.medium,
     fontSize: 15,
     color: colors.text,
     marginBottom: spacing.xs,
@@ -1170,18 +1176,22 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   impactText: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.mono,
     fontSize: 13,
-    color: colors.accent,
+    color: colors.text,
   },
   effortBadge: {
-    borderRadius: 10,
+    borderRadius: 100,
     paddingVertical: 2,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   effortText: {
-    fontSize: 11,
-    fontFamily: fonts.medium,
+    fontSize: 10,
+    fontFamily: fonts.mono,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   expandIcon: {
     fontSize: 10,
@@ -1197,19 +1207,21 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   merchantChip: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 6,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 100,
     paddingVertical: 3,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
   },
   merchantChipText: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.text2,
   },
   merchantMore: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.dim,
     alignSelf: 'center',
   },
@@ -1223,29 +1235,29 @@ const styles = StyleSheet.create({
   },
   miniProgressBar: {
     flex: 1,
-    height: 4,
-    backgroundColor: colors.border,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 2,
     overflow: 'hidden',
   },
   miniProgressFill: {
     height: '100%',
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
     borderRadius: 2,
     minWidth: 1,
   },
   miniProgressText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.muted,
   },
 
   // ── Impact comparison bars ──
   impactCompare: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 24,
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
@@ -1265,38 +1277,39 @@ const styles = StyleSheet.create({
   },
   impactBarTrack: {
     flex: 1,
-    height: 12,
-    backgroundColor: colors.border,
-    borderRadius: 6,
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 4,
     overflow: 'hidden',
   },
   impactBarFill: {
     height: '100%',
-    borderRadius: 6,
+    borderRadius: 4,
   },
   impactBarValue: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '400',
     width: 54,
     textAlign: 'right',
   },
   impactBarFootnote: {
-    fontFamily: fonts.regular,
-    fontSize: 10,
+    fontFamily: fonts.mono,
+    fontSize: 9,
     color: colors.muted,
     textAlign: 'right',
     marginTop: 2,
+    letterSpacing: 0.3,
   },
 
   // ── Expanded section ──
   expandedSection: { marginTop: spacing.sm },
-  separator: { height: 1, backgroundColor: colors.border, marginBottom: spacing.md },
+  separator: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: spacing.md },
   detailBlock: { marginBottom: spacing.md },
   detailLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 11,
-    letterSpacing: 0.5,
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2,
     color: colors.dim,
     textTransform: 'uppercase',
     marginBottom: spacing.xs,
@@ -1319,10 +1332,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   merchantDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.accent,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
   },
   merchantName: {
     fontFamily: fonts.regular,
@@ -1339,7 +1352,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.04)',
   },
   checklistRowNext: {
-    backgroundColor: 'rgba(122,239,199,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
     marginHorizontal: -spacing.sm,
     paddingHorizontal: spacing.sm,
     borderRadius: radius.sm,
@@ -1349,21 +1362,21 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 6,
-    borderWidth: 2,
-    borderColor: colors.muted,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
     marginRight: spacing.sm,
     marginTop: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxDone: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
   },
   checkmark: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.bg,
+    color: '#000000',
   },
   checklistContent: { flex: 1 },
   checklistText: {
@@ -1377,17 +1390,17 @@ const styles = StyleSheet.create({
     color: colors.muted,
   },
   nextStepLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 10,
-    letterSpacing: 0.5,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1,
+    color: colors.text,
     marginTop: 2,
     textTransform: 'uppercase',
   },
   stepNumber: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.dim,
     width: 22,
     marginRight: spacing.sm,
     textAlign: 'center',
@@ -1396,9 +1409,9 @@ const styles = StyleSheet.create({
 
   // ── Impact grid ──
   effectText: {
-    fontFamily: fonts.medium,
+    fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.accent,
+    color: colors.text,
     lineHeight: 22,
   },
   impactGrid: {
@@ -1407,21 +1420,25 @@ const styles = StyleSheet.create({
   },
   impactItem: {
     flex: 1,
-    backgroundColor: colors.accentDim,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
     borderRadius: radius.sm,
     padding: spacing.sm,
     alignItems: 'center',
   },
   impactValue: {
-    fontFamily: fonts.heading,
+    fontFamily: fonts.mono,
     fontSize: 18,
-    color: colors.accent,
+    fontWeight: '300',
+    color: colors.text,
   },
   impactLabel: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.dim,
     marginTop: 2,
+    letterSpacing: 0.3,
   },
 
   // ── Provider action buttons ──
@@ -1436,28 +1453,28 @@ const styles = StyleSheet.create({
   providerBtn: {
     minWidth: '45%',
     flexGrow: 1,
-    borderRadius: radius.md,
+    borderRadius: 100,
     paddingVertical: 12,
     paddingHorizontal: spacing.md,
     alignItems: 'center',
   },
   providerBtnCall: {
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
   },
   providerBtnLink: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.accentDim,
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   providerBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 13,
   },
   providerBtnTextCall: {
-    color: colors.bg,
+    color: '#000000',
   },
   providerBtnTextLink: {
-    color: colors.accent,
+    color: colors.text,
   },
   providerBtnSub: {
     fontFamily: fonts.regular,
@@ -1465,8 +1482,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   providerBtnSubCall: {
-    color: colors.bg,
-    opacity: 0.7,
+    color: '#000000',
+    opacity: 0.5,
   },
   providerBtnSubLink: {
     color: colors.dim,
@@ -1474,24 +1491,26 @@ const styles = StyleSheet.create({
   providerBtnPhone: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.bg,
+    color: '#000000',
     marginTop: 2,
-    opacity: 0.6,
+    opacity: 0.4,
   },
 
   // ── Buttons ──
   chatBtn: {
-    borderWidth: 1.5,
-    borderColor: colors.accentDim,
-    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 100,
     paddingVertical: 12,
     alignItems: 'center',
     marginBottom: spacing.sm,
   },
   chatBtnText: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.text,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   actionButtons: {
     flexDirection: 'row',
@@ -1500,48 +1519,48 @@ const styles = StyleSheet.create({
   },
   startBtn: {
     flex: 1,
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
     paddingVertical: 14,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
   },
   startBtnText: {
     fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.bg,
+    fontSize: 14,
+    color: '#000000',
   },
   removeButton: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.10)',
     paddingVertical: 14,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
   },
   removeText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
+    fontFamily: fonts.mono,
+    fontSize: 13,
     color: colors.dim,
   },
   deleteBtn: {
     flex: 1,
-    backgroundColor: 'rgba(232,114,114,0.08)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(232,114,114,0.2)',
+    borderColor: 'rgba(215,26,33,0.3)',
     paddingVertical: 14,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
   },
   deleteBtnText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: colors.coral,
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.accent,
   },
 
   // ── Resources ──
   resourceLink: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.sky,
+    color: colors.text2,
     paddingVertical: spacing.xs,
     textDecorationLine: 'underline',
   },

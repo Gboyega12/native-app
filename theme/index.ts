@@ -1,21 +1,36 @@
+// ── Nothing Phone OS-inspired design system ──
+// Pure AMOLED black, monochrome philosophy, red accent only.
+// Typography: SpaceMono for dot-matrix feel, Poppins for body.
+
 export const colors = {
-  bg: '#050505',
-  surface: '#0F0F0F',
-  border: 'rgba(255,255,255,0.08)',
-  accent: '#7AEFC7',
-  accentDim: 'rgba(122,239,199,0.12)',
-  coral: '#E87272',
-  coralDim: 'rgba(232,114,114,0.12)',
-  mint: '#7AEFC7',
-  mintDim: 'rgba(122,239,199,0.12)',
-  sky: '#72B0E8',
-  skyDim: 'rgba(114,176,232,0.12)',
-  lavender: '#B272E8',
+  // Surfaces — true black for AMOLED, subtle grays for separation
+  bg: '#000000',
+  surface: '#141414',
+  border: 'rgba(255,255,255,0.10)',
+
+  // Accent — Nothing Red (used sparingly, never as a fill)
+  accent: '#D71A21',
+  accentDim: 'rgba(215,26,33,0.12)',
+
+  // Semantic — coral for warnings, kept for API compat
+  coral: '#D71A21',
+  coralDim: 'rgba(215,26,33,0.10)',
+
+  // Functional tones — monochrome-first, subtle when needed
+  mint: '#FFFFFF',
+  mintDim: 'rgba(255,255,255,0.06)',
+  sky: '#A0A0A0',
+  skyDim: 'rgba(160,160,160,0.10)',
+  lavender: '#666666',
+
+  // Text hierarchy
   text: '#FFFFFF',
-  text2: '#B0B0B0',
-  dim: '#777777',
-  muted: '#444444',
-  card: '#111111',
+  text2: '#A7A7A7',
+  dim: '#848484',
+  muted: '#3D3D3D',
+
+  // Card surface
+  card: '#0A0A0A',
 };
 
 export const fonts = {

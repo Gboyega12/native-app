@@ -19,9 +19,9 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// Extended palette matching the BOCY design
-const gold = '#E8C55A';
-const goldSoft = 'rgba(232, 197, 90, 0.15)';
+// Nothing OS — monochrome extended palette
+const gold = '#A7A7A7';
+const goldSoft = 'rgba(255,255,255,0.04)';
 
 export default function Home() {
   const router = useRouter();
@@ -698,7 +698,7 @@ export default function Home() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color={colors.accent} size="large" />
+        <ActivityIndicator color="#FFFFFF" size="large" />
       </View>
     );
   }
@@ -840,8 +840,8 @@ export default function Home() {
             )}
 
             {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
-              const effortColor = move.effort === 'high' ? colors.coral
-                : move.effort === 'medium' ? gold : colors.accent;
+              const effortColor = move.effort === 'high' ? colors.accent
+                : move.effort === 'medium' ? colors.dim : '#666666';
               return (
                 <View
                   key={i}
@@ -864,7 +864,7 @@ export default function Home() {
                         +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
                       </Text>
                       {move.effort && (
-                        <View style={[styles.effortPill, { backgroundColor: effortColor + '1A' }]}>
+                        <View style={[styles.effortPill, { borderColor: effortColor + '40' }]}>
                           <Text style={[styles.effortPillText, { color: effortColor }]}>
                             {move.effort}
                           </Text>
@@ -1011,7 +1011,7 @@ export default function Home() {
 
             {/* Big remaining number */}
             <View style={styles.safeToSpendHero}>
-              <Text style={[styles.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }]}>
+              <Text style={[styles.safeToSpendAmount, !weeklyHealthy && { color: colors.accent }]}>
                 {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
               </Text>
               <Text style={styles.safeToSpendLabel}>left this week</Text>
@@ -1024,7 +1024,7 @@ export default function Home() {
                   styles.safeToSpendBarFill,
                   {
                     width: `${weeklyUsedPct}%`,
-                    backgroundColor: weeklyHealthy ? colors.accent : colors.coral,
+                    backgroundColor: weeklyHealthy ? '#FFFFFF' : colors.accent,
                   },
                 ]}
               />
@@ -1069,37 +1069,37 @@ export default function Home() {
               <Text style={styles.cardTitle}>Your budget reality</Text>
             </View>
 
-            {/* 3-segment stacked bar */}
+            {/* 3-segment stacked bar — monochrome */}
             <View style={styles.budgetBar}>
               {nonDiscFlex > 0 && (
-                <View style={[styles.barSeg, { flex: nonDiscFlex, backgroundColor: colors.coral }]} />
+                <View style={[styles.barSeg, { flex: nonDiscFlex, backgroundColor: '#FFFFFF' }]} />
               )}
               {discFlex > 0 && (
-                <View style={[styles.barSeg, { flex: discFlex, backgroundColor: gold }]} />
+                <View style={[styles.barSeg, { flex: discFlex, backgroundColor: '#666666' }]} />
               )}
               {leftFlex > 0 && (
-                <View style={[styles.barSeg, { flex: leftFlex, backgroundColor: colors.accent }]} />
+                <View style={[styles.barSeg, { flex: leftFlex, backgroundColor: '#2A2A2A' }]} />
               )}
             </View>
 
             {/* Summary row — always visible */}
             <View style={[styles.summaryRow, !budgetExpanded && { marginBottom: 0 }]}>
               <View style={styles.summaryItem}>
-                <Text style={[styles.summaryAmount, { color: colors.coral }]}>
+                <Text style={[styles.summaryAmount, { color: '#FFFFFF' }]}>
                   {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
                 </Text>
                 <Text style={styles.summaryLabel}>Non-negotiable</Text>
                 <Text style={styles.summaryPct}>{nonDiscPct}%</Text>
               </View>
               <View style={styles.summaryItem}>
-                <Text style={[styles.summaryAmount, { color: gold }]}>
+                <Text style={[styles.summaryAmount, { color: '#999999' }]}>
                   {'\u00a3'}{Math.round(discTotal).toLocaleString()}
                 </Text>
                 <Text style={styles.summaryLabel}>Lifestyle</Text>
                 <Text style={styles.summaryPct}>{discPct}%</Text>
               </View>
               <View style={styles.summaryItem}>
-                <Text style={[styles.summaryAmount, { color: colors.accent }]}>
+                <Text style={[styles.summaryAmount, { color: '#555555' }]}>
                   {'\u00a3'}{Math.round(leftToDecide).toLocaleString()}
                 </Text>
                 <Text style={styles.summaryLabel}>Left to decide</Text>
@@ -1142,7 +1142,7 @@ export default function Home() {
                             style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
                           >
                             <View style={styles.dataRowLeft}>
-                              <Text style={[styles.catArrow, { color: colors.coral }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
+                              <Text style={[styles.catArrow, { color: colors.text }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
                               <View style={styles.catInfo}>
                                 <Text style={styles.dataLabel}>{item.category}</Text>
                                 <Text style={styles.dataMeta}>
@@ -1151,7 +1151,7 @@ export default function Home() {
                               </View>
                             </View>
                             <View style={styles.dataRowRight}>
-                              <Text style={[styles.dataValue, { color: colors.coral }]}>
+                              <Text style={[styles.dataValue, { color: colors.text }]}>
                                 {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
                             </View>
@@ -1174,7 +1174,7 @@ export default function Home() {
                                     <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
                                   </View>
                                   <View style={styles.txRightCol}>
-                                    <Text style={[styles.txAmount, { color: colors.coral }]}>
+                                    <Text style={[styles.txAmount, { color: colors.text2 }]}>
                                       {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
                                     </Text>
                                     <Text style={styles.txRecatHint}>Hold to move</Text>
@@ -1226,7 +1226,7 @@ export default function Home() {
                             style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
                           >
                             <View style={styles.dataRowLeft}>
-                              <Text style={[styles.catArrow, { color: gold }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
+                              <Text style={[styles.catArrow, { color: colors.dim }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
                               <View style={styles.catInfo}>
                                 <Text style={styles.dataLabel}>{item.category}</Text>
                                 <Text style={styles.dataMeta}>
@@ -1235,7 +1235,7 @@ export default function Home() {
                               </View>
                             </View>
                             <View style={styles.dataRowRight}>
-                              <Text style={[styles.dataValue, { color: gold }]}>
+                              <Text style={[styles.dataValue, { color: colors.dim }]}>
                                 {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
                             </View>
@@ -1258,7 +1258,7 @@ export default function Home() {
                                     <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
                                   </View>
                                   <View style={styles.txRightCol}>
-                                    <Text style={[styles.txAmount, { color: gold }]}>
+                                    <Text style={[styles.txAmount, { color: colors.dim }]}>
                                       {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
                                     </Text>
                                     <Text style={styles.txRecatHint}>Hold to move</Text>
@@ -1590,7 +1590,7 @@ export default function Home() {
   );
 }
 
-// ── Styles ──
+// ── Nothing OS Design System Styles ──
 
 const styles = StyleSheet.create({
   container: {
@@ -1599,7 +1599,7 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: 20,
-    paddingTop: 56,
+    paddingTop: 60,
     paddingBottom: 48,
   },
   loadingContainer: {
@@ -1614,37 +1614,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 36,
   },
   greeting: {
-    fontFamily: fonts.heading,
-    fontSize: 22,
+    fontFamily: fonts.mono,
+    fontSize: 20,
     color: colors.text,
-    letterSpacing: -0.2,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   menuButton: {
     padding: 10,
-    gap: 5,
+    gap: 4,
     minWidth: 44,
     minHeight: 44,
     justifyContent: 'center',
-    alignItems: 'center',
+    alignItems: 'flex-end',
   },
   menuLine: {
-    width: 22,
-    height: 2,
+    width: 20,
+    height: 1.5,
     backgroundColor: colors.text,
     borderRadius: 1,
   },
   menuLineShort: {
-    width: 16,
+    width: 12,
     backgroundColor: colors.dim,
   },
   syncText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.accent,
-    marginTop: 4,
+    fontSize: 10,
+    color: colors.dim,
+    marginTop: 6,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
 
   // ── Empty State ──
@@ -1653,17 +1656,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyIcon: {
-    fontFamily: fonts.heading,
-    fontSize: 40,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 48,
+    color: colors.text,
     marginBottom: spacing.lg,
+    letterSpacing: 2,
   },
   emptyTitle: {
     fontFamily: fonts.semibold,
-    fontSize: 20,
+    fontSize: 18,
     color: colors.text,
     textAlign: 'center',
     marginBottom: spacing.sm,
+    letterSpacing: -0.2,
   },
   emptyDesc: {
     fontFamily: fonts.regular,
@@ -1675,42 +1680,44 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   ctaButton: {
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
     paddingVertical: 16,
     paddingHorizontal: spacing.xl,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
     width: '100%',
   },
   ctaText: {
     fontFamily: fonts.semibold,
-    fontSize: 16,
-    color: colors.bg,
+    fontSize: 15,
+    color: '#000000',
+    letterSpacing: 0.3,
   },
 
-  // ── Shared Card ──
+  // ── Shared Card — Nothing OS: border-defined, no fill ──
   card: {
-    backgroundColor: colors.card,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.accentDim,
-    borderRadius: 16,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 24,
     padding: 24,
     paddingTop: 28,
     paddingBottom: 28,
-    marginBottom: 24,
+    marginBottom: 20,
     overflow: 'hidden',
   },
   cardTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 20,
-    color: colors.text,
-    letterSpacing: -0.2,
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
     marginBottom: 6,
   },
   cardSubtitle: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.dim,
+    color: colors.muted,
     lineHeight: 20,
     marginBottom: 24,
   },
@@ -1728,24 +1735,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   infoIcon: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
+    fontFamily: fonts.mono,
+    fontSize: 11,
     color: colors.dim,
     width: 22,
     height: 22,
     lineHeight: 22,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: 11,
     overflow: 'hidden',
   },
   infoBox: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 8,
-    marginBottom: 8,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 12,
+    padding: 14,
+    marginTop: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   infoBoxText: {
     fontFamily: fonts.regular,
@@ -1754,20 +1763,21 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ── Card 1: Recommendations ──
   // ── Card 1: Move items ──
   moveItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 14,
-    gap: 14,
+    paddingVertical: 16,
+    gap: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   moveRank: {
     fontFamily: fonts.mono,
-    fontSize: 28,
-    fontWeight: '800',
-    color: 'rgba(255,255,255,0.10)',
-    lineHeight: 32,
+    fontSize: 32,
+    fontWeight: '300',
+    color: 'rgba(255,255,255,0.08)',
+    lineHeight: 36,
     width: 28,
     textAlign: 'center',
   },
@@ -1775,7 +1785,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   moveTitle: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.medium,
     fontSize: 15,
     color: colors.text,
     lineHeight: 22,
@@ -1790,19 +1800,22 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 13,
     fontWeight: '700',
-    color: colors.accent,
+    color: colors.text,
   },
   effortPill: {
-    borderRadius: 4,
-    paddingVertical: 2,
-    paddingHorizontal: 7,
+    borderRadius: 100,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'transparent',
   },
   effortPillText: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'capitalize',
-    letterSpacing: 0.3,
+    fontSize: 9,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   moveExpanded: {
     marginTop: 12,
@@ -1818,27 +1831,27 @@ const styles = StyleSheet.create({
   moveActions: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 12,
+    marginTop: 14,
   },
   moveApproveBtn: {
     flex: 1,
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: 100,
     alignItems: 'center',
   },
   moveApproveBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.bg,
+    color: '#000000',
   },
   moveVerifyBtn: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.15)',
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: 100,
     alignItems: 'center',
   },
   moveVerifyBtnText: {
@@ -1848,60 +1861,64 @@ const styles = StyleSheet.create({
   },
   moveDeleteBtn: {
     flex: 1,
-    backgroundColor: colors.coralDim,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(232,114,114,0.2)',
+    borderColor: 'rgba(215,26,33,0.3)',
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: 100,
     alignItems: 'center',
   },
   moveDeleteBtnText: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.coral,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.accent,
   },
   viewAllBtn: {
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
     marginTop: 4,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: 'rgba(255,255,255,0.06)',
   },
   viewAllText: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.text,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
 
   // ── Card 2: Income ──
   bigNumberWrap: {
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 20,
     paddingBottom: 28,
   },
   bigNumber: {
     fontFamily: fonts.mono,
-    fontSize: 48,
-    fontWeight: '800',
-    color: colors.accent,
-    letterSpacing: -1,
+    fontSize: 52,
+    fontWeight: '300',
+    color: colors.text,
+    letterSpacing: -2,
   },
   bigNumberLabel: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    color: colors.dim,
-    marginTop: 4,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 8,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     marginBottom: 4,
   },
   sourceCard: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
     padding: 16,
     marginTop: 12,
   },
@@ -1915,8 +1932,8 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   sourceName: {
-    fontFamily: fonts.heading,
-    fontSize: 16,
+    fontFamily: fonts.medium,
+    fontSize: 15,
     color: colors.text,
     lineHeight: 21,
     marginBottom: 8,
@@ -1928,21 +1945,24 @@ const styles = StyleSheet.create({
   },
   sourceFreq: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: 'rgba(122,239,199,0.6)',
+    fontSize: 11,
+    color: colors.dim,
+    letterSpacing: 0.3,
   },
   primaryTag: {
-    backgroundColor: colors.accentDim,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     paddingVertical: 3,
     paddingHorizontal: 8,
-    borderRadius: 4,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   primaryTagText: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
-    color: colors.accent,
-    letterSpacing: 0.8,
+    color: colors.text,
+    letterSpacing: 1,
   },
   sourceAmountWrap: {
     alignItems: 'flex-end',
@@ -1950,8 +1970,8 @@ const styles = StyleSheet.create({
   sourceAmount: {
     fontFamily: fonts.mono,
     fontSize: 20,
-    fontWeight: '800',
-    color: colors.accent,
+    fontWeight: '300',
+    color: colors.text,
   },
   sourceAmountPer: {
     fontFamily: fonts.mono,
@@ -1961,55 +1981,61 @@ const styles = StyleSheet.create({
   },
   incomeSourcesHeader: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.muted,
-    letterSpacing: 0.5,
+    letterSpacing: 1,
     marginBottom: 4,
     marginTop: 8,
+    textTransform: 'uppercase',
   },
   removeSourceBtn: {
     marginTop: 10,
     alignSelf: 'flex-start',
     paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 6,
-    backgroundColor: 'rgba(232,96,99,0.08)',
+    paddingHorizontal: 12,
+    borderRadius: 100,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(215,26,33,0.25)',
   },
   removeSourceText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: colors.coral,
+    fontSize: 11,
+    color: colors.accent,
+    letterSpacing: 0.3,
   },
 
   // ── Card 3: Safe to Spend ──
   safeToSpendHero: {
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingBottom: 20,
+    paddingVertical: 20,
+    paddingBottom: 24,
   },
   safeToSpendAmount: {
     fontFamily: fonts.mono,
-    fontSize: 44,
-    fontWeight: '800',
-    color: colors.accent,
-    letterSpacing: -1,
+    fontSize: 48,
+    fontWeight: '300',
+    color: colors.text,
+    letterSpacing: -2,
   },
   safeToSpendLabel: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    color: colors.dim,
-    marginTop: 4,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 8,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   safeToSpendBar: {
-    height: 6,
-    borderRadius: 3,
+    height: 4,
+    borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.06)',
     overflow: 'hidden',
     marginBottom: 16,
   },
   safeToSpendBarFill: {
     height: '100%',
-    borderRadius: 3,
+    borderRadius: 2,
   },
   safeToSpendRow: {
     flexDirection: 'row',
@@ -2017,8 +2043,9 @@ const styles = StyleSheet.create({
   },
   safeToSpendMeta: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: colors.muted,
+    fontSize: 11,
+    color: colors.dim,
+    letterSpacing: 0.3,
   },
 
   // ── Card 4: Budget Reality ──
@@ -2038,9 +2065,11 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   expandToggleText: {
     fontFamily: fonts.mono,
@@ -2049,13 +2078,14 @@ const styles = StyleSheet.create({
   },
   budgetBar: {
     flexDirection: 'row',
-    height: 8,
-    borderRadius: 4,
+    height: 4,
+    borderRadius: 2,
     overflow: 'hidden',
-    marginBottom: 20,
+    marginBottom: 24,
+    gap: 2,
   },
   barSeg: {
-    borderRadius: 0,
+    borderRadius: 2,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -2069,19 +2099,20 @@ const styles = StyleSheet.create({
   summaryAmount: {
     fontFamily: fonts.mono,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '300',
   },
   summaryLabel: {
     fontFamily: fonts.regular,
-    fontSize: 12,
+    fontSize: 11,
     color: colors.dim,
-    marginTop: 2,
+    marginTop: 4,
   },
   summaryPct: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.muted,
-    marginTop: 1,
+    marginTop: 2,
+    letterSpacing: 0.5,
   },
   breakdownHeaderRow: {
     flexDirection: 'row',
@@ -2091,10 +2122,10 @@ const styles = StyleSheet.create({
   },
   breakdownHeader: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    letterSpacing: 1,
+    fontSize: 10,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
-    color: colors.muted,
+    color: colors.dim,
   },
   addItemBtn: {
     flexDirection: 'row',
@@ -2103,20 +2134,22 @@ const styles = StyleSheet.create({
   },
   addItemLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: colors.accent,
+    fontSize: 10,
+    color: colors.text,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   addItemIcon: {
-    fontFamily: fonts.semibold,
-    fontSize: 18,
-    color: colors.accent,
-    width: 22,
-    height: 22,
-    lineHeight: 20,
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: colors.text,
+    width: 20,
+    height: 20,
+    lineHeight: 18,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: colors.accentDim,
-    borderRadius: 11,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 10,
     overflow: 'hidden',
   },
   dataRow: {
@@ -2138,7 +2171,7 @@ const styles = StyleSheet.create({
   },
   catArrow: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 8,
     marginTop: 4,
     width: 14,
   },
@@ -2147,14 +2180,16 @@ const styles = StyleSheet.create({
   },
   dataLabel: {
     fontFamily: fonts.mono,
-    fontSize: 14,
-    color: colors.dim,
+    fontSize: 13,
+    color: colors.text2,
+    letterSpacing: 0.2,
   },
   dataMeta: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 3,
+    letterSpacing: 0.3,
   },
   dataRowRight: {
     alignItems: 'flex-end',
@@ -2162,14 +2197,14 @@ const styles = StyleSheet.create({
   dataValue: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '400',
   },
 
   // ── Transaction dropdown ──
   txDropdown: {
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderLeftWidth: 2,
-    borderLeftColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'transparent',
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(255,255,255,0.08)',
     marginLeft: 10,
     marginBottom: 8,
     paddingLeft: 14,
@@ -2179,7 +2214,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 9,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.03)',
   },
@@ -2191,29 +2226,32 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   txMerchant: {
-    fontFamily: fonts.medium,
+    fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.text2,
   },
   txDate: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 3,
+    letterSpacing: 0.3,
   },
   txAmount: {
     fontFamily: fonts.mono,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '400',
   },
   txRightCol: {
     alignItems: 'flex-end',
   },
   txRecatHint: {
     fontFamily: fonts.mono,
-    fontSize: 9,
+    fontSize: 8,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 3,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   txEmpty: {
     fontFamily: fonts.regular,
@@ -2229,41 +2267,47 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   cardFooter: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.muted,
     textAlign: 'center',
     marginTop: 16,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   viewTransactionsBtn: {
     alignItems: 'center',
-    paddingVertical: 14,
+    paddingVertical: 16,
     marginTop: 8,
   },
   viewTransactionsText: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.text,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
 
   // ── Card 5: Debt accounts ──
   debtHero: {
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingBottom: 20,
+    paddingVertical: 16,
+    paddingBottom: 24,
   },
   debtHeroAmount: {
     fontFamily: fonts.mono,
-    fontSize: 40,
-    fontWeight: '800',
-    color: colors.coral,
-    letterSpacing: -1,
+    fontSize: 44,
+    fontWeight: '300',
+    color: colors.accent,
+    letterSpacing: -2,
   },
   debtHeroLabel: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    color: colors.dim,
-    marginTop: 4,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 8,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   debtRow: {
     flexDirection: 'row',
@@ -2281,15 +2325,17 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   debtName: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.medium,
     fontSize: 14,
     color: colors.text,
   },
   debtType: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 3,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
   debtRowRight: {
     alignItems: 'flex-end',
@@ -2297,37 +2343,40 @@ const styles = StyleSheet.create({
   debtBalance: {
     fontFamily: fonts.mono,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '400',
     color: colors.text,
   },
   debtUtil: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 3,
+    letterSpacing: 0.3,
   },
 
   // ── Add item button ──
 
-  // ── Modal ──
+  // ── Modal — Nothing OS: dark glass, border-defined ──
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.85)',
     justifyContent: 'center',
     padding: 24,
   },
   modalContent: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
+    backgroundColor: '#0A0A0A',
+    borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: colors.accentDim,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   modalTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 20,
+    fontFamily: fonts.mono,
+    fontSize: 14,
     color: colors.text,
-    marginBottom: 4,
+    marginBottom: 6,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   modalSubtitle: {
     fontFamily: fonts.regular,
@@ -2337,12 +2386,12 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   modalInput: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     fontFamily: fonts.regular,
     fontSize: 15,
     color: colors.text,
@@ -2350,32 +2399,36 @@ const styles = StyleSheet.create({
   },
   modalLabel: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: colors.muted,
-    letterSpacing: 0.5,
+    fontSize: 10,
+    color: colors.dim,
+    letterSpacing: 1,
     marginBottom: 8,
+    textTransform: 'uppercase',
   },
   categoryScroll: {
     marginBottom: 16,
     maxHeight: 36,
   },
   categoryChip: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 8,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 100,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     marginRight: 8,
   },
   categoryChipActive: {
-    backgroundColor: colors.accentDim,
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
   },
   categoryChipText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
+    fontSize: 11,
     color: colors.dim,
   },
   categoryChipTextActive: {
-    color: colors.accent,
+    color: '#000000',
   },
   essentialRow: {
     marginBottom: 20,
@@ -2386,31 +2439,32 @@ const styles = StyleSheet.create({
   },
   toggleOption: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 8,
+    backgroundColor: 'transparent',
+    borderRadius: 100,
     paddingVertical: 10,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: 'rgba(255,255,255,0.10)',
   },
   toggleOptionActive: {
-    borderColor: colors.coral,
-    backgroundColor: 'rgba(232,96,99,0.1)',
+    borderColor: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   toggleOptionLifestyle: {
-    borderColor: '#E8C55A',
-    backgroundColor: 'rgba(232,197,90,0.1)',
+    borderColor: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   toggleText: {
     fontFamily: fonts.mono,
-    fontSize: 13,
+    fontSize: 12,
     color: colors.dim,
+    letterSpacing: 0.3,
   },
   toggleTextActive: {
-    color: colors.coral,
+    color: colors.text,
   },
   toggleTextLifestyle: {
-    color: '#E8C55A',
+    color: colors.text,
   },
   modalActions: {
     flexDirection: 'row',
@@ -2419,46 +2473,49 @@ const styles = StyleSheet.create({
   modalCancel: {
     flex: 1,
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: 100,
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   modalCancelText: {
     fontFamily: fonts.semibold,
-    fontSize: 15,
+    fontSize: 14,
     color: colors.dim,
   },
   modalSave: {
     flex: 1,
     paddingVertical: 14,
-    borderRadius: 10,
+    borderRadius: 100,
     alignItems: 'center',
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
   },
   modalSaveDisabled: {
-    opacity: 0.4,
+    opacity: 0.3,
   },
   addItemErrorText: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.coral,
+    color: colors.accent,
     marginBottom: 12,
     lineHeight: 18,
   },
   modalSaveText: {
     fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.bg,
+    fontSize: 14,
+    color: '#000000',
   },
 
   // ── Verify modal ──
   verifySection: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    color: colors.accent,
+    fontSize: 9,
+    letterSpacing: 2,
+    color: colors.dim,
     marginTop: 16,
     marginBottom: 6,
+    textTransform: 'uppercase',
   },
   verifyText: {
     fontFamily: fonts.regular,
