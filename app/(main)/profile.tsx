@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
-  LayoutAnimation, Animated, Easing,
+  LayoutAnimation, Animated, Easing, Switch, Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -72,6 +72,13 @@ export default function Profile() {
   const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
   const [showSuccess, setShowSuccess] = useState(connected === 'true');
+  const [notifPrefs, setNotifPrefs] = useState({
+    weekly_digest: true,
+    milestone_alerts: true,
+    checkin_prompts: true,
+    achievement_alerts: true,
+  });
+  const [notifExpanded, setNotifExpanded] = useState(false);
 
   useEffect(() => {
     loadUser();
@@ -106,6 +113,23 @@ export default function Profile() {
       ]);
       if (banksRes.data) setConnectedBanks(banksRes.data as BankConnection[]);
       if (debtRes.data) setDebtAccounts(debtRes.data);
+
+      // Load notification preferences
+      try {
+        const { data: prefs } = await supabase
+          .from('notification_preferences')
+          .select('weekly_digest, milestone_alerts, checkin_prompts, achievement_alerts')
+          .eq('user_id', user.id)
+          .single();
+        if (prefs) {
+          setNotifPrefs({
+            weekly_digest: prefs.weekly_digest ?? true,
+            milestone_alerts: prefs.milestone_alerts ?? true,
+            checkin_prompts: prefs.checkin_prompts ?? true,
+            achievement_alerts: prefs.achievement_alerts ?? true,
+          });
+        }
+      } catch {}
     }
   };
 
@@ -149,6 +173,20 @@ export default function Profile() {
 
   const handleAddAccount = () => {
     router.push({ pathname: '/(main)/connect', params: { from: 'profile' } });
+  };
+
+  const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
+    const newVal = !notifPrefs[key];
+    setNotifPrefs((prev) => ({ ...prev, [key]: newVal }));
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('notification_preferences').update({
+          [key]: newVal,
+          updated_at: new Date().toISOString(),
+        }).eq('user_id', user.id);
+      }
+    } catch {}
   };
 
   const initials = name
@@ -432,10 +470,75 @@ export default function Profile() {
           <Text style={s.menuChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[s.menuRow, s.menuRowLast]} onPress={() => Alert.alert('Coming soon', 'Notifications will be available in a future update.')} activeOpacity={0.7}>
-          <Text style={[s.menuLabel, { color: colors.muted }]}>Notifications</Text>
-          <Text style={[s.menuChevron, { color: colors.muted }]}>Soon</Text>
+        <TouchableOpacity
+          style={[s.menuRow, !notifExpanded && s.menuRowLast]}
+          onPress={() => {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setNotifExpanded(!notifExpanded);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={s.menuLabel}>Notifications</Text>
+          <Text style={s.menuChevron}>{notifExpanded ? '\u2039' : '\u203A'}</Text>
         </TouchableOpacity>
+
+        {notifExpanded && (
+          <View style={s.notifSection}>
+            <View style={s.notifRow}>
+              <View style={s.notifInfo}>
+                <Text style={s.notifLabel}>Weekly digest</Text>
+                <Text style={s.notifDesc}>Score, spending & moves recap every Monday</Text>
+              </View>
+              <Switch
+                value={notifPrefs.weekly_digest}
+                onValueChange={() => toggleNotifPref('weekly_digest')}
+                trackColor={{ false: '#333', true: colors.green + '60' }}
+                thumbColor={notifPrefs.weekly_digest ? colors.green : '#666'}
+              />
+            </View>
+            <View style={s.notifRow}>
+              <View style={s.notifInfo}>
+                <Text style={s.notifLabel}>Check-in prompts</Text>
+                <Text style={s.notifDesc}>Bocy reaches out when something needs attention</Text>
+              </View>
+              <Switch
+                value={notifPrefs.checkin_prompts}
+                onValueChange={() => toggleNotifPref('checkin_prompts')}
+                trackColor={{ false: '#333', true: colors.green + '60' }}
+                thumbColor={notifPrefs.checkin_prompts ? colors.green : '#666'}
+              />
+            </View>
+            <View style={s.notifRow}>
+              <View style={s.notifInfo}>
+                <Text style={s.notifLabel}>Achievements</Text>
+                <Text style={s.notifDesc}>Celebrate milestones and progress</Text>
+              </View>
+              <Switch
+                value={notifPrefs.achievement_alerts}
+                onValueChange={() => toggleNotifPref('achievement_alerts')}
+                trackColor={{ false: '#333', true: colors.green + '60' }}
+                thumbColor={notifPrefs.achievement_alerts ? colors.green : '#666'}
+              />
+            </View>
+            <View style={[s.notifRow, s.notifRowLast]}>
+              <View style={s.notifInfo}>
+                <Text style={s.notifLabel}>Score changes</Text>
+                <Text style={s.notifDesc}>Alert when your decision score shifts significantly</Text>
+              </View>
+              <Switch
+                value={notifPrefs.milestone_alerts}
+                onValueChange={() => toggleNotifPref('milestone_alerts')}
+                trackColor={{ false: '#333', true: colors.green + '60' }}
+                thumbColor={notifPrefs.milestone_alerts ? colors.green : '#666'}
+              />
+            </View>
+            {Platform.OS === 'web' && (
+              <Text style={s.notifNote}>
+                Notifications are sent via email. Push notifications will be available when the app launches on iOS and Android.
+              </Text>
+            )}
+          </View>
+        )}
       </View>
 
       {/* ── Account ── */}
@@ -839,5 +942,52 @@ const s = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 18,
     color: colors.muted,
+  },
+
+  // ── Notification settings ──
+  notifSection: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    marginBottom: 1,
+    overflow: 'hidden',
+  },
+  notifRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  notifRowLast: {
+    borderBottomWidth: 0,
+  },
+  notifInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  notifLabel: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.text,
+    letterSpacing: -0.1,
+  },
+  notifDesc: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  notifNote: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.muted,
+    padding: 12,
+    lineHeight: 16,
+    textAlign: 'center',
   },
 });

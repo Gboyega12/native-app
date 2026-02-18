@@ -462,6 +462,43 @@ export default function Home() {
 
       setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
 
+      // ── Record daily streak ──
+      try {
+        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        const { data: streak } = await supabase
+          .from('user_streaks')
+          .select('current_streak, longest_streak, last_active_date, total_active_days')
+          .eq('user_id', user.id)
+          .single();
+
+        if (streak) {
+          if (streak.last_active_date !== today) {
+            const lastDate = new Date(streak.last_active_date);
+            const todayDate = new Date(today);
+            const diffDays = Math.floor((todayDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+
+            const newStreak = diffDays === 1 ? streak.current_streak + 1 : 1;
+            const newLongest = Math.max(streak.longest_streak, newStreak);
+
+            await supabase.from('user_streaks').update({
+              current_streak: newStreak,
+              longest_streak: newLongest,
+              last_active_date: today,
+              total_active_days: streak.total_active_days + 1,
+              updated_at: new Date().toISOString(),
+            }).eq('user_id', user.id);
+          }
+        } else {
+          await supabase.from('user_streaks').insert({
+            user_id: user.id,
+            current_streak: 1,
+            longest_streak: 1,
+            last_active_date: today,
+            total_active_days: 1,
+          });
+        }
+      } catch {}
+
       // Fetch budget adjustments + debt accounts
       let adjustments: any[] = [];
       try {
@@ -699,6 +736,23 @@ export default function Home() {
           goal_context: rawAnalysis.goal_context,
         });
       }
+
+      // ── Save score snapshot on background sync ──
+      try {
+        const savingsRate = rawAnalysis.monthly_income > 0
+          ? Math.round((rawAnalysis.surplus / rawAnalysis.monthly_income) * 100) : 0;
+        await supabase.from('score_history').insert({
+          user_id: userId,
+          decision_score: rawAnalysis.decision_score,
+          monthly_income: rawAnalysis.monthly_income,
+          monthly_spending: rawAnalysis.monthly_spending,
+          surplus: rawAnalysis.surplus,
+          savings_rate: savingsRate,
+          subscription_count: result.profile.metrics.subscriptionCount || 0,
+          debt_account_count: result.profile.metrics.debtAccountCount || 0,
+          archetype: rawAnalysis.archetype,
+        });
+      } catch {}
 
       // Re-fetch budget adjustments right before merging so we capture
       // any items the user added while the sync was running.
