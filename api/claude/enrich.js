@@ -92,6 +92,14 @@ RULES:
 - NEVER give regulated financial advice — suggest consulting a qualified advisor for investment decisions
 - NEVER mention specific financial institutions or products (e.g. no "Monzo", "Chase", "Marcus", "Chip", "Vanguard", no savings account interest rates, no ISA providers). Keep recommendations institution-neutral
 
+MERCHANT CLEANUP RULES:
+- The "merchants" array may contain raw bank descriptions. Clean them into proper brand names.
+- Examples: "DELIVEROO.COM ORDER" → "Deliveroo", "AMZNMKTPLACE" → "Amazon", "TESCO STORES" → "Tesco", "UBER *EATS" → "Uber Eats"
+- Remove payment prefixes (SQ*, IZ*, PP*, etc.), terminal IDs, reference numbers, country codes (GB, GBR)
+- Use proper capitalisation: "Deliveroo" not "deliveroo" or "DELIVEROO"
+- Deduplicate: if the same merchant appears with slight variations, keep only the clean version
+- Remove generic entries like "Card Payment", "Direct Debit", or transaction descriptions that are not actual merchant names
+
 USER CONTEXT:
 - UKPF priority: ${sanitize(ukpf_label || 'unknown')} (${sanitize(ukpf_priority || 'unknown')})`;
 
@@ -111,7 +119,7 @@ USER CONTEXT:
     prompt += `\nMonthly impact: £${m.monthlyImpact}`;
     prompt += `\nAnnual impact: £${m.annualImpact}`;
     prompt += `\nEffort: ${sanitize(m.effort, 10)}`;
-    prompt += `\nMerchants: ${(m.merchants || []).map((s) => sanitize(s, 50)).join(', ') || 'none detected'}`;
+    prompt += `\nMerchants (raw — clean these up): ${(m.merchants || []).map((s) => sanitize(s, 50)).join(', ') || 'none detected'}`;
     prompt += `\nStrategy: ${sanitize(m.strategy, 300)}`;
     prompt += `\nSteps: ${(m.steps || []).map((s) => sanitize(s, 100)).join('; ')}`;
     prompt += `\nEffect: ${sanitize(m.effect, 200)}`;
@@ -129,10 +137,11 @@ USER CONTEXT:
   "strategy": "1-2 definite sentences explaining why and how",
   "steps": ["step 1", "step 2", "step 3"],
   "effect": "measurable outcome with timeline",
-  "timeline": "goal-tied timeline e.g. 'reach 1-month buffer in 4 months'"
+  "timeline": "goal-tied timeline e.g. 'reach 1-month buffer in 4 months'",
+  "merchants": ["Clean Merchant Name 1", "Clean Merchant Name 2"]
 }
 
-Return exactly ${moves.length} objects in the same order as the input moves. Do NOT change monthlyImpact, annualImpact, effort, category, or merchants — only rewrite action, strategy, steps, effect, and timeline.`;
+Return exactly ${moves.length} objects in the same order as the input moves. Do NOT change monthlyImpact, annualImpact, effort, or category — only rewrite action, strategy, steps, effect, timeline, and merchants.`;
 
   return prompt;
 }

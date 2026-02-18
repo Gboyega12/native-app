@@ -9,8 +9,11 @@ export default async function handler(req, res) {
   // Accept both GET (server redirect from TrueLayer) and POST (client-initiated)
   let code, connectionId, webOrigin;
 
+  let postUserId;
+
   if (req.method === 'POST') {
     code = req.body?.code;
+    postUserId = req.body?.user_id || null;
     const state = req.body?.state || '';
     const pipeIdx = state.indexOf('|');
     connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
@@ -145,12 +148,24 @@ export default async function handler(req, res) {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
-    const { error: dbError } = await admin.from('bank_data').insert({
+    // Determine account type and provider name from TrueLayer data
+    const providerName = accounts[0]?.provider?.display_name || cards[0]?.provider?.display_name || null;
+    const accountType = accounts.length > 0 && cards.length === 0 ? 'bank'
+      : cards.length > 0 && accounts.length === 0 ? 'credit'
+      : accounts.length > 0 ? 'bank' : null;
+
+    const insertRow = {
       connection_id: connectionId,
       csv_data: csv,
       source: 'truelayer',
       refresh_token: tokenData.refresh_token || null,
-    });
+      provider_name: providerName,
+      account_type: accountType,
+    };
+    // Set user_id directly if provided by the frontend (avoids claiming race condition)
+    if (postUserId) insertRow.user_id = postUserId;
+
+    const { error: dbError } = await admin.from('bank_data').insert(insertRow);
 
     if (dbError) {
       console.error('Failed to save bank data:', dbError);

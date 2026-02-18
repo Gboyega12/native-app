@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { View, Text, Animated, StyleSheet } from 'react-native';
+import { View, Text, Animated, StyleSheet, Easing } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
@@ -11,11 +11,11 @@ import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
 
 const STEPS = [
   'Scanning transactions',
-  'Identifying merchants',
+  'Mapping income stability',
   'Enriching transactions',
   'Verifying with AI',
-  'Detecting spending patterns',
-  'Ranking by financial priority',
+  'Detecting optimisation opportunities',
+  'Ranking highest impact actions',
   'Refining your action plan',
 ];
 
@@ -52,6 +52,34 @@ function buildFirstInsight(identity: any, profile: any, topMove: any): string {
   return `We've mapped your complete financial picture. ${topAction ? `Your top move: ${topAction.toLowerCase()}` : 'Your personalised action plan is ready'}.`;
 }
 
+// ── Animated scanning glyph ──
+const ScanGlyph = () => {
+  const pulse = useRef(new Animated.Value(0)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 1200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 1200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
+    Animated.loop(
+      Animated.timing(rotate, { toValue: 1, duration: 4000, easing: Easing.linear, useNativeDriver: true })
+    ).start();
+  }, []);
+  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.1] });
+  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
+  const spin = rotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  return (
+    <View style={styles.glyphContainer}>
+      <Animated.View style={[styles.glyphRing, { transform: [{ rotate: spin }, { scale }], opacity }]} />
+      <Animated.Text style={[styles.glyphText, { opacity, transform: [{ scale }] }]}>
+        {'{ B }'}
+      </Animated.Text>
+    </View>
+  );
+};
+
 function ProcessingInner() {
   const router = useRouter();
   const { csvData } = useLocalSearchParams<{ csvData: string }>();
@@ -60,6 +88,8 @@ function ProcessingInner() {
   const [enrichProgress, setEnrichProgress] = useState('');
   const [insight, setInsight] = useState('');
   const fadeAnims = useRef(STEPS.map(() => new Animated.Value(0))).current;
+  const slideAnims = useRef(STEPS.map(() => new Animated.Value(20))).current;
+  const progressAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     runAnalysis();
@@ -67,10 +97,26 @@ function ProcessingInner() {
 
   useEffect(() => {
     if (currentStep < STEPS.length) {
-      Animated.timing(fadeAnims[currentStep], {
-        toValue: 1,
-        duration: 400,
-        useNativeDriver: true,
+      Animated.parallel([
+        Animated.timing(fadeAnims[currentStep], {
+          toValue: 1,
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnims[currentStep], {
+          toValue: 0,
+          duration: 500,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start();
+      // Animate progress bar
+      Animated.timing(progressAnim, {
+        toValue: (currentStep + 1) / STEPS.length,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
       }).start();
     }
   }, [currentStep]);
@@ -282,7 +328,7 @@ function ProcessingInner() {
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.moves)) {
-          // Merge Claude's refined text with our ranked data
+          // Merge Claude's refined text + cleaned merchants with our ranked data
           refinedMoves = top3.map((original, i) => {
             const refined = data.moves[i];
             if (!refined) return original;
@@ -293,6 +339,7 @@ function ProcessingInner() {
               steps: refined.steps || original.steps,
               effect: refined.effect || original.effect,
               timeline: refined.timeline || original.timeline,
+              merchants: (refined.merchants && refined.merchants.length > 0) ? refined.merchants : original.merchants,
             };
           });
         }
@@ -460,15 +507,44 @@ function ProcessingInner() {
 
   return (
     <View style={styles.container}>
+      <ScanGlyph />
       <Text style={styles.title}>Analysing your data</Text>
+
+      {/* Progress bar */}
+      <View style={styles.progressBar}>
+        <Animated.View
+          style={[
+            styles.progressFill,
+            {
+              width: progressAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: ['0%', '100%'],
+              }),
+            },
+          ]}
+        />
+      </View>
+      <Text style={styles.progressLabel}>
+        {currentStep + 1} of {STEPS.length}
+      </Text>
+
       <View style={styles.steps}>
         {STEPS.map((step, i) => (
-          <Animated.View key={i} style={[styles.stepRow, { opacity: fadeAnims[i] }]}>
-            <Text style={[styles.stepIcon, i <= currentStep && styles.stepIconActive]}>
-              {i < currentStep ? '>' : i === currentStep ? '...' : ' '}
+          <Animated.View
+            key={i}
+            style={[
+              styles.stepRow,
+              {
+                opacity: fadeAnims[i],
+                transform: [{ translateX: slideAnims[i] }],
+              },
+            ]}
+          >
+            <Text style={[styles.stepIcon, i < currentStep && styles.stepIconDone, i === currentStep && styles.stepIconActive]}>
+              {i < currentStep ? '\u2713' : i === currentStep ? '\u25CF' : '\u25CB'}
             </Text>
-            <View>
-              <Text style={[styles.stepText, i <= currentStep && styles.stepTextActive]}>
+            <View style={styles.stepContent}>
+              <Text style={[styles.stepText, i <= currentStep && styles.stepTextActive, i < currentStep && styles.stepTextDone]}>
                 {step}
               </Text>
               {i === currentStep && enrichProgress ? (
@@ -501,27 +577,83 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: spacing.xl,
   },
+
+  // ── Scanning glyph ──
+  glyphContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xl,
+    height: 80,
+  },
+  glyphRing: {
+    position: 'absolute',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 1.5,
+    borderColor: colors.green,
+    borderTopColor: 'transparent',
+  },
+  glyphText: {
+    fontFamily: fonts.heading,
+    fontSize: 24,
+    color: colors.green,
+    letterSpacing: 2,
+  },
+
   title: {
     fontFamily: fonts.heading,
     fontSize: 20,
     color: colors.text,
-    marginBottom: spacing.xxl,
+    marginBottom: spacing.md,
   },
+
+  // ── Progress bar ──
+  progressBar: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: colors.green,
+  },
+  progressLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.muted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xl,
+  },
+
   steps: {
-    gap: spacing.lg,
+    gap: spacing.md,
   },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  stepContent: {
+    flex: 1,
+  },
   stepIcon: {
     fontFamily: fonts.medium,
-    fontSize: 14,
+    fontSize: 12,
     color: colors.muted,
-    width: 32,
+    width: 28,
+    textAlign: 'center',
   },
   stepIconActive: {
-    color: colors.accent,
+    color: colors.green,
+    fontSize: 10,
+  },
+  stepIconDone: {
+    color: colors.green,
+    fontSize: 14,
   },
   stepText: {
     fontFamily: fonts.regular,
@@ -531,10 +663,13 @@ const styles = StyleSheet.create({
   stepTextActive: {
     color: colors.text,
   },
+  stepTextDone: {
+    color: colors.text2,
+  },
   enrichProgress: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.accent,
+    color: colors.green,
     marginTop: 2,
   },
   insightEmoji: {
