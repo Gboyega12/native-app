@@ -510,14 +510,14 @@ async function executePlan(input, userId) {
 
   const admin = createClient(supabaseUrl, serviceKey);
 
-  // Insert as 'active' directly — no approval step needed, Bocy is agentic
+  // Insert as 'proposed' — user explicitly approves on the chat card
   const planRow = {
     user_id: userId,
     action: input.action,
     target_amount: input.target_amount || null,
     monthly_saving: input.monthly_saving || null,
     timeline: input.timeline || null,
-    status: 'active',
+    status: 'proposed',
   };
 
   console.log('[executePlan] Inserting plan:', JSON.stringify(planRow));
@@ -598,7 +598,7 @@ Rules:
 
 Tools:
 - When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction. For the match_description, use the EXACT bank description shown in the transfers list if available — partial matches work (e.g. "JOHN" will match "TFR TO JOHN SMITH"). Common cases: rent paid to partner/housemate, bill splits, debt repayments showing as transfers.
-- When you recommend a concrete financial plan, use propose_plan to create it directly. It will be added to the user's action plan automatically — no approval step needed. Be decisive.
+- When you recommend a concrete financial plan, use propose_plan to create it. The user will see an "Add to plan" button and can approve or dismiss it from the chat.
 - When the user mentions a regular expense that doesn't appear in their bank data (rent paid via partner, cash payments, expenses from unconnected accounts), use save_budget_item to add it to their budget. This appears immediately on their budget card. Examples: "My rent is £1200", "I spend £200 on childcare", "Add council tax £150".
 - When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis and recommendations. Don't suggest this casually — only when a real shift has happened.
 - IMPORTANT: In all tool call inputs (action titles, reasons, descriptions), use PLAIN TEXT only — no markdown, no **bold**, no *italic*. Markdown is only for your chat messages.`;

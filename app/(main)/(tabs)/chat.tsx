@@ -90,19 +90,22 @@ function TypingIndicator() {
 
 function PlanCard({
   action,
+  onApprove,
   onDismiss,
-  onViewPlan,
+  saving,
 }: {
   action: ChatAction;
+  onApprove: () => void;
   onDismiss: () => void;
-  onViewPlan: () => void;
+  saving?: boolean;
 }) {
   const d = action.data;
+  const isApproved = action.status === 'approved';
   const isDismissed = action.status === 'dismissed';
 
   return (
-    <View style={[styles.actionCard, styles.actionCardApproved]}>
-      <Text style={styles.actionCardLabel}>PLAN CREATED</Text>
+    <View style={[styles.actionCard, isApproved && styles.actionCardApproved]}>
+      <Text style={styles.actionCardLabel}>{isApproved ? 'PLAN ADDED' : 'PLAN SUGGESTED'}</Text>
       <Text style={styles.actionCardTitle}>{stripMd(d.action)}</Text>
       <View style={styles.actionCardStats}>
         {d.target_amount != null && (
@@ -124,19 +127,32 @@ function PlanCard({
           </View>
         )}
       </View>
-      {isDismissed ? (
+      {isApproved ? (
+        <View style={styles.approvedBanner}>
+          <Text style={styles.approvedBannerText}>{'\u2713'} Added to your plan</Text>
+        </View>
+      ) : isDismissed ? (
         <View style={styles.dismissedBanner}>
           <Text style={styles.dismissedBannerText}>Removed from plan</Text>
         </View>
       ) : (
-        <>
-          <TouchableOpacity style={styles.viewPlanBanner} onPress={onViewPlan} activeOpacity={0.7}>
-            <Text style={styles.viewPlanBannerText}>{'\u2713'} Added to your plan — tap to view {'>'}</Text>
+        <View style={styles.actionCardButtons}>
+          <TouchableOpacity
+            style={[styles.approveBtn, saving && styles.approveBtnSaving]}
+            onPress={onApprove}
+            activeOpacity={0.8}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={colors.bg} />
+            ) : (
+              <Text style={styles.approveBtnText}>Add to plan</Text>
+            )}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.dismissLink} onPress={onDismiss} activeOpacity={0.7}>
-            <Text style={styles.dismissLinkText}>Remove from plan</Text>
+          <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss} activeOpacity={0.8}>
+            <Text style={styles.dismissBtnText}>Dismiss</Text>
           </TouchableOpacity>
-        </>
+        </View>
       )}
     </View>
   );
@@ -461,12 +477,6 @@ export default function Chat() {
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'plan_proposed') return;
 
-    const planId = action.data.id;
-    if (!planId) {
-      Alert.alert('Error', 'No plan ID — this plan may have been created before the fix. Ask Bocy to suggest it again.');
-      return;
-    }
-
     // Get fresh user ID in case state hasn't settled
     let uid = userId;
     if (!uid) {
@@ -483,17 +493,51 @@ export default function Chat() {
     setSavingPlan(key);
 
     try {
-      const res = await fetch('/api/plans/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan_id: planId, user_id: uid }),
-      });
-      const data = await res.json();
+      const planId = action.data.id;
 
-      if (!res.ok || !data.success) {
-        Alert.alert('Could not save plan', data.error || 'Unknown error');
-        setSavingPlan(null);
-        return;
+      if (planId) {
+        // Server already created the plan as 'proposed' — approve it
+        const res = await fetch('/api/plans/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_id: planId, user_id: uid }),
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          // Fallback: server approve failed, try direct client-side insert
+          const { error: insertErr } = await supabase.from('user_plans').upsert({
+            id: planId,
+            user_id: uid,
+            action: action.data.action || '',
+            target_amount: action.data.target_amount || null,
+            monthly_saving: action.data.monthly_saving || null,
+            timeline: action.data.timeline || null,
+            status: 'active',
+          }, { onConflict: 'id' });
+
+          if (insertErr) {
+            Alert.alert('Could not save plan', insertErr.message);
+            setSavingPlan(null);
+            return;
+          }
+        }
+      } else {
+        // No server-side plan ID — insert directly from client
+        const { error: insertErr } = await supabase.from('user_plans').insert({
+          user_id: uid,
+          action: action.data.action || '',
+          target_amount: action.data.target_amount || null,
+          monthly_saving: action.data.monthly_saving || null,
+          timeline: action.data.timeline || null,
+          status: 'active',
+        });
+
+        if (insertErr) {
+          Alert.alert('Could not save plan', insertErr.message);
+          setSavingPlan(null);
+          return;
+        }
       }
 
       // Update action status in chat messages
@@ -694,7 +738,7 @@ export default function Chat() {
               collectedActions.push({
                 type: event.action.type,
                 data: event.action.data,
-                status: event.action.type === 'goal_update_proposed' ? 'pending' : undefined,
+                status: (event.action.type === 'goal_update_proposed' || event.action.type === 'plan_proposed') ? 'pending' : undefined,
               });
             }
           } catch {
@@ -736,7 +780,7 @@ export default function Chat() {
         ? data.actions.map((a: { type: string; data: ChatAction['data'] }) => ({
             type: a.type,
             data: a.data,
-            status: a.type === 'goal_update_proposed' ? 'pending' : undefined,
+            status: (a.type === 'goal_update_proposed' || a.type === 'plan_proposed') ? 'pending' : undefined,
           }))
         : undefined;
 
@@ -841,8 +885,9 @@ export default function Chat() {
                 {action.type === 'plan_proposed' ? (
                   <PlanCard
                     action={action}
+                    onApprove={() => handleApprovePlan(i, j)}
                     onDismiss={() => handleDismissPlan(i, j)}
-                    onViewPlan={() => router.push('/(main)/(tabs)/plan')}
+                    saving={savingPlan === `${i}-${j}`}
                   />
                 ) : action.type === 'plan_error' ? (
                   <View style={styles.errorCard}>

@@ -9,6 +9,7 @@ import { readFileSync } from 'fs';
 import { matchMerchant, isPersonTransfer } from './lib/merchant-db';
 import { classifyTransaction } from './lib/classifier';
 import { normaliseDescription } from './lib/normalise';
+import EnrichmentEngine, { TransactionOverride } from './lib/enrichment-engine';
 
 // ── Load .env manually (no dotenv dependency) ──
 try {
@@ -134,7 +135,132 @@ assert('Mrs Jane Doe -> person', isPersonTransfer('MRS JANE DOE'));
 assert('TESCO STORES -> not person', !isPersonTransfer('TESCO STORES'));
 assert('AMZNMKTPLACE -> not person', !isPersonTransfer('AMZNMKTPLACE'));
 
-// ─── 7. Claude API connectivity ───
+// ─── 7. Override matching ───
+console.log('\n-- Override matching --');
+
+const overrides: TransactionOverride[] = [
+  { match_description: 'tesco', category: 'Groceries', is_essential: true },
+  { match_description: 'netflix', category: 'Streaming', is_essential: false },
+  { match_description: 'coffee house', category: 'Coffee & Cafes', is_essential: false },
+  { match_description: 'gym membership', category: 'Fitness', is_essential: false },
+  { match_description: 'debt repay', category: 'Debt Payments', is_essential: true },
+  { match_description: 'savings pot', category: 'Savings', is_essential: false },
+];
+
+// 7a. Basic substring match on raw description
+{
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'TESCO STORES 6091', amount: -45.00 };
+  const result = EnrichmentEngine.enrichTransaction(tx, overrides);
+  assert(
+    'Override matches raw description substring ("tesco" in "TESCO STORES 6091")',
+    result.category === 'Groceries' && result.isEssential === true && result.confidence === 'high',
+    `got: category=${result.category}, essential=${result.isEssential}, confidence=${result.confidence}`,
+  );
+}
+
+// 7b. Match via normalised description (strips gateway prefix)
+{
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'SQ *COFFEE HOUSE LONDON', amount: -4.50 };
+  const result = EnrichmentEngine.enrichTransaction(tx, overrides);
+  assert(
+    'Override matches normalised description ("coffee house" in "SQ *COFFEE HOUSE LONDON")',
+    result.category === 'Coffee & Cafes',
+    `got: category=${result.category}`,
+  );
+}
+
+// 7c. Case insensitivity
+{
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'Netflix.com Monthly', amount: -15.99 };
+  const result = EnrichmentEngine.enrichTransaction(tx, overrides);
+  assert(
+    'Override is case-insensitive ("netflix" matches "Netflix.com Monthly")',
+    result.category === 'Streaming',
+    `got: category=${result.category}`,
+  );
+}
+
+// 7d. No match falls through to normal enrichment
+{
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'RANDOM MERCHANT XYZ', amount: -20.00 };
+  const result = EnrichmentEngine.enrichTransaction(tx, overrides);
+  assert(
+    'No override match falls through to normal enrichment',
+    result.category !== 'Groceries' && result.category !== 'Streaming' && result.category !== 'Coffee & Cafes',
+    `got: category=${result.category}`,
+  );
+}
+
+// 7e. Debt category sets isDebt flag
+{
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'DEBT REPAY CC', amount: -200.00 };
+  const result = EnrichmentEngine.enrichTransaction(tx, overrides);
+  assert(
+    'Override with "Debt Payments" category sets isDebt=true',
+    result.category === 'Debt Payments' && result.isDebt === true,
+    `got: category=${result.category}, isDebt=${result.isDebt}`,
+  );
+}
+
+// 7f. Savings category sets isSavings flag
+{
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'SAVINGS POT TRANSFER', amount: -500.00 };
+  const result = EnrichmentEngine.enrichTransaction(tx, overrides);
+  assert(
+    'Override with "Savings" category sets isSavings=true',
+    result.category === 'Savings' && result.isSavings === true,
+    `got: category=${result.category}, isSavings=${result.isSavings}`,
+  );
+}
+
+// 7g. Credit transaction with override sets isIncome=true
+{
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'TESCO REFUND', amount: 25.00 };
+  const result = EnrichmentEngine.enrichTransaction(tx, overrides);
+  assert(
+    'Override on credit transaction sets isIncome=true (amount > 0)',
+    result.category === 'Groceries' && result.isIncome === true,
+    `got: category=${result.category}, isIncome=${result.isIncome}`,
+  );
+}
+
+// 7h. Empty overrides array doesn't break anything
+{
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'TESCO STORES', amount: -30.00 };
+  const result = EnrichmentEngine.enrichTransaction(tx, []);
+  assert(
+    'Empty overrides array falls through to normal enrichment',
+    result.merchant === 'Tesco' && result.confidence === 'high',
+    `got: merchant=${result.merchant}, confidence=${result.confidence}`,
+  );
+}
+
+// 7i. Override takes priority over merchant DB match
+{
+  const customOverrides: TransactionOverride[] = [
+    { match_description: 'tesco', category: 'Other Grocery Store', is_essential: false },
+  ];
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'TESCO STORES 6091', amount: -45.00 };
+  const result = EnrichmentEngine.enrichTransaction(tx, customOverrides);
+  assert(
+    'Override takes priority over merchant DB match',
+    result.category === 'Other Grocery Store' && result.isEssential === false,
+    `got: category=${result.category}, essential=${result.isEssential}`,
+  );
+}
+
+// 7j. Normalised match with heavy bank noise
+{
+  const tx = { date: '2025-06-01T00:00:00.000Z', description: 'VIS PURCHASE GYM MEMBERSHIP FEE REF:ABC123 CD 4321 GB', amount: -29.99 };
+  const result = EnrichmentEngine.enrichTransaction(tx, overrides);
+  assert(
+    'Override matches through heavy bank noise via normalisation',
+    result.category === 'Fitness',
+    `got: category=${result.category} (normalised: "${normaliseDescription(tx.description)}")`,
+  );
+}
+
+// ─── 8. Claude API connectivity ───
 console.log('\n-- Claude API connectivity --');
 
 async function testClaudeAPI() {
