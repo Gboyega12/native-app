@@ -1,14 +1,36 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Linking, Alert,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
+  Linking, Alert, LayoutAnimation, Platform, UIManager,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
-import type { Analysis, Move } from '@/lib/types';
+import type { Analysis, Move, GoalTrajectory } from '@/lib/types';
 
-/** Strip markdown bold/italic markers from text rendered with plain <Text> */
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+/** Strip markdown bold/italic markers */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
+
+/** Category label mapping for display */
+const CATEGORY_LABELS: Record<string, string> = {
+  break_even: 'Break Even',
+  buffer: 'Emergency Buffer',
+  debt: 'Debt',
+  spending: 'Spending',
+  savings: 'Savings',
+  invest: 'Investing',
+};
+
+/** Known provider contact info for action buttons */
+const PROVIDER_CONTACTS: Record<string, { phone?: string; url?: string; label: string }> = {
+  stepchange: { phone: '0800 138 1111', url: 'https://www.stepchange.org', label: 'StepChange' },
+  citizensadvice: { phone: '0800 144 8848', url: 'https://www.citizensadvice.org.uk/debt-and-money', label: 'Citizens Advice' },
+  moneyhelper: { phone: '0800 138 7777', url: 'https://www.moneyhelper.org.uk', label: 'MoneyHelper' },
+};
 
 interface UserPlan {
   id: string;
@@ -31,7 +53,11 @@ function effortColor(effort: string) {
   return effort === 'low' ? colors.accent : effort === 'medium' ? colors.sky : colors.coral;
 }
 
-// Generate actionable steps for user plans
+function effortLabel(effort: string) {
+  return effort === 'low' ? 'Quick win' : effort === 'medium' ? 'Some effort' : 'Big move';
+}
+
+/** Generate actionable steps for user plans */
 function getPlanSteps(plan: UserPlan): string[] {
   const action = (plan.action || '').toLowerCase();
   if (action.includes('emergency') || action.includes('buffer')) {
@@ -77,16 +103,41 @@ function getPlanSteps(plan: UserPlan): string[] {
   ];
 }
 
+/** Get provider suggestion for a move */
+function getProviderForMove(move: Move): { phone?: string; url?: string; label: string } | null {
+  const action = (move.action || '').toLowerCase();
+  if (action.includes('debt') || move.category === 'debt') {
+    return PROVIDER_CONTACTS.stepchange;
+  }
+  return null;
+}
+
 export default function Plan() {
   const router = useRouter();
+  const { highlight } = useLocalSearchParams<{ highlight?: string }>();
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [userPlans, setUserPlans] = useState<UserPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
-  // Progress persisted to DB
   const [progress, setProgress] = useState<Record<string, ProgressRow>>({});
   const userIdRef = useRef<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const [highlightIdx, setHighlightIdx] = useState<number | null>(null);
+
+  // Handle deep-link highlight from home page "View" button
+  useEffect(() => {
+    if (highlight != null) {
+      const idx = parseInt(highlight, 10);
+      if (!isNaN(idx)) {
+        setHighlightIdx(idx);
+        setExpanded(idx);
+        // Clear highlight glow after 2s
+        const timer = setTimeout(() => setHighlightIdx(null), 2000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [highlight]);
 
   useFocusEffect(
     useCallback(() => {
@@ -100,7 +151,6 @@ export default function Plan() {
     if (!user) { setLoading(false); return; }
     userIdRef.current = user.id;
 
-    // Fetch analysis + user plans + progress in parallel
     const [analysisRes, plansRes, progressRes] = await Promise.all([
       supabase.from('analyses').select('*').eq('user_id', user.id)
         .order('created_at', { ascending: false }).limit(1).single(),
@@ -111,7 +161,6 @@ export default function Plan() {
 
     setUserPlans(plansRes.data || []);
 
-    // Build progress map and collect dismissed move actions
     const progressMap: Record<string, ProgressRow> = {};
     const dismissedActions = new Set<string>();
     for (const row of (progressRes.data || [])) {
@@ -127,7 +176,6 @@ export default function Plan() {
       }
     }
 
-    // Filter out dismissed recommendations so they don't reappear after sync
     if (analysisRes.data && dismissedActions.size > 0) {
       const filtered = (analysisRes.data.all_moves || []).filter(
         (m: Move) => !dismissedActions.has(m.action),
@@ -141,7 +189,7 @@ export default function Plan() {
     setLoading(false);
   };
 
-  // ── Persist progress to DB ──
+  // ── Persist progress ──
 
   const saveProgress = async (key: string, row: ProgressRow) => {
     const uid = userIdRef.current;
@@ -169,25 +217,22 @@ export default function Plan() {
     });
   };
 
-  // ── Auto-create plan when user taps "Start this" on a move ──
-
   const handleStartMove = async (index: number, move: Move) => {
     const uid = userIdRef.current;
     if (!uid) return;
 
     const key = `move-${index}`;
-
-    // Mark as approved in local progress
     const row: ProgressRow = {
       move_key: key,
       move_action: move.action,
       approved: true,
       completed_steps: [],
     };
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setProgress((prev) => ({ ...prev, [key]: row }));
     saveProgress(key, row);
 
-    // Also create a user_plan so it shows in "YOUR PLANS"
     try {
       const { data } = await supabase.from('user_plans').insert({
         user_id: uid,
@@ -198,12 +243,8 @@ export default function Plan() {
         status: 'active',
       }).select('*').single();
 
-      if (data) {
-        setUserPlans((prev) => [data, ...prev]);
-      }
-    } catch {
-      // Non-critical — progress is saved regardless
-    }
+      if (data) setUserPlans((prev) => [data, ...prev]);
+    } catch {}
   };
 
   const handleStopMove = async (index: number) => {
@@ -211,13 +252,13 @@ export default function Plan() {
     if (!uid) return;
 
     const key = `move-${index}`;
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setProgress((prev) => {
       const updated = { ...prev };
       delete updated[key];
       return updated;
     });
 
-    // Remove from DB
     await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', key);
   };
 
@@ -233,6 +274,7 @@ export default function Plan() {
       });
     } catch {}
 
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
   };
 
@@ -241,8 +283,6 @@ export default function Plan() {
     const uid = userIdRef.current;
     if (!uid) return;
 
-    // `moves` is sorted by effort — find the actual move object, then locate
-    // it in the original unsorted `all_moves` by matching the action text.
     const moveToDelete = moves[sortedIndex];
     if (!moveToDelete) return;
 
@@ -252,9 +292,10 @@ export default function Plan() {
 
     const updatedMoves = [...originalMoves];
     updatedMoves.splice(originalIndex, 1);
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setAnalysis({ ...analysis, all_moves: updatedMoves });
 
-    // Also remove from progress if it was started
     const progressKey = `move-${sortedIndex}`;
     setProgress((prev) => {
       const updated = { ...prev };
@@ -262,8 +303,6 @@ export default function Plan() {
       return updated;
     });
 
-    // Persist dismissal to plan_progress so it survives background sync.
-    // Uses a 'dismissed-' prefix key; loadData filters these out on load.
     try {
       await supabase.from('plan_progress').upsert({
         user_id: uid,
@@ -274,7 +313,6 @@ export default function Plan() {
         updated_at: new Date().toISOString(),
       }, { onConflict: 'user_id,move_key' });
 
-      // Also update analyses table so home page picks it up immediately
       const { data: latest } = await supabase.from('analyses')
         .select('id, all_moves')
         .eq('user_id', uid)
@@ -290,12 +328,13 @@ export default function Plan() {
           .eq('id', latest.id);
       }
 
-      // Clean up any progress tracking for this move
       await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', progressKey);
     } catch (err: any) {
       console.warn('[plan] Failed to persist recommendation deletion:', err?.message);
     }
   };
+
+  // ── Loading & empty states ──
 
   if (loading) {
     return (
@@ -314,29 +353,110 @@ export default function Plan() {
     );
   }
 
+  // ── Derived data ──
+
   const effortOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
   const moves: Move[] = [...(analysis?.all_moves || [])].sort(
     (a, b) => (effortOrder[a.effort] ?? 2) - (effortOrder[b.effort] ?? 2),
   );
 
-  const approvedMoves = moves.filter((_, i) => progress[`move-${i}`]?.approved);
-  const totalMonthly = moves.reduce((s, m) => s + (m.monthlyImpact || 0), 0);
-  const approvedMonthly = approvedMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0);
+  const activeMoves = moves
+    .map((m, i) => ({ move: m, index: i }))
+    .filter(({ index }) => progress[`move-${index}`]?.approved);
+
+  const opportunities = moves
+    .map((m, i) => ({ move: m, index: i }))
+    .filter(({ index }) => !progress[`move-${index}`]?.approved)
+    .sort((a, b) => (b.move.annualImpact || 0) - (a.move.annualImpact || 0));
+
+  const totalMonthlyImpact = moves.reduce((s, m) => s + (m.monthlyImpact || 0), 0);
+  const activeMonthly = activeMoves.reduce((s, { move }) => s + (move.monthlyImpact || 0), 0);
   const planMonthly = userPlans.reduce((s, p) => s + (p.monthly_saving || 0), 0);
-  const overallProgress = moves.length > 0 ? approvedMoves.length / moves.length : 0;
+  const goalCtx: GoalTrajectory | null = analysis?.goal_context || null;
+
+  // ── Render ──
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
-      <Text style={styles.heading}>Action Plan</Text>
+    <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.scroll}>
+      <Text style={styles.heading}>Your Plan</Text>
       <Text style={styles.headingSub}>
-        {moves.length} recommendation{moves.length !== 1 ? 's' : ''}
-        {userPlans.length > 0 ? ` + ${userPlans.length} active plan${userPlans.length !== 1 ? 's' : ''}` : ''}
+        {activeMoves.length + userPlans.length} active
+        {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} opportunit${opportunities.length === 1 ? 'y' : 'ies'}` : ''}
       </Text>
 
-      {/* User Plans — created from chat or auto-created */}
-      {userPlans.length > 0 && (
+      {/* ══════════════════════════════════════════════
+          SECTION 1 — GOAL TRAJECTORY
+          ══════════════════════════════════════════════ */}
+      {goalCtx && (
+        <View style={styles.trajectoryCard}>
+          <Text style={styles.trajLabel}>GOAL TRAJECTORY</Text>
+          <Text style={styles.trajGoal}>{goalCtx.goalLabel}</Text>
+
+          {goalCtx.targetAmount > 0 && (
+            <Text style={styles.trajTarget}>
+              Target: {'\u00a3'}{goalCtx.targetAmount.toLocaleString()}
+            </Text>
+          )}
+
+          {/* Timeline bar */}
+          <View style={styles.trajTimeline}>
+            <View style={styles.trajBarRow}>
+              <View style={styles.trajBarBg}>
+                {goalCtx.currentMonths > 0 && goalCtx.newMonths > 0 && (
+                  <View
+                    style={[
+                      styles.trajBarFill,
+                      { width: `${Math.min(100, Math.round((goalCtx.newMonths / goalCtx.currentMonths) * 100))}%` },
+                    ]}
+                  />
+                )}
+              </View>
+            </View>
+            <View style={styles.trajMonthsRow}>
+              {goalCtx.newMonths > 0 ? (
+                <>
+                  <View style={styles.trajMonthItem}>
+                    <Text style={styles.trajMonthValue}>{goalCtx.newMonths}</Text>
+                    <Text style={styles.trajMonthLabel}>months{'\n'}with plan</Text>
+                  </View>
+                  {goalCtx.currentMonths > 0 && (
+                    <View style={styles.trajMonthItem}>
+                      <Text style={[styles.trajMonthValue, { color: colors.dim }]}>{goalCtx.currentMonths}</Text>
+                      <Text style={styles.trajMonthLabel}>months{'\n'}without</Text>
+                    </View>
+                  )}
+                  {goalCtx.monthsSaved > 0 && (
+                    <View style={[styles.trajMonthItem, styles.trajSavedItem]}>
+                      <Text style={[styles.trajMonthValue, { color: colors.accent }]}>-{goalCtx.monthsSaved}</Text>
+                      <Text style={[styles.trajMonthLabel, { color: colors.accent }]}>months{'\n'}saved</Text>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <Text style={styles.trajInsight}>{goalCtx.insight}</Text>
+              )}
+            </View>
+          </View>
+
+          {goalCtx.newMonths > 0 && goalCtx.insight && (
+            <Text style={styles.trajInsight}>{goalCtx.insight}</Text>
+          )}
+        </View>
+      )}
+
+      {/* ══════════════════════════════════════════════
+          SECTION 2 — ACTIVE MOVES
+          ══════════════════════════════════════════════ */}
+      {(activeMoves.length > 0 || userPlans.length > 0) && (
         <>
-          <Text style={styles.sectionLabel}>YOUR PLANS</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionLabel}>ACTIVE MOVES</Text>
+            <Text style={styles.sectionMeta}>
+              {'\u00a3'}{Math.round(activeMonthly + planMonthly)}/mo impact
+            </Text>
+          </View>
+
+          {/* User plans (from chat or auto-created) */}
           {userPlans.map((plan) => {
             const isPlanExpanded = expandedPlan === plan.id;
             const planKey = `plan-${plan.id}`;
@@ -346,99 +466,49 @@ export default function Plan() {
             const nextStepIdx = planSteps.findIndex((_, idx) => !doneSteps.includes(idx));
 
             return (
-              <View key={plan.id} style={[styles.card, styles.userPlanCard]}>
+              <View key={plan.id} style={[styles.card, styles.activeCard]}>
                 <TouchableOpacity
                   onPress={() => setExpandedPlan(isPlanExpanded ? null : plan.id)}
                   activeOpacity={0.8}
                 >
                   <View style={styles.cardHeader}>
-                    <View style={[styles.moveNumberBadge, styles.planBadge]}>
-                      <Text style={styles.planBadgeText}>{'\u2713'}</Text>
+                    <View style={[styles.badge, styles.badgeActive]}>
+                      <Text style={styles.badgeActiveText}>{'\u2713'}</Text>
                     </View>
                     <View style={styles.cardContent}>
                       <Text style={styles.moveAction}>{stripMd(plan.action)}</Text>
-                      {plan.timeline && (
-                        <Text style={styles.moveTimeline}>{plan.timeline}</Text>
-                      )}
                       <View style={styles.moveStats}>
                         {plan.monthly_saving != null && (
-                          <Text style={styles.moveImpact}>
+                          <Text style={styles.impactText}>
                             {'\u00a3'}{plan.monthly_saving}/mo
-                          </Text>
-                        )}
-                        {plan.target_amount != null && (
-                          <Text style={styles.planTarget}>
-                            Target: {'\u00a3'}{plan.target_amount}
                           </Text>
                         )}
                         <Text style={styles.expandIcon}>{isPlanExpanded ? '\u25B2' : '\u25BC'}</Text>
                       </View>
-
-                      {/* Step progress bar (collapsed) */}
                       {!isPlanExpanded && (
-                        <View style={styles.stepProgressWrap}>
-                          <View style={styles.stepProgressBar}>
-                            <View style={[styles.stepProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                        <View style={styles.miniProgress}>
+                          <View style={styles.miniProgressBar}>
+                            <View style={[styles.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
                           </View>
-                          <Text style={styles.stepProgressText}>
-                            {doneSteps.length}/{planSteps.length} steps
-                          </Text>
+                          <Text style={styles.miniProgressText}>{doneSteps.length}/{planSteps.length}</Text>
                         </View>
                       )}
                     </View>
                   </View>
                 </TouchableOpacity>
 
-                {/* Quick delete button — always visible */}
-                {!isPlanExpanded && (
-                  <TouchableOpacity
-                    style={styles.quickDiscardBtn}
-                    onPress={() => {
-                      Alert.alert(
-                        'Delete plan?',
-                        `Remove "${stripMd(plan.action)}" from your plans?`,
-                        [
-                          { text: 'Keep', style: 'cancel' },
-                          { text: 'Delete', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
-                        ],
-                      );
-                    }}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Text style={styles.quickDiscardText}>Delete</Text>
-                  </TouchableOpacity>
-                )}
-
                 {isPlanExpanded && (
                   <View style={styles.expandedSection}>
                     <View style={styles.separator} />
 
-                    {plan.target_amount != null && plan.monthly_saving != null && plan.monthly_saving > 0 && (
-                      <View style={styles.detailBlock}>
-                        <Text style={styles.detailLabel}>Projection</Text>
-                        <View style={styles.impactGrid}>
-                          <View style={styles.impactItem}>
-                            <Text style={styles.impactValue}>{'\u00a3'}{plan.target_amount}</Text>
-                            <Text style={styles.impactLabel}>target</Text>
-                          </View>
-                          <View style={styles.impactItem}>
-                            <Text style={styles.impactValue}>{'\u00a3'}{plan.monthly_saving}</Text>
-                            <Text style={styles.impactLabel}>per month</Text>
-                          </View>
-                        </View>
-                      </View>
-                    )}
-
-                    {/* Actionable checklist */}
+                    {/* Step checklist */}
                     <View style={styles.detailBlock}>
                       <Text style={styles.detailLabel}>Action checklist</Text>
-                      <View style={styles.stepProgressWrap}>
-                        <View style={styles.stepProgressBar}>
-                          <View style={[styles.stepProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                      <View style={styles.miniProgress}>
+                        <View style={styles.miniProgressBar}>
+                          <View style={[styles.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
                         </View>
-                        <Text style={styles.stepProgressText}>
-                          {doneSteps.length}/{planSteps.length} done
-                        </Text>
+                        <Text style={styles.miniProgressText}>{doneSteps.length}/{planSteps.length} done</Text>
                       </View>
                       {planSteps.map((step, j) => {
                         const isDone = doneSteps.includes(j);
@@ -473,222 +543,186 @@ export default function Plan() {
                       <Text style={styles.chatBtnText}>Ask Bocy about this</Text>
                     </TouchableOpacity>
 
-                    <View style={styles.actionButtons}>
-                      <TouchableOpacity
-                        style={styles.removeButton}
-                        onPress={() => handleRemovePlan(plan.id)}
-                      >
-                        <Text style={styles.removeText}>Delete plan</Text>
-                      </TouchableOpacity>
-                    </View>
+                    <TouchableOpacity
+                      style={styles.removeButton}
+                      onPress={() => {
+                        Alert.alert(
+                          'Delete plan?',
+                          `Remove "${stripMd(plan.action)}" from your plans?`,
+                          [
+                            { text: 'Keep', style: 'cancel' },
+                            { text: 'Delete', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
+                          ],
+                        );
+                      }}
+                    >
+                      <Text style={styles.removeText}>Delete plan</Text>
+                    </TouchableOpacity>
                   </View>
                 )}
+              </View>
+            );
+          })}
+
+          {/* Active recommendation moves */}
+          {activeMoves.map(({ move, index: i }) => {
+            const isExpanded = expanded === i;
+            const moveKey = `move-${i}`;
+            const steps = move.steps || [];
+            const doneSteps = progress[moveKey]?.completed_steps || [];
+            const stepProgress = steps.length > 0 ? doneSteps.length / steps.length : 0;
+            const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.includes(idx));
+
+            return (
+              <View key={`active-${i}`} style={[styles.card, styles.activeCard]}>
+                <TouchableOpacity
+                  onPress={() => setExpanded(isExpanded ? null : i)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.cardHeader}>
+                    <View style={[styles.badge, styles.badgeActive]}>
+                      <Text style={styles.badgeActiveText}>{'\u2713'}</Text>
+                    </View>
+                    <View style={styles.cardContent}>
+                      <Text style={styles.moveAction}>{stripMd(move.action)}</Text>
+                      <View style={styles.moveStats}>
+                        <Text style={styles.impactText}>
+                          {'\u00a3'}{move.monthlyImpact}/mo
+                        </Text>
+                        <View style={[styles.effortBadge, { backgroundColor: `${effortColor(move.effort)}15` }]}>
+                          <Text style={[styles.effortText, { color: effortColor(move.effort) }]}>{effortLabel(move.effort)}</Text>
+                        </View>
+                        <Text style={styles.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                      </View>
+                      {!isExpanded && steps.length > 0 && (
+                        <View style={styles.miniProgress}>
+                          <View style={styles.miniProgressBar}>
+                            <View style={[styles.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                          </View>
+                          <Text style={styles.miniProgressText}>{doneSteps.length}/{steps.length}</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                {isExpanded && renderExpandedMove(move, i, moveKey, steps, doneSteps, stepProgress, nextStepIdx, true)}
               </View>
             );
           })}
         </>
       )}
 
-      {/* Progress summary */}
-      {moves.length > 0 && (
+      {/* ══════════════════════════════════════════════
+          SECTION 3 — OPPORTUNITIES
+          ══════════════════════════════════════════════ */}
+      {opportunities.length > 0 && (
         <>
-          <Text style={styles.sectionLabel}>RECOMMENDATIONS</Text>
-          <View style={styles.progressCard}>
-            <View style={styles.progressRow}>
-              <View>
-                <Text style={styles.progressLabel}>Started</Text>
-                <Text style={styles.progressCount}>{approvedMoves.length} of {moves.length}</Text>
-              </View>
-              <View style={styles.progressRight}>
-                <Text style={styles.progressLabel}>Monthly impact</Text>
-                <Text style={styles.progressAmount}>
-                  {'\u00a3'}{Math.round(approvedMonthly + planMonthly)} of {'\u00a3'}{Math.round(totalMonthly + planMonthly)}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${Math.round(overallProgress * 100)}%` }]} />
-            </View>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionLabel}>OPPORTUNITIES</Text>
+            <Text style={styles.sectionMeta}>
+              {'\u00a3'}{Math.round(totalMonthlyImpact - activeMonthly)}/mo potential
+            </Text>
           </View>
+
+          {/* Impact comparison bar */}
+          <View style={styles.impactCompare}>
+            {opportunities.map(({ move, index: i }) => {
+              const maxImpact = opportunities[0]?.move.annualImpact || 1;
+              const pct = Math.max(8, Math.round(((move.annualImpact || 0) / maxImpact) * 100));
+              const eColor = effortColor(move.effort);
+              return (
+                <TouchableOpacity
+                  key={`bar-${i}`}
+                  style={styles.impactBarRow}
+                  onPress={() => setExpanded(expanded === i ? null : i)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.impactBarLabel}>
+                    <Text style={styles.impactBarAction} numberOfLines={1}>
+                      {stripMd(move.action)}
+                    </Text>
+                  </View>
+                  <View style={styles.impactBarTrack}>
+                    <View
+                      style={[styles.impactBarFill, { width: `${pct}%`, backgroundColor: eColor + '40' }]}
+                    />
+                  </View>
+                  <Text style={[styles.impactBarValue, { color: eColor }]}>
+                    {'\u00a3'}{(move.annualImpact || 0).toLocaleString()}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+            <Text style={styles.impactBarFootnote}>annual impact {'\u2192'} tap to expand</Text>
+          </View>
+
+          {/* Individual opportunity cards */}
+          {opportunities.map(({ move, index: i }) => {
+            const isExpanded = expanded === i;
+            const isHighlighted = highlightIdx === i;
+            const moveKey = `move-${i}`;
+            const steps = move.steps || [];
+            const doneSteps = progress[moveKey]?.completed_steps || [];
+            const stepProgress = steps.length > 0 ? doneSteps.length / steps.length : 0;
+            const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.includes(idx));
+
+            return (
+              <View
+                key={`opp-${i}`}
+                style={[
+                  styles.card,
+                  isHighlighted && styles.cardHighlight,
+                ]}
+              >
+                <TouchableOpacity
+                  onPress={() => setExpanded(isExpanded ? null : i)}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.cardHeader}>
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{i + 1}</Text>
+                    </View>
+                    <View style={styles.cardContent}>
+                      <Text style={styles.moveAction}>{stripMd(move.action)}</Text>
+                      <View style={styles.moveStats}>
+                        <Text style={styles.impactText}>
+                          {'\u00a3'}{move.monthlyImpact}/mo
+                        </Text>
+                        <View style={[styles.effortBadge, { backgroundColor: `${effortColor(move.effort)}15` }]}>
+                          <Text style={[styles.effortText, { color: effortColor(move.effort) }]}>{effortLabel(move.effort)}</Text>
+                        </View>
+                        <Text style={styles.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                      </View>
+
+                      {/* Merchant chips preview */}
+                      {!isExpanded && move.merchants && move.merchants.length > 0 && (
+                        <View style={styles.merchantChips}>
+                          {move.merchants.slice(0, 3).map((m, j) => (
+                            <View key={j} style={styles.merchantChip}>
+                              <Text style={styles.merchantChipText}>{m}</Text>
+                            </View>
+                          ))}
+                          {move.merchants.length > 3 && (
+                            <Text style={styles.merchantMore}>+{move.merchants.length - 3}</Text>
+                          )}
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                {isExpanded && renderExpandedMove(move, i, moveKey, steps, doneSteps, stepProgress, nextStepIdx, false)}
+              </View>
+            );
+          })}
         </>
       )}
 
-      {/* Moves */}
-      {moves.map((move, i) => {
-        const isExpanded = expanded === i;
-        const moveKey = `move-${i}`;
-        const isApproved = progress[moveKey]?.approved || false;
-        const steps = move.steps || [];
-        const doneSteps = progress[moveKey]?.completed_steps || [];
-        const stepProgress = steps.length > 0 ? doneSteps.length / steps.length : 0;
-        const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.includes(idx));
-
-        return (
-          <View key={i} style={[styles.card, isApproved && styles.cardApproved]}>
-            <TouchableOpacity
-              onPress={() => setExpanded(isExpanded ? null : i)}
-              activeOpacity={0.8}
-            >
-              <View style={styles.cardHeader}>
-                <View style={[styles.moveNumberBadge, isApproved && styles.moveNumberApproved]}>
-                  <Text style={[styles.moveNumber, isApproved && styles.moveNumberTextApproved]}>
-                    {isApproved ? '\u2713' : i + 1}
-                  </Text>
-                </View>
-                <View style={styles.cardContent}>
-                  <Text style={[styles.moveAction, isApproved && styles.approvedAction]}>{stripMd(move.action)}</Text>
-                  <View style={styles.moveStats}>
-                    <Text style={styles.moveImpact}>
-                      {'\u00a3'}{move.monthlyImpact}/mo
-                    </Text>
-                    <View style={[styles.effortBadge, { backgroundColor: `${effortColor(move.effort)}15` }]}>
-                      <Text style={[styles.effortText, { color: effortColor(move.effort) }]}>{move.effort}</Text>
-                    </View>
-                    <Text style={styles.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
-                  </View>
-
-                  {/* Step progress bar (collapsed) */}
-                  {isApproved && steps.length > 0 && !isExpanded && (
-                    <View style={styles.stepProgressWrap}>
-                      <View style={styles.stepProgressBar}>
-                        <View style={[styles.stepProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
-                      </View>
-                      <Text style={styles.stepProgressText}>
-                        {doneSteps.length}/{steps.length} steps
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            </TouchableOpacity>
-
-            {isExpanded && (
-              <View style={styles.expandedSection}>
-                <View style={styles.separator} />
-
-                {move.strategy && (
-                  <View style={styles.detailBlock}>
-                    <Text style={styles.detailLabel}>Strategy</Text>
-                    <Text style={styles.detailText}>{stripMd(move.strategy)}</Text>
-                  </View>
-                )}
-
-                {/* Actionable checklist */}
-                {steps.length > 0 && (
-                  <View style={styles.detailBlock}>
-                    <Text style={styles.detailLabel}>Action checklist</Text>
-                    {isApproved && (
-                      <View style={styles.stepProgressWrap}>
-                        <View style={styles.stepProgressBar}>
-                          <View style={[styles.stepProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
-                        </View>
-                        <Text style={styles.stepProgressText}>
-                          {doneSteps.length}/{steps.length} done
-                        </Text>
-                      </View>
-                    )}
-                    {steps.map((step, j) => {
-                      const isDone = doneSteps.includes(j);
-                      const isNext = j === nextStepIdx && isApproved;
-                      return (
-                        <TouchableOpacity
-                          key={j}
-                          style={[styles.checklistRow, isNext && styles.checklistRowNext]}
-                          onPress={() => isApproved ? toggleStep(moveKey, j, move.action) : null}
-                          activeOpacity={isApproved ? 0.7 : 1}
-                        >
-                          {isApproved ? (
-                            <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
-                              {isDone && <Text style={styles.checkmark}>{'\u2713'}</Text>}
-                            </View>
-                          ) : (
-                            <Text style={styles.stepNumber}>{j + 1}</Text>
-                          )}
-                          <View style={styles.checklistContent}>
-                            <Text style={[
-                              styles.checklistText,
-                              isDone && isApproved && styles.checklistTextDone,
-                            ]}>
-                              {stripMd(step)}
-                            </Text>
-                            {isNext && !isDone && (
-                              <Text style={styles.nextStepLabel}>Do this next</Text>
-                            )}
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
-
-                {move.effect && (
-                  <View style={styles.detailBlock}>
-                    <Text style={styles.detailLabel}>Expected outcome</Text>
-                    <Text style={styles.effectText}>{stripMd(move.effect)}</Text>
-                  </View>
-                )}
-
-                <View style={styles.detailBlock}>
-                  <Text style={styles.detailLabel}>Impact breakdown</Text>
-                  <View style={styles.impactGrid}>
-                    <View style={styles.impactItem}>
-                      <Text style={styles.impactValue}>{'\u00a3'}{move.monthlyImpact || 0}</Text>
-                      <Text style={styles.impactLabel}>per month</Text>
-                    </View>
-                    <View style={styles.impactItem}>
-                      <Text style={styles.impactValue}>{'\u00a3'}{move.annualImpact || ((move.monthlyImpact || 0) * 12)}</Text>
-                      <Text style={styles.impactLabel}>per year</Text>
-                    </View>
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.chatBtn}
-                  onPress={() => router.push('/(main)/(tabs)/chat')}
-                >
-                  <Text style={styles.chatBtnText}>Ask Bocy about this</Text>
-                </TouchableOpacity>
-
-                <View style={styles.actionButtons}>
-                  {isApproved ? (
-                    <TouchableOpacity
-                      style={styles.removeButton}
-                      onPress={() => handleStopMove(i)}
-                    >
-                      <Text style={styles.removeText}>Remove from plan</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.startBtn}
-                      onPress={() => handleStartMove(i, move)}
-                    >
-                      <Text style={styles.startBtnText}>Start this</Text>
-                    </TouchableOpacity>
-                  )}
-                  <TouchableOpacity
-                    style={styles.deleteBtn}
-                    onPress={() => {
-                      Alert.alert(
-                        'Delete recommendation?',
-                        `Permanently remove "${stripMd(move.action)}"?`,
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          { text: 'Delete', style: 'destructive', onPress: () => handleDeleteRecommendation(i) },
-                        ],
-                      );
-                    }}
-                  >
-                    <Text style={styles.deleteBtnText}>Delete</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-          </View>
-        );
-      })}
-
-      {/* Resources */}
-      <Text style={styles.sectionLabel}>NEED HELP WITH DEBT?</Text>
+      {/* ══════════════════════════════════════════════
+          SECTION 4 — RESOURCES
+          ══════════════════════════════════════════════ */}
+      <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>NEED HELP WITH DEBT?</Text>
       <View style={styles.card}>
         <TouchableOpacity onPress={() => Linking.openURL('https://www.stepchange.org')}>
           <Text style={styles.resourceLink}>StepChange — Free debt advice</Text>
@@ -699,7 +733,191 @@ export default function Plan() {
       </View>
     </ScrollView>
   );
+
+  // ── Shared expanded move renderer ──
+
+  function renderExpandedMove(
+    move: Move,
+    i: number,
+    moveKey: string,
+    steps: string[],
+    doneSteps: number[],
+    stepProgress: number,
+    nextStepIdx: number,
+    isActive: boolean,
+  ) {
+    const provider = getProviderForMove(move);
+
+    return (
+      <View style={styles.expandedSection}>
+        <View style={styles.separator} />
+
+        {/* Strategy */}
+        {move.strategy && (
+          <View style={styles.detailBlock}>
+            <Text style={styles.detailLabel}>Strategy</Text>
+            <Text style={styles.detailText}>{stripMd(move.strategy)}</Text>
+          </View>
+        )}
+
+        {/* Merchants breakdown */}
+        {move.merchants && move.merchants.length > 0 && (
+          <View style={styles.detailBlock}>
+            <Text style={styles.detailLabel}>Where your money goes</Text>
+            <View style={styles.merchantList}>
+              {move.merchants.map((m, j) => (
+                <View key={j} style={styles.merchantRow}>
+                  <View style={styles.merchantDot} />
+                  <Text style={styles.merchantName}>{m}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Action checklist */}
+        {steps.length > 0 && (
+          <View style={styles.detailBlock}>
+            <Text style={styles.detailLabel}>Action checklist</Text>
+            {isActive && (
+              <View style={styles.miniProgress}>
+                <View style={styles.miniProgressBar}>
+                  <View style={[styles.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                </View>
+                <Text style={styles.miniProgressText}>{doneSteps.length}/{steps.length} done</Text>
+              </View>
+            )}
+            {steps.map((step, j) => {
+              const isDone = doneSteps.includes(j);
+              const isNext = j === nextStepIdx && isActive;
+              return (
+                <TouchableOpacity
+                  key={j}
+                  style={[styles.checklistRow, isNext && styles.checklistRowNext]}
+                  onPress={() => isActive ? toggleStep(moveKey, j, move.action) : null}
+                  activeOpacity={isActive ? 0.7 : 1}
+                >
+                  {isActive ? (
+                    <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
+                      {isDone && <Text style={styles.checkmark}>{'\u2713'}</Text>}
+                    </View>
+                  ) : (
+                    <Text style={styles.stepNumber}>{j + 1}</Text>
+                  )}
+                  <View style={styles.checklistContent}>
+                    <Text style={[
+                      styles.checklistText,
+                      isDone && isActive && styles.checklistTextDone,
+                    ]}>
+                      {stripMd(step)}
+                    </Text>
+                    {isNext && !isDone && (
+                      <Text style={styles.nextStepLabel}>Do this next</Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Expected outcome */}
+        {move.effect && (
+          <View style={styles.detailBlock}>
+            <Text style={styles.detailLabel}>Expected outcome</Text>
+            <Text style={styles.effectText}>{stripMd(move.effect)}</Text>
+          </View>
+        )}
+
+        {/* Impact breakdown */}
+        <View style={styles.detailBlock}>
+          <Text style={styles.detailLabel}>Impact</Text>
+          <View style={styles.impactGrid}>
+            <View style={styles.impactItem}>
+              <Text style={styles.impactValue}>{'\u00a3'}{move.monthlyImpact || 0}</Text>
+              <Text style={styles.impactLabel}>per month</Text>
+            </View>
+            <View style={styles.impactItem}>
+              <Text style={styles.impactValue}>{'\u00a3'}{move.annualImpact || ((move.monthlyImpact || 0) * 12)}</Text>
+              <Text style={styles.impactLabel}>per year</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Provider contact actions */}
+        {provider && (
+          <View style={styles.providerBlock}>
+            <Text style={styles.detailLabel}>Get help</Text>
+            <View style={styles.providerActions}>
+              {provider.phone && (
+                <TouchableOpacity
+                  style={styles.providerBtn}
+                  onPress={() => Linking.openURL(`tel:${provider.phone}`)}
+                >
+                  <Text style={styles.providerBtnText}>Call {provider.label}</Text>
+                  <Text style={styles.providerBtnSub}>{provider.phone}</Text>
+                </TouchableOpacity>
+              )}
+              {provider.url && (
+                <TouchableOpacity
+                  style={[styles.providerBtn, styles.providerBtnOutline]}
+                  onPress={() => Linking.openURL(provider.url!)}
+                >
+                  <Text style={[styles.providerBtnText, { color: colors.accent }]}>Visit website</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={styles.chatBtn}
+          onPress={() => router.push('/(main)/(tabs)/chat')}
+        >
+          <Text style={styles.chatBtnText}>Ask Bocy about this</Text>
+        </TouchableOpacity>
+
+        {/* Action buttons */}
+        <View style={styles.actionButtons}>
+          {isActive ? (
+            <TouchableOpacity
+              style={styles.removeButton}
+              onPress={() => handleStopMove(i)}
+            >
+              <Text style={styles.removeText}>Remove from plan</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.startBtn}
+              onPress={() => handleStartMove(i, move)}
+            >
+              <Text style={styles.startBtnText}>Start this move</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={styles.deleteBtn}
+            onPress={() => {
+              Alert.alert(
+                'Delete recommendation?',
+                `Permanently remove "${stripMd(move.action)}"?`,
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Delete', style: 'destructive', onPress: () => handleDeleteRecommendation(i) },
+                ],
+              );
+            }}
+          >
+            <Text style={styles.deleteBtnText}>Delete</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 }
+
+// ══════════════════════════════════════════════
+// STYLES
+// ══════════════════════════════════════════════
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
@@ -708,76 +926,520 @@ const styles = StyleSheet.create({
   emptyContainer: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
   emptyTitle: { fontFamily: fonts.semibold, fontSize: 18, color: colors.text, marginBottom: spacing.sm },
   emptyText: { fontFamily: fonts.regular, fontSize: 14, color: colors.dim, textAlign: 'center', lineHeight: 22 },
+
+  // ── Header ──
   heading: { fontFamily: fonts.heading, fontSize: 24, color: colors.text, marginBottom: 2 },
   headingSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.dim, marginBottom: spacing.lg },
-  // ── Progress card ──
-  progressCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
-  progressRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.md },
-  progressLabel: { fontFamily: fonts.regular, fontSize: 12, color: colors.dim, marginBottom: 2 },
-  progressCount: { fontFamily: fonts.semibold, fontSize: 16, color: colors.text },
-  progressRight: { alignItems: 'flex-end' },
-  progressAmount: { fontFamily: fonts.semibold, fontSize: 16, color: colors.accent },
-  progressBar: { height: 6, backgroundColor: colors.border, borderRadius: 3, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: colors.accent, borderRadius: 3, minWidth: 2 },
+
+  // ── Goal trajectory ──
+  trajectoryCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  trajLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: colors.accent,
+    marginBottom: spacing.sm,
+  },
+  trajGoal: {
+    fontFamily: fonts.heading,
+    fontSize: 18,
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  trajTarget: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.dim,
+    marginBottom: spacing.md,
+  },
+  trajTimeline: {
+    marginBottom: spacing.sm,
+  },
+  trajBarRow: {
+    marginBottom: spacing.md,
+  },
+  trajBarBg: {
+    height: 8,
+    backgroundColor: colors.muted,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  trajBarFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+    borderRadius: 4,
+  },
+  trajMonthsRow: {
+    flexDirection: 'row',
+    gap: spacing.lg,
+  },
+  trajMonthItem: {
+    alignItems: 'center',
+  },
+  trajSavedItem: {
+    marginLeft: 'auto',
+  },
+  trajMonthValue: {
+    fontFamily: fonts.heading,
+    fontSize: 24,
+    color: colors.text,
+  },
+  trajMonthLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.dim,
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  trajInsight: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.text2,
+    lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+
+  // ── Section headers ──
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginTop: spacing.xl,
+    marginBottom: spacing.sm,
+  },
+  sectionLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    letterSpacing: 1.5,
+    color: colors.accent,
+  },
+  sectionMeta: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.dim,
+  },
+
   // ── Cards ──
-  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.sm },
-  cardApproved: { borderColor: colors.accentDim },
-  userPlanCard: { borderColor: colors.accent },
-  cardHeader: { flexDirection: 'row', alignItems: 'flex-start' },
-  moveNumberBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.accentDim, justifyContent: 'center', alignItems: 'center', marginRight: spacing.sm, marginTop: 2 },
-  moveNumberApproved: { backgroundColor: colors.accent },
-  planBadge: { backgroundColor: colors.accent },
-  planBadgeText: { fontFamily: fonts.semibold, fontSize: 13, color: colors.bg },
-  moveNumber: { fontFamily: fonts.semibold, fontSize: 13, color: colors.accent },
-  moveNumberTextApproved: { color: colors.bg },
-  cardContent: { flex: 1 },
-  moveAction: { fontFamily: fonts.semibold, fontSize: 15, color: colors.text, marginBottom: spacing.xs, lineHeight: 22 },
-  approvedAction: { color: colors.text2 },
-  moveTimeline: { fontFamily: fonts.medium, fontSize: 12, color: colors.accent, marginBottom: spacing.xs },
-  moveStats: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  moveImpact: { fontFamily: fonts.semibold, fontSize: 13, color: colors.accent },
-  planTarget: { fontFamily: fonts.regular, fontSize: 12, color: colors.dim },
-  effortBadge: { borderRadius: 10, paddingVertical: 2, paddingHorizontal: 8 },
-  effortText: { fontSize: 11, fontFamily: fonts.medium },
-  expandIcon: { fontSize: 10, color: colors.muted, marginLeft: 'auto' },
+  card: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  activeCard: {
+    borderColor: colors.accentDim,
+  },
+  cardHighlight: {
+    borderColor: colors.accent,
+    borderWidth: 2,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  cardContent: {
+    flex: 1,
+  },
+
+  // ── Badges ──
+  badge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.accentDim,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.sm,
+    marginTop: 2,
+  },
+  badgeText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.accent,
+  },
+  badgeActive: {
+    backgroundColor: colors.accent,
+  },
+  badgeActiveText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.bg,
+  },
+
+  // ── Move content ──
+  moveAction: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.text,
+    marginBottom: spacing.xs,
+    lineHeight: 22,
+  },
+  moveStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  impactText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.accent,
+  },
+  effortBadge: {
+    borderRadius: 10,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+  },
+  effortText: {
+    fontSize: 11,
+    fontFamily: fonts.medium,
+  },
+  expandIcon: {
+    fontSize: 10,
+    color: colors.muted,
+    marginLeft: 'auto',
+  },
+
+  // ── Merchant chips ──
+  merchantChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.sm,
+  },
+  merchantChip: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+  },
+  merchantChipText: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.text2,
+  },
+  merchantMore: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.dim,
+    alignSelf: 'center',
+  },
+
+  // ── Mini progress bar ──
+  miniProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  miniProgressBar: {
+    flex: 1,
+    height: 4,
+    backgroundColor: colors.border,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  miniProgressFill: {
+    height: '100%',
+    backgroundColor: colors.accent,
+    borderRadius: 2,
+    minWidth: 1,
+  },
+  miniProgressText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.muted,
+  },
+
+  // ── Impact comparison bars ──
+  impactCompare: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  impactBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  impactBarLabel: {
+    width: 100,
+  },
+  impactBarAction: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.text2,
+  },
+  impactBarTrack: {
+    flex: 1,
+    height: 12,
+    backgroundColor: colors.border,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  impactBarFill: {
+    height: '100%',
+    borderRadius: 6,
+  },
+  impactBarValue: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    fontWeight: '700',
+    width: 54,
+    textAlign: 'right',
+  },
+  impactBarFootnote: {
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    color: colors.muted,
+    textAlign: 'right',
+    marginTop: 2,
+  },
+
   // ── Expanded section ──
   expandedSection: { marginTop: spacing.sm },
   separator: { height: 1, backgroundColor: colors.border, marginBottom: spacing.md },
   detailBlock: { marginBottom: spacing.md },
-  detailLabel: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 0.5, color: colors.dim, textTransform: 'uppercase', marginBottom: spacing.xs },
-  detailText: { fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 },
-  // ── Interactive checklist ──
-  checklistRow: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.04)' },
-  checklistRowNext: { backgroundColor: 'rgba(122,239,199,0.06)', marginHorizontal: -spacing.sm, paddingHorizontal: spacing.sm, borderRadius: radius.sm, borderBottomWidth: 0 },
-  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: colors.muted, marginRight: spacing.sm, marginTop: 1, justifyContent: 'center', alignItems: 'center' },
-  checkboxDone: { backgroundColor: colors.accent, borderColor: colors.accent },
-  checkmark: { fontFamily: fonts.semibold, fontSize: 13, color: colors.bg },
+  detailLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    letterSpacing: 0.5,
+    color: colors.dim,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xs,
+  },
+  detailText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text2,
+    lineHeight: 22,
+  },
+
+  // ── Merchant list ──
+  merchantList: {
+    gap: spacing.xs,
+  },
+  merchantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: 4,
+  },
+  merchantDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.accent,
+  },
+  merchantName: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text2,
+  },
+
+  // ── Checklist ──
+  checklistRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.04)',
+  },
+  checklistRowNext: {
+    backgroundColor: 'rgba(122,239,199,0.06)',
+    marginHorizontal: -spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    borderBottomWidth: 0,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.muted,
+    marginRight: spacing.sm,
+    marginTop: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxDone: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  checkmark: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.bg,
+  },
   checklistContent: { flex: 1 },
-  checklistText: { fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 },
-  checklistTextDone: { textDecorationLine: 'line-through', color: colors.muted },
-  nextStepLabel: { fontFamily: fonts.semibold, fontSize: 10, letterSpacing: 0.5, color: colors.accent, marginTop: 2, textTransform: 'uppercase' },
-  stepProgressWrap: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs, marginBottom: spacing.xs },
-  stepProgressBar: { flex: 1, height: 4, backgroundColor: colors.border, borderRadius: 2, overflow: 'hidden' },
-  stepProgressFill: { height: '100%', backgroundColor: colors.accent, borderRadius: 2, minWidth: 1 },
-  stepProgressText: { fontFamily: fonts.mono, fontSize: 11, color: colors.muted },
-  stepNumber: { fontFamily: fonts.semibold, fontSize: 13, color: colors.accent, width: 22, marginRight: spacing.sm, textAlign: 'center', marginTop: 1 },
-  effectText: { fontFamily: fonts.medium, fontSize: 14, color: colors.accent, lineHeight: 22 },
-  impactGrid: { flexDirection: 'row', gap: spacing.md },
-  impactItem: { flex: 1, backgroundColor: colors.accentDim, borderRadius: radius.sm, padding: spacing.sm, alignItems: 'center' },
-  impactValue: { fontFamily: fonts.heading, fontSize: 18, color: colors.accent },
-  impactLabel: { fontFamily: fonts.regular, fontSize: 11, color: colors.accent, marginTop: 2 },
+  checklistText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text2,
+    lineHeight: 22,
+  },
+  checklistTextDone: {
+    textDecorationLine: 'line-through',
+    color: colors.muted,
+  },
+  nextStepLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    color: colors.accent,
+    marginTop: 2,
+    textTransform: 'uppercase',
+  },
+  stepNumber: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.accent,
+    width: 22,
+    marginRight: spacing.sm,
+    textAlign: 'center',
+    marginTop: 1,
+  },
+
+  // ── Impact grid ──
+  effectText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.accent,
+    lineHeight: 22,
+  },
+  impactGrid: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  impactItem: {
+    flex: 1,
+    backgroundColor: colors.accentDim,
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    alignItems: 'center',
+  },
+  impactValue: {
+    fontFamily: fonts.heading,
+    fontSize: 18,
+    color: colors.accent,
+  },
+  impactLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.accent,
+    marginTop: 2,
+  },
+
+  // ── Provider contact ──
+  providerBlock: {
+    marginBottom: spacing.md,
+  },
+  providerActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  providerBtn: {
+    flex: 1,
+    backgroundColor: colors.accentDim,
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  providerBtnOutline: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.accentDim,
+  },
+  providerBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: colors.bg,
+  },
+  providerBtnSub: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.bg,
+    marginTop: 2,
+    opacity: 0.7,
+  },
+
   // ── Buttons ──
-  chatBtn: { borderWidth: 1.5, borderColor: colors.accentDim, borderRadius: radius.md, paddingVertical: 12, alignItems: 'center', marginBottom: spacing.sm },
-  chatBtnText: { fontFamily: fonts.semibold, fontSize: 14, color: colors.accent },
-  actionButtons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
-  startBtn: { flex: 1, backgroundColor: colors.accent, paddingVertical: 14, borderRadius: radius.md, alignItems: 'center' },
-  startBtnText: { fontFamily: fonts.semibold, fontSize: 15, color: colors.bg },
-  removeButton: { flex: 1, borderWidth: 1, borderColor: colors.border, paddingVertical: 14, borderRadius: radius.md, alignItems: 'center' },
-  removeText: { fontFamily: fonts.medium, fontSize: 14, color: colors.dim },
-  deleteBtn: { flex: 1, backgroundColor: 'rgba(232,114,114,0.08)', borderWidth: 1, borderColor: 'rgba(232,114,114,0.2)', paddingVertical: 14, borderRadius: radius.md, alignItems: 'center' },
-  deleteBtnText: { fontFamily: fonts.medium, fontSize: 14, color: colors.coral },
-  quickDiscardBtn: { position: 'absolute', top: spacing.lg, right: spacing.lg, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, backgroundColor: 'rgba(232,96,99,0.08)' },
-  quickDiscardText: { fontFamily: fonts.medium, fontSize: 11, color: colors.coral },
-  sectionLabel: { fontFamily: fonts.semibold, fontSize: 11, letterSpacing: 1.5, color: colors.accent, marginBottom: spacing.sm, marginTop: spacing.xl },
-  resourceLink: { fontFamily: fonts.regular, fontSize: 14, color: colors.sky, paddingVertical: spacing.xs, textDecorationLine: 'underline' },
+  chatBtn: {
+    borderWidth: 1.5,
+    borderColor: colors.accentDim,
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  chatBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.accent,
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  startBtn: {
+    flex: 1,
+    backgroundColor: colors.accent,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  startBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.bg,
+  },
+  removeButton: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  removeText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.dim,
+  },
+  deleteBtn: {
+    flex: 1,
+    backgroundColor: 'rgba(232,114,114,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(232,114,114,0.2)',
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  deleteBtnText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.coral,
+  },
+
+  // ── Resources ──
+  resourceLink: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.sky,
+    paddingVertical: spacing.xs,
+    textDecorationLine: 'underline',
+  },
 });

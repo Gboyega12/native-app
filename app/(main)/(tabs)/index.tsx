@@ -865,9 +865,9 @@ export default function Home() {
                     <View style={styles.moveActions}>
                       <TouchableOpacity
                         style={styles.moveApproveBtn}
-                        onPress={() => router.push('/(main)/(tabs)/plan')}
+                        onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlight: String(i) } })}
                       >
-                        <Text style={styles.moveApproveBtnText}>Approve</Text>
+                        <Text style={styles.moveApproveBtnText}>View</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.moveDeleteBtn}
