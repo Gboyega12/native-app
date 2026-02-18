@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform,
-  LayoutAnimation,
+  LayoutAnimation, Animated, Easing,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -407,7 +407,8 @@ export default function Connect() {
     }
 
     clearConnectState();
-    router.push({ pathname: '/(main)/processing', params: { csvData: mergedCSV } });
+    // Onboarding: go to Goals first, then Goals routes to Processing
+    router.push({ pathname: '/(main)/goals', params: { csvData: mergedCSV } });
   };
 
   const anyLoading = loading || loadingCSV || loadingPDF;
@@ -423,108 +424,231 @@ export default function Connect() {
     );
   }
 
+  // ── Onboarding flow: primary account connected state ──
+  const primaryConnected = connectedCount > 0 && !isFromProfile;
+  const fadeIn = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (primaryConnected) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      Animated.timing(fadeIn, {
+        toValue: 1,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [primaryConnected]);
+
+  // Profile flow — simple add connection UI
+  if (isFromProfile) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.content}>
+          <Text style={styles.title}>Add a connection</Text>
+          <Text style={styles.subtitle}>
+            Connect a bank account for transactions or a credit card for balance tracking.
+          </Text>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, loading && styles.buttonDisabled]}
+            onPress={handleTrueLayer}
+            disabled={anyLoading}
+          >
+            {loading ? (
+              <ActivityIndicator color={colors.bg} />
+            ) : (
+              <Text style={styles.primaryButtonText}>Connect via Open Banking</Text>
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.trustRow}>
+            <TrustBadge text="FCA regulated" />
+            <TrustBadge text="Read-only access" />
+            <TrustBadge text="Data on device" />
+          </View>
+
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or upload a statement</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <View style={styles.uploadRow}>
+            <TouchableOpacity
+              style={[styles.uploadButton, loadingPDF && styles.buttonDisabled]}
+              onPress={handlePDFUpload}
+              disabled={anyLoading}
+            >
+              {loadingPDF ? (
+                <ActivityIndicator color={colors.text} />
+              ) : (
+                <>
+                  <Text style={styles.uploadIcon}>PDF</Text>
+                  <Text style={styles.uploadButtonText}>PDF statement</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.uploadButton, loadingCSV && styles.buttonDisabled]}
+              onPress={handleCSVUpload}
+              disabled={anyLoading}
+            >
+              {loadingCSV ? (
+                <ActivityIndicator color={colors.text} />
+              ) : (
+                <>
+                  <Text style={styles.uploadIcon}>CSV</Text>
+                  <Text style={styles.uploadButtonText}>CSV export</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.hint}>
+            Download your statement from your banking app as PDF or CSV
+          </Text>
+
+          {statusMsg ? <Text style={styles.statusText}>{statusMsg}</Text> : null}
+          {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
+        </View>
+      </View>
+    );
+  }
+
+  // ── Onboarding flow ──
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        {/* Success banner for connected accounts */}
-        {connectedCount > 0 && !isFromProfile && (
-          <View style={styles.successBanner}>
-            <View style={styles.successCountBadge}>
-              <Text style={styles.successCountText}>{connectedCount}</Text>
+        {/* ── State: Primary account connected ── */}
+        {primaryConnected ? (
+          <Animated.View style={{ opacity: fadeIn, transform: [{ translateY: fadeIn.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
+            {/* Success indicator */}
+            <View style={styles.successGlyph}>
+              <Text style={styles.successGlyphText}>{'\u2713'}</Text>
             </View>
-            <Text style={styles.successText}>
-              {connectedCount} account{connectedCount > 1 ? 's' : ''} connected
-              {lastConnectedName ? ` (${lastConnectedName})` : ''}
+
+            <Text style={styles.successTitle}>Primary account connected</Text>
+            <Text style={styles.successSubtitle}>
+              {lastConnectedName ? `${lastConnectedName} is now linked. ` : ''}
+              We have what we need to analyse your finances.
             </Text>
-          </View>
+
+            {/* Continue CTA */}
+            <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
+              <Text style={styles.continueText}>
+                Continue to set your goals
+              </Text>
+            </TouchableOpacity>
+
+            {/* Secondary: add more */}
+            <View style={styles.addMoreSection}>
+              <View style={styles.addMoreDivider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>want a fuller picture?</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <Text style={styles.addMoreHint}>
+                Connect additional accounts now, or add them later in your Profile for a holistic view of your finances.
+              </Text>
+
+              <View style={styles.addMoreRow}>
+                <TouchableOpacity
+                  style={[styles.addMoreBtn, loading && styles.buttonDisabled]}
+                  onPress={handleTrueLayer}
+                  disabled={anyLoading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color={colors.text} size="small" />
+                  ) : (
+                    <Text style={styles.addMoreBtnText}>+ Add another account</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {connectedCount > 1 && (
+                <Text style={styles.addMoreCount}>
+                  {connectedCount} accounts connected
+                </Text>
+              )}
+            </View>
+          </Animated.View>
+        ) : (
+          /* ── State: No account connected yet ── */
+          <>
+            <Text style={styles.stepLabel}>STEP 1 OF 3</Text>
+
+            <Text style={styles.title}>Connect your{'\n'}primary bank account</Text>
+            <Text style={styles.subtitle}>
+              This is the account you use most — where your salary lands and bills go out. Bocy needs your transaction history to build your personalised action plan.
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, loading && styles.buttonDisabled]}
+              onPress={handleTrueLayer}
+              disabled={anyLoading}
+            >
+              {loading ? (
+                <ActivityIndicator color={colors.bg} />
+              ) : (
+                <Text style={styles.primaryButtonText}>Connect via Open Banking</Text>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.trustRow}>
+              <TrustBadge text="FCA regulated" />
+              <TrustBadge text="Read-only access" />
+              <TrustBadge text="Data on device" />
+            </View>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or upload a statement</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <View style={styles.uploadRow}>
+              <TouchableOpacity
+                style={[styles.uploadButton, loadingPDF && styles.buttonDisabled]}
+                onPress={handlePDFUpload}
+                disabled={anyLoading}
+              >
+                {loadingPDF ? (
+                  <ActivityIndicator color={colors.text} />
+                ) : (
+                  <>
+                    <Text style={styles.uploadIcon}>PDF</Text>
+                    <Text style={styles.uploadButtonText}>PDF statement</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.uploadButton, loadingCSV && styles.buttonDisabled]}
+                onPress={handleCSVUpload}
+                disabled={anyLoading}
+              >
+                {loadingCSV ? (
+                  <ActivityIndicator color={colors.text} />
+                ) : (
+                  <>
+                    <Text style={styles.uploadIcon}>CSV</Text>
+                    <Text style={styles.uploadButtonText}>CSV export</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.hint}>
+              Download your statement from your banking app as PDF or CSV
+            </Text>
+          </>
         )}
 
-        <Text style={styles.title}>
-          {isFromProfile ? 'Add a connection' : connectedCount > 0 ? 'Add another account?' : 'Connect your bank'}
-        </Text>
-        <Text style={styles.subtitle}>
-          {isFromProfile
-            ? 'Connect a bank account for transactions or a credit card for balance tracking.'
-            : connectedCount > 0
-              ? 'Connect more accounts for a complete picture, or continue to analyse your finances.'
-              : 'We need your transaction data to identify your most impactful financial move.'}
-        </Text>
-
-        <TouchableOpacity
-          style={[styles.primaryButton, loading && styles.buttonDisabled]}
-          onPress={handleTrueLayer}
-          disabled={anyLoading}
-        >
-          {loading ? (
-            <ActivityIndicator color={colors.bg} />
-          ) : (
-            <Text style={styles.primaryButtonText}>Connect via Open Banking</Text>
-          )}
-        </TouchableOpacity>
-
-        <View style={styles.trustRow}>
-          <TrustBadge text="FCA regulated" />
-          <TrustBadge text="Read-only access" />
-          <TrustBadge text="Data on device" />
-        </View>
-
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or upload a statement</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        <View style={styles.uploadRow}>
-          <TouchableOpacity
-            style={[styles.uploadButton, loadingPDF && styles.buttonDisabled]}
-            onPress={handlePDFUpload}
-            disabled={anyLoading}
-          >
-            {loadingPDF ? (
-              <ActivityIndicator color={colors.text} />
-            ) : (
-              <>
-                <Text style={styles.uploadIcon}>PDF</Text>
-                <Text style={styles.uploadButtonText}>PDF statement</Text>
-              </>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.uploadButton, loadingCSV && styles.buttonDisabled]}
-            onPress={handleCSVUpload}
-            disabled={anyLoading}
-          >
-            {loadingCSV ? (
-              <ActivityIndicator color={colors.text} />
-            ) : (
-              <>
-                <Text style={styles.uploadIcon}>CSV</Text>
-                <Text style={styles.uploadButtonText}>CSV export</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.hint}>
-          Download your statement from your banking app as PDF or CSV
-        </Text>
-
-        {/* Continue button — only in onboarding when at least one account connected */}
-        {connectedCount > 0 && !isFromProfile && (
-          <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-            <Text style={styles.continueText}>
-              Continue with {connectedCount} account{connectedCount > 1 ? 's' : ''} {'>'}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {statusMsg ? (
-          <Text style={styles.statusText}>{statusMsg}</Text>
-        ) : null}
-        {errorMsg ? (
-          <Text style={styles.errorText}>{errorMsg}</Text>
-        ) : null}
+        {statusMsg ? <Text style={styles.statusText}>{statusMsg}</Text> : null}
+        {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
       </View>
     </View>
   );
@@ -619,37 +743,84 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // ── Success banner ──
-  successBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(122,239,199,0.08)',
-    borderWidth: 1,
-    borderColor: colors.accentDim,
-    borderRadius: radius.md,
-    padding: 12,
-    marginBottom: spacing.lg,
-    gap: 10,
+  // ── Step label ──
+  stepLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 2,
+    color: colors.dim,
+    textTransform: 'uppercase',
+    marginBottom: spacing.md,
   },
-  successCountBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colors.accent,
+
+  // ── Success (primary connected) ──
+  successGlyph: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.green,
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: spacing.lg,
   },
-  successCountText: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
+  successGlyphText: {
+    fontFamily: fonts.heading,
+    fontSize: 24,
     color: colors.bg,
   },
-  successText: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: colors.accent,
-    flex: 1,
+  successTitle: {
+    fontFamily: fonts.heading,
+    fontSize: 22,
+    color: colors.text,
+    marginBottom: spacing.sm,
   },
+  successSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text2,
+    lineHeight: 22,
+    marginBottom: spacing.xl,
+  },
+
+  // ── Add more section (after primary connected) ──
+  addMoreSection: {
+    marginTop: spacing.xl,
+  },
+  addMoreDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  addMoreHint: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    lineHeight: 20,
+    marginBottom: spacing.md,
+  },
+  addMoreRow: {
+    flexDirection: 'row',
+  },
+  addMoreBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+  },
+  addMoreBtnText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.text2,
+  },
+  addMoreCount: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.green,
+    marginTop: spacing.sm,
+  },
+
   title: {
     fontFamily: fonts.heading,
     fontSize: 22,

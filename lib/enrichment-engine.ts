@@ -1115,16 +1115,30 @@ const EnrichmentEngine = {
   },
 
   _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {
-    const counts: Record<string, number> = {};
+    // Count occurrences per normalised merchant name
+    const counts: Record<string, { count: number; bestName: string }> = {};
     for (const t of txs) {
       if (t.category === category && !t.isIncome && !t.isTransfer && !t.isRefund) {
-        counts[t.merchant] = (counts[t.merchant] || 0) + 1;
+        // Use normalised description as the dedup key
+        const raw = t.merchant || t.description;
+        const key = normaliseDescription(raw);
+        if (!key) continue;
+        if (!counts[key]) counts[key] = { count: 0, bestName: raw };
+        counts[key].count++;
+        // Prefer shorter names (more likely to be a clean merchant name)
+        if (raw.length < counts[key].bestName.length) counts[key].bestName = raw;
       }
     }
+
     return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
+      .sort((a, b) => b[1].count - a[1].count)
       .slice(0, 5)
-      .map(([name]) => name);
+      .map(([, { bestName }]) => this._titleCase(normaliseDescription(bestName)));
+  },
+
+  /** Title-case a normalised merchant name: "deliveroo london" → "Deliveroo London" */
+  _titleCase(s: string): string {
+    return s.replace(/\b\w/g, (c) => c.toUpperCase());
   },
 };
 

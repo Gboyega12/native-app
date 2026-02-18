@@ -170,10 +170,13 @@ export default function Home() {
 
       if (insertError) {
         console.warn('[home] Failed to insert budget item:', insertError.message, 'code:', insertError.code, 'status:', status);
-        if (insertError.code === '42501' || insertError.message?.includes('policy')) {
+        const msg = insertError.message || '';
+        if (msg.includes('schema cache') || msg.includes('relation') || msg.includes('does not exist') || insertError.code === '42P01') {
+          setAddItemError('The budget_adjustments table hasn\'t been created yet. Run the SQL in supabase-budget-adjustments.sql in your Supabase SQL Editor (Dashboard > SQL Editor > New query).');
+        } else if (insertError.code === '42501' || msg.includes('policy')) {
           setAddItemError('Permission error. The app needs to be re-authorised — try signing out and back in.');
         } else {
-          setAddItemError(`Could not save: ${insertError.message || 'Unknown error'}. Please try again.`);
+          setAddItemError(`Could not save: ${msg || 'Unknown error'}. Please try again.`);
         }
         setAddItemSaving(false);
         return;

@@ -328,7 +328,7 @@ function ProcessingInner() {
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.moves)) {
-          // Merge Claude's refined text with our ranked data
+          // Merge Claude's refined text + cleaned merchants with our ranked data
           refinedMoves = top3.map((original, i) => {
             const refined = data.moves[i];
             if (!refined) return original;
@@ -339,6 +339,7 @@ function ProcessingInner() {
               steps: refined.steps || original.steps,
               effect: refined.effect || original.effect,
               timeline: refined.timeline || original.timeline,
+              merchants: (refined.merchants && refined.merchants.length > 0) ? refined.merchants : original.merchants,
             };
           });
         }
