@@ -88,11 +88,8 @@ CREATE POLICY "Users can read own bank data"
 CREATE POLICY "Authenticated users can read unclaimed bank data"
   ON bank_data FOR SELECT USING (user_id IS NULL AND auth.role() = 'authenticated');
 
-CREATE POLICY "Service role can insert bank data"
-  ON bank_data FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Service role can update bank data"
-  ON bank_data FOR UPDATE USING (true);
+-- No INSERT or UPDATE policies needed for client-side access.
+-- All writes to bank_data are performed via the service role (which bypasses RLS).
 
 CREATE POLICY "Users can delete own bank data"
   ON bank_data FOR DELETE USING (auth.uid() = user_id);
