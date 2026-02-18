@@ -5,14 +5,52 @@
 // Batches unclassified descriptions → Claude Haiku → structured JSON
 // with merchant name, category, essential/subscription/debt flags.
 //
+// Includes an in-memory classification cache so the same description
+// is never sent to Claude twice across requests within the same server
+// process. Cache entries expire after 24 hours.
+//
 // Claude's world knowledge handles cases rules can't:
 //   "to Amex"          → Debt Payments (credit card)
 //   "Claude.ai"        → Subscriptions (AI tool)
 //   "THE BARBERSHOP"   → Personal Care (discretionary)
 //   "DVLA VEHICLE TAX" → Transport (essential)
 
-const MAX_RETRIES = 2;
+const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MAX_CACHE_SIZE = 2000;
+
+// ── In-memory classification cache ──
+// Key: normalised description (lowercase, trimmed)
+// Value: { classification, timestamp }
+const classificationCache = new Map();
+
+function getCacheKey(description) {
+  return (description || '').toLowerCase().trim();
+}
+
+function getCached(description) {
+  const key = getCacheKey(description);
+  const entry = classificationCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    classificationCache.delete(key);
+    return null;
+  }
+  return entry.classification;
+}
+
+function setCache(description, classification) {
+  // Evict oldest entries if cache is full
+  if (classificationCache.size >= MAX_CACHE_SIZE) {
+    const firstKey = classificationCache.keys().next().value;
+    classificationCache.delete(firstKey);
+  }
+  classificationCache.set(getCacheKey(description), {
+    classification,
+    timestamp: Date.now(),
+  });
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -47,8 +85,32 @@ export default async function handler(req, res) {
 
   // Cap batch size to keep prompt reasonable and fast
   const batch = transactions.slice(0, 50);
+
+  // ── Check cache for already-classified descriptions ──
+  const results = new Array(batch.length).fill(null);
+  const uncached = [];
+
+  for (let i = 0; i < batch.length; i++) {
+    const cached = getCached(batch[i].description);
+    if (cached) {
+      results[i] = { ...cached, index: i };
+    } else {
+      uncached.push({ tx: batch[i], originalIndex: i });
+    }
+  }
+
+  const cacheHits = batch.length - uncached.length;
+  if (cacheHits > 0) {
+    console.log(`[classify] Cache: ${cacheHits}/${batch.length} hits, ${uncached.length} to classify`);
+  }
+
+  // If everything was cached, return immediately
+  if (uncached.length === 0) {
+    return res.json({ success: true, classifications: results, cacheHits });
+  }
+
   const model = process.env.CLAUDE_CLASSIFY_MODEL || process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
-  const prompt = buildClassifyPrompt(batch);
+  const prompt = buildClassifyPrompt(uncached.map((u) => u.tx));
 
   let lastError = null;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -79,20 +141,44 @@ export default async function handler(req, res) {
           return res.json({ success: false, classifications: [], error: 'not_array' });
         }
 
-        // Validate and sanitize each classification
-        const classifications = parsed.map((item, i) => ({
-          index: item.index ?? i,
-          merchant: sanitize(item.merchant || batch[i]?.description || 'Unknown', 100),
-          category: VALID_CATEGORIES.includes(item.category) ? item.category : 'Other',
-          isEssential: Boolean(item.isEssential),
-          isSubscription: Boolean(item.isSubscription),
-          isDebt: Boolean(item.isDebt),
-          isBNPL: Boolean(item.isBNPL),
-          isIncome: Boolean(item.isIncome),
-          confidence: item.confidence === 'high' ? 'high' : 'medium',
-        }));
+        // Validate, sanitize, and cache each classification
+        parsed.forEach((item, i) => {
+          const entry = uncached[i];
+          if (!entry) return;
 
-        return res.json({ success: true, classifications });
+          const classification = {
+            merchant: sanitize(item.merchant || entry.tx.description || 'Unknown', 100),
+            category: VALID_CATEGORIES.includes(item.category) ? item.category : 'Other',
+            isEssential: Boolean(item.isEssential),
+            isSubscription: Boolean(item.isSubscription),
+            isDebt: Boolean(item.isDebt),
+            isBNPL: Boolean(item.isBNPL),
+            isIncome: Boolean(item.isIncome),
+            confidence: item.confidence === 'high' ? 'high' : 'medium',
+          };
+
+          results[entry.originalIndex] = { ...classification, index: entry.originalIndex };
+
+          // Cache successful non-Other classifications
+          if (classification.category !== 'Other') {
+            setCache(entry.tx.description, classification);
+          }
+        });
+
+        // Fill any remaining gaps (if Claude returned fewer results)
+        const classifications = results.map((r, i) => r || {
+          index: i,
+          merchant: sanitize(batch[i]?.description || 'Unknown', 100),
+          category: 'Other',
+          isEssential: false,
+          isSubscription: false,
+          isDebt: false,
+          isBNPL: false,
+          isIncome: false,
+          confidence: 'low',
+        });
+
+        return res.json({ success: true, classifications, cacheHits });
       } catch {
         return res.json({ success: false, classifications: [], error: 'parse_failed' });
       }

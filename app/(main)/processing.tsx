@@ -235,6 +235,7 @@ function ProcessingInner() {
                   tx.isBNPL = c.isBNPL || tx.isBNPL;
                   tx.isIncome = c.isIncome || tx.isIncome;
                   tx.confidence = c.confidence || 'medium';
+                  tx.classifiedBy = 'claude_ai';
                   updated[entry.originalIndex] = tx;
                 });
               }
@@ -471,6 +472,10 @@ function ProcessingInner() {
         _enrichmentResult: result,
         _archetype: result.archetype,
         _decisionScore: result.decisionScore,
+        _enrichmentMetrics: result.enrichmentMetrics,
+        _unresolvedCount: result.enrichedTransactions.filter(
+          (t) => t.category === 'Other' && !t.isIncome && !t.isTransfer && !t.isRefund
+        ).length,
       } as any;
 
       // Show personalised first insight before navigating

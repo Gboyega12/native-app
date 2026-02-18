@@ -18,6 +18,8 @@ export interface EnrichedTransaction extends RawTransaction {
   isRefund: boolean;
   isSavings: boolean;
   confidence: 'high' | 'medium' | 'low';
+  /** Which classification layer resolved this transaction */
+  classifiedBy?: 'user_override' | 'merchant_db' | 'fuzzy_match' | 'keyword' | 'claude_ai' | 'default';
 }
 
 // ── Recurring ──
@@ -178,6 +180,25 @@ export interface GoalTrajectory {
   insight: string;
 }
 
+// ── Enrichment Metrics ──
+
+export interface EnrichmentMetrics {
+  totalTransactions: number;
+  highConfidence: number;
+  mediumConfidence: number;
+  lowConfidence: number;
+  /** Percentage of transactions classified as 'Other' (unresolved) */
+  otherRate: number;
+  /** Which classification layer resolved each transaction */
+  bySource: {
+    userOverride: number;
+    merchantDb: number;
+    fuzzyMatch: number;
+    keyword: number;
+    unresolved: number;
+  };
+}
+
 // ── Enrichment Engine Output ──
 
 export interface EnrichmentResult {
@@ -190,6 +211,7 @@ export interface EnrichmentResult {
   decisionStack: Move[];
   behavioralPatterns: string[];
   enrichedTransactions: EnrichedTransaction[];
+  enrichmentMetrics: EnrichmentMetrics;
 }
 
 // ── Chat ──

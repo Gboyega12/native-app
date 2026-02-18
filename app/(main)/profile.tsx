@@ -572,7 +572,7 @@ const s = StyleSheet.create({
     borderColor: 'rgba(232,114,114,0.25)',
   },
   accountCardBank: {
-    borderColor: 'rgba(0,255,135,0.20)',
+    borderColor: 'rgba(0,212,170,0.20)',
   },
   accountRow: {
     flexDirection: 'row',

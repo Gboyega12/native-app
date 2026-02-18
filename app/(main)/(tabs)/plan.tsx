@@ -1424,12 +1424,12 @@ const styles = StyleSheet.create({
 
   // ── Emergency fund info ──
   emergencyInfoBox: {
-    backgroundColor: 'rgba(0,255,135,0.06)',
+    backgroundColor: 'rgba(0,212,170,0.06)',
     borderRadius: 12,
     padding: 14,
     marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(0,255,135,0.12)',
+    borderColor: 'rgba(0,212,170,0.12)',
   },
   emergencyInfoHeader: {
     flexDirection: 'row',
@@ -1446,7 +1446,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(0,255,135,0.4)',
+    borderColor: 'rgba(0,212,170,0.4)',
     borderRadius: 10,
     overflow: 'hidden',
   },
