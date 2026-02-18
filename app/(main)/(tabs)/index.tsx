@@ -96,13 +96,20 @@ export default function Home() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      await supabase.from('budget_adjustments').insert({
+      const { error: insertError } = await supabase.from('budget_adjustments').insert({
         user_id: user.id,
         description: addItemDesc.trim(),
         category: addItemCategory,
         monthly_amount: amount,
         is_essential: addItemEssential,
       });
+
+      if (insertError) {
+        console.warn('[home] Failed to insert budget item:', insertError.message);
+        Alert.alert('Save failed', 'Could not save budget item. Please try again.');
+        setAddItemSaving(false);
+        return;
+      }
 
       // Optimistic update: merge the new item directly into current analysis state
       if (analysis) {
@@ -598,6 +605,16 @@ export default function Home() {
           goal_context: rawAnalysis.goal_context,
         });
       }
+
+      // Re-fetch budget adjustments right before merging so we capture
+      // any items the user added while the sync was running.
+      try {
+        const { data: freshAdj } = await supabase
+          .from('budget_adjustments')
+          .select('description, category, monthly_amount, is_essential')
+          .eq('user_id', userId);
+        if (freshAdj) budgetAdjustments = freshAdj;
+      } catch {}
 
       // Apply budget adjustments for display only (not saved)
       const updatedAnalysis = mergeAdjustments(rawAnalysis, budgetAdjustments);
