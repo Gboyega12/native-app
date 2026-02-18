@@ -1226,6 +1226,16 @@ export default function Home() {
                 )}
 
                 <Text style={styles.cardFooter}>Tap any category to expand transactions</Text>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    setBudgetExpanded(false);
+                  }}
+                  style={styles.viewTransactionsBtn}
+                >
+                  <Text style={styles.viewTransactionsText}>Hide transactions</Text>
+                </TouchableOpacity>
               </>
             )}
 

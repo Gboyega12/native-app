@@ -13,12 +13,18 @@ SplashScreen.preventAutoHideAsync();
 // This is critical because app/index.tsx's <Redirect> fires during render and
 // clears the URL params before useEffect can read them.
 let _pendingOAuth: { code: string; state: string } | null = null;
+let _emailConfirmed = false;
 if (typeof window !== 'undefined') {
   const p = new URLSearchParams(window.location.search);
   const code = p.get('code');
   const state = p.get('state');
   if (code && state) {
     _pendingOAuth = { code, state };
+  }
+  // Detect email confirmation redirect (Supabase appends #...&type=signup)
+  const hash = window.location.hash;
+  if (hash.includes('type=signup') || hash.includes('type=email')) {
+    _emailConfirmed = true;
   }
 }
 
@@ -39,6 +45,18 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready) return;
     const inAuth = segments[0] === '(auth)';
+
+    // Email confirmation opened in email browser — sign out to prevent
+    // onboarding in the wrong browser. Show confirmation on sign-in instead.
+    if (session && _emailConfirmed) {
+      _emailConfirmed = false;
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('_emailConfirmed', '1');
+      }
+      supabase.auth.signOut();
+      router.replace('/(auth)/sign-in');
+      return;
+    }
 
     // Forward captured OAuth code+state to the connect screen
     if (session && _pendingOAuth) {

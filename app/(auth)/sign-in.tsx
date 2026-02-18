@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView,
   Platform, ScrollView, ActivityIndicator,
@@ -13,6 +13,16 @@ export default function SignIn() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [emailConfirmed, setEmailConfirmed] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (sessionStorage.getItem('_emailConfirmed')) {
+        sessionStorage.removeItem('_emailConfirmed');
+        setEmailConfirmed(true);
+      }
+    }
+  }, []);
 
   const handleSignIn = async () => {
     if (!email.trim() || !password.trim()) {
@@ -46,6 +56,12 @@ export default function SignIn() {
           <Text style={styles.logo}>Bocy</Text>
           <Text style={styles.subtitle}>AI financial strategist</Text>
         </View>
+
+        {emailConfirmed && (
+          <View style={styles.confirmedBanner}>
+            <Text style={styles.confirmedText}>Email confirmed! Sign in to continue.</Text>
+          </View>
+        )}
 
         <View style={styles.form}>
           <TextInput
@@ -160,6 +176,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   linkAccent: {
+    color: colors.accent,
+  },
+  confirmedBanner: {
+    backgroundColor: 'rgba(122, 239, 199, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(122, 239, 199, 0.3)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    alignItems: 'center',
+  },
+  confirmedText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
     color: colors.accent,
   },
 });
