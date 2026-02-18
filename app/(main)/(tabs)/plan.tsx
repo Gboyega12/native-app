@@ -518,45 +518,47 @@ export default function Plan() {
 
       {/* ── Info modal ── */}
       <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}>
-        <TouchableOpacity style={styles.infoOverlay} activeOpacity={1} onPress={() => setShowInfo(false)}>
+        <View style={styles.infoOverlay}>
           <View style={styles.infoModal}>
-            <Text style={styles.infoTitle}>How your plan works</Text>
+            <ScrollView showsVerticalScrollIndicator={false} bounces={false} style={styles.infoScroll} contentContainerStyle={styles.infoScrollContent}>
+              <Text style={styles.infoTitle}>How your plan works</Text>
 
-            <Text style={styles.infoHeading}>Goal trajectory</Text>
-            <Text style={styles.infoBody}>
-              Shows how many months to reach your goal if you follow the plan, compared to doing nothing.
-            </Text>
+              <Text style={styles.infoHeading}>Goal trajectory</Text>
+              <Text style={styles.infoBody}>
+                Shows how many months to reach your goal if you follow the plan, compared to doing nothing.
+              </Text>
 
-            <Text style={styles.infoHeading}>In progress</Text>
-            <Text style={styles.infoBody}>
-              Moves you've started. Track steps with the checklist. Your monthly savings total is shown at the top.
-            </Text>
+              <Text style={styles.infoHeading}>In progress</Text>
+              <Text style={styles.infoBody}>
+                Moves you've started. Track steps with the checklist. Your monthly savings total is shown at the top.
+              </Text>
 
-            <Text style={styles.infoHeading}>Recommended</Text>
-            <Text style={styles.infoBody}>
-              Personalised opportunities ranked by annual impact. Tap to expand details, strategy, and action steps.
-            </Text>
+              <Text style={styles.infoHeading}>Recommended</Text>
+              <Text style={styles.infoBody}>
+                Personalised opportunities ranked by annual impact. Tap to expand details, strategy, and action steps.
+              </Text>
 
-            <Text style={styles.infoHeading}>Effort levels</Text>
-            <Text style={styles.infoBody}>
-              Quick win = minimal effort.{'\n'}Some effort = takes a bit of time.{'\n'}Big move = significant change but highest reward.
-            </Text>
+              <Text style={styles.infoHeading}>Effort levels</Text>
+              <Text style={styles.infoBody}>
+                Quick win = minimal effort.{'\n'}Some effort = takes a bit of time.{'\n'}Big move = significant change but highest reward.
+              </Text>
 
-            <Text style={styles.infoHeading}>Take action</Text>
-            <Text style={styles.infoBody}>
-              Each move has direct links or buttons to help you act — compare rates, call providers, or ask Bocy for personalised advice.
-            </Text>
+              <Text style={styles.infoHeading}>Take action</Text>
+              <Text style={styles.infoBody}>
+                Each move has direct links or buttons to help you act — compare rates, call providers, or ask Bocy for personalised advice.
+              </Text>
 
-            <Text style={styles.infoHeading}>Automatic tracking</Text>
-            <Text style={styles.infoBody}>
-              Recommendations are automatically tracked when Bocy re-analyses your bank data. As your spending patterns change, new transactions come in, and debts are paid down, Bocy re-evaluates your recommendations and updates progress automatically — no manual input needed. Dismissed or completed recommendations won't reappear.
-            </Text>
+              <Text style={styles.infoHeading}>Automatic tracking</Text>
+              <Text style={styles.infoBody}>
+                Recommendations are automatically tracked when Bocy re-analyses your bank data. As your spending patterns change, new transactions come in, and debts are paid down, Bocy re-evaluates your recommendations and updates progress automatically — no manual input needed. Dismissed or completed recommendations won't reappear.
+              </Text>
 
-            <TouchableOpacity style={styles.infoClose} onPress={() => setShowInfo(false)} activeOpacity={0.8}>
-              <Text style={styles.infoCloseText}>Got it</Text>
-            </TouchableOpacity>
+              <TouchableOpacity style={styles.infoClose} onPress={() => setShowInfo(false)} activeOpacity={0.8}>
+                <Text style={styles.infoCloseText}>Got it</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       {/* ══════════════════════════════════════════════
@@ -913,7 +915,11 @@ export default function Plan() {
               <Text style={styles.emergencyInfoTitle}>What is an emergency fund?</Text>
             </View>
             <Text style={styles.emergencyInfoText}>
-              An emergency fund is 3–6 months of essential expenses saved in an easy-access account. It protects you from unexpected costs like car repairs, medical bills, or job loss — so you don't need to rely on credit cards or loans.
+              An emergency fund is 3–6 months of essential expenses kept in an easy-access savings account. It acts as your financial safety net for unexpected costs — car repairs, medical bills, or job loss — so you never have to fall back on credit cards or loans.
+            </Text>
+            <Text style={[styles.emergencyInfoText, { marginTop: 8, color: colors.green }]}>
+              Target: 3–6 months of essentials ({move.monthlyImpact ? `aim for £${Math.round(move.monthlyImpact * 3).toLocaleString()}–£${Math.round(move.monthlyImpact * 6).toLocaleString()}` : 'based on your spending'}){'\n'}
+              Timeframe: {move.timeline ? stripMd(move.timeline) : 'Start with £1,000 in the first 2–3 months, then build up gradually'}
             </Text>
           </View>
         )}
@@ -1130,7 +1136,9 @@ const styles = StyleSheet.create({
 
   // ── Info modal ──
   infoOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
-  infoModal: { backgroundColor: colors.surface, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 24, padding: spacing.xl, maxWidth: 400, width: '100%' },
+  infoModal: { backgroundColor: colors.surface, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 24, maxWidth: 400, width: '100%', maxHeight: '80%', overflow: 'hidden' },
+  infoScroll: { flex: 1 },
+  infoScrollContent: { padding: spacing.xl },
   infoTitle: { fontFamily: fonts.mono, fontSize: 16, color: colors.text, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: spacing.lg },
   infoHeading: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text, marginTop: spacing.md, marginBottom: 4 },
   infoBody: { fontFamily: fonts.regular, fontSize: 13, color: colors.text2, lineHeight: 20 },

@@ -128,22 +128,37 @@ export default function Home() {
   const saveAddItem = async () => {
     setAddItemError('');
     const amount = parseFloat(addItemAmount);
-    if (!addItemDesc.trim() || !addItemCategory || isNaN(amount) || amount <= 0) {
-      setAddItemError('Please fill in all fields with a valid amount.');
+    if (!addItemDesc.trim()) {
+      setAddItemError('Please enter a description.');
+      return;
+    }
+    if (!addItemCategory) {
+      setAddItemError('Please select a category.');
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      setAddItemError('Please enter a valid monthly amount.');
       return;
     }
 
     setAddItemSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      let user: any = null;
+      try {
+        const { data } = await supabase.auth.getUser();
+        user = data?.user;
+      } catch (authErr: any) {
+        console.warn('[home] auth.getUser failed:', authErr?.message);
+      }
+
       if (!user) {
         setAddItemError('Not signed in. Please sign in and try again.');
         setAddItemSaving(false);
         return;
       }
 
-      // Insert the budget item — skip .select() to avoid PostgREST header issues
-      const { error: insertError } = await supabase
+      // Insert the budget item
+      const { error: insertError, status } = await supabase
         .from('budget_adjustments')
         .insert({
           user_id: user.id,
@@ -154,8 +169,12 @@ export default function Home() {
         });
 
       if (insertError) {
-        console.warn('[home] Failed to insert budget item:', insertError.message);
-        setAddItemError('Could not save budget item. Please try again.');
+        console.warn('[home] Failed to insert budget item:', insertError.message, 'code:', insertError.code, 'status:', status);
+        if (insertError.code === '42501' || insertError.message?.includes('policy')) {
+          setAddItemError('Permission error. The app needs to be re-authorised — try signing out and back in.');
+        } else {
+          setAddItemError(`Could not save: ${insertError.message || 'Unknown error'}. Please try again.`);
+        }
         setAddItemSaving(false);
         return;
       }
@@ -867,7 +886,6 @@ export default function Home() {
             {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
               const effortClr = move.effort === 'high' ? colors.green
                 : move.effort === 'medium' ? colors.dim : '#666666';
-              const isEmergencyFund = (move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.category || '') === 'buffer';
               return (
                 <AnimGlyph key={i} delay={i * 120}>
                   <View
@@ -878,19 +896,6 @@ export default function Home() {
                     <Text style={styles.moveTitle}>
                       {stripMd(move.action)}
                     </Text>
-
-                    {/* Emergency fund info tooltip */}
-                    {isEmergencyFund && (
-                      <View style={styles.emergencyInfoBox}>
-                        <View style={styles.emergencyInfoHeader}>
-                          <Text style={styles.emergencyInfoIcon}>i</Text>
-                          <Text style={styles.emergencyInfoTitle}>What is an emergency fund?</Text>
-                        </View>
-                        <Text style={styles.emergencyInfoText}>
-                          An emergency fund is 3–6 months of essential expenses saved in an easy-access account. It protects you from unexpected costs like car repairs, medical bills, or job loss — so you don't need to rely on credit cards or loans.
-                        </Text>
-                      </View>
-                    )}
 
                     {/* Impact + effort on one line */}
                     <View style={styles.moveMeta}>
@@ -1127,7 +1132,7 @@ export default function Home() {
                 <Text style={[styles.summaryAmount, { color: '#FFFFFF' }]}>
                   {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
                 </Text>
-                <Text style={styles.summaryLabel}>Non-negotiable</Text>
+                <Text style={styles.summaryLabel}>Essentials</Text>
                 <Text style={styles.summaryPct}>{nonDiscPct}%</Text>
               </AnimGlyph>
               <AnimGlyph delay={160} style={styles.summaryItem}>
@@ -1331,6 +1336,44 @@ export default function Home() {
                   <Text style={styles.viewTransactionsText}>Hide transactions</Text>
                 </TouchableOpacity>
               </>
+            )}
+
+            {/* Quick add buttons — always visible when collapsed */}
+            {!budgetExpanded && (
+              <View style={styles.quickAddRow}>
+                <TouchableOpacity
+                  style={styles.quickAddBtn}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(SMOOTH_ANIM);
+                    setAddItemEssential(true);
+                    setAddItemError('');
+                    setAddItemDesc('');
+                    setAddItemAmount('');
+                    setAddItemCategory('');
+                    setShowAddItem(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.quickAddIcon}>+</Text>
+                  <Text style={styles.quickAddText}>Add essential</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.quickAddBtn}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(SMOOTH_ANIM);
+                    setAddItemEssential(false);
+                    setAddItemError('');
+                    setAddItemDesc('');
+                    setAddItemAmount('');
+                    setAddItemCategory('');
+                    setShowAddItem(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.quickAddIcon}>+</Text>
+                  <Text style={styles.quickAddText}>Add lifestyle</Text>
+                </TouchableOpacity>
+              </View>
             )}
 
             {/* View transactions button */}
@@ -2126,7 +2169,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 12,
   },
   expandHint: {
     fontFamily: fonts.regular,
@@ -2154,7 +2197,8 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     overflow: 'hidden',
-    marginBottom: 28,
+    marginTop: 8,
+    marginBottom: 32,
     gap: 2,
   },
   barSeg: {
@@ -2163,11 +2207,13 @@ const styles = StyleSheet.create({
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 32,
+    marginBottom: 36,
+    paddingHorizontal: 4,
   },
   summaryItem: {
     alignItems: 'center',
     flex: 1,
+    paddingVertical: 8,
   },
   summaryAmount: {
     fontFamily: fonts.mono,
@@ -2178,13 +2224,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     color: colors.text2,
-    marginTop: 6,
+    marginTop: 8,
   },
   summaryPct: {
     fontFamily: fonts.mono,
     fontSize: 11,
     color: colors.dim,
-    marginTop: 3,
+    marginTop: 4,
     letterSpacing: 0.5,
   },
   breakdownHeaderRow: {
@@ -2350,8 +2396,8 @@ const styles = StyleSheet.create({
   },
   viewTransactionsBtn: {
     alignItems: 'center',
-    paddingVertical: 16,
-    marginTop: 8,
+    paddingVertical: 18,
+    marginTop: 4,
   },
   viewTransactionsText: {
     fontFamily: fonts.mono,
@@ -2427,7 +2473,36 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // ── Add item button ──
+  // ── Quick add buttons (collapsed) ──
+  quickAddRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  quickAddBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: colors.green + '30',
+    borderRadius: 12,
+    borderStyle: 'dashed',
+  },
+  quickAddIcon: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: colors.green,
+  },
+  quickAddText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.green,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
 
   // ── Modal — Nothing OS: dark glass, border-defined ──
   modalOverlay: {

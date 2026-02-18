@@ -127,10 +127,17 @@ export default function Connect() {
     setErrorMsg('');
     setStatusMsg('Exchanging authorization code...');
     try {
+      // Get user_id so the callback can set it on the bank_data row directly
+      let userId = '';
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        userId = user?.id || '';
+      } catch {}
+
       const res = await fetch('/api/truelayer/callback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, state }),
+        body: JSON.stringify({ code, state, user_id: userId }),
       });
       const data = await res.json();
 
