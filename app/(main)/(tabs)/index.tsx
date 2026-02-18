@@ -142,7 +142,7 @@ export default function Home() {
         return;
       }
 
-      // Use .select() to confirm the row was actually inserted (catches silent RLS failures)
+      // Insert the budget item — avoid .single() as it can fail on some PostgREST configs
       const { data: inserted, error: insertError } = await supabase
         .from('budget_adjustments')
         .insert({
@@ -152,11 +152,18 @@ export default function Home() {
           monthly_amount: amount,
           is_essential: addItemEssential,
         })
-        .select('id')
-        .single();
+        .select('id');
 
-      if (insertError || !inserted) {
-        console.warn('[home] Failed to insert budget item:', insertError?.message || 'no row returned');
+      if (insertError) {
+        console.warn('[home] Failed to insert budget item:', insertError.message);
+        setAddItemError('Could not save budget item. Please try again.');
+        setAddItemSaving(false);
+        return;
+      }
+
+      // Verify the row was actually written (catches silent RLS failures)
+      if (!inserted || inserted.length === 0) {
+        console.warn('[home] Budget insert returned no rows — possible RLS issue');
         setAddItemError('Could not save budget item. Please try again.');
         setAddItemSaving(false);
         return;

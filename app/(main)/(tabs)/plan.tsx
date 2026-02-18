@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  Linking, Alert, LayoutAnimation, Platform, UIManager, Animated, Easing,
+  Linking, Alert, LayoutAnimation, Platform, UIManager, Animated, Easing, Modal,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -90,9 +90,7 @@ const PROVIDER_ACTIONS: Record<string, ProviderAction[]> = {
     { label: 'Compare ISAs', sub: 'Stocks & Shares ISAs', url: 'https://www.bocy.io/isa-comparison.html' },
     { label: 'Compare savings rates', sub: 'Cash alternatives', url: 'https://www.bocy.io/savings-comparison.html' },
   ],
-  subscriptions: [
-    { label: 'Review with free tool', sub: 'Trim subscriptions', url: 'https://www.moneysavingexpert.com/broadband-and-tv/cancel-direct-debit/' },
-  ],
+  subscriptions: [],
   transport: [
     { label: 'Get a Railcard', sub: 'Save 1/3 on rail', url: 'https://www.railcard.co.uk' },
     { label: 'Cycle to Work scheme', url: 'https://www.cyclescheme.co.uk' },
@@ -211,6 +209,12 @@ function getProviderActions(move: Move): ProviderAction[] {
   return [];
 }
 
+/** Check if a move is subscription-related (routes to chat instead of external links) */
+function isSubscriptionMove(move: Move): boolean {
+  const action = (move.action || '').toLowerCase();
+  return action.includes('subscript') || action.includes('cancel');
+}
+
 /** Confirm and execute a destructive action — works on web + native */
 function confirmAction(title: string, message: string, onConfirm: () => void) {
   if (Platform.OS === 'web') {
@@ -236,6 +240,7 @@ export default function Plan() {
   const userIdRef = useRef<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [highlightIdx, setHighlightIdx] = useState<number | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
 
   // Handle deep-link highlight from home page "View" button
   useEffect(() => {
@@ -490,11 +495,56 @@ export default function Plan() {
 
   return (
     <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.scroll}>
-      <Text style={styles.heading}>Your Plan</Text>
-      <Text style={styles.headingSub}>
-        {activeMoves.length + userPlans.length} in progress
-        {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} recommended` : ''}
-      </Text>
+      <View style={styles.headingRow}>
+        <View>
+          <Text style={styles.heading}>Your Plan</Text>
+          <Text style={styles.headingSub}>
+            {activeMoves.length + userPlans.length} in progress
+            {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} recommended` : ''}
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.infoBtn} onPress={() => setShowInfo(true)} activeOpacity={0.7}>
+          <Text style={styles.infoBtnText}>{'\u24D8'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Info modal ── */}
+      <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}>
+        <TouchableOpacity style={styles.infoOverlay} activeOpacity={1} onPress={() => setShowInfo(false)}>
+          <View style={styles.infoModal}>
+            <Text style={styles.infoTitle}>How your plan works</Text>
+
+            <Text style={styles.infoHeading}>Goal trajectory</Text>
+            <Text style={styles.infoBody}>
+              Shows how many months to reach your goal if you follow the plan, compared to doing nothing.
+            </Text>
+
+            <Text style={styles.infoHeading}>In progress</Text>
+            <Text style={styles.infoBody}>
+              Moves you've started. Track steps with the checklist. Your monthly savings total is shown at the top.
+            </Text>
+
+            <Text style={styles.infoHeading}>Recommended</Text>
+            <Text style={styles.infoBody}>
+              Personalised opportunities ranked by annual impact. Tap to expand details, strategy, and action steps.
+            </Text>
+
+            <Text style={styles.infoHeading}>Effort levels</Text>
+            <Text style={styles.infoBody}>
+              Quick win = minimal effort.{'\n'}Some effort = takes a bit of time.{'\n'}Big move = significant change but highest reward.
+            </Text>
+
+            <Text style={styles.infoHeading}>Take action</Text>
+            <Text style={styles.infoBody}>
+              Each move has direct links or buttons to help you act — compare rates, call providers, or ask Bocy for personalised advice.
+            </Text>
+
+            <TouchableOpacity style={styles.infoClose} onPress={() => setShowInfo(false)} activeOpacity={0.8}>
+              <Text style={styles.infoCloseText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* ══════════════════════════════════════════════
           SECTION 1 — YOUR GOAL
@@ -930,8 +980,22 @@ export default function Plan() {
           </View>
         </View>
 
-        {/* Provider action buttons */}
-        {providerActions.length > 0 && (
+        {/* Provider action buttons — subscriptions route to chat instead */}
+        {isSubscriptionMove(move) ? (
+          <View style={styles.providerBlock}>
+            <Text style={styles.detailLabel}>Take action</Text>
+            <TouchableOpacity
+              style={styles.askBocyBtn}
+              onPress={() => {
+                const prompt = `I'd like help with this recommendation: "${stripMd(move.action)}".${move.merchants?.length ? ` My subscriptions include: ${move.merchants.join(', ')}.` : ''} What should I do?`;
+                router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: prompt } });
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.askBocyBtnText}>Ask BOCY about this</Text>
+            </TouchableOpacity>
+          </View>
+        ) : providerActions.length > 0 ? (
           <View style={styles.providerBlock}>
             <Text style={styles.detailLabel}>Take action</Text>
             <View style={styles.providerGrid}>
@@ -970,11 +1034,14 @@ export default function Plan() {
               ))}
             </View>
           </View>
-        )}
+        ) : null}
 
         <TouchableOpacity
           style={styles.chatBtn}
-          onPress={() => router.push('/(main)/(tabs)/chat')}
+          onPress={() => {
+            const prompt = `Tell me more about: "${stripMd(move.action)}"`;
+            router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: prompt } });
+          }}
         >
           <Text style={styles.chatBtnText}>Ask Bocy about this</Text>
         </TouchableOpacity>
@@ -1025,8 +1092,20 @@ const styles = StyleSheet.create({
   emptyText: { fontFamily: fonts.regular, fontSize: 15, color: colors.dim, textAlign: 'center', lineHeight: 24 },
 
   // ── Header ──
+  headingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.xl },
   heading: { fontFamily: fonts.mono, fontSize: 22, color: colors.text, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' },
-  headingSub: { fontFamily: fonts.regular, fontSize: 14, color: colors.dim, marginBottom: spacing.xl },
+  headingSub: { fontFamily: fonts.regular, fontSize: 14, color: colors.dim },
+  infoBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center', marginTop: 2 },
+  infoBtnText: { fontSize: 18, color: colors.text2 },
+
+  // ── Info modal ──
+  infoOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
+  infoModal: { backgroundColor: colors.surface, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 24, padding: spacing.xl, maxWidth: 400, width: '100%' },
+  infoTitle: { fontFamily: fonts.mono, fontSize: 16, color: colors.text, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: spacing.lg },
+  infoHeading: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text, marginTop: spacing.md, marginBottom: 4 },
+  infoBody: { fontFamily: fonts.regular, fontSize: 13, color: colors.text2, lineHeight: 20 },
+  infoClose: { backgroundColor: '#FFFFFF', borderRadius: 100, paddingVertical: 14, alignItems: 'center', marginTop: spacing.xl },
+  infoCloseText: { fontFamily: fonts.semibold, fontSize: 14, color: '#000000' },
 
   // ── Goal trajectory ──
   trajectoryCard: {
@@ -1500,6 +1579,17 @@ const styles = StyleSheet.create({
   },
 
   // ── Buttons ──
+  askBocyBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 100,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  askBocyBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: '#000000',
+  },
   chatBtn: {
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',

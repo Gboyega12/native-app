@@ -3,7 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 import Markdown from '@/lib/markdown';
@@ -283,6 +283,7 @@ function GoalUpdateCard({
 
 export default function Chat() {
   const router = useRouter();
+  const { prefill } = useLocalSearchParams<{ prefill?: string }>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [inputHeight, setInputHeight] = useState(40);
@@ -295,6 +296,73 @@ export default function Chat() {
   const [savingPlan, setSavingPlan] = useState<string | null>(null); // "msgIdx-actionIdx"
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  // ── Pre-fill input from plan page navigation ──
+  useEffect(() => {
+    if (prefill) {
+      setInput(prefill);
+      setTimeout(() => inputRef.current?.focus(), 300);
+    }
+  }, [prefill]);
+
+  // ── Voice input via Web Speech API ──
+  const voiceSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
+    !!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition;
+
+  const toggleVoice = () => {
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+
+    if (Platform.OS !== 'web') return;
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-GB';
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognitionRef.current = recognition;
+
+    let finalTranscript = '';
+
+    recognition.onresult = (event: any) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interim = transcript;
+        }
+      }
+      setInput((prev) => {
+        const base = prev.replace(/\u200B.*$/, '').trimEnd();
+        const prefix = base ? base + ' ' : '';
+        if (finalTranscript) return prefix + finalTranscript;
+        return prefix + (interim ? '\u200B' + interim : '');
+      });
+    };
+
+    recognition.onend = () => {
+      setListening(false);
+      // Clean up any interim markers
+      setInput((prev) => prev.replace(/\u200B/g, ''));
+      setTimeout(() => inputRef.current?.focus(), 100);
+    };
+
+    recognition.onerror = () => {
+      setListening(false);
+    };
+
+    setListening(true);
+    recognition.start();
+  };
 
   // ── Load context + persisted messages on focus ──
 
@@ -925,8 +993,8 @@ export default function Chat() {
         <TextInput
           ref={inputRef}
           style={[styles.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
-          placeholder="Ask about your finances..."
-          placeholderTextColor={colors.muted}
+          placeholder={listening ? 'Listening...' : 'Ask about your finances...'}
+          placeholderTextColor={listening ? colors.green : colors.muted}
           value={input}
           onChangeText={setInput}
           onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
@@ -936,6 +1004,17 @@ export default function Chat() {
           maxLength={1000}
           blurOnSubmit
         />
+        {voiceSupported && (
+          <TouchableOpacity
+            style={[styles.voiceButton, listening && styles.voiceButtonActive]}
+            onPress={toggleVoice}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.voiceIcon, listening && styles.voiceIconActive]}>
+              {listening ? '\u23F9' : '\u{1F3A4}'}
+            </Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={[styles.sendButton, (!input.trim() || loading) && styles.sendDisabled]}
           onPress={() => sendMessage(input)}
@@ -1309,6 +1388,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     fontSize: 14,
     color: colors.text,
+  },
+  voiceButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  voiceButtonActive: {
+    borderColor: colors.green,
+    backgroundColor: 'rgba(0,255,135,0.10)',
+  },
+  voiceIcon: {
+    fontSize: 18,
+  },
+  voiceIconActive: {
+    color: colors.green,
   },
   sendButton: {
     backgroundColor: colors.accent,
