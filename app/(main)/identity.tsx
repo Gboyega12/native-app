@@ -393,6 +393,12 @@ export default function Identity() {
                   onPress={() => handleSelect(opt.key)}
                   activeOpacity={0.7}
                 >
+                  {/* Checkbox for multi-select screens */}
+                  {isMulti && (
+                    <View style={[styles.checkbox, sel && styles.checkboxSelected]}>
+                      {sel && <Text style={styles.checkboxMark}>{'\u2713'}</Text>}
+                    </View>
+                  )}
                   <View style={[styles.cardIcon, sel && styles.cardIconSelected]}>
                     <Text style={[styles.cardIconText, sel && styles.cardIconTextSelected]}>
                       {opt.icon}
@@ -402,7 +408,7 @@ export default function Identity() {
                     {opt.label}
                   </Text>
                   <Text style={styles.cardDesc}>{opt.desc}</Text>
-                  {sel && <View style={styles.checkBadge}><Text style={styles.checkMark}>{'\u2713'}</Text></View>}
+                  {!isMulti && sel && <View style={styles.checkBadge}><Text style={styles.checkMark}>{'\u2713'}</Text></View>}
                 </TouchableOpacity>
               );
             })}
@@ -534,6 +540,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.dim,
     lineHeight: 15,
+  },
+  checkbox: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: colors.muted,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  checkboxSelected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accent,
+  },
+  checkboxMark: {
+    fontFamily: fonts.semibold,
+    fontSize: 11,
+    color: colors.bg,
+    marginTop: -1,
   },
   checkBadge: {
     position: 'absolute',
