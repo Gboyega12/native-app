@@ -142,8 +142,8 @@ export default function Home() {
         return;
       }
 
-      // Insert the budget item — avoid .single() as it can fail on some PostgREST configs
-      const { data: inserted, error: insertError } = await supabase
+      // Insert the budget item — skip .select() to avoid PostgREST header issues
+      const { error: insertError } = await supabase
         .from('budget_adjustments')
         .insert({
           user_id: user.id,
@@ -151,19 +151,10 @@ export default function Home() {
           category: addItemCategory,
           monthly_amount: amount,
           is_essential: addItemEssential,
-        })
-        .select('id');
+        });
 
       if (insertError) {
         console.warn('[home] Failed to insert budget item:', insertError.message);
-        setAddItemError('Could not save budget item. Please try again.');
-        setAddItemSaving(false);
-        return;
-      }
-
-      // Verify the row was actually written (catches silent RLS failures)
-      if (!inserted || inserted.length === 0) {
-        console.warn('[home] Budget insert returned no rows — possible RLS issue');
         setAddItemError('Could not save budget item. Please try again.');
         setAddItemSaving(false);
         return;
@@ -878,12 +869,12 @@ export default function Home() {
                 <View
                   key={i}
                   accessibilityRole="summary"
-                  accessibilityLabel={`Insight ${i + 1}: ${move.action}, saves ${move.annualImpact} pounds per year`}
+                  accessibilityLabel={`Insight: ${move.action}, saves ${move.annualImpact} pounds per year`}
                   style={styles.moveItem}
                 >
-                  {/* Animated rank glyph */}
+                  {/* Animated glyph */}
                   <AnimGlyph delay={i * 120}>
-                    <Text style={styles.moveRank}>{i + 1}</Text>
+                    <Text style={styles.moveRank}>{'•'}</Text>
                   </AnimGlyph>
 
                   {/* Content */}

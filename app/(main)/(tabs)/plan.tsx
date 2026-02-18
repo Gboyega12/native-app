@@ -484,7 +484,13 @@ export default function Plan() {
   const opportunities = moves
     .map((m, i) => ({ move: m, index: i }))
     .filter(({ index }) => !progress[`move-${index}`]?.approved)
-    .sort((a, b) => (b.move.annualImpact || 0) - (a.move.annualImpact || 0));
+    .sort((a, b) => {
+      // Big moves (high effort) first, quick wins (low effort) last
+      const eDiff = (effortOrder[a.move.effort] ?? 2) - (effortOrder[b.move.effort] ?? 2);
+      if (eDiff !== 0) return eDiff;
+      // Within same effort tier, sort by highest impact first
+      return (b.move.annualImpact || 0) - (a.move.annualImpact || 0);
+    });
 
   const totalMonthlyImpact = moves.reduce((s, m) => s + (m.monthlyImpact || 0), 0);
   const activeMonthly = activeMoves.reduce((s, { move }) => s + (move.monthlyImpact || 0), 0);

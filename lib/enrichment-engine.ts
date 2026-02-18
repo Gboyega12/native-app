@@ -347,12 +347,24 @@ const EnrichmentEngine = {
 
       if (frequency !== 'irregular') {
         const avgAmount = Math.abs(txs.reduce((s, t) => s + t.amount, 0) / txs.length);
+        // Only mark as subscription if already flagged by merchant DB, OR
+        // recurring monthly/quarterly AND not a category that is clearly not a subscription.
+        const NON_SUB_CATEGORIES = new Set([
+          'Debt Payments', 'Groceries', 'Savings', 'Transfers', 'Transport',
+          'Rent', 'Mortgage', 'Bills', 'Insurance', 'Income', 'Refunds',
+          'Childcare', 'Education', 'Charity',
+        ]);
+        const firstTx = txs[0];
+        const isSub = firstTx.isSubscription ||
+          ((frequency === 'monthly' || frequency === 'quarterly') &&
+           !NON_SUB_CATEGORIES.has(firstTx.category) &&
+           !firstTx.isDebt && !firstTx.isSavings && !firstTx.isTransfer);
         recurring.push({
           merchant,
           frequency,
           averageAmount: avgAmount,
           category: txs[0].category,
-          isSubscription: txs[0].isSubscription || frequency === 'monthly' || frequency === 'quarterly',
+          isSubscription: isSub,
           count: txs.length,
         });
       }
