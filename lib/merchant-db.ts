@@ -282,6 +282,148 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['bloom & wild', 'bloomandwild', 'bloom and wild'], merchant: 'Bloom & Wild', category: 'Shopping' },
   { patterns: ['moonpig'], merchant: 'Moonpig', category: 'Shopping' },
   { patterns: ['bunches'], merchant: 'Bunches', category: 'Shopping' },
+
+  // ── Additional Eating Out (discretionary) ──
+  { patterns: ['wahaca'], merchant: 'Wahaca', category: 'Eating Out' },
+  { patterns: ['dishoom'], merchant: 'Dishoom', category: 'Eating Out' },
+  { patterns: ['honest burgers', 'honest burger'], merchant: 'Honest Burgers', category: 'Eating Out' },
+  { patterns: ['byron'], merchant: 'Byron', category: 'Eating Out' },
+  { patterns: ['prezzo'], merchant: 'Prezzo', category: 'Eating Out' },
+  { patterns: ['yo sushi', 'yo! sushi'], merchant: 'YO! Sushi', category: 'Eating Out' },
+  { patterns: ['pizza express', 'pizzaexpress'], merchant: 'Pizza Express', category: 'Eating Out' },
+  { patterns: ['harvester'], merchant: 'Harvester', category: 'Eating Out' },
+  { patterns: ['toby carvery'], merchant: 'Toby Carvery', category: 'Eating Out' },
+  { patterns: ['beefeater'], merchant: 'Beefeater', category: 'Eating Out' },
+  { patterns: ['wetherspoon', 'j d wetherspoon', 'jd wetherspoon'], merchant: "Wetherspoon's", category: 'Eating Out' },
+  { patterns: ['tgi friday', "tgi friday's", 'tgi fridays'], merchant: "TGI Friday's", category: 'Eating Out' },
+  { patterns: ['chiquito'], merchant: 'Chiquito', category: 'Eating Out' },
+  { patterns: ['las iguanas'], merchant: 'Las Iguanas', category: 'Eating Out' },
+  { patterns: ['cote', 'cote brasserie'], merchant: 'Côte', category: 'Eating Out' },
+  { patterns: ['gourmet burger kitchen', 'gbk'], merchant: 'GBK', category: 'Eating Out' },
+  { patterns: ['papa johns', "papa john's"], merchant: "Papa John's", category: 'Eating Out' },
+  { patterns: ['slim chickens'], merchant: 'Slim Chickens', category: 'Eating Out' },
+  { patterns: ['popeyes'], merchant: 'Popeyes', category: 'Eating Out' },
+  { patterns: ['wendy'], merchant: "Wendy's", category: 'Eating Out' },
+  { patterns: ['taco bell'], merchant: 'Taco Bell', category: 'Eating Out' },
+  { patterns: ['krispy kreme'], merchant: 'Krispy Kreme', category: 'Eating Out' },
+
+  // ── Additional Coffee & Cafes (discretionary) ──
+  { patterns: ['black sheep coffee', 'black sheep'], merchant: 'Black Sheep Coffee', category: 'Coffee & Cafes' },
+  { patterns: ['joe & the juice', 'joe and the juice'], merchant: 'Joe & The Juice', category: 'Coffee & Cafes' },
+  { patterns: ['tim hortons'], merchant: 'Tim Hortons', category: 'Coffee & Cafes' },
+  { patterns: ['paul bakery', 'paul uk'], merchant: 'PAUL', category: 'Coffee & Cafes' },
+  { patterns: ['gail', "gail's", 'gails'], merchant: "Gail's", category: 'Coffee & Cafes' },
+  { patterns: ['ole & steen', 'ole and steen'], merchant: 'Ole & Steen', category: 'Coffee & Cafes' },
+
+  // ── Additional Groceries (essential) ──
+  { patterns: ['farmfoods'], merchant: 'Farmfoods', category: 'Groceries', isEssential: true },
+  { patterns: ['heron foods', 'heron'], merchant: 'Heron Foods', category: 'Groceries', isEssential: true },
+  { patterns: ['jack'], merchant: "Jack's", category: 'Groceries', isEssential: true },
+  { patterns: ['spar'], merchant: 'SPAR', category: 'Groceries', isEssential: true },
+  { patterns: ['nisa'], merchant: 'Nisa', category: 'Groceries', isEssential: true },
+  { patterns: ['londis'], merchant: 'Londis', category: 'Groceries', isEssential: true },
+  { patterns: ['budgens'], merchant: 'Budgens', category: 'Groceries', isEssential: true },
+  { patterns: ['costcutter'], merchant: 'Costcutter', category: 'Groceries', isEssential: true },
+
+  // ── Additional Shopping (discretionary) ──
+  { patterns: ['uniqlo'], merchant: 'Uniqlo', category: 'Shopping' },
+  { patterns: ['river island'], merchant: 'River Island', category: 'Shopping' },
+  { patterns: ['new look'], merchant: 'New Look', category: 'Shopping' },
+  { patterns: ['superdry'], merchant: 'Superdry', category: 'Shopping' },
+  { patterns: ['gap'], merchant: 'GAP', category: 'Shopping' },
+  { patterns: ['mango'], merchant: 'Mango', category: 'Shopping' },
+  { patterns: ['cos'], merchant: 'COS', category: 'Shopping' },
+  { patterns: ['lush'], merchant: 'Lush', category: 'Shopping' },
+  { patterns: ['the body shop', 'body shop'], merchant: 'The Body Shop', category: 'Shopping' },
+  { patterns: ['screwfix'], merchant: 'Screwfix', category: 'Shopping' },
+  { patterns: ['b&q', 'b and q'], merchant: 'B&Q', category: 'Shopping' },
+  { patterns: ['hobbycraft'], merchant: 'Hobbycraft', category: 'Shopping' },
+  { patterns: ['the range'], merchant: 'The Range', category: 'Shopping' },
+  { patterns: ['dunelm'], merchant: 'Dunelm', category: 'Shopping' },
+  { patterns: ['matalan'], merchant: 'Matalan', category: 'Shopping' },
+  { patterns: ['peacocks'], merchant: 'Peacocks', category: 'Shopping' },
+  { patterns: ['george asda'], merchant: 'George at Asda', category: 'Shopping' },
+  { patterns: ['tu clothing', 'tu sainsbury'], merchant: 'Tu Clothing', category: 'Shopping' },
+
+  // ── Additional Transport (essential) ──
+  { patterns: ['national rail', 'nationalrail'], merchant: 'National Rail', category: 'Transport', isEssential: true },
+  { patterns: ['lner'], merchant: 'LNER', category: 'Transport', isEssential: true },
+  { patterns: ['avanti west coast', 'avanti'], merchant: 'Avanti', category: 'Transport', isEssential: true },
+  { patterns: ['great western railway', 'gwr'], merchant: 'GWR', category: 'Transport', isEssential: true },
+  { patterns: ['southern rail', 'southern railway'], merchant: 'Southern', category: 'Transport', isEssential: true },
+  { patterns: ['southeastern'], merchant: 'Southeastern', category: 'Transport', isEssential: true },
+  { patterns: ['northern rail', 'northern trains'], merchant: 'Northern', category: 'Transport', isEssential: true },
+  { patterns: ['scotrail'], merchant: 'ScotRail', category: 'Transport', isEssential: true },
+  { patterns: ['national express'], merchant: 'National Express', category: 'Transport', isEssential: true },
+  { patterns: ['megabus'], merchant: 'Megabus', category: 'Transport', isEssential: true },
+  { patterns: ['flixbus'], merchant: 'FlixBus', category: 'Transport', isEssential: true },
+  { patterns: ['freenow', 'free now'], merchant: 'FREE NOW', category: 'Transport', isEssential: true },
+  { patterns: ['lime bike', 'lime scooter', 'lime-e'], merchant: 'Lime', category: 'Transport' },
+  { patterns: ['voi'], merchant: 'Voi', category: 'Transport' },
+  { patterns: ['texaco'], merchant: 'Texaco', category: 'Transport', isEssential: true },
+  { patterns: ['jet petrol', 'jet fuel'], merchant: 'Jet', category: 'Transport', isEssential: true },
+
+  // ── Additional Entertainment (discretionary) ──
+  { patterns: ['curzon'], merchant: 'Curzon', category: 'Entertainment' },
+  { patterns: ['everyman cinema', 'everyman'], merchant: 'Everyman Cinema', category: 'Entertainment' },
+  { patterns: ['picturehouse'], merchant: 'Picturehouse', category: 'Entertainment' },
+  { patterns: ['the o2', 'theo2'], merchant: 'The O2', category: 'Entertainment' },
+  { patterns: ['eventbrite'], merchant: 'Eventbrite', category: 'Entertainment' },
+  { patterns: ['dice fm', 'dice.fm'], merchant: 'DICE', category: 'Entertainment' },
+
+  // ── Additional Fitness (discretionary subscription) ──
+  { patterns: ['barry', "barry's", 'barrys bootcamp'], merchant: "Barry's", category: 'Fitness', isSubscription: true },
+  { patterns: ['f45'], merchant: 'F45 Training', category: 'Fitness', isSubscription: true },
+  { patterns: ['classpass'], merchant: 'ClassPass', category: 'Fitness', isSubscription: true },
+  { patterns: ['peloton'], merchant: 'Peloton', category: 'Fitness', isSubscription: true },
+  { patterns: ['hussle'], merchant: 'Hussle', category: 'Fitness', isSubscription: true },
+  { patterns: ['anytime fitness'], merchant: 'Anytime Fitness', category: 'Fitness', isSubscription: true },
+  { patterns: ['jd gyms'], merchant: 'JD Gyms', category: 'Fitness', isSubscription: true },
+
+  // ── Additional Streaming/Subscriptions (discretionary) ──
+  { patterns: ['paramount+', 'paramount plus'], merchant: 'Paramount+', category: 'Streaming', isSubscription: true },
+  { patterns: ['apple tv', 'apple tv+'], merchant: 'Apple TV+', category: 'Streaming', isSubscription: true },
+  { patterns: ['discovery+', 'discovery plus'], merchant: 'Discovery+', category: 'Streaming', isSubscription: true },
+  { patterns: ['britbox'], merchant: 'BritBox', category: 'Streaming', isSubscription: true },
+  { patterns: ['hayu'], merchant: 'Hayu', category: 'Streaming', isSubscription: true },
+  { patterns: ['dazn'], merchant: 'DAZN', category: 'Streaming', isSubscription: true },
+  { patterns: ['tidal'], merchant: 'Tidal', category: 'Streaming', isSubscription: true },
+  { patterns: ['amazon music'], merchant: 'Amazon Music', category: 'Streaming', isSubscription: true },
+  { patterns: ['apple music'], merchant: 'Apple Music', category: 'Streaming', isSubscription: true },
+
+  // ── Personal Care (discretionary) ──
+  { patterns: ['specsavers'], merchant: 'Specsavers', category: 'Health', isEssential: true },
+  { patterns: ['vision express'], merchant: 'Vision Express', category: 'Health', isEssential: true },
+
+  // ── Childcare (essential) ──
+  { patterns: ['bright horizons'], merchant: 'Bright Horizons', category: 'Childcare', isEssential: true },
+  { patterns: ['kidsunlimited', 'kids unlimited'], merchant: 'Kids Unlimited', category: 'Childcare', isEssential: true },
+  { patterns: ['busy bees'], merchant: 'Busy Bees', category: 'Childcare', isEssential: true },
+
+  // ── Pets (discretionary) ──
+  { patterns: ['pets at home'], merchant: 'Pets at Home', category: 'Pets' },
+  { patterns: ['pet plan', 'petplan'], merchant: 'Petplan', category: 'Pets' },
+
+  // ── Gambling (discretionary) ──
+  { patterns: ['bet365'], merchant: 'Bet365', category: 'Gambling' },
+  { patterns: ['paddy power', 'paddypower'], merchant: 'Paddy Power', category: 'Gambling' },
+  { patterns: ['ladbrokes'], merchant: 'Ladbrokes', category: 'Gambling' },
+  { patterns: ['william hill'], merchant: 'William Hill', category: 'Gambling' },
+  { patterns: ['betfred'], merchant: 'Betfred', category: 'Gambling' },
+  { patterns: ['skybet', 'sky bet'], merchant: 'Sky Bet', category: 'Gambling' },
+  { patterns: ['betfair'], merchant: 'Betfair', category: 'Gambling' },
+  { patterns: ['tombola'], merchant: 'Tombola', category: 'Gambling' },
+  { patterns: ['national lottery', 'lottoland'], merchant: 'National Lottery', category: 'Gambling' },
+
+  // ── Charity (discretionary) ──
+  { patterns: ['cancer research'], merchant: 'Cancer Research', category: 'Charity' },
+  { patterns: ['macmillan'], merchant: 'Macmillan', category: 'Charity' },
+  { patterns: ['oxfam'], merchant: 'Oxfam', category: 'Charity' },
+  { patterns: ['red cross', 'british red cross'], merchant: 'Red Cross', category: 'Charity' },
+  { patterns: ['save the children'], merchant: 'Save the Children', category: 'Charity' },
+  { patterns: ['shelter'], merchant: 'Shelter', category: 'Charity' },
+  { patterns: ['nspcc'], merchant: 'NSPCC', category: 'Charity' },
+  { patterns: ['mind charity', 'mind.org'], merchant: 'Mind', category: 'Charity' },
 ];
 
 // Short patterns (<=3 chars) use word-boundary matching to avoid false positives.

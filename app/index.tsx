@@ -10,7 +10,7 @@ export default function Index() {
     if (params.get('code') && params.get('state')) {
       return (
         <View style={{ flex: 1, backgroundColor: '#050505', justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator color="#7AEFC7" size="large" />
+          <ActivityIndicator color="#66DFCA" size="large" />
         </View>
       );
     }

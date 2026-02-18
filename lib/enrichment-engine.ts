@@ -15,6 +15,7 @@ import type {
   DecisionScore,
   Move,
   EnrichmentResult,
+  EnrichmentMetrics,
   BudgetCategory,
 } from './types';
 
@@ -69,6 +70,7 @@ const EnrichmentEngine = {
     const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
     const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
     const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
+    const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
 
     return {
       profile,
@@ -80,6 +82,7 @@ const EnrichmentEngine = {
       decisionStack: stack,
       behavioralPatterns: patterns.map((p: any) => p.pattern || p),
       enrichedTransactions: enriched,
+      enrichmentMetrics,
     };
   },
 
@@ -175,6 +178,7 @@ const EnrichmentEngine = {
           isRefund: false,
           isSavings: override.category === 'Savings',
           confidence: 'high' as const,
+          classifiedBy: 'user_override' as const,
         };
       }
     }
@@ -213,6 +217,7 @@ const EnrichmentEngine = {
         isRefund,
         isSavings,
         confidence: 'high',
+        classifiedBy: 'merchant_db' as const,
       };
     }
 
@@ -236,6 +241,7 @@ const EnrichmentEngine = {
           isRefund: false,
           isSavings,
           confidence: 'medium',
+          classifiedBy: 'fuzzy_match' as const,
         };
       }
     }
@@ -245,24 +251,30 @@ const EnrichmentEngine = {
     let category = 'Other';
     let isEssential = false;
     let confidence: EnrichedTransaction['confidence'] = 'low';
+    let classifiedBy: EnrichedTransaction['classifiedBy'] = 'default';
 
     if (isCredit) {
       if (isRefund) {
         category = 'Refunds';
+        classifiedBy = 'keyword';
       } else if (this._isCreditCardRepayment(tx.description)) {
         // Credit card repayment received — NOT income
         category = 'Debt Payments';
         isEssential = true;
         confidence = 'high';
+        classifiedBy = 'keyword';
       } else if (isPerson) {
         category = 'Transfers';
+        classifiedBy = 'keyword';
       } else if (this._isInternationalTransfer(tx.description)) {
         // Inbound international transfer — NOT income
         category = 'Transfers';
+        classifiedBy = 'keyword';
       } else if (isLikelyIncomeCredit(tx.description)) {
         isIncome = true;
         category = 'Income';
         confidence = 'high';
+        classifiedBy = 'keyword';
       } else {
         // Unknown credit — tentative income, validated in buildProfile
         isIncome = true;
@@ -270,6 +282,7 @@ const EnrichmentEngine = {
       }
     } else if (isSavings) {
       category = 'Savings';
+      classifiedBy = 'keyword';
     } else {
       // Spending transaction with no merchant match — run keyword classifier
       // BEFORE person-transfer heuristic, so that descriptions like
@@ -282,8 +295,10 @@ const EnrichmentEngine = {
         isEssential = classification.isEssential;
         confidence = classification.confidence;
         isPerson = false;
+        classifiedBy = 'keyword';
       } else if (isPerson) {
         category = 'Transfers';
+        classifiedBy = 'keyword';
       } else {
         category = classification.category;
         isEssential = classification.isEssential;
@@ -304,6 +319,7 @@ const EnrichmentEngine = {
       isRefund,
       isSavings,
       confidence,
+      classifiedBy,
     };
   },
 
@@ -1070,6 +1086,7 @@ const EnrichmentEngine = {
     const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
     const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
     const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
+    const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
 
     return {
       profile,
@@ -1081,6 +1098,7 @@ const EnrichmentEngine = {
       decisionStack: stack,
       behavioralPatterns: patterns.map((p: any) => p.pattern || p),
       enrichedTransactions: enriched,
+      enrichmentMetrics,
     };
   },
 
@@ -1139,6 +1157,37 @@ const EnrichmentEngine = {
   /** Title-case a normalised merchant name: "deliveroo london" → "Deliveroo London" */
   _titleCase(s: string): string {
     return s.replace(/\b\w/g, (c) => c.toUpperCase());
+  },
+
+  /** Compute enrichment confidence and source distribution metrics */
+  _computeEnrichmentMetrics(enriched: EnrichedTransaction[]): EnrichmentMetrics {
+    const total = enriched.length;
+    const high = enriched.filter((t) => t.confidence === 'high').length;
+    const medium = enriched.filter((t) => t.confidence === 'medium').length;
+    const low = enriched.filter((t) => t.confidence === 'low').length;
+    const other = enriched.filter((t) => t.category === 'Other').length;
+
+    const bySource = {
+      userOverride: enriched.filter((t) => t.classifiedBy === 'user_override').length,
+      merchantDb: enriched.filter((t) => t.classifiedBy === 'merchant_db').length,
+      fuzzyMatch: enriched.filter((t) => t.classifiedBy === 'fuzzy_match').length,
+      keyword: enriched.filter((t) => t.classifiedBy === 'keyword').length,
+      unresolved: enriched.filter((t) => t.classifiedBy === 'default' || !t.classifiedBy).length,
+    };
+
+    const metrics: EnrichmentMetrics = {
+      totalTransactions: total,
+      highConfidence: high,
+      mediumConfidence: medium,
+      lowConfidence: low,
+      otherRate: total > 0 ? Math.round((other / total) * 100) : 0,
+      bySource,
+    };
+
+    console.log(`[enrichment] Metrics: ${total} transactions — ${high} high (${total > 0 ? Math.round((high / total) * 100) : 0}%), ${medium} medium, ${low} low. Other rate: ${metrics.otherRate}%`);
+    console.log(`[enrichment] Sources: override=${bySource.userOverride}, merchant_db=${bySource.merchantDb}, fuzzy=${bySource.fuzzyMatch}, keyword=${bySource.keyword}, unresolved=${bySource.unresolved}`);
+
+    return metrics;
   },
 };
 

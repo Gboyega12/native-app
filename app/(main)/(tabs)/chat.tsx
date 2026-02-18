@@ -1400,7 +1400,7 @@ const styles = StyleSheet.create({
   },
   voiceButtonActive: {
     borderColor: colors.green,
-    backgroundColor: 'rgba(0,255,135,0.10)',
+    backgroundColor: 'rgba(0,212,170,0.10)',
   },
   voiceIcon: {
     fontSize: 18,

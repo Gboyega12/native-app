@@ -299,6 +299,11 @@ export default function Home() {
 
       setRecatTx(null);
       setRecatTarget('');
+
+      // Trigger background re-enrichment so score/moves reflect the correction
+      if (user) {
+        syncInBackground(user.id);
+      }
     } catch (err: any) {
       console.warn('[home] Recategorize failed:', err?.message);
     }
@@ -878,6 +883,24 @@ export default function Home() {
         </View>
       ) : (
         <>
+          {/* ── Unresolved transactions nudge ── */}
+          {(() => {
+            const unresolvedCount = (analysis as any)?._unresolvedCount || 0;
+            if (unresolvedCount <= 0) return null;
+            return (
+              <TouchableOpacity
+                style={styles.reviewBanner}
+                onPress={() => router.push('/(main)/(tabs)/chat')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.reviewBannerText}>
+                  {unresolvedCount} transaction{unresolvedCount !== 1 ? 's' : ''} couldn't be categorised.{' '}
+                  <Text style={styles.reviewBannerLink}>Tell me what they are</Text>
+                </Text>
+              </TouchableOpacity>
+            );
+          })()}
+
           {/* ══════════════════════════════════════════════
               CARD 1 — YOUR INSIGHTS
               ══════════════════════════════════════════════ */}
@@ -2685,5 +2708,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 24,
+  },
+
+  // ── Review banner for unresolved transactions ──
+  reviewBanner: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  reviewBannerText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.text2,
+    lineHeight: 20,
+  },
+  reviewBannerLink: {
+    color: colors.green,
+    fontFamily: fonts.semibold,
   },
 });
