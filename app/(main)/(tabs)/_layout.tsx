@@ -13,7 +13,7 @@ export default function TabsLayout() {
           borderTopWidth: 1,
           elevation: 0,
         },
-        tabBarActiveTintColor: '#FFFFFF',
+        tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: '#3D3D3D',
         tabBarLabelStyle: {
           fontFamily: fonts.mono,

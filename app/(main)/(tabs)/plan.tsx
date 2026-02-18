@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  Linking, Alert, LayoutAnimation, Platform, UIManager,
+  Linking, Alert, LayoutAnimation, Platform, UIManager, Animated, Easing,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -14,6 +14,43 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 /** Strip markdown bold/italic markers */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
+
+// Smooth layout animation config
+const SMOOTH_ANIM = {
+  duration: 280,
+  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+  update: { type: LayoutAnimation.Types.easeInEaseOut },
+  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+};
+
+// ── Glyph micro-animation: fade+scale on mount ──
+const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 500,
+      delay,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        style,
+        {
+          opacity: anim,
+          transform: [{
+            scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
+          }],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+};
 
 /** Category label mapping for display */
 const CATEGORY_LABELS: Record<string, string> = {
@@ -304,7 +341,7 @@ export default function Plan() {
       completed_steps: [],
     };
 
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setProgress((prev) => ({ ...prev, [key]: row }));
     saveProgress(key, row);
 
@@ -327,7 +364,7 @@ export default function Plan() {
     if (!uid) return;
 
     const key = `move-${index}`;
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setProgress((prev) => {
       const updated = { ...prev };
       delete updated[key];
@@ -349,7 +386,7 @@ export default function Plan() {
       });
     } catch {}
 
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
   };
 
@@ -368,7 +405,7 @@ export default function Plan() {
     const updatedMoves = [...originalMoves];
     updatedMoves.splice(originalIndex, 1);
 
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setAnalysis({ ...analysis, all_moves: updatedMoves });
 
     const progressKey = `move-${sortedIndex}`;
@@ -455,63 +492,50 @@ export default function Plan() {
     <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.scroll}>
       <Text style={styles.heading}>Your Plan</Text>
       <Text style={styles.headingSub}>
-        {activeMoves.length + userPlans.length} active
-        {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} opportunit${opportunities.length === 1 ? 'y' : 'ies'}` : ''}
+        {activeMoves.length + userPlans.length} in progress
+        {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} recommended` : ''}
       </Text>
 
       {/* ══════════════════════════════════════════════
-          SECTION 1 — GOAL TRAJECTORY
+          SECTION 1 — YOUR GOAL
           ══════════════════════════════════════════════ */}
       {goalCtx && (
         <View style={styles.trajectoryCard}>
-          <Text style={styles.trajLabel}>GOAL TRAJECTORY</Text>
-          <Text style={styles.trajGoal}>{goalCtx.goalLabel}</Text>
+          <AnimGlyph>
+            <Text style={styles.trajGoal}>{goalCtx.goalLabel}</Text>
+          </AnimGlyph>
 
           {goalCtx.targetAmount > 0 && (
             <Text style={styles.trajTarget}>
-              Target: {'\u00a3'}{goalCtx.targetAmount.toLocaleString()}
+              {'\u00a3'}{goalCtx.targetAmount.toLocaleString()} target
             </Text>
           )}
 
-          {/* Timeline bar */}
-          <View style={styles.trajTimeline}>
-            <View style={styles.trajBarRow}>
-              <View style={styles.trajBarBg}>
-                {goalCtx.currentMonths > 0 && goalCtx.newMonths > 0 && (
-                  <View
-                    style={[
-                      styles.trajBarFill,
-                      { width: `${Math.min(100, Math.round((goalCtx.newMonths / goalCtx.currentMonths) * 100))}%` },
-                    ]}
-                  />
-                )}
-              </View>
-            </View>
-            <View style={styles.trajMonthsRow}>
-              {goalCtx.newMonths > 0 ? (
-                <>
-                  <View style={styles.trajMonthItem}>
-                    <Text style={styles.trajMonthValue}>{goalCtx.newMonths}</Text>
-                    <Text style={styles.trajMonthLabel}>months{'\n'}with plan</Text>
+          {goalCtx.newMonths > 0 ? (
+            <View style={styles.trajTimeline}>
+              {/* Clear primary metric */}
+              <AnimGlyph delay={100}>
+                <Text style={styles.trajHeroNumber}>{goalCtx.newMonths}</Text>
+                <Text style={styles.trajHeroLabel}>months to reach your goal</Text>
+              </AnimGlyph>
+
+              {/* Savings comparison */}
+              {goalCtx.monthsSaved > 0 && goalCtx.currentMonths > 0 && (
+                <View style={styles.trajCompareRow}>
+                  <View style={styles.trajCompareItem}>
+                    <Text style={[styles.trajCompareValue, { color: colors.accent }]}>
+                      {goalCtx.monthsSaved} months faster
+                    </Text>
+                    <Text style={styles.trajCompareLabel}>
+                      vs {goalCtx.currentMonths} months without a plan
+                    </Text>
                   </View>
-                  {goalCtx.currentMonths > 0 && (
-                    <View style={styles.trajMonthItem}>
-                      <Text style={[styles.trajMonthValue, { color: colors.dim }]}>{goalCtx.currentMonths}</Text>
-                      <Text style={styles.trajMonthLabel}>months{'\n'}without</Text>
-                    </View>
-                  )}
-                  {goalCtx.monthsSaved > 0 && (
-                    <View style={[styles.trajMonthItem, styles.trajSavedItem]}>
-                      <Text style={[styles.trajMonthValue, { color: colors.text }]}>-{goalCtx.monthsSaved}</Text>
-                      <Text style={[styles.trajMonthLabel, { color: colors.text }]}>months{'\n'}saved</Text>
-                    </View>
-                  )}
-                </>
-              ) : (
-                <Text style={styles.trajInsight}>{goalCtx.insight}</Text>
+                </View>
               )}
             </View>
-          </View>
+          ) : goalCtx.insight ? (
+            <Text style={styles.trajInsight}>{goalCtx.insight}</Text>
+          ) : null}
 
           {goalCtx.newMonths > 0 && goalCtx.insight && (
             <Text style={styles.trajInsight}>{goalCtx.insight}</Text>
@@ -525,9 +549,9 @@ export default function Plan() {
       {(activeMoves.length > 0 || userPlans.length > 0) && (
         <>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionLabel}>ACTIVE MOVES</Text>
+            <Text style={styles.sectionLabel}>IN PROGRESS</Text>
             <Text style={styles.sectionMeta}>
-              {'\u00a3'}{Math.round(activeMonthly + planMonthly)}/mo impact
+              saving {'\u00a3'}{Math.round(activeMonthly + planMonthly)}/mo
             </Text>
           </View>
 
@@ -635,7 +659,7 @@ export default function Plan() {
           })}
 
           {/* Active recommendation moves */}
-          {activeMoves.map(({ move, index: i }) => {
+          {activeMoves.map(({ move, index: i }, seqIdx) => {
             const isExpanded = expanded === i;
             const moveKey = `move-${i}`;
             const steps = move.steps || [];
@@ -650,9 +674,11 @@ export default function Plan() {
                   activeOpacity={0.8}
                 >
                   <View style={styles.cardHeader}>
-                    <View style={[styles.badge, styles.badgeActive]}>
-                      <Text style={styles.badgeActiveText}>{'\u2713'}</Text>
-                    </View>
+                    <AnimGlyph delay={seqIdx * 80}>
+                      <View style={[styles.badge, styles.badgeActive]}>
+                        <Text style={styles.badgeActiveText}>{'\u2713'}</Text>
+                      </View>
+                    </AnimGlyph>
                     <View style={styles.cardContent}>
                       <Text style={styles.moveAction}>{stripMd(move.action)}</Text>
                       <View style={styles.moveStats}>
@@ -689,7 +715,7 @@ export default function Plan() {
       {opportunities.length > 0 && (
         <>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionLabel}>OPPORTUNITIES</Text>
+            <Text style={styles.sectionLabel}>RECOMMENDED</Text>
             <Text style={styles.sectionMeta}>
               {'\u00a3'}{Math.round(totalMonthlyImpact - activeMonthly)}/mo potential
             </Text>
@@ -728,7 +754,7 @@ export default function Plan() {
           </View>
 
           {/* Individual opportunity cards */}
-          {opportunities.map(({ move, index: i }) => {
+          {opportunities.map(({ move, index: i }, seqIdx) => {
             const isExpanded = expanded === i;
             const isHighlighted = highlightIdx === i;
             const moveKey = `move-${i}`;
@@ -750,9 +776,11 @@ export default function Plan() {
                   activeOpacity={0.8}
                 >
                   <View style={styles.cardHeader}>
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{i + 1}</Text>
-                    </View>
+                    <AnimGlyph delay={seqIdx * 80}>
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{seqIdx + 1}</Text>
+                      </View>
+                    </AnimGlyph>
                     <View style={styles.cardContent}>
                       <Text style={styles.moveAction}>{stripMd(move.action)}</Text>
                       <View style={styles.moveStats}>
@@ -1021,14 +1049,6 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     marginBottom: spacing.lg,
   },
-  trajLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    letterSpacing: 2,
-    color: colors.dim,
-    marginBottom: spacing.sm,
-    textTransform: 'uppercase',
-  },
   trajGoal: {
     fontFamily: fonts.medium,
     fontSize: 18,
@@ -1042,51 +1062,45 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   trajTimeline: {
-    marginBottom: spacing.sm,
+    marginTop: spacing.sm,
   },
-  trajBarRow: {
-    marginBottom: spacing.md,
-  },
-  trajBarBg: {
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  trajBarFill: {
-    height: '100%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 2,
-  },
-  trajMonthsRow: {
-    flexDirection: 'row',
-    gap: spacing.lg,
-  },
-  trajMonthItem: {
-    alignItems: 'center',
-  },
-  trajSavedItem: {
-    marginLeft: 'auto',
-  },
-  trajMonthValue: {
+  trajHeroNumber: {
     fontFamily: fonts.mono,
-    fontSize: 24,
+    fontSize: 48,
     fontWeight: '300',
     color: colors.text,
+    letterSpacing: -2,
   },
-  trajMonthLabel: {
+  trajHeroLabel: {
     fontFamily: fonts.regular,
-    fontSize: 11,
+    fontSize: 14,
+    color: colors.text2,
+    marginTop: 2,
+    marginBottom: spacing.md,
+  },
+  trajCompareRow: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    paddingTop: spacing.md,
+  },
+  trajCompareItem: {
+  },
+  trajCompareValue: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    marginBottom: 2,
+  },
+  trajCompareLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
     color: colors.dim,
-    textAlign: 'center',
-    lineHeight: 15,
   },
   trajInsight: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.text2,
     lineHeight: 20,
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
   },
 
   // ── Section headers ──
@@ -1153,8 +1167,8 @@ const styles = StyleSheet.create({
     color: colors.dim,
   },
   badgeActive: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#FFFFFF',
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
   badgeActiveText: {
     fontFamily: fonts.mono,
@@ -1242,7 +1256,7 @@ const styles = StyleSheet.create({
   },
   miniProgressFill: {
     height: '100%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.accent,
     borderRadius: 2,
     minWidth: 1,
   },
@@ -1370,8 +1384,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   checkboxDone: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#FFFFFF',
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
   checkmark: {
     fontFamily: fonts.semibold,
@@ -1519,7 +1533,7 @@ const styles = StyleSheet.create({
   },
   startBtn: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.accent,
     paddingVertical: 14,
     borderRadius: 100,
     alignItems: 'center',
@@ -1545,7 +1559,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(215,26,33,0.3)',
+    borderColor: 'rgba(224,82,82,0.3)',
     paddingVertical: 14,
     borderRadius: 100,
     alignItems: 'center',
@@ -1553,7 +1567,7 @@ const styles = StyleSheet.create({
   deleteBtnText: {
     fontFamily: fonts.mono,
     fontSize: 13,
-    color: colors.accent,
+    color: colors.coral,
   },
 
   // ── Resources ──

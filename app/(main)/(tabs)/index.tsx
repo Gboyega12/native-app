@@ -31,6 +31,35 @@ const SMOOTH_ANIM = {
 const gold = '#A7A7A7';
 const goldSoft = 'rgba(255,255,255,0.04)';
 
+// ── Glyph micro-animation: fade+scale on mount ──
+const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 500,
+      delay,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        style,
+        {
+          opacity: anim,
+          transform: [{
+            scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
+          }],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+};
+
 export default function Home() {
   const router = useRouter();
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -833,22 +862,10 @@ export default function Home() {
               CARD 1 — YOUR INSIGHTS
               ══════════════════════════════════════════════ */}
           <View style={styles.card}>
-            <View style={styles.cardTitleRow}>
-              <Text style={styles.cardTitle}>Your Insights</Text>
-              <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'moves' ? null : 'moves')}>
-                <Text style={styles.infoIcon}>i</Text>
-              </TouchableOpacity>
-            </View>
-            {infoCard === 'moves' && (
-              <View style={styles.infoBox}>
-                <Text style={styles.infoBoxText}>
-                  Personalised recommendations based on your spending patterns, income, goals, and financial position. Higher-impact actions that match your effort level appear first.
-                </Text>
-              </View>
-            )}
+            <Text style={styles.cardTitle}>Your Insights</Text>
 
             {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
-              const effortColor = move.effort === 'high' ? colors.accent
+              const effortClr = move.effort === 'high' ? colors.accent
                 : move.effort === 'medium' ? colors.dim : '#666666';
               return (
                 <View
@@ -857,8 +874,10 @@ export default function Home() {
                   accessibilityLabel={`Insight ${i + 1}: ${move.action}, saves ${move.annualImpact} pounds per year`}
                   style={styles.moveItem}
                 >
-                  {/* Rank number */}
-                  <Text style={styles.moveRank}>{i + 1}</Text>
+                  {/* Animated rank glyph */}
+                  <AnimGlyph delay={i * 120}>
+                    <Text style={styles.moveRank}>{i + 1}</Text>
+                  </AnimGlyph>
 
                   {/* Content */}
                   <View style={styles.moveContent}>
@@ -872,8 +891,8 @@ export default function Home() {
                         +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
                       </Text>
                       {move.effort && (
-                        <View style={[styles.effortPill, { borderColor: effortColor + '40' }]}>
-                          <Text style={[styles.effortPillText, { color: effortColor }]}>
+                        <View style={[styles.effortPill, { borderColor: effortClr + '40' }]}>
+                          <Text style={[styles.effortPillText, { color: effortClr }]}>
                             {move.effort}
                           </Text>
                         </View>
@@ -916,7 +935,7 @@ export default function Home() {
                 activeOpacity={0.7}
               >
                 <Text style={styles.viewAllText}>
-                  View all {moves.length} recommendations {'\u203A'}
+                  View plan {'\u203A'}
                 </Text>
               </TouchableOpacity>
             )}
@@ -940,12 +959,14 @@ export default function Home() {
               </View>
             )}
 
-            <View style={styles.bigNumberWrap}>
-              <Text style={styles.bigNumber} accessibilityRole="text">
-                {'\u00a3'}{Math.round(income).toLocaleString()}
-              </Text>
-              <Text style={styles.bigNumberLabel}>monthly</Text>
-            </View>
+            <AnimGlyph delay={100}>
+              <View style={styles.bigNumberWrap}>
+                <Text style={styles.bigNumber} accessibilityRole="text">
+                  {'\u00a3'}{Math.round(income).toLocaleString()}
+                </Text>
+                <Text style={styles.bigNumberLabel}>monthly</Text>
+              </View>
+            </AnimGlyph>
 
             {incomeSources.length > 0 ? (
               <>
@@ -1018,12 +1039,14 @@ export default function Home() {
             <Text style={styles.cardSubtitle}>Your weekly lifestyle allowance</Text>
 
             {/* Big remaining number */}
-            <View style={styles.safeToSpendHero}>
-              <Text style={[styles.safeToSpendAmount, !weeklyHealthy && { color: colors.accent }]}>
-                {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
-              </Text>
-              <Text style={styles.safeToSpendLabel}>left this week</Text>
-            </View>
+            <AnimGlyph delay={150}>
+              <View style={styles.safeToSpendHero}>
+                <Text style={[styles.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }]}>
+                  {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
+                </Text>
+                <Text style={styles.safeToSpendLabel}>left this week</Text>
+              </View>
+            </AnimGlyph>
 
             {/* Progress bar */}
             <View style={styles.safeToSpendBar}>
@@ -1032,7 +1055,7 @@ export default function Home() {
                   styles.safeToSpendBarFill,
                   {
                     width: `${weeklyUsedPct}%`,
-                    backgroundColor: weeklyHealthy ? '#FFFFFF' : colors.accent,
+                    backgroundColor: weeklyHealthy ? '#FFFFFF' : colors.coral,
                   },
                 ]}
               />
@@ -1343,12 +1366,14 @@ export default function Home() {
                 </Text>
 
                 {/* Total debt hero */}
-                <View style={styles.debtHero}>
-                  <Text style={styles.debtHeroAmount}>
-                    {'\u00a3'}{Math.round(totalDebt).toLocaleString()}
-                  </Text>
-                  <Text style={styles.debtHeroLabel}>total outstanding</Text>
-                </View>
+                <AnimGlyph delay={100}>
+                  <View style={styles.debtHero}>
+                    <Text style={styles.debtHeroAmount}>
+                      {'\u00a3'}{Math.round(totalDebt).toLocaleString()}
+                    </Text>
+                    <Text style={styles.debtHeroLabel}>total outstanding</Text>
+                  </View>
+                </AnimGlyph>
 
                 {/* Individual accounts */}
                 {debtAccounts.map((d: any, i: number) => {
@@ -1688,7 +1713,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   ctaButton: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.accent,
     paddingVertical: 16,
     paddingHorizontal: spacing.xl,
     borderRadius: 100,
@@ -1843,7 +1868,7 @@ const styles = StyleSheet.create({
   },
   moveApproveBtn: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.accent,
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -1871,7 +1896,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(215,26,33,0.3)',
+    borderColor: 'rgba(224,82,82,0.3)',
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -1879,7 +1904,7 @@ const styles = StyleSheet.create({
   moveDeleteBtnText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.accent,
+    color: colors.coral,
   },
   viewAllBtn: {
     alignItems: 'center',
@@ -2004,12 +2029,12 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(215,26,33,0.25)',
+    borderColor: 'rgba(224,82,82,0.25)',
   },
   removeSourceText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.accent,
+    color: colors.coral,
     letterSpacing: 0.3,
   },
 
@@ -2306,7 +2331,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 44,
     fontWeight: '300',
-    color: colors.accent,
+    color: colors.coral,
     letterSpacing: -2,
   },
   debtHeroLabel: {
@@ -2427,8 +2452,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   categoryChipActive: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#FFFFFF',
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
   },
   categoryChipText: {
     fontFamily: fonts.mono,
@@ -2497,7 +2522,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 100,
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.accent,
   },
   modalSaveDisabled: {
     opacity: 0.3,
@@ -2505,7 +2530,7 @@ const styles = StyleSheet.create({
   addItemErrorText: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.accent,
+    color: colors.coral,
     marginBottom: 12,
     lineHeight: 18,
   },
