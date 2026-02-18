@@ -432,3 +432,85 @@ export function isLikelyIncomeCredit(description: string): boolean {
     || matchesEmployerPattern(description)
     || matchesBenefitKeywords(description);
 }
+
+// ── Fuzzy Merchant Matching ──
+// Catches merchants with slight misspellings or word-order variations
+// not covered by exact pattern matching. Only activates when exact
+// matching fails. Returns null if no confident fuzzy match found.
+
+function levenshtein(a: string, b: string): number {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  // Space-optimised single-row DP
+  const row: number[] = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const val = Math.min(row[j] + 1, prev + 1, row[j - 1] + cost);
+      row[j - 1] = prev;
+      prev = val;
+    }
+    row[b.length] = prev;
+  }
+  return row[b.length];
+}
+
+function extractSubstrings(text: string): string[] {
+  const words = text.split(/\s+/).filter((w) => w.length >= 2);
+  const out: string[] = [];
+  for (let len = 1; len <= Math.min(3, words.length); len++) {
+    for (let i = 0; i <= words.length - len; i++) {
+      out.push(words.slice(i, i + len).join(' '));
+    }
+  }
+  return out;
+}
+
+export function fuzzyMatchMerchant(
+  description: string,
+  normalisedDescription?: string,
+): MerchantMatch | null {
+  const candidates = [description.toLowerCase().trim()];
+  if (normalisedDescription && normalisedDescription !== candidates[0]) {
+    candidates.push(normalisedDescription);
+  }
+
+  let bestMatch: MerchantMatch | null = null;
+  let bestSimilarity = 0;
+  const MIN_SIMILARITY = 0.75;
+  const MIN_PATTERN_LEN = 4;
+
+  for (const text of candidates) {
+    const substrings = extractSubstrings(text);
+
+    for (const entry of MERCHANTS) {
+      for (const pattern of entry.patterns) {
+        if (pattern.length < MIN_PATTERN_LEN) continue;
+
+        for (const substr of substrings) {
+          // Skip if length difference too large
+          if (Math.abs(substr.length - pattern.length) > Math.max(2, pattern.length * 0.4)) continue;
+
+          const dist = levenshtein(substr, pattern);
+          const maxLen = Math.max(substr.length, pattern.length);
+          const similarity = 1 - dist / maxLen;
+
+          if (similarity > bestSimilarity && similarity >= MIN_SIMILARITY) {
+            bestSimilarity = similarity;
+            bestMatch = {
+              merchant: entry.merchant,
+              category: entry.category,
+              isEssential: entry.isEssential || false,
+              isSubscription: entry.isSubscription || false,
+              isBNPL: entry.isBNPL || false,
+              isDebt: entry.isDebt || false,
+              isIncome: entry.isIncome || false,
+            };
+          }
+        }
+      }
+    }
+  }
+  return bestMatch;
+}

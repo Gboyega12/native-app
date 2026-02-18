@@ -24,7 +24,7 @@ export interface EnrichedTransaction extends RawTransaction {
 
 export interface RecurringItem {
   merchant: string;
-  frequency: 'weekly' | 'monthly' | 'annual' | 'irregular';
+  frequency: 'weekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
   averageAmount: number;
   category: string;
   isSubscription: boolean;

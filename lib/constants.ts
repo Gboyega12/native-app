@@ -40,10 +40,12 @@ export const ANALYSIS_MONTHS = 4;
 
 export const INCOME_THRESHOLDS = {
   minRegularAmount: 100,
+  minRegularCount: 3,       // Require 3+ regular credits to count as income
   largeCreditMin: 500,
-  largeCreditMinCount: 2,
+  largeCreditMinCount: 3,   // Require 3+ large credits (was 2)
   largeCreditIntervalMin: 20,
   largeCreditIntervalMax: 45,
+  windfallMin: 1000,        // One-off credits above this → windfall, not income
 } as const;
 
 // ── Trajectory display cap ──
