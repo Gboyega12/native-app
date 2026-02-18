@@ -37,9 +37,9 @@ export default function Welcome() {
           <Text style={styles.subtitle}>Your AI financial strategist</Text>
 
           <View style={styles.benefits}>
-            <BenefitItem text="Your most material financial move \u2014 identified" />
-            <BenefitItem text="Data-driven action plan \u2014 built" />
-            <BenefitItem text="One-tap execution \u2014 enabled" />
+            <BenefitItem text="Your most material financial move — identified" />
+            <BenefitItem text="Data-driven action plan — built" />
+            <BenefitItem text="One-tap execution — enabled" />
           </View>
 
           <TouchableOpacity style={styles.button} onPress={() => setStep(1)}>
