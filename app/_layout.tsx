@@ -68,9 +68,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
                 .from('analyses')
                 .select('id')
                 .eq('user_id', session.user.id)
-                .single()
-                .then(({ data: analysis }) => {
-                  router.replace(analysis ? '/(main)/(tabs)' : '/(main)/connect');
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .then(({ data: rows }) => {
+                  router.replace(rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect');
                 });
             } else {
               // No identity yet — start education flow

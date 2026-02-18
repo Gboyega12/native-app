@@ -537,51 +537,19 @@ export default function Home() {
       const allMoves = rankedMoves;
       const topMove = allMoves[0] || null;
 
-      // Merge manual budget adjustments into the enrichment result
-      const nonDisc = { ...result.profile.budgetReality.nonDiscretionary };
-      const disc = { ...result.profile.budgetReality.discretionary };
-      nonDisc.items = [...(nonDisc.items || [])];
-      disc.items = [...(disc.items || [])];
+      // Build raw analysis WITHOUT budget adjustments (those are applied at display time)
+      const rawNonDisc = result.profile.budgetReality.nonDiscretionary;
+      const rawDisc = result.profile.budgetReality.discretionary;
 
-      for (const adj of budgetAdjustments) {
-        const section = adj.is_essential ? nonDisc : disc;
-        const existing = section.items.find((i: BudgetCategory) => i.category === adj.category);
-        if (existing) {
-          existing.monthly += adj.monthly_amount;
-          existing.txs += 1;
-          existing.transactions = [...(existing.transactions || []), {
-            date: new Date().toISOString().split('T')[0],
-            merchant: adj.description,
-            description: adj.description + ' (manual)',
-            amount: -Math.abs(adj.monthly_amount),
-          }];
-        } else {
-          section.items.push({
-            category: adj.category,
-            monthly: adj.monthly_amount,
-            txs: 1,
-            transactions: [{
-              date: new Date().toISOString().split('T')[0],
-              merchant: adj.description,
-              description: adj.description + ' (manual)',
-              amount: -Math.abs(adj.monthly_amount),
-            }],
-          });
-        }
-        section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
-      }
-
-      const totalManualSpend = budgetAdjustments.reduce((s: number, a: any) => s + a.monthly_amount, 0);
-
-      const updatedAnalysis: Analysis = {
+      const rawAnalysis: Analysis = {
         user_id: userId,
         archetype: result.archetype.key,
         decision_score: result.decisionScore.score,
         monthly_income: Math.round(result.profile.monthly.income),
-        monthly_spending: Math.round(result.profile.monthly.spending + totalManualSpend),
-        surplus: Math.round(result.profile.monthly.surplus - totalManualSpend),
-        non_discretionary: nonDisc,
-        discretionary: disc,
+        monthly_spending: Math.round(result.profile.monthly.spending),
+        surplus: Math.round(result.profile.monthly.surplus),
+        non_discretionary: rawNonDisc,
+        discretionary: rawDisc,
         income_sources: result.profile.incomeSources,
         top_move: topMove || ({} as any),
         all_moves: allMoves,
@@ -589,22 +557,50 @@ export default function Home() {
         goal_context: goalTrajectory,
       };
 
-      // Save to Supabase
-      await supabase.from('analyses').insert({
-        user_id: userId,
-        archetype: updatedAnalysis.archetype,
-        decision_score: updatedAnalysis.decision_score,
-        monthly_income: updatedAnalysis.monthly_income,
-        monthly_spending: updatedAnalysis.monthly_spending,
-        surplus: updatedAnalysis.surplus,
-        non_discretionary: updatedAnalysis.non_discretionary,
-        discretionary: updatedAnalysis.discretionary,
-        income_sources: updatedAnalysis.income_sources,
-        top_move: updatedAnalysis.top_move,
-        all_moves: updatedAnalysis.all_moves,
-        behavioral_patterns: updatedAnalysis.behavioral_patterns,
-        goal_context: updatedAnalysis.goal_context,
-      });
+      // Upsert to Supabase — update latest row instead of creating duplicates
+      const { data: existingRow } = await supabase
+        .from('analyses')
+        .select('id')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (existingRow?.id) {
+        await supabase.from('analyses').update({
+          archetype: rawAnalysis.archetype,
+          decision_score: rawAnalysis.decision_score,
+          monthly_income: rawAnalysis.monthly_income,
+          monthly_spending: rawAnalysis.monthly_spending,
+          surplus: rawAnalysis.surplus,
+          non_discretionary: rawAnalysis.non_discretionary,
+          discretionary: rawAnalysis.discretionary,
+          income_sources: rawAnalysis.income_sources,
+          top_move: rawAnalysis.top_move,
+          all_moves: rawAnalysis.all_moves,
+          behavioral_patterns: rawAnalysis.behavioral_patterns,
+          goal_context: rawAnalysis.goal_context,
+        }).eq('id', existingRow.id);
+      } else {
+        await supabase.from('analyses').insert({
+          user_id: userId,
+          archetype: rawAnalysis.archetype,
+          decision_score: rawAnalysis.decision_score,
+          monthly_income: rawAnalysis.monthly_income,
+          monthly_spending: rawAnalysis.monthly_spending,
+          surplus: rawAnalysis.surplus,
+          non_discretionary: rawAnalysis.non_discretionary,
+          discretionary: rawAnalysis.discretionary,
+          income_sources: rawAnalysis.income_sources,
+          top_move: rawAnalysis.top_move,
+          all_moves: rawAnalysis.all_moves,
+          behavioral_patterns: rawAnalysis.behavioral_patterns,
+          goal_context: rawAnalysis.goal_context,
+        });
+      }
+
+      // Apply budget adjustments for display only (not saved)
+      const updatedAnalysis = mergeAdjustments(rawAnalysis, budgetAdjustments);
 
       // Sync debt accounts from ALL bank_data.card_balances
       try {
@@ -794,7 +790,7 @@ export default function Home() {
               </View>
             )}
 
-            {dashboardMoves.length > 0 ? dashboardMoves.map((move: Move, i: number) => {
+            {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
               const effortColor = move.effort === 'high' ? colors.coral
                 : move.effort === 'medium' ? gold : colors.accent;
               return (
@@ -854,6 +850,18 @@ export default function Home() {
               <Text style={styles.noDataText}>
                 No actionable insights yet. Upload a statement to get started.
               </Text>
+            )}
+
+            {dashboardMoves.length > 2 && (
+              <TouchableOpacity
+                style={styles.viewAllBtn}
+                onPress={() => router.push('/(main)/(tabs)/plan')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.viewAllText}>
+                  View all {moves.length} recommendations {'\u203A'}
+                </Text>
+              </TouchableOpacity>
             )}
           </View>
 
@@ -1783,6 +1791,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 13,
     color: colors.coral,
+  },
+  viewAllBtn: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  viewAllText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.accent,
   },
 
   // ── Card 2: Income ──
