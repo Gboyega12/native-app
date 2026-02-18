@@ -23,11 +23,30 @@ const GATEWAY_PREFIXES: RegExp[] = [
   /^sp\s*\*\s*/i,                   // Shopify payments
   /^gp\s*\*\s*/i,                   // GoCardless / generic prefix
   /^stripe\s*\*\s*/i,               // Stripe
+  /^wln\s*\*\s*/i,                  // Worldline
+  /^adyen\s*\*\s*/i,                // Adyen payment gateway
+
+  // ── UK bank description prefixes ──
+  /^vis\s+(?:purchase|purch)\s*/i,  // HSBC: "VIS PURCHASE TESCO"
+  /^visa\s+(?:purchase|purch)\s*/i, // HSBC alt
+  /^card\s+pur(?:chase)?\s*/i,      // NatWest: "CARD PUR TESCO"
+  /^dd\s*[\-:]\s*/i,                // NatWest: "DD - BRITISH GAS"
+  /^so\s*[\-:]\s*/i,                // Standing order: "SO - OPENRENT"
+  /^ddr\s*[\-:]\s*/i,               // Direct debit received
+  /^bgc\s*[\-:]\s*/i,               // Bank giro credit
+  /^chq\s*[\-:]\s*/i,               // Cheque
+  /^contactless\s*/i,               // "CONTACTLESS TESCO" → "TESCO"
+  /^chip\s*(?:&|and)\s*pin\s*/i,    // "CHIP & PIN TESCO" → "TESCO"
+  /^online\s+transaction\s*/i,      // "ONLINE TRANSACTION AMAZON" → "AMAZON"
+  /^faster\s+payment\s+(?:to|from)\s*/i, // "FASTER PAYMENT TO MR SMITH"
+
+  // ── Generic direction prefixes ──
   /^to\s+/i,                        // "To American Exp 3773" → "American Exp 3773"
   /^from\s+/i,                      // "From HSBC" → "HSBC"
   /^payment\s+to\s+/i,              // "Payment to Amex" → "Amex"
   /^card\s+payment\s+to\s+/i,       // "Card payment to ..." → "..."
-  /^direct\s+debit\s+to\s+/i,       // "Direct debit to ..." → "..."
+  /^direct\s+debit\s+(?:to|payment\s+to)\s+/i, // "Direct debit to ..." / "Direct debit payment to ..."
+  /^standing\s+order\s+to\s+/i,     // "Standing order to ..."
 ];
 
 // Noise patterns to strip (order matters — most specific first)
@@ -53,6 +72,10 @@ const NOISE_PATTERNS: RegExp[] = [
   /\bfpo\b/gi,                     // Faster Payment Outbound
   /\bbacs\b/gi,                    // BACS payment
   /\b[a-z]{2}\d{2}\s?\d{4}\s?\d{4}\s?\d{4}/gi, // Partial IBANs
+  /\bchip\s*(?:&|and)\s*pin\b/gi,  // Payment method marker
+  /\bcontactless\b/gi,             // Payment method marker
+  /\b(?:www\.)?[\w-]+\.(?:com|co\.uk|org|net)\b/gi, // URLs (keep merchant name, strip domain)
+  /\s+[\w]{2,3}\d{6,}/gi,          // Branch/terminal codes like "LDN123456"
 ];
 
 export function normaliseDescription(description: string): string {

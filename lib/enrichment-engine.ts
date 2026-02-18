@@ -1,5 +1,5 @@
 import {
-  matchMerchant, isPersonTransfer,
+  matchMerchant, fuzzyMatchMerchant, isPersonTransfer,
   isLikelyIncomeCredit, matchesSalaryKeywords,
 } from './merchant-db';
 import { classifyTransaction } from './classifier';
@@ -151,10 +151,14 @@ const EnrichmentEngine = {
   },
 
   enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[]): EnrichedTransaction {
-    // Check user overrides first — short-circuit if matched
+    // Check user overrides first — try both raw and normalised descriptions
     if (overrides?.length) {
       const descLower = tx.description.toLowerCase();
-      const override = overrides.find((o) => descLower.includes(o.match_description.toLowerCase()));
+      const normDesc = normaliseDescription(tx.description);
+      const override = overrides.find((o) => {
+        const pattern = o.match_description.toLowerCase();
+        return descLower.includes(pattern) || normDesc.includes(pattern);
+      });
       if (override) {
         return {
           date: tx.date,
@@ -210,6 +214,30 @@ const EnrichmentEngine = {
         isSavings,
         confidence: 'high',
       };
+    }
+
+    // ── Fuzzy merchant matching fallback ──
+    // Only for spending transactions (not credits) to avoid misclassifying income.
+    // Uses Levenshtein distance to catch typos and merchant name variations.
+    if (!isCredit) {
+      const fuzzyMatch = fuzzyMatchMerchant(tx.description, normalised);
+      if (fuzzyMatch) {
+        const classification = classifyTransaction(tx.description, fuzzyMatch);
+        return {
+          ...tx,
+          merchant: fuzzyMatch.merchant,
+          category: classification.category,
+          isEssential: classification.isEssential,
+          isSubscription: fuzzyMatch.isSubscription,
+          isBNPL: fuzzyMatch.isBNPL,
+          isDebt: fuzzyMatch.isDebt,
+          isIncome: false,
+          isTransfer: false,
+          isRefund: false,
+          isSavings,
+          confidence: 'medium',
+        };
+      }
     }
 
     // No merchant match — classify via keyword fallback or default
@@ -290,6 +318,19 @@ const EnrichmentEngine = {
 
     const recurring: RecurringItem[] = [];
     for (const [merchant, txs] of Object.entries(groups)) {
+      // Flag single transactions from known subscription merchants
+      if (txs.length === 1 && txs[0].isSubscription) {
+        recurring.push({
+          merchant,
+          frequency: 'monthly', // Assume monthly for known subscription merchants
+          averageAmount: Math.abs(txs[0].amount),
+          category: txs[0].category,
+          isSubscription: true,
+          count: 1,
+        });
+        continue;
+      }
+
       if (txs.length < 2) continue;
       const sorted = txs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       const intervals: number[] = [];
@@ -300,6 +341,8 @@ const EnrichmentEngine = {
       let frequency: RecurringItem['frequency'] = 'irregular';
       if (avgInterval >= 5 && avgInterval <= 10) frequency = 'weekly';
       else if (avgInterval >= 25 && avgInterval <= 35) frequency = 'monthly';
+      else if (avgInterval >= 80 && avgInterval <= 100) frequency = 'quarterly';
+      else if (avgInterval >= 170 && avgInterval <= 200) frequency = 'semi_annual';
       else if (avgInterval >= 340 && avgInterval <= 400) frequency = 'annual';
 
       if (frequency !== 'irregular') {
@@ -309,7 +352,7 @@ const EnrichmentEngine = {
           frequency,
           averageAmount: avgAmount,
           category: txs[0].category,
-          isSubscription: txs[0].isSubscription || frequency === 'monthly',
+          isSubscription: txs[0].isSubscription || frequency === 'monthly' || frequency === 'quarterly',
           count: txs.length,
         });
       }
@@ -403,14 +446,28 @@ const EnrichmentEngine = {
       return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt };
     })
     .filter((src) => {
+      // Known salary/employer/benefit keywords → always income
       if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
-      if (src.frequency !== 'irregular' && src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount) return true;
+
+      // Regular credits: require 3+ occurrences and minimum amount
+      if (
+        src.frequency !== 'irregular' &&
+        src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount &&
+        src.count >= INCOME_THRESHOLDS.minRegularCount
+      ) return true;
+
+      // Large recurring credits: require 3+ with regular intervals
       if (
         src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin &&
         src.count >= INCOME_THRESHOLDS.largeCreditMinCount &&
         src.avgInterval >= INCOME_THRESHOLDS.largeCreditIntervalMin &&
         src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax
       ) return true;
+
+      // One-off large credits below windfall threshold with only 1-2 occurrences
+      // are NOT income (likely refunds, gifts, or one-off transfers)
+      if (src.count <= 2 && src.avgAmount >= INCOME_THRESHOLDS.windfallMin) return false;
+
       return false;
     })
     .sort((a, b) => b.monthly - a.monthly);
