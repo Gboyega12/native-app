@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  Linking, Alert, LayoutAnimation, Platform, UIManager,
+  Linking, Alert, LayoutAnimation, Platform, UIManager, Animated, Easing, Modal,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -15,6 +15,43 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 /** Strip markdown bold/italic markers */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 
+// Smooth layout animation config
+const SMOOTH_ANIM = {
+  duration: 280,
+  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+  update: { type: LayoutAnimation.Types.easeInEaseOut },
+  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+};
+
+// ── Glyph micro-animation: fade+scale on mount ──
+const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 500,
+      delay,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        style,
+        {
+          opacity: anim,
+          transform: [{
+            scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
+          }],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+};
+
 /** Category label mapping for display */
 const CATEGORY_LABELS: Record<string, string> = {
   break_even: 'Break Even',
@@ -25,11 +62,42 @@ const CATEGORY_LABELS: Record<string, string> = {
   invest: 'Investing',
 };
 
-/** Known provider contact info for action buttons */
-const PROVIDER_CONTACTS: Record<string, { phone?: string; url?: string; label: string }> = {
-  stepchange: { phone: '0800 138 1111', url: 'https://www.stepchange.org', label: 'StepChange' },
-  citizensadvice: { phone: '0800 144 8848', url: 'https://www.citizensadvice.org.uk/debt-and-money', label: 'Citizens Advice' },
-  moneyhelper: { phone: '0800 138 7777', url: 'https://www.moneyhelper.org.uk', label: 'MoneyHelper' },
+/** Provider action — a concrete action the user can take with a provider */
+interface ProviderAction {
+  label: string;
+  sub?: string;
+  phone?: string;
+  url?: string;
+  email?: string;
+}
+
+/** Known providers by move category/type */
+const PROVIDER_ACTIONS: Record<string, ProviderAction[]> = {
+  debt: [
+    { label: 'Call StepChange', sub: 'Free debt advice', phone: '0800 138 1111' },
+    { label: 'Visit StepChange', url: 'https://www.stepchange.org' },
+    { label: 'Citizens Advice', sub: 'Debt guidance', phone: '0800 144 8848', url: 'https://www.citizensadvice.org.uk/debt-and-money' },
+  ],
+  buffer: [
+    { label: 'Compare savings accounts', sub: 'Find the best rate', url: 'https://www.bocy.io/savings-comparison.html' },
+    { label: 'Compare ISAs', sub: 'Tax-free savings', url: 'https://www.bocy.io/isa-comparison.html' },
+  ],
+  savings: [
+    { label: 'Compare savings rates', sub: 'Find the best rate', url: 'https://www.bocy.io/savings-comparison.html' },
+    { label: 'Compare ISAs', sub: 'Tax-free savings', url: 'https://www.bocy.io/isa-comparison.html' },
+  ],
+  invest: [
+    { label: 'Compare ISAs', sub: 'Stocks & Shares ISAs', url: 'https://www.bocy.io/isa-comparison.html' },
+    { label: 'Compare savings rates', sub: 'Cash alternatives', url: 'https://www.bocy.io/savings-comparison.html' },
+  ],
+  subscriptions: [],
+  transport: [
+    { label: 'Get a Railcard', sub: 'Save 1/3 on rail', url: 'https://www.railcard.co.uk' },
+    { label: 'Cycle to Work scheme', url: 'https://www.cyclescheme.co.uk' },
+  ],
+  energy: [
+    { label: 'Switch energy provider', sub: 'Ofgem', url: 'https://www.ofgem.gov.uk/information-for-household-consumers/switching-your-energy-supplier' },
+  ],
 };
 
 interface UserPlan {
@@ -50,7 +118,7 @@ interface ProgressRow {
 }
 
 function effortColor(effort: string) {
-  return effort === 'low' ? colors.accent : effort === 'medium' ? colors.sky : colors.coral;
+  return effort === 'low' ? '#666666' : effort === 'medium' ? colors.dim : colors.green;
 }
 
 function effortLabel(effort: string) {
@@ -103,13 +171,61 @@ function getPlanSteps(plan: UserPlan): string[] {
   ];
 }
 
-/** Get provider suggestion for a move */
-function getProviderForMove(move: Move): { phone?: string; url?: string; label: string } | null {
+/** Get provider actions for a move based on its category and action text */
+function getProviderActions(move: Move): ProviderAction[] {
   const action = (move.action || '').toLowerCase();
-  if (action.includes('debt') || move.category === 'debt') {
-    return PROVIDER_CONTACTS.stepchange;
+  const cat = move.category || '';
+
+  // Debt moves
+  if (cat === 'debt' || action.includes('debt') || action.includes('overpay')) {
+    return PROVIDER_ACTIONS.debt;
   }
-  return null;
+
+  // Buffer / emergency fund
+  if (cat === 'buffer' || action.includes('buffer') || action.includes('emergency')) {
+    return PROVIDER_ACTIONS.buffer;
+  }
+
+  // Savings
+  if (cat === 'savings' || action.includes('saving') || action.includes('surplus')) {
+    return PROVIDER_ACTIONS.savings;
+  }
+
+  // Investing
+  if (cat === 'invest' || action.includes('invest')) {
+    return PROVIDER_ACTIONS.invest;
+  }
+
+  // Subscriptions
+  if (action.includes('subscript') || action.includes('cancel')) {
+    return PROVIDER_ACTIONS.subscriptions;
+  }
+
+  // Transport
+  if (action.includes('transport') || action.includes('commut')) {
+    return PROVIDER_ACTIONS.transport;
+  }
+
+  return [];
+}
+
+/** Check if a move is subscription-related (routes to chat instead of external links) */
+function isSubscriptionMove(move: Move): boolean {
+  const action = (move.action || '').toLowerCase();
+  return action.includes('subscript') || action.includes('cancel');
+}
+
+/** Confirm and execute a destructive action — works on web + native */
+function confirmAction(title: string, message: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    const ok = window.confirm(`${title}\n\n${message}`);
+    if (ok) onConfirm();
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
 }
 
 export default function Plan() {
@@ -124,6 +240,7 @@ export default function Plan() {
   const userIdRef = useRef<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [highlightIdx, setHighlightIdx] = useState<number | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
 
   // Handle deep-link highlight from home page "View" button
   useEffect(() => {
@@ -229,7 +346,7 @@ export default function Plan() {
       completed_steps: [],
     };
 
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setProgress((prev) => ({ ...prev, [key]: row }));
     saveProgress(key, row);
 
@@ -252,7 +369,7 @@ export default function Plan() {
     if (!uid) return;
 
     const key = `move-${index}`;
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setProgress((prev) => {
       const updated = { ...prev };
       delete updated[key];
@@ -274,7 +391,7 @@ export default function Plan() {
       });
     } catch {}
 
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
   };
 
@@ -293,7 +410,7 @@ export default function Plan() {
     const updatedMoves = [...originalMoves];
     updatedMoves.splice(originalIndex, 1);
 
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
     setAnalysis({ ...analysis, all_moves: updatedMoves });
 
     const progressKey = `move-${sortedIndex}`;
@@ -339,7 +456,7 @@ export default function Plan() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color={colors.accent} size="large" />
+        <ActivityIndicator color="#FFFFFF" size="large" />
       </View>
     );
   }
@@ -367,7 +484,13 @@ export default function Plan() {
   const opportunities = moves
     .map((m, i) => ({ move: m, index: i }))
     .filter(({ index }) => !progress[`move-${index}`]?.approved)
-    .sort((a, b) => (b.move.annualImpact || 0) - (a.move.annualImpact || 0));
+    .sort((a, b) => {
+      // Big moves (high effort) first, quick wins (low effort) last
+      const eDiff = (effortOrder[a.move.effort] ?? 2) - (effortOrder[b.move.effort] ?? 2);
+      if (eDiff !== 0) return eDiff;
+      // Within same effort tier, sort by highest impact first
+      return (b.move.annualImpact || 0) - (a.move.annualImpact || 0);
+    });
 
   const totalMonthlyImpact = moves.reduce((s, m) => s + (m.monthlyImpact || 0), 0);
   const activeMonthly = activeMoves.reduce((s, { move }) => s + (move.monthlyImpact || 0), 0);
@@ -378,65 +501,97 @@ export default function Plan() {
 
   return (
     <ScrollView ref={scrollRef} style={styles.container} contentContainerStyle={styles.scroll}>
-      <Text style={styles.heading}>Your Plan</Text>
-      <Text style={styles.headingSub}>
-        {activeMoves.length + userPlans.length} active
-        {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} opportunit${opportunities.length === 1 ? 'y' : 'ies'}` : ''}
-      </Text>
+      <View style={styles.headingRow}>
+        <View>
+          <Text style={styles.heading}>Your Plan</Text>
+          <Text style={styles.headingSub}>
+            {activeMoves.length + userPlans.length} in progress
+            {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} recommended` : ''}
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.infoBtn} onPress={() => setShowInfo(true)} activeOpacity={0.7}>
+          <Text style={styles.infoBtnText}>{'\u24D8'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Info modal ── */}
+      <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}>
+        <TouchableOpacity style={styles.infoOverlay} activeOpacity={1} onPress={() => setShowInfo(false)}>
+          <View style={styles.infoModal}>
+            <Text style={styles.infoTitle}>How your plan works</Text>
+
+            <Text style={styles.infoHeading}>Goal trajectory</Text>
+            <Text style={styles.infoBody}>
+              Shows how many months to reach your goal if you follow the plan, compared to doing nothing.
+            </Text>
+
+            <Text style={styles.infoHeading}>In progress</Text>
+            <Text style={styles.infoBody}>
+              Moves you've started. Track steps with the checklist. Your monthly savings total is shown at the top.
+            </Text>
+
+            <Text style={styles.infoHeading}>Recommended</Text>
+            <Text style={styles.infoBody}>
+              Personalised opportunities ranked by annual impact. Tap to expand details, strategy, and action steps.
+            </Text>
+
+            <Text style={styles.infoHeading}>Effort levels</Text>
+            <Text style={styles.infoBody}>
+              Quick win = minimal effort.{'\n'}Some effort = takes a bit of time.{'\n'}Big move = significant change but highest reward.
+            </Text>
+
+            <Text style={styles.infoHeading}>Take action</Text>
+            <Text style={styles.infoBody}>
+              Each move has direct links or buttons to help you act — compare rates, call providers, or ask Bocy for personalised advice.
+            </Text>
+
+            <TouchableOpacity style={styles.infoClose} onPress={() => setShowInfo(false)} activeOpacity={0.8}>
+              <Text style={styles.infoCloseText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* ══════════════════════════════════════════════
-          SECTION 1 — GOAL TRAJECTORY
+          SECTION 1 — YOUR GOAL
           ══════════════════════════════════════════════ */}
       {goalCtx && (
         <View style={styles.trajectoryCard}>
-          <Text style={styles.trajLabel}>GOAL TRAJECTORY</Text>
-          <Text style={styles.trajGoal}>{goalCtx.goalLabel}</Text>
+          <AnimGlyph>
+            <Text style={styles.trajGoal}>{goalCtx.goalLabel}</Text>
+          </AnimGlyph>
 
           {goalCtx.targetAmount > 0 && (
             <Text style={styles.trajTarget}>
-              Target: {'\u00a3'}{goalCtx.targetAmount.toLocaleString()}
+              {'\u00a3'}{goalCtx.targetAmount.toLocaleString()} target
             </Text>
           )}
 
-          {/* Timeline bar */}
-          <View style={styles.trajTimeline}>
-            <View style={styles.trajBarRow}>
-              <View style={styles.trajBarBg}>
-                {goalCtx.currentMonths > 0 && goalCtx.newMonths > 0 && (
-                  <View
-                    style={[
-                      styles.trajBarFill,
-                      { width: `${Math.min(100, Math.round((goalCtx.newMonths / goalCtx.currentMonths) * 100))}%` },
-                    ]}
-                  />
-                )}
-              </View>
-            </View>
-            <View style={styles.trajMonthsRow}>
-              {goalCtx.newMonths > 0 ? (
-                <>
-                  <View style={styles.trajMonthItem}>
-                    <Text style={styles.trajMonthValue}>{goalCtx.newMonths}</Text>
-                    <Text style={styles.trajMonthLabel}>months{'\n'}with plan</Text>
+          {goalCtx.newMonths > 0 ? (
+            <View style={styles.trajTimeline}>
+              {/* Clear primary metric */}
+              <AnimGlyph delay={100}>
+                <Text style={styles.trajHeroNumber}>{goalCtx.newMonths}</Text>
+                <Text style={styles.trajHeroLabel}>months to reach your goal</Text>
+              </AnimGlyph>
+
+              {/* Savings comparison */}
+              {goalCtx.monthsSaved > 0 && goalCtx.currentMonths > 0 && (
+                <View style={styles.trajCompareRow}>
+                  <View style={styles.trajCompareItem}>
+                    <Text style={[styles.trajCompareValue, { color: colors.green }]}>
+                      {goalCtx.monthsSaved} months faster
+                    </Text>
+                    <Text style={styles.trajCompareLabel}>
+                      vs {goalCtx.currentMonths} months without a plan
+                    </Text>
                   </View>
-                  {goalCtx.currentMonths > 0 && (
-                    <View style={styles.trajMonthItem}>
-                      <Text style={[styles.trajMonthValue, { color: colors.dim }]}>{goalCtx.currentMonths}</Text>
-                      <Text style={styles.trajMonthLabel}>months{'\n'}without</Text>
-                    </View>
-                  )}
-                  {goalCtx.monthsSaved > 0 && (
-                    <View style={[styles.trajMonthItem, styles.trajSavedItem]}>
-                      <Text style={[styles.trajMonthValue, { color: colors.accent }]}>-{goalCtx.monthsSaved}</Text>
-                      <Text style={[styles.trajMonthLabel, { color: colors.accent }]}>months{'\n'}saved</Text>
-                    </View>
-                  )}
-                </>
-              ) : (
-                <Text style={styles.trajInsight}>{goalCtx.insight}</Text>
+                </View>
               )}
             </View>
-          </View>
+          ) : goalCtx.insight ? (
+            <Text style={styles.trajInsight}>{goalCtx.insight}</Text>
+          ) : null}
 
           {goalCtx.newMonths > 0 && goalCtx.insight && (
             <Text style={styles.trajInsight}>{goalCtx.insight}</Text>
@@ -450,9 +605,9 @@ export default function Plan() {
       {(activeMoves.length > 0 || userPlans.length > 0) && (
         <>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionLabel}>ACTIVE MOVES</Text>
+            <Text style={styles.sectionLabel}>IN PROGRESS</Text>
             <Text style={styles.sectionMeta}>
-              {'\u00a3'}{Math.round(activeMonthly + planMonthly)}/mo impact
+              saving {'\u00a3'}{Math.round(activeMonthly + planMonthly)}/mo
             </Text>
           </View>
 
@@ -545,16 +700,11 @@ export default function Plan() {
 
                     <TouchableOpacity
                       style={styles.removeButton}
-                      onPress={() => {
-                        Alert.alert(
-                          'Delete plan?',
-                          `Remove "${stripMd(plan.action)}" from your plans?`,
-                          [
-                            { text: 'Keep', style: 'cancel' },
-                            { text: 'Delete', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
-                          ],
-                        );
-                      }}
+                      onPress={() => confirmAction(
+                        'Delete plan?',
+                        `Remove "${stripMd(plan.action)}" from your plans?`,
+                        () => handleRemovePlan(plan.id),
+                      )}
                     >
                       <Text style={styles.removeText}>Delete plan</Text>
                     </TouchableOpacity>
@@ -565,7 +715,7 @@ export default function Plan() {
           })}
 
           {/* Active recommendation moves */}
-          {activeMoves.map(({ move, index: i }) => {
+          {activeMoves.map(({ move, index: i }, seqIdx) => {
             const isExpanded = expanded === i;
             const moveKey = `move-${i}`;
             const steps = move.steps || [];
@@ -580,9 +730,11 @@ export default function Plan() {
                   activeOpacity={0.8}
                 >
                   <View style={styles.cardHeader}>
-                    <View style={[styles.badge, styles.badgeActive]}>
-                      <Text style={styles.badgeActiveText}>{'\u2713'}</Text>
-                    </View>
+                    <AnimGlyph delay={seqIdx * 80}>
+                      <View style={[styles.badge, styles.badgeActive]}>
+                        <Text style={styles.badgeActiveText}>{'\u2713'}</Text>
+                      </View>
+                    </AnimGlyph>
                     <View style={styles.cardContent}>
                       <Text style={styles.moveAction}>{stripMd(move.action)}</Text>
                       <View style={styles.moveStats}>
@@ -619,7 +771,7 @@ export default function Plan() {
       {opportunities.length > 0 && (
         <>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionLabel}>OPPORTUNITIES</Text>
+            <Text style={styles.sectionLabel}>RECOMMENDED</Text>
             <Text style={styles.sectionMeta}>
               {'\u00a3'}{Math.round(totalMonthlyImpact - activeMonthly)}/mo potential
             </Text>
@@ -658,7 +810,7 @@ export default function Plan() {
           </View>
 
           {/* Individual opportunity cards */}
-          {opportunities.map(({ move, index: i }) => {
+          {opportunities.map(({ move, index: i }, seqIdx) => {
             const isExpanded = expanded === i;
             const isHighlighted = highlightIdx === i;
             const moveKey = `move-${i}`;
@@ -680,9 +832,11 @@ export default function Plan() {
                   activeOpacity={0.8}
                 >
                   <View style={styles.cardHeader}>
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{i + 1}</Text>
-                    </View>
+                    <AnimGlyph delay={seqIdx * 80}>
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{seqIdx + 1}</Text>
+                      </View>
+                    </AnimGlyph>
                     <View style={styles.cardContent}>
                       <Text style={styles.moveAction}>{stripMd(move.action)}</Text>
                       <View style={styles.moveStats}>
@@ -719,18 +873,6 @@ export default function Plan() {
         </>
       )}
 
-      {/* ══════════════════════════════════════════════
-          SECTION 4 — RESOURCES
-          ══════════════════════════════════════════════ */}
-      <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>NEED HELP WITH DEBT?</Text>
-      <View style={styles.card}>
-        <TouchableOpacity onPress={() => Linking.openURL('https://www.stepchange.org')}>
-          <Text style={styles.resourceLink}>StepChange — Free debt advice</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => Linking.openURL('https://www.citizensadvice.org.uk/debt-and-money')}>
-          <Text style={styles.resourceLink}>Citizens Advice — Debt guidance</Text>
-        </TouchableOpacity>
-      </View>
     </ScrollView>
   );
 
@@ -746,7 +888,7 @@ export default function Plan() {
     nextStepIdx: number,
     isActive: boolean,
   ) {
-    const provider = getProviderForMove(move);
+    const providerActions = getProviderActions(move);
 
     return (
       <View style={styles.expandedSection}>
@@ -844,35 +986,68 @@ export default function Plan() {
           </View>
         </View>
 
-        {/* Provider contact actions */}
-        {provider && (
+        {/* Provider action buttons — subscriptions route to chat instead */}
+        {isSubscriptionMove(move) ? (
           <View style={styles.providerBlock}>
-            <Text style={styles.detailLabel}>Get help</Text>
-            <View style={styles.providerActions}>
-              {provider.phone && (
+            <Text style={styles.detailLabel}>Take action</Text>
+            <TouchableOpacity
+              style={styles.askBocyBtn}
+              onPress={() => {
+                const prompt = `I'd like help with this recommendation: "${stripMd(move.action)}".${move.merchants?.length ? ` My subscriptions include: ${move.merchants.join(', ')}.` : ''} What should I do?`;
+                router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: prompt } });
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.askBocyBtnText}>Ask BOCY about this</Text>
+            </TouchableOpacity>
+          </View>
+        ) : providerActions.length > 0 ? (
+          <View style={styles.providerBlock}>
+            <Text style={styles.detailLabel}>Take action</Text>
+            <View style={styles.providerGrid}>
+              {providerActions.map((pa, j) => (
                 <TouchableOpacity
-                  style={styles.providerBtn}
-                  onPress={() => Linking.openURL(`tel:${provider.phone}`)}
+                  key={j}
+                  style={[styles.providerBtn, pa.phone && !pa.url ? styles.providerBtnCall : styles.providerBtnLink]}
+                  onPress={() => {
+                    if (pa.phone && !pa.url) {
+                      Linking.openURL(`tel:${pa.phone}`);
+                    } else if (pa.url) {
+                      Linking.openURL(pa.url);
+                    } else if (pa.email) {
+                      Linking.openURL(`mailto:${pa.email}`);
+                    }
+                  }}
                 >
-                  <Text style={styles.providerBtnText}>Call {provider.label}</Text>
-                  <Text style={styles.providerBtnSub}>{provider.phone}</Text>
+                  <Text style={[
+                    styles.providerBtnText,
+                    pa.phone && !pa.url ? styles.providerBtnTextCall : styles.providerBtnTextLink,
+                  ]}>
+                    {pa.label}
+                  </Text>
+                  {pa.sub && (
+                    <Text style={[
+                      styles.providerBtnSub,
+                      pa.phone && !pa.url ? styles.providerBtnSubCall : styles.providerBtnSubLink,
+                    ]}>
+                      {pa.sub}
+                    </Text>
+                  )}
+                  {pa.phone && !pa.url && (
+                    <Text style={styles.providerBtnPhone}>{pa.phone}</Text>
+                  )}
                 </TouchableOpacity>
-              )}
-              {provider.url && (
-                <TouchableOpacity
-                  style={[styles.providerBtn, styles.providerBtnOutline]}
-                  onPress={() => Linking.openURL(provider.url!)}
-                >
-                  <Text style={[styles.providerBtnText, { color: colors.accent }]}>Visit website</Text>
-                </TouchableOpacity>
-              )}
+              ))}
             </View>
           </View>
-        )}
+        ) : null}
 
         <TouchableOpacity
           style={styles.chatBtn}
-          onPress={() => router.push('/(main)/(tabs)/chat')}
+          onPress={() => {
+            const prompt = `Tell me more about: "${stripMd(move.action)}"`;
+            router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: prompt } });
+          }}
         >
           <Text style={styles.chatBtnText}>Ask Bocy about this</Text>
         </TouchableOpacity>
@@ -896,16 +1071,11 @@ export default function Plan() {
           )}
           <TouchableOpacity
             style={styles.deleteBtn}
-            onPress={() => {
-              Alert.alert(
-                'Delete recommendation?',
-                `Permanently remove "${stripMd(move.action)}"?`,
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Delete', style: 'destructive', onPress: () => handleDeleteRecommendation(i) },
-                ],
-              );
-            }}
+            onPress={() => confirmAction(
+              'Delete recommendation?',
+              `Permanently remove "${stripMd(move.action)}"?`,
+              () => handleDeleteRecommendation(i),
+            )}
           >
             <Text style={styles.deleteBtnText}>Delete</Text>
           </TouchableOpacity>
@@ -921,89 +1091,90 @@ export default function Plan() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: spacing.lg, paddingTop: spacing.xxl + spacing.lg, paddingBottom: spacing.xxl },
+  scroll: { padding: spacing.lg, paddingTop: spacing.xxl + spacing.xl, paddingBottom: spacing.xxl + spacing.lg },
   loadingContainer: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: { flex: 1, backgroundColor: colors.bg, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
-  emptyTitle: { fontFamily: fonts.semibold, fontSize: 18, color: colors.text, marginBottom: spacing.sm },
-  emptyText: { fontFamily: fonts.regular, fontSize: 14, color: colors.dim, textAlign: 'center', lineHeight: 22 },
+  emptyTitle: { fontFamily: fonts.medium, fontSize: 18, color: colors.text, marginBottom: spacing.sm },
+  emptyText: { fontFamily: fonts.regular, fontSize: 15, color: colors.dim, textAlign: 'center', lineHeight: 24 },
 
   // ── Header ──
-  heading: { fontFamily: fonts.heading, fontSize: 24, color: colors.text, marginBottom: 2 },
-  headingSub: { fontFamily: fonts.regular, fontSize: 13, color: colors.dim, marginBottom: spacing.lg },
+  headingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.xl },
+  heading: { fontFamily: fonts.mono, fontSize: 22, color: colors.text, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' },
+  headingSub: { fontFamily: fonts.regular, fontSize: 14, color: colors.dim },
+  infoBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center', marginTop: 2 },
+  infoBtnText: { fontSize: 18, color: colors.text2 },
+
+  // ── Info modal ──
+  infoOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
+  infoModal: { backgroundColor: colors.surface, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 24, padding: spacing.xl, maxWidth: 400, width: '100%' },
+  infoTitle: { fontFamily: fonts.mono, fontSize: 16, color: colors.text, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: spacing.lg },
+  infoHeading: { fontFamily: fonts.semibold, fontSize: 14, color: colors.text, marginTop: spacing.md, marginBottom: 4 },
+  infoBody: { fontFamily: fonts.regular, fontSize: 13, color: colors.text2, lineHeight: 20 },
+  infoClose: { backgroundColor: '#FFFFFF', borderRadius: 100, paddingVertical: 14, alignItems: 'center', marginTop: spacing.xl },
+  infoCloseText: { fontFamily: fonts.semibold, fontSize: 14, color: '#000000' },
 
   // ── Goal trajectory ──
   trajectoryCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.accentDim,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.lg,
-  },
-  trajLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    color: colors.accent,
-    marginBottom: spacing.sm,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 24,
+    padding: spacing.xl,
+    marginBottom: spacing.xl,
   },
   trajGoal: {
-    fontFamily: fonts.heading,
-    fontSize: 18,
+    fontFamily: fonts.medium,
+    fontSize: 19,
     color: colors.text,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
+    lineHeight: 26,
   },
   trajTarget: {
     fontFamily: fonts.mono,
-    fontSize: 13,
+    fontSize: 14,
     color: colors.dim,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   trajTimeline: {
-    marginBottom: spacing.sm,
+    marginTop: spacing.sm,
   },
-  trajBarRow: {
+  trajHeroNumber: {
+    fontFamily: fonts.mono,
+    fontSize: 48,
+    fontWeight: '300',
+    color: colors.text,
+    letterSpacing: -2,
+  },
+  trajHeroLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.text2,
+    marginTop: 2,
     marginBottom: spacing.md,
   },
-  trajBarBg: {
-    height: 8,
-    backgroundColor: colors.muted,
-    borderRadius: 4,
-    overflow: 'hidden',
+  trajCompareRow: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    paddingTop: spacing.md,
   },
-  trajBarFill: {
-    height: '100%',
-    backgroundColor: colors.accent,
-    borderRadius: 4,
+  trajCompareItem: {
   },
-  trajMonthsRow: {
-    flexDirection: 'row',
-    gap: spacing.lg,
+  trajCompareValue: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    marginBottom: 2,
   },
-  trajMonthItem: {
-    alignItems: 'center',
-  },
-  trajSavedItem: {
-    marginLeft: 'auto',
-  },
-  trajMonthValue: {
-    fontFamily: fonts.heading,
-    fontSize: 24,
-    color: colors.text,
-  },
-  trajMonthLabel: {
+  trajCompareLabel: {
     fontFamily: fonts.regular,
-    fontSize: 11,
+    fontSize: 13,
     color: colors.dim,
-    textAlign: 'center',
-    lineHeight: 15,
   },
   trajInsight: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.text2,
     lineHeight: 20,
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
   },
 
   // ── Section headers ──
@@ -1011,35 +1182,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginTop: spacing.xl,
-    marginBottom: spacing.sm,
+    marginTop: spacing.xxl,
+    marginBottom: spacing.md,
   },
   sectionLabel: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.mono,
     fontSize: 11,
-    letterSpacing: 1.5,
-    color: colors.accent,
+    letterSpacing: 2,
+    color: colors.text2,
+    textTransform: 'uppercase',
   },
   sectionMeta: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 12,
     color: colors.dim,
   },
 
   // ── Cards ──
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.sm,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 24,
+    padding: spacing.xl,
+    marginBottom: spacing.md,
   },
   activeCard: {
-    borderColor: colors.accentDim,
+    borderColor: 'rgba(255,255,255,0.20)',
   },
   cardHighlight: {
-    borderColor: colors.accent,
+    borderColor: '#FFFFFF',
     borderWidth: 2,
   },
   cardHeader: {
@@ -1055,33 +1227,36 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.accentDim,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.sm,
     marginTop: 2,
   },
   badgeText: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.dim,
   },
   badgeActive: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.green,
+    borderColor: colors.green,
   },
   badgeActiveText: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.bg,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: '#000000',
   },
 
   // ── Move content ──
   moveAction: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
+    fontFamily: fonts.medium,
+    fontSize: 16,
     color: colors.text,
-    marginBottom: spacing.xs,
-    lineHeight: 22,
+    marginBottom: spacing.sm,
+    lineHeight: 24,
   },
   moveStats: {
     flexDirection: 'row',
@@ -1089,18 +1264,22 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   impactText: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: colors.text,
   },
   effortBadge: {
-    borderRadius: 10,
+    borderRadius: 100,
     paddingVertical: 2,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   effortText: {
-    fontSize: 11,
-    fontFamily: fonts.medium,
+    fontSize: 10,
+    fontFamily: fonts.mono,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   expandIcon: {
     fontSize: 10,
@@ -1116,19 +1295,21 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   merchantChip: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 6,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 100,
     paddingVertical: 3,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
   },
   merchantChipText: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.text2,
   },
   merchantMore: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.dim,
     alignSelf: 'center',
   },
@@ -1142,29 +1323,29 @@ const styles = StyleSheet.create({
   },
   miniProgressBar: {
     flex: 1,
-    height: 4,
-    backgroundColor: colors.border,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 2,
     overflow: 'hidden',
   },
   miniProgressFill: {
     height: '100%',
-    backgroundColor: colors.accent,
+    backgroundColor: colors.green,
     borderRadius: 2,
     minWidth: 1,
   },
   miniProgressText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.muted,
   },
 
   // ── Impact comparison bars ──
   impactCompare: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 24,
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
@@ -1184,47 +1365,48 @@ const styles = StyleSheet.create({
   },
   impactBarTrack: {
     flex: 1,
-    height: 12,
-    backgroundColor: colors.border,
-    borderRadius: 6,
+    height: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 4,
     overflow: 'hidden',
   },
   impactBarFill: {
     height: '100%',
-    borderRadius: 6,
+    borderRadius: 4,
   },
   impactBarValue: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '400',
     width: 54,
     textAlign: 'right',
   },
   impactBarFootnote: {
-    fontFamily: fonts.regular,
-    fontSize: 10,
+    fontFamily: fonts.mono,
+    fontSize: 9,
     color: colors.muted,
     textAlign: 'right',
     marginTop: 2,
+    letterSpacing: 0.3,
   },
 
   // ── Expanded section ──
-  expandedSection: { marginTop: spacing.sm },
-  separator: { height: 1, backgroundColor: colors.border, marginBottom: spacing.md },
-  detailBlock: { marginBottom: spacing.md },
+  expandedSection: { marginTop: spacing.md },
+  separator: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: spacing.lg },
+  detailBlock: { marginBottom: spacing.lg },
   detailLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 11,
-    letterSpacing: 0.5,
-    color: colors.dim,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 2,
+    color: colors.text2,
     textTransform: 'uppercase',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   detailText: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.text2,
-    lineHeight: 22,
+    lineHeight: 24,
   },
 
   // ── Merchant list ──
@@ -1238,10 +1420,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   merchantDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.accent,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
   },
   merchantName: {
     fontFamily: fonts.regular,
@@ -1258,7 +1440,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.04)',
   },
   checklistRowNext: {
-    backgroundColor: 'rgba(122,239,199,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
     marginHorizontal: -spacing.sm,
     paddingHorizontal: spacing.sm,
     borderRadius: radius.sm,
@@ -1268,45 +1450,45 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: 6,
-    borderWidth: 2,
-    borderColor: colors.muted,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
     marginRight: spacing.sm,
     marginTop: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   checkboxDone: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    backgroundColor: colors.green,
+    borderColor: colors.green,
   },
   checkmark: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.bg,
+    color: '#000000',
   },
   checklistContent: { flex: 1 },
   checklistText: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.text2,
-    lineHeight: 22,
+    lineHeight: 24,
   },
   checklistTextDone: {
     textDecorationLine: 'line-through',
     color: colors.muted,
   },
   nextStepLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 10,
-    letterSpacing: 0.5,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1,
+    color: colors.text,
     marginTop: 2,
     textTransform: 'uppercase',
   },
   stepNumber: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.dim,
     width: 22,
     marginRight: spacing.sm,
     textAlign: 'center',
@@ -1315,10 +1497,10 @@ const styles = StyleSheet.create({
 
   // ── Impact grid ──
   effectText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: colors.accent,
-    lineHeight: 22,
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 24,
   },
   impactGrid: {
     flexDirection: 'row',
@@ -1326,69 +1508,108 @@ const styles = StyleSheet.create({
   },
   impactItem: {
     flex: 1,
-    backgroundColor: colors.accentDim,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
     borderRadius: radius.sm,
     padding: spacing.sm,
     alignItems: 'center',
   },
   impactValue: {
-    fontFamily: fonts.heading,
+    fontFamily: fonts.mono,
     fontSize: 18,
-    color: colors.accent,
+    fontWeight: '300',
+    color: colors.text,
   },
   impactLabel: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.dim,
     marginTop: 2,
+    letterSpacing: 0.3,
   },
 
-  // ── Provider contact ──
+  // ── Provider action buttons ──
   providerBlock: {
     marginBottom: spacing.md,
   },
-  providerActions: {
+  providerGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
   providerBtn: {
-    flex: 1,
-    backgroundColor: colors.accentDim,
-    borderRadius: radius.md,
+    minWidth: '45%',
+    flexGrow: 1,
+    borderRadius: 100,
     paddingVertical: 12,
+    paddingHorizontal: spacing.md,
     alignItems: 'center',
   },
-  providerBtnOutline: {
+  providerBtnCall: {
+    backgroundColor: '#FFFFFF',
+  },
+  providerBtnLink: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: colors.accentDim,
+    borderColor: 'rgba(255,255,255,0.15)',
   },
   providerBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.bg,
+  },
+  providerBtnTextCall: {
+    color: '#000000',
+  },
+  providerBtnTextLink: {
+    color: colors.text,
   },
   providerBtnSub: {
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    marginTop: 2,
+  },
+  providerBtnSubCall: {
+    color: '#000000',
+    opacity: 0.5,
+  },
+  providerBtnSubLink: {
+    color: colors.dim,
+  },
+  providerBtnPhone: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.bg,
+    color: '#000000',
     marginTop: 2,
-    opacity: 0.7,
+    opacity: 0.4,
   },
 
   // ── Buttons ──
+  askBocyBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 100,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  askBocyBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: '#000000',
+  },
   chatBtn: {
-    borderWidth: 1.5,
-    borderColor: colors.accentDim,
-    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 100,
     paddingVertical: 12,
     alignItems: 'center',
     marginBottom: spacing.sm,
   },
   chatBtnText: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: colors.accent,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.text,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   actionButtons: {
     flexDirection: 'row',
@@ -1397,49 +1618,41 @@ const styles = StyleSheet.create({
   },
   startBtn: {
     flex: 1,
-    backgroundColor: colors.accent,
+    backgroundColor: '#FFFFFF',
     paddingVertical: 14,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
   },
   startBtnText: {
     fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.bg,
+    fontSize: 14,
+    color: '#000000',
   },
   removeButton: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.10)',
     paddingVertical: 14,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
   },
   removeText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
+    fontFamily: fonts.mono,
+    fontSize: 13,
     color: colors.dim,
   },
   deleteBtn: {
     flex: 1,
-    backgroundColor: 'rgba(232,114,114,0.08)',
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(232,114,114,0.2)',
+    borderColor: 'rgba(224,82,82,0.3)',
     paddingVertical: 14,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
   },
   deleteBtnText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
+    fontFamily: fonts.mono,
+    fontSize: 13,
     color: colors.coral,
   },
 
-  // ── Resources ──
-  resourceLink: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: colors.sky,
-    paddingVertical: spacing.xs,
-    textDecorationLine: 'underline',
-  },
 });

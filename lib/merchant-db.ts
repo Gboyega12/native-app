@@ -257,6 +257,8 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['trading 212', 'trading212'], merchant: 'Trading 212', category: 'Savings' },
   { patterns: ['nutmeg'], merchant: 'Nutmeg', category: 'Savings' },
   { patterns: ['moneybox'], merchant: 'Moneybox', category: 'Savings' },
+  { patterns: ['plum'], merchant: 'Plum', category: 'Savings' },
+  { patterns: ['chip'], merchant: 'Chip', category: 'Savings' },
 
   // ── International Transfers (not income, not spending — transfers) ──
   { patterns: ['lemfi'], merchant: 'LemFi', category: 'Transfers' },
