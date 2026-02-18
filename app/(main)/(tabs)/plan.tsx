@@ -25,11 +25,44 @@ const CATEGORY_LABELS: Record<string, string> = {
   invest: 'Investing',
 };
 
-/** Known provider contact info for action buttons */
-const PROVIDER_CONTACTS: Record<string, { phone?: string; url?: string; label: string }> = {
-  stepchange: { phone: '0800 138 1111', url: 'https://www.stepchange.org', label: 'StepChange' },
-  citizensadvice: { phone: '0800 144 8848', url: 'https://www.citizensadvice.org.uk/debt-and-money', label: 'Citizens Advice' },
-  moneyhelper: { phone: '0800 138 7777', url: 'https://www.moneyhelper.org.uk', label: 'MoneyHelper' },
+/** Provider action — a concrete action the user can take with a provider */
+interface ProviderAction {
+  label: string;
+  sub?: string;
+  phone?: string;
+  url?: string;
+  email?: string;
+}
+
+/** Known providers by move category/type */
+const PROVIDER_ACTIONS: Record<string, ProviderAction[]> = {
+  debt: [
+    { label: 'Call StepChange', sub: 'Free debt advice', phone: '0800 138 1111' },
+    { label: 'Visit StepChange', url: 'https://www.stepchange.org' },
+    { label: 'Citizens Advice', sub: 'Debt guidance', phone: '0800 144 8848', url: 'https://www.citizensadvice.org.uk/debt-and-money' },
+  ],
+  buffer: [
+    { label: 'Compare savings accounts', sub: 'MoneyHelper', url: 'https://www.moneyhelper.org.uk/en/savings/how-to-save/use-our-savings-calculator' },
+    { label: 'Open a Cash ISA', sub: 'Tax-free savings', url: 'https://www.moneyhelper.org.uk/en/savings/types-of-savings/cash-isas' },
+  ],
+  savings: [
+    { label: 'Compare savings rates', sub: 'MSE', url: 'https://www.moneysavingexpert.com/savings/savings-accounts-best-interest/' },
+    { label: 'Call MoneyHelper', sub: 'Savings advice', phone: '0800 138 7777' },
+  ],
+  invest: [
+    { label: 'Learn about investing', sub: 'MoneyHelper guide', url: 'https://www.moneyhelper.org.uk/en/investments' },
+    { label: 'Compare S&S ISAs', sub: 'MSE', url: 'https://www.moneysavingexpert.com/savings/stocks-shares-isas/' },
+  ],
+  subscriptions: [
+    { label: 'Review with free tool', sub: 'Trim subscriptions', url: 'https://www.moneysavingexpert.com/broadband-and-tv/cancel-direct-debit/' },
+  ],
+  transport: [
+    { label: 'Get a Railcard', sub: 'Save 1/3 on rail', url: 'https://www.railcard.co.uk' },
+    { label: 'Cycle to Work scheme', url: 'https://www.cyclescheme.co.uk' },
+  ],
+  energy: [
+    { label: 'Switch energy provider', sub: 'Ofgem', url: 'https://www.ofgem.gov.uk/information-for-household-consumers/switching-your-energy-supplier' },
+  ],
 };
 
 interface UserPlan {
@@ -103,13 +136,55 @@ function getPlanSteps(plan: UserPlan): string[] {
   ];
 }
 
-/** Get provider suggestion for a move */
-function getProviderForMove(move: Move): { phone?: string; url?: string; label: string } | null {
+/** Get provider actions for a move based on its category and action text */
+function getProviderActions(move: Move): ProviderAction[] {
   const action = (move.action || '').toLowerCase();
-  if (action.includes('debt') || move.category === 'debt') {
-    return PROVIDER_CONTACTS.stepchange;
+  const cat = move.category || '';
+
+  // Debt moves
+  if (cat === 'debt' || action.includes('debt') || action.includes('overpay')) {
+    return PROVIDER_ACTIONS.debt;
   }
-  return null;
+
+  // Buffer / emergency fund
+  if (cat === 'buffer' || action.includes('buffer') || action.includes('emergency')) {
+    return PROVIDER_ACTIONS.buffer;
+  }
+
+  // Savings
+  if (cat === 'savings' || action.includes('saving') || action.includes('surplus')) {
+    return PROVIDER_ACTIONS.savings;
+  }
+
+  // Investing
+  if (cat === 'invest' || action.includes('invest')) {
+    return PROVIDER_ACTIONS.invest;
+  }
+
+  // Subscriptions
+  if (action.includes('subscript') || action.includes('cancel')) {
+    return PROVIDER_ACTIONS.subscriptions;
+  }
+
+  // Transport
+  if (action.includes('transport') || action.includes('commut')) {
+    return PROVIDER_ACTIONS.transport;
+  }
+
+  return [];
+}
+
+/** Confirm and execute a destructive action — works on web + native */
+function confirmAction(title: string, message: string, onConfirm: () => void) {
+  if (Platform.OS === 'web') {
+    const ok = window.confirm(`${title}\n\n${message}`);
+    if (ok) onConfirm();
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
 }
 
 export default function Plan() {
@@ -545,16 +620,11 @@ export default function Plan() {
 
                     <TouchableOpacity
                       style={styles.removeButton}
-                      onPress={() => {
-                        Alert.alert(
-                          'Delete plan?',
-                          `Remove "${stripMd(plan.action)}" from your plans?`,
-                          [
-                            { text: 'Keep', style: 'cancel' },
-                            { text: 'Delete', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
-                          ],
-                        );
-                      }}
+                      onPress={() => confirmAction(
+                        'Delete plan?',
+                        `Remove "${stripMd(plan.action)}" from your plans?`,
+                        () => handleRemovePlan(plan.id),
+                      )}
                     >
                       <Text style={styles.removeText}>Delete plan</Text>
                     </TouchableOpacity>
@@ -746,7 +816,7 @@ export default function Plan() {
     nextStepIdx: number,
     isActive: boolean,
   ) {
-    const provider = getProviderForMove(move);
+    const providerActions = getProviderActions(move);
 
     return (
       <View style={styles.expandedSection}>
@@ -844,28 +914,44 @@ export default function Plan() {
           </View>
         </View>
 
-        {/* Provider contact actions */}
-        {provider && (
+        {/* Provider action buttons */}
+        {providerActions.length > 0 && (
           <View style={styles.providerBlock}>
-            <Text style={styles.detailLabel}>Get help</Text>
-            <View style={styles.providerActions}>
-              {provider.phone && (
+            <Text style={styles.detailLabel}>Take action</Text>
+            <View style={styles.providerGrid}>
+              {providerActions.map((pa, j) => (
                 <TouchableOpacity
-                  style={styles.providerBtn}
-                  onPress={() => Linking.openURL(`tel:${provider.phone}`)}
+                  key={j}
+                  style={[styles.providerBtn, pa.phone && !pa.url ? styles.providerBtnCall : styles.providerBtnLink]}
+                  onPress={() => {
+                    if (pa.phone && !pa.url) {
+                      Linking.openURL(`tel:${pa.phone}`);
+                    } else if (pa.url) {
+                      Linking.openURL(pa.url);
+                    } else if (pa.email) {
+                      Linking.openURL(`mailto:${pa.email}`);
+                    }
+                  }}
                 >
-                  <Text style={styles.providerBtnText}>Call {provider.label}</Text>
-                  <Text style={styles.providerBtnSub}>{provider.phone}</Text>
+                  <Text style={[
+                    styles.providerBtnText,
+                    pa.phone && !pa.url ? styles.providerBtnTextCall : styles.providerBtnTextLink,
+                  ]}>
+                    {pa.label}
+                  </Text>
+                  {pa.sub && (
+                    <Text style={[
+                      styles.providerBtnSub,
+                      pa.phone && !pa.url ? styles.providerBtnSubCall : styles.providerBtnSubLink,
+                    ]}>
+                      {pa.sub}
+                    </Text>
+                  )}
+                  {pa.phone && !pa.url && (
+                    <Text style={styles.providerBtnPhone}>{pa.phone}</Text>
+                  )}
                 </TouchableOpacity>
-              )}
-              {provider.url && (
-                <TouchableOpacity
-                  style={[styles.providerBtn, styles.providerBtnOutline]}
-                  onPress={() => Linking.openURL(provider.url!)}
-                >
-                  <Text style={[styles.providerBtnText, { color: colors.accent }]}>Visit website</Text>
-                </TouchableOpacity>
-              )}
+              ))}
             </View>
           </View>
         )}
@@ -896,16 +982,11 @@ export default function Plan() {
           )}
           <TouchableOpacity
             style={styles.deleteBtn}
-            onPress={() => {
-              Alert.alert(
-                'Delete recommendation?',
-                `Permanently remove "${stripMd(move.action)}"?`,
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Delete', style: 'destructive', onPress: () => handleDeleteRecommendation(i) },
-                ],
-              );
-            }}
+            onPress={() => confirmAction(
+              'Delete recommendation?',
+              `Permanently remove "${stripMd(move.action)}"?`,
+              () => handleDeleteRecommendation(i),
+            )}
           >
             <Text style={styles.deleteBtnText}>Delete</Text>
           </TouchableOpacity>
@@ -1343,22 +1424,27 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // ── Provider contact ──
+  // ── Provider action buttons ──
   providerBlock: {
     marginBottom: spacing.md,
   },
-  providerActions: {
+  providerGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
   },
   providerBtn: {
-    flex: 1,
-    backgroundColor: colors.accentDim,
+    minWidth: '45%',
+    flexGrow: 1,
     borderRadius: radius.md,
     paddingVertical: 12,
+    paddingHorizontal: spacing.md,
     alignItems: 'center',
   },
-  providerBtnOutline: {
+  providerBtnCall: {
+    backgroundColor: colors.accent,
+  },
+  providerBtnLink: {
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: colors.accentDim,
@@ -1366,14 +1452,31 @@ const styles = StyleSheet.create({
   providerBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 13,
+  },
+  providerBtnTextCall: {
     color: colors.bg,
   },
+  providerBtnTextLink: {
+    color: colors.accent,
+  },
   providerBtnSub: {
+    fontFamily: fonts.regular,
+    fontSize: 10,
+    marginTop: 2,
+  },
+  providerBtnSubCall: {
+    color: colors.bg,
+    opacity: 0.7,
+  },
+  providerBtnSubLink: {
+    color: colors.dim,
+  },
+  providerBtnPhone: {
     fontFamily: fonts.mono,
     fontSize: 10,
     color: colors.bg,
     marginTop: 2,
-    opacity: 0.7,
+    opacity: 0.6,
   },
 
   // ── Buttons ──
