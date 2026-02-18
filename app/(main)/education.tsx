@@ -38,7 +38,7 @@ const SLIDES = [
     iconColor: colors.lavender,
     title: 'Personalised to your life',
     subtitle: 'Your situation shapes every decision',
-    body: "A hybrid worker gets different advice than a commuter. A single parent gets different advice than a couple. We need to understand who you are — not just what you spend.",
+    body: "A hybrid worker has different priorities than a commuter. A single parent faces different trade-offs than a couple. We need to understand who you are — not just what you spend.",
     cta: "Let's get to know you",
     accent: colors.lavender,
   },

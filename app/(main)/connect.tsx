@@ -10,32 +10,97 @@ import { getTrueLayerAuthUrl } from '@/lib/truelayer';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
 
+// ── Session storage helpers (web only) ──
+function saveConnectState(csv: string, count: number) {
+  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+    try {
+      sessionStorage.setItem('bocy_connect_csv', csv);
+      sessionStorage.setItem('bocy_connect_count', String(count));
+    } catch {}
+  }
+}
+
+function restoreConnectState(): { csv: string; count: number } | null {
+  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+    try {
+      const csv = sessionStorage.getItem('bocy_connect_csv');
+      const count = sessionStorage.getItem('bocy_connect_count');
+      if (csv || count) {
+        return { csv: csv || '', count: parseInt(count || '0', 10) };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function clearConnectState() {
+  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+    try {
+      sessionStorage.removeItem('bocy_connect_csv');
+      sessionStorage.removeItem('bocy_connect_count');
+    } catch {}
+  }
+}
+
 export default function Connect() {
   const router = useRouter();
   const params = useLocalSearchParams<{
     connection_id?: string; status?: string; error?: string;
     code?: string; state?: string;
-    from?: string; // 'profile' | 'onboarding'
-    csvData?: string; // carried from prior connections during onboarding
+    from?: string;
+    csvData?: string;
   }>();
+
+  // Detect if we're returning from a TrueLayer redirect
+  const isRedirecting = !!(params.connection_id && params.status === 'success') || !!(params.code && params.state);
+
   const [loading, setLoading] = useState(false);
   const [loadingCSV, setLoadingCSV] = useState(false);
   const [loadingPDF, setLoadingPDF] = useState(false);
-  const [statusMsg, setStatusMsg] = useState('');
+  const [redirectLoading, setRedirectLoading] = useState(isRedirecting);
+  const [statusMsg, setStatusMsg] = useState(isRedirecting ? 'Connecting your account...' : '');
   const [errorMsg, setErrorMsg] = useState('');
-  // Accumulated CSV data when connecting multiple accounts during onboarding
   const [accumulatedCSV, setAccumulatedCSV] = useState(params.csvData || '');
   const [connectedCount, setConnectedCount] = useState(params.csvData ? 1 : 0);
   const [lastConnectedName, setLastConnectedName] = useState('');
 
   const isFromProfile = params.from === 'profile';
 
-  // Handle redirect params — arriving back from TrueLayer server redirect or popup
+  // On mount: restore state from sessionStorage (handles TrueLayer web redirect)
+  // and count existing bank_data rows
+  useEffect(() => {
+    const init = async () => {
+      // Restore session state (from before TrueLayer redirect)
+      const saved = restoreConnectState();
+      if (saved && saved.count > 0) {
+        setAccumulatedCSV((prev) => prev || saved.csv);
+        setConnectedCount((prev) => Math.max(prev, saved.count));
+      }
+
+      // Count existing bank_data rows for this user
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { count } = await supabase
+            .from('bank_data')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', user.id);
+          if (count && count > 0) {
+            setConnectedCount((prev) => Math.max(prev, count));
+          }
+        }
+      } catch {}
+    };
+    init();
+  }, []);
+
+  // Handle redirect params — arriving back from TrueLayer
   useEffect(() => {
     if (params.status === 'success' && params.connection_id) {
       fetchBankData(params.connection_id);
     } else if (params.status === 'error' && params.error) {
       setErrorMsg(decodeURIComponent(params.error));
+      setRedirectLoading(false);
     } else if (params.code && params.state) {
       exchangeTrueLayerCode(params.code, params.state);
     }
@@ -43,6 +108,7 @@ export default function Connect() {
 
   const exchangeTrueLayerCode = async (code: string, state: string) => {
     setLoading(true);
+    setRedirectLoading(true);
     setErrorMsg('');
     setStatusMsg('Exchanging authorization code...');
     try {
@@ -54,7 +120,7 @@ export default function Connect() {
       const data = await res.json();
 
       if (data.success && data.connection_id) {
-        setStatusMsg('Fetching bank data...');
+        setStatusMsg('Fetching your transactions...');
         await fetchBankData(data.connection_id);
         return;
       }
@@ -65,10 +131,12 @@ export default function Connect() {
       setErrorMsg(errDetail);
       setStatusMsg('');
       setLoading(false);
+      setRedirectLoading(false);
     } catch (err: any) {
       setErrorMsg(err.message || 'Network error during token exchange');
       setStatusMsg('');
       setLoading(false);
+      setRedirectLoading(false);
     }
   };
 
@@ -90,34 +158,42 @@ export default function Connect() {
         setErrorMsg(result.error || 'No bank data found for this connection');
         setStatusMsg('');
         setLoading(false);
+        setRedirectLoading(false);
         return;
       }
 
       setStatusMsg('');
       setLoading(false);
+      setRedirectLoading(false);
 
       if (isFromProfile) {
-        // From profile — go back to profile with success, don't go to goals
+        clearConnectState();
         router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
         return;
       }
 
-      // Onboarding flow — accumulate data for multiple accounts
+      // Onboarding flow — accumulate data
       handleConnectionSuccess(result.csv_data, 'Bank account');
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to fetch bank data');
       setStatusMsg('');
       setLoading(false);
+      setRedirectLoading(false);
     }
   };
 
   const handleConnectionSuccess = (csvData: string, label: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     const combined = accumulatedCSV
-      ? accumulatedCSV + '\n' + csvData.split('\n').slice(1).join('\n')  // skip header of 2nd CSV
+      ? accumulatedCSV + '\n' + csvData.split('\n').slice(1).join('\n')
       : csvData;
     setAccumulatedCSV(combined);
-    setConnectedCount((c) => c + 1);
+    setConnectedCount((c) => {
+      const next = c + 1;
+      // Persist state for web redirect survival
+      saveConnectState(combined, next);
+      return next;
+    });
     setLastConnectedName(label);
   };
 
@@ -125,6 +201,10 @@ export default function Connect() {
     setLoading(true);
     setErrorMsg('');
     setStatusMsg('Connecting to your bank...');
+
+    // Save current state before redirect (web loses state)
+    saveConnectState(accumulatedCSV, connectedCount);
+
     try {
       const connectionId = `conn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       const authUrl = getTrueLayerAuthUrl(connectionId);
@@ -260,12 +340,66 @@ export default function Connect() {
     }
   };
 
-  const handleContinue = () => {
-    if (!accumulatedCSV) return;
-    router.push({ pathname: '/(main)/processing', params: { csvData: accumulatedCSV } });
+  const handleContinue = async () => {
+    // Merge ALL bank_data CSVs from Supabase + any locally accumulated data
+    let mergedCSV = accumulatedCSV;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: bankRows } = await supabase
+          .from('bank_data')
+          .select('csv_data')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (bankRows && bankRows.length > 0) {
+          const allLines: string[] = ['Date,Description,Amount'];
+          for (const row of bankRows) {
+            if (!row.csv_data) continue;
+            const lines = row.csv_data.split('\n');
+            allLines.push(...lines.slice(1).filter((l: string) => l.trim()));
+          }
+          const dbCSV = allLines.join('\n');
+
+          // Merge with any locally accumulated CSV (from manual uploads)
+          if (mergedCSV) {
+            const localLines = mergedCSV.split('\n').slice(1).filter((l: string) => l.trim());
+            // Deduplicate by checking if lines already exist in DB CSV
+            const dbLineSet = new Set(allLines);
+            const uniqueLocal = localLines.filter((l: string) => !dbLineSet.has(l));
+            if (uniqueLocal.length > 0) {
+              mergedCSV = dbCSV + '\n' + uniqueLocal.join('\n');
+            } else {
+              mergedCSV = dbCSV;
+            }
+          } else {
+            mergedCSV = dbCSV;
+          }
+        }
+      }
+    } catch {}
+
+    if (!mergedCSV || mergedCSV.trim().split('\n').length < 2) {
+      Alert.alert('No data', 'No transaction data found. Please connect at least one account.');
+      return;
+    }
+
+    clearConnectState();
+    router.push({ pathname: '/(main)/processing', params: { csvData: mergedCSV } });
   };
 
   const anyLoading = loading || loadingCSV || loadingPDF;
+
+  // Show full-screen loading when returning from TrueLayer redirect
+  if (redirectLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color={colors.accent} size="large" />
+        <Text style={styles.loadingText}>{statusMsg || 'Connecting your account...'}</Text>
+        <Text style={styles.loadingHint}>This may take a few seconds</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -273,7 +407,9 @@ export default function Connect() {
         {/* Success banner for connected accounts */}
         {connectedCount > 0 && !isFromProfile && (
           <View style={styles.successBanner}>
-            <Text style={styles.successIcon}>{'>'}</Text>
+            <View style={styles.successCountBadge}>
+              <Text style={styles.successCountText}>{connectedCount}</Text>
+            </View>
             <Text style={styles.successText}>
               {connectedCount} account{connectedCount > 1 ? 's' : ''} connected
               {lastConnectedName ? ` (${lastConnectedName})` : ''}
@@ -288,8 +424,8 @@ export default function Connect() {
           {isFromProfile
             ? 'Connect a bank account for transactions or a credit card for balance tracking.'
             : connectedCount > 0
-              ? 'Connect more accounts for a complete picture, or continue to set your goals.'
-              : 'We need your transaction data to identify your most material financial move.'}
+              ? 'Connect more accounts for a complete picture, or continue to analyse your finances.'
+              : 'We need your transaction data to identify your most impactful financial move.'}
         </Text>
 
         <TouchableOpacity
@@ -437,6 +573,31 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: spacing.xl,
   },
+
+  // ── Loading screen (redirect) ──
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  loadingText: {
+    fontFamily: fonts.semibold,
+    fontSize: 16,
+    color: colors.text,
+    marginTop: spacing.lg,
+    textAlign: 'center',
+  },
+  loadingHint: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
+
+  // ── Success banner ──
   successBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -446,17 +607,26 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: 12,
     marginBottom: spacing.lg,
-    gap: 8,
+    gap: 10,
   },
-  successIcon: {
+  successCountBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successCountText: {
     fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: colors.accent,
+    fontSize: 12,
+    color: colors.bg,
   },
   successText: {
     fontFamily: fonts.medium,
     fontSize: 13,
     color: colors.accent,
+    flex: 1,
   },
   title: {
     fontFamily: fonts.heading,
