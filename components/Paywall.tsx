@@ -24,6 +24,7 @@ interface PaywallProps {
 
 export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedPrice, setSelectedPrice] = useState<'monthly' | 'yearly'>('monthly');
 
   const contextMessage = feature === 'chat'
@@ -32,13 +33,18 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     ? 'Unlock all moves to see your full action plan with step-by-step guidance.'
     : 'Get the full Bocy experience.';
 
+  const showError = (msg: string) => {
+    setError(msg);
+    setLoading(false);
+  };
+
   const handleSubscribe = async () => {
     setLoading(true);
+    setError(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        Alert.alert('Sign in required', 'Please sign in to subscribe.');
-        setLoading(false);
+        showError('Please sign in to subscribe.');
         return;
       }
 
@@ -51,11 +57,18 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
         body: JSON.stringify({ price: selectedPrice }),
       });
 
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let msg = 'Unable to start checkout. Please try again.';
+        try { msg = JSON.parse(text).error || msg; } catch {}
+        showError(msg);
+        return;
+      }
+
       const data = await res.json();
 
       if (!data.url) {
-        Alert.alert('Something went wrong', data.error || 'Unable to start checkout. Please try again.');
-        setLoading(false);
+        showError(data.error || 'Unable to start checkout. Please try again.');
         return;
       }
 
@@ -66,7 +79,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       }
     } catch (err) {
       console.warn('[Paywall] Checkout error:', err);
-      Alert.alert('Something went wrong', 'Could not connect to the payment server. Please try again.');
+      showError('Could not connect to the payment server. Please try again.');
     }
     setLoading(false);
   };
@@ -161,6 +174,9 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
                 <Text style={styles.upgradeBtnText}>Subscribe</Text>
               )}
             </TouchableOpacity>
+            {error && (
+              <Text style={styles.errorText}>{error}</Text>
+            )}
             <Text style={styles.trialNote}>Cancel anytime</Text>
 
             {/* Dismiss */}
@@ -365,6 +381,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: '#000000',
+  },
+  errorText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: '#FF6B6B',
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    lineHeight: 20,
   },
   trialNote: {
     fontFamily: fonts.regular,
