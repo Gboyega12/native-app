@@ -36,3 +36,6 @@ CREATE POLICY "Users can read own subscription"
 -- Indexes for Stripe webhook lookups (find user by Stripe IDs)
 CREATE INDEX idx_subscriptions_stripe_customer ON user_subscriptions(stripe_customer_id);
 CREATE INDEX idx_subscriptions_stripe_sub ON user_subscriptions(stripe_subscription_id);
+
+-- Enable Realtime so useSubscription() auto-updates when the webhook upserts
+ALTER PUBLICATION supabase_realtime ADD TABLE user_subscriptions;

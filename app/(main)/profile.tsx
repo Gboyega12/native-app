@@ -69,7 +69,7 @@ function getProviderInitial(name: string) {
 export default function Profile() {
   const router = useRouter();
   const { connected, upgraded } = useLocalSearchParams<{ connected?: string; upgraded?: string }>();
-  const { tier, isPro, refresh: refreshTier } = useSubscription();
+  const { tier, isPro, status, billingInterval, currentPeriodEnd, cancelAtPeriodEnd, refresh: refreshTier } = useSubscription();
   const [showPaywall, setShowPaywall] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
   const [name, setName] = useState('');
@@ -357,7 +357,11 @@ export default function Profile() {
           {isPro && (
             <>
               <Text style={s.subDesc}>
-                You have access to all Bocy features.
+                {cancelAtPeriodEnd
+                  ? `Cancels ${currentPeriodEnd ? currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'at end of period'}. You keep Pro access until then.`
+                  : status === 'past_due'
+                  ? 'Your last payment failed. Please update your payment method to keep Pro access.'
+                  : `${billingInterval === 'year' ? 'Yearly' : 'Monthly'} plan${currentPeriodEnd ? ` · renews ${currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}`}
               </Text>
               <TouchableOpacity
                 style={s.manageSubBtn}
@@ -368,7 +372,9 @@ export default function Profile() {
                 {portalLoading ? (
                   <ActivityIndicator size="small" color={colors.accent} />
                 ) : (
-                  <Text style={s.manageSubBtnText}>Manage subscription</Text>
+                  <Text style={s.manageSubBtnText}>
+                    {status === 'past_due' ? 'Update payment method' : 'Manage subscription'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </>
