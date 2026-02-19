@@ -24,14 +24,15 @@ CREATE TABLE user_subscriptions (
 
 ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;
 
--- Users can read their own subscription
+-- Users can read their own subscription (client-side tier checks)
 CREATE POLICY "Users can read own subscription"
-  ON user_subscriptions FOR SELECT USING ((select auth.uid()) = user_id);
+  ON user_subscriptions FOR SELECT
+  USING ((select auth.uid()) = user_id);
 
--- Only service role (webhooks) can insert/update — users cannot modify directly
-CREATE POLICY "Service role can manage subscriptions"
-  ON user_subscriptions FOR ALL USING (true) WITH CHECK (true);
+-- No INSERT/UPDATE/DELETE policies for authenticated users.
+-- Only the service_role key (used by Stripe webhook API route) bypasses RLS,
+-- so users cannot tamper with their own subscription status.
 
--- Index for Stripe lookups
+-- Indexes for Stripe webhook lookups (find user by Stripe IDs)
 CREATE INDEX idx_subscriptions_stripe_customer ON user_subscriptions(stripe_customer_id);
 CREATE INDEX idx_subscriptions_stripe_sub ON user_subscriptions(stripe_subscription_id);
