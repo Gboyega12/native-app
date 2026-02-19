@@ -248,6 +248,7 @@ export default function Plan() {
   const scrollRef = useRef<ScrollView>(null);
   const [highlightIdx, setHighlightIdx] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const itemYPositions = useRef<Record<number, number>>({});
 
   // Handle deep-link highlight from home page "View" button
   useEffect(() => {
@@ -256,12 +257,24 @@ export default function Plan() {
       if (!isNaN(idx)) {
         setHighlightIdx(idx);
         setExpanded(idx);
-        // Clear highlight glow after 2s
-        const timer = setTimeout(() => setHighlightIdx(null), 2000);
+        // Clear highlight glow after animation
+        const timer = setTimeout(() => setHighlightIdx(null), 2500);
         return () => clearTimeout(timer);
       }
     }
   }, [highlight]);
+
+  // Scroll to highlighted card once data is loaded and layout is ready
+  useEffect(() => {
+    if (highlightIdx == null || loading) return;
+    const timer = setTimeout(() => {
+      const y = itemYPositions.current[highlightIdx];
+      if (y != null && scrollRef.current) {
+        scrollRef.current.scrollTo({ y: Math.max(0, y - 80), animated: true });
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [highlightIdx, loading]);
 
   useFocusEffect(
     useCallback(() => {
@@ -861,6 +874,15 @@ export default function Plan() {
             return (
               <View
                 key={`opp-${i}`}
+                onLayout={(e) => {
+                  const y = e.nativeEvent.layout.y;
+                  itemYPositions.current[i] = y;
+                  if (highlightIdx === i) {
+                    setTimeout(() => {
+                      scrollRef.current?.scrollTo({ y: Math.max(0, y - 80), animated: true });
+                    }, 150);
+                  }
+                }}
                 style={[
                   styles.card,
                   isHighlighted && styles.cardHighlight,

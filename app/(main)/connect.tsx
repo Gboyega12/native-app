@@ -555,10 +555,10 @@ export default function Connect() {
               <Text style={styles.successGlyphText}>{'\u2713'}</Text>
             </View>
 
-            <Text style={styles.successTitle}>Primary account connected</Text>
+            <Text style={styles.successTitle}>Account connected</Text>
             <Text style={styles.successSubtitle}>
-              {lastConnectedName ? `${lastConnectedName} is now linked. ` : ''}
-              We have what we need to analyse your finances.
+              {lastConnectedName ? `${lastConnectedName} is linked. ` : ''}
+              Bocy has what it needs to start. Add more accounts now for a fuller picture, or do it later in your profile.
             </Text>
 
             {/* Continue CTA */}
@@ -577,7 +577,7 @@ export default function Connect() {
               </View>
 
               <Text style={styles.addMoreHint}>
-                Connect additional accounts now, or add them later in your Profile for a holistic view of your finances.
+                Credit cards, savings accounts, or a second current account — the more Bocy sees, the smarter your plan. You can always add more from your profile too.
               </Text>
 
               <View style={styles.addMoreRow}>
@@ -606,9 +606,9 @@ export default function Connect() {
           <>
             <Text style={styles.stepLabel}>STEP 1 OF 3</Text>
 
-            <Text style={styles.title}>Connect your{'\n'}primary bank account</Text>
+            <Text style={styles.title}>Connect your{'\n'}main bank account</Text>
             <Text style={styles.subtitle}>
-              This is the account you use most — where your salary lands and bills go out. Bocy needs your transaction history to build your personalised action plan.
+              Start with the account you use most — where your salary arrives and bills go out. You can add other accounts too, or connect them later in your profile.
             </Text>
 
             <TouchableOpacity
