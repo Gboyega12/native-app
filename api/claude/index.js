@@ -58,6 +58,24 @@ const VALID_CATEGORIES = [
   'Gambling', 'Subscriptions', 'Charity', 'Pets', 'Other',
 ];
 
+// Sensitive categories require keyword evidence in the transaction description.
+// If the AI suggests one of these but the description has no matching keyword,
+// we fall back to the safer alternative to avoid offensive mis-categorisations.
+const SENSITIVE_CATEGORIES = {
+  Gambling: {
+    keywords: /\bbet365\b|\bpaddy\s*power\b|\bladbrokes\b|\bwilliam\s*hill\b|\bbetfred\b|\bcoral\b|\bsky\s*bet\b|\bbetting\b|\bcasino\b|\blottery\b|\blotto\b|\bgambl|\btombola\b|\bbetfair\b|\bpokerstars\b|\b888\b|\bfoxybingo\b/i,
+    fallback: 'Entertainment',
+  },
+};
+
+// Gate sensitive categories: only accept if transaction description has keyword evidence
+function gateSensitiveCategory(category, description) {
+  const rule = SENSITIVE_CATEGORIES[category];
+  if (!rule) return category; // not sensitive, pass through
+  const desc = (description || '').toLowerCase();
+  return rule.keywords.test(desc) ? category : rule.fallback;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -138,9 +156,10 @@ async function handleClassify(req, res) {
           const entry = uncached[i];
           if (!entry) return;
 
+          const rawCategory = VALID_CATEGORIES.includes(item.category) ? item.category : 'Other';
           const classification = {
             merchant: sanitize(item.merchant || entry.tx.description || 'Unknown', 100),
-            category: VALID_CATEGORIES.includes(item.category) ? item.category : 'Other',
+            category: gateSensitiveCategory(rawCategory, entry.tx.description),
             isEssential: Boolean(item.isEssential),
             isSubscription: Boolean(item.isSubscription),
             isDebt: Boolean(item.isDebt),
@@ -203,6 +222,7 @@ RULES:
 - Groceries, transport, health, childcare, education → essential
 - Restaurants, takeaways, coffee shops, shopping, entertainment → NOT essential
 - Gambling, betting → "Gambling", NOT essential
+  IMPORTANT: ONLY use "Gambling" when the merchant is a known bookmaker or gambling operator (e.g. Bet365, Ladbrokes, Paddy Power). Game purchases, arcades, amusement parks, and lottery-adjacent merchants should be "Entertainment" or "Shopping". When in doubt, NEVER guess "Gambling" — prefer "Entertainment" or "Other" instead.
 - If genuinely uncertain, use "Other"
 - Use your world knowledge of UK merchants, brands, and services
 
