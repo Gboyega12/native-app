@@ -66,6 +66,22 @@ export default function Connect() {
 
   const isFromProfile = params.from === 'profile';
 
+  // Must declare all hooks before any conditional returns (Rules of Hooks)
+  const primaryConnected = connectedCount > 0 && !isFromProfile;
+  const fadeIn = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (primaryConnected) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      Animated.timing(fadeIn, {
+        toValue: 1,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [primaryConnected]);
+
   // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
     const init = async () => {
@@ -108,6 +124,17 @@ export default function Connect() {
     };
     init();
   }, []);
+
+  // Safety timeout: if redirectLoading stays true for 30s, show escape button
+  useEffect(() => {
+    if (!redirectLoading) return;
+    const timer = setTimeout(() => {
+      if (!errorMsg) {
+        setErrorMsg('Connection is taking longer than expected.');
+      }
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [redirectLoading]);
 
   // Handle redirect params — arriving back from TrueLayer
   useEffect(() => {
@@ -162,10 +189,10 @@ export default function Connect() {
     }
   };
 
-  const fetchBankData = async (connId: string) => {
+  const fetchBankData = async (connId: string, attempt = 1) => {
     setLoading(true);
     setErrorMsg('');
-    setStatusMsg('Loading transactions...');
+    setStatusMsg(attempt > 1 ? 'Waiting for bank data...' : 'Loading transactions...');
     try {
       let userId = '';
       try {
@@ -177,6 +204,14 @@ export default function Connect() {
       const result = await res.json();
 
       if (!result.success || !result.csv_data) {
+        // Retry up to 4 times with increasing delay — the server callback
+        // may still be processing or the DB write may not have committed yet.
+        if (attempt < 4) {
+          const delayMs = attempt * 2000; // 2s, 4s, 6s
+          setStatusMsg(`Waiting for bank data... (attempt ${attempt + 1})`);
+          await new Promise((r) => setTimeout(r, delayMs));
+          return fetchBankData(connId, attempt + 1);
+        }
         setErrorMsg(result.error || 'No bank data found for this connection');
         setStatusMsg('');
         setLoading(false);
@@ -407,8 +442,8 @@ export default function Connect() {
     }
 
     clearConnectState();
-    // Onboarding: go to Goals first, then Goals routes to Processing
-    router.push({ pathname: '/(main)/goals', params: { csvData: mergedCSV } });
+    // Skip goals — identity flow already auto-generates them
+    router.push({ pathname: '/(main)/processing', params: { csvData: mergedCSV } });
   };
 
   const anyLoading = loading || loadingCSV || loadingPDF;
@@ -420,25 +455,20 @@ export default function Connect() {
         <ActivityIndicator color={colors.accent} size="large" />
         <Text style={styles.loadingText}>{statusMsg || 'Connecting your account...'}</Text>
         <Text style={styles.loadingHint}>This may take a few seconds</Text>
+        {errorMsg ? (
+          <>
+            <Text style={styles.errorText}>{errorMsg}</Text>
+            <TouchableOpacity
+              style={[styles.primaryButton, { marginTop: spacing.lg }]}
+              onPress={() => { setRedirectLoading(false); setErrorMsg(''); }}
+            >
+              <Text style={styles.primaryButtonText}>Try again</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
       </View>
     );
   }
-
-  // ── Onboarding flow: primary account connected state ──
-  const primaryConnected = connectedCount > 0 && !isFromProfile;
-  const fadeIn = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (primaryConnected) {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      Animated.timing(fadeIn, {
-        toValue: 1,
-        duration: 600,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [primaryConnected]);
 
   // Profile flow — simple add connection UI
   if (isFromProfile) {
@@ -538,7 +568,7 @@ export default function Connect() {
             {/* Continue CTA */}
             <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
               <Text style={styles.continueText}>
-                Continue to set your goals
+                Start analysis
               </Text>
             </TouchableOpacity>
 

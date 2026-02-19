@@ -6,6 +6,8 @@ import {
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { useSubscription } from '@/lib/subscription';
+import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/lib/types';
 
@@ -284,6 +286,8 @@ function GoalUpdateCard({
 export default function Chat() {
   const router = useRouter();
   const { prefill } = useLocalSearchParams<{ prefill?: string }>();
+  const { isPro } = useSubscription();
+  const [showPaywall, setShowPaywall] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [inputHeight, setInputHeight] = useState(40);
@@ -565,10 +569,10 @@ export default function Chat() {
 
       if (planId) {
         // Server already created the plan as 'proposed' — approve it
-        const res = await fetch('/api/plans/approve', {
+        const res = await fetch('/api/plans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan_id: planId, user_id: uid }),
+          body: JSON.stringify({ action: 'approve', plan_id: planId, user_id: uid }),
         });
         const data = await res.json();
 
@@ -639,10 +643,10 @@ export default function Chat() {
     // Dismiss server-side if we have a plan ID
     if (planId && uid) {
       try {
-        await fetch('/api/plans/dismiss', {
+        await fetch('/api/plans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan_id: planId, user_id: uid }),
+          body: JSON.stringify({ action: 'dismiss', plan_id: planId, user_id: uid }),
         });
       } catch {
         // Non-critical — still update UI
@@ -892,6 +896,29 @@ export default function Chat() {
   };
 
   const suggestedQuestions = getContextualQuestions(analysis, goals);
+
+  // ── Free tier: show locked chat state ──
+  if (!isPro) {
+    return (
+      <View style={styles.container}>
+        <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
+        <View style={styles.lockedContainer}>
+          <Text style={styles.lockedIcon}>{'\u{1F512}'}</Text>
+          <Text style={styles.lockedTitle}>AI Chat is a Pro feature</Text>
+          <Text style={styles.lockedSubtitle}>
+            Get unlimited personalised financial guidance from Bocy.
+          </Text>
+          <TouchableOpacity
+            style={styles.lockedBtn}
+            onPress={() => setShowPaywall(true)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.lockedBtnText}>Upgrade to Pro</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -1423,5 +1450,43 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 20,
     color: colors.bg,
+  },
+
+  // ── Locked state (free tier) ──
+  lockedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  lockedIcon: {
+    fontSize: 40,
+    marginBottom: spacing.lg,
+  },
+  lockedTitle: {
+    fontFamily: fonts.heading,
+    fontSize: 20,
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  lockedSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.dim,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: spacing.xl,
+    maxWidth: 280,
+  },
+  lockedBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 100,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.xl + spacing.md,
+  },
+  lockedBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: '#000000',
   },
 });

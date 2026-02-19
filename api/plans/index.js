@@ -1,13 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Unified plans endpoint: POST /api/plans with { action: "approve" | "dismiss", plan_id, user_id }
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { plan_id, user_id } = req.body;
+  const { action, plan_id, user_id } = req.body;
   if (!plan_id || !user_id) {
     return res.status(400).json({ error: 'plan_id and user_id required' });
+  }
+  if (action !== 'approve' && action !== 'dismiss') {
+    return res.status(400).json({ error: 'action must be "approve" or "dismiss"' });
   }
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -18,6 +22,27 @@ export default async function handler(req, res) {
 
   const admin = createClient(supabaseUrl, serviceKey);
 
+  if (action === 'approve') {
+    const { data, error } = await admin
+      .from('user_plans')
+      .update({ status: 'active', updated_at: new Date().toISOString() })
+      .eq('id', plan_id)
+      .eq('user_id', user_id)
+      .neq('status', 'dismissed')
+      .select('id')
+      .single();
+
+    if (error) {
+      console.error('[plans/approve] Update failed:', error.message, error.code);
+      return res.status(400).json({ error: error.message });
+    }
+    if (!data) {
+      return res.status(404).json({ error: 'Plan not found or already dismissed' });
+    }
+    return res.json({ success: true, plan_id: data.id });
+  }
+
+  // dismiss
   const { error } = await admin
     .from('user_plans')
     .update({ status: 'dismissed', updated_at: new Date().toISOString() })
@@ -28,6 +53,5 @@ export default async function handler(req, res) {
   if (error) {
     return res.status(400).json({ error: error.message });
   }
-
   return res.json({ success: true });
 }

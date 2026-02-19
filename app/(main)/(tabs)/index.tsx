@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
   LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Animated, Easing,
@@ -119,6 +119,12 @@ export default function Home() {
   const [addItemSaving, setAddItemSaving] = useState(false);
   const [addItemError, setAddItemError] = useState('');
 
+  // Categorise review modal state
+  const [showCatReview, setShowCatReview] = useState(false);
+  const [catExpandedKey, setCatExpandedKey] = useState<string | null>(null);
+  const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean }>>({});
+  const [savingCatReview, setSavingCatReview] = useState(false);
+
   const BUDGET_CATEGORIES = [
     'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport',
     'Dining', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
@@ -233,6 +239,98 @@ export default function Home() {
       setAddItemError('Something went wrong. Please try again.');
     }
     setAddItemSaving(false);
+  };
+
+  // ── Unresolved transaction groups (for categorise modal) ──
+  const unresolvedGroups = useMemo(() => {
+    if (!analysis) return [];
+    const txs: TransactionDetail[] = [];
+    for (const section of [analysis.discretionary, analysis.non_discretionary]) {
+      if (!(section as any)?.items) continue;
+      for (const item of (section as any).items) {
+        if (item.category === 'Other') {
+          txs.push(...(item.transactions || []));
+        }
+      }
+    }
+    // Group by merchant/description — user assigns one category per merchant
+    const groups = new Map<string, { key: string; txs: TransactionDetail[]; total: number }>();
+    for (const tx of txs) {
+      const key = tx.merchant || tx.description;
+      if (!groups.has(key)) groups.set(key, { key, txs: [], total: 0 });
+      const g = groups.get(key)!;
+      g.txs.push(tx);
+      g.total += Math.abs(tx.amount);
+    }
+    return Array.from(groups.values()).sort((a, b) => b.total - a.total);
+  }, [analysis]);
+
+  const unresolvedTxCount = useMemo(
+    () => unresolvedGroups.reduce((sum, g) => sum + g.txs.length, 0),
+    [unresolvedGroups],
+  );
+
+  const saveCatReview = async () => {
+    const keys = Object.keys(catAssignments);
+    if (keys.length === 0) { setShowCatReview(false); return; }
+    setSavingCatReview(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not signed in');
+
+      // Bulk save overrides
+      for (const matchKey of keys) {
+        const a = catAssignments[matchKey];
+        await supabase.from('transaction_overrides').upsert({
+          user_id: user.id,
+          match_description: matchKey,
+          category: a.category,
+          is_essential: a.isEssential,
+        }, { onConflict: 'user_id,match_description' });
+      }
+
+      // Optimistic UI: remove categorised transactions from "Other"
+      if (analysis) {
+        const updated = { ...analysis };
+        const assignedKeys = new Set(keys);
+
+        for (const sectionKey of ['discretionary', 'non_discretionary'] as const) {
+          const section = { ...(updated as any)[sectionKey] };
+          section.items = [...(section.items || [])];
+          const otherIdx = section.items.findIndex((i: BudgetCategory) => i.category === 'Other');
+          if (otherIdx >= 0) {
+            const otherCat = { ...section.items[otherIdx] };
+            otherCat.transactions = (otherCat.transactions || []).filter(
+              (tx: TransactionDetail) => !assignedKeys.has(tx.merchant || tx.description)
+            );
+            otherCat.txs = otherCat.transactions.length;
+            if (otherCat.txs === 0) {
+              section.items.splice(otherIdx, 1);
+            } else {
+              otherCat.monthly = otherCat.transactions.reduce(
+                (s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0
+              );
+              section.items[otherIdx] = otherCat;
+            }
+            section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+          }
+          (updated as any)[sectionKey] = section;
+        }
+
+        LayoutAnimation.configureNext(SMOOTH_ANIM);
+        setAnalysis(updated);
+      }
+
+      setShowCatReview(false);
+      setCatAssignments({});
+      setCatExpandedKey(null);
+
+      // Re-enrich in background so scores/moves update
+      syncInBackground(user.id);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Could not save categories');
+    }
+    setSavingCatReview(false);
   };
 
   const saveRecategorize = async () => {
@@ -461,6 +559,43 @@ export default function Home() {
       if (!user) { setLoading(false); return; }
 
       setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
+
+      // ── Record daily streak ──
+      try {
+        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        const { data: streak } = await supabase
+          .from('user_streaks')
+          .select('current_streak, longest_streak, last_active_date, total_active_days')
+          .eq('user_id', user.id)
+          .single();
+
+        if (streak) {
+          if (streak.last_active_date !== today) {
+            const lastDate = new Date(streak.last_active_date);
+            const todayDate = new Date(today);
+            const diffDays = Math.floor((todayDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+
+            const newStreak = diffDays === 1 ? streak.current_streak + 1 : 1;
+            const newLongest = Math.max(streak.longest_streak, newStreak);
+
+            await supabase.from('user_streaks').update({
+              current_streak: newStreak,
+              longest_streak: newLongest,
+              last_active_date: today,
+              total_active_days: streak.total_active_days + 1,
+              updated_at: new Date().toISOString(),
+            }).eq('user_id', user.id);
+          }
+        } else {
+          await supabase.from('user_streaks').insert({
+            user_id: user.id,
+            current_streak: 1,
+            longest_streak: 1,
+            last_active_date: today,
+            total_active_days: 1,
+          });
+        }
+      } catch {}
 
       // Fetch budget adjustments + debt accounts
       let adjustments: any[] = [];
@@ -700,6 +835,23 @@ export default function Home() {
         });
       }
 
+      // ── Save score snapshot on background sync ──
+      try {
+        const savingsRate = rawAnalysis.monthly_income > 0
+          ? Math.round((rawAnalysis.surplus / rawAnalysis.monthly_income) * 100) : 0;
+        await supabase.from('score_history').insert({
+          user_id: userId,
+          decision_score: rawAnalysis.decision_score,
+          monthly_income: rawAnalysis.monthly_income,
+          monthly_spending: rawAnalysis.monthly_spending,
+          surplus: rawAnalysis.surplus,
+          savings_rate: savingsRate,
+          subscription_count: result.profile.metrics.subscriptionCount || 0,
+          debt_account_count: result.profile.metrics.debtAccountCount || 0,
+          archetype: rawAnalysis.archetype,
+        });
+      } catch {}
+
       // Re-fetch budget adjustments right before merging so we capture
       // any items the user added while the sync was running.
       try {
@@ -884,22 +1036,18 @@ export default function Home() {
       ) : (
         <>
           {/* ── Unresolved transactions nudge ── */}
-          {(() => {
-            const unresolvedCount = (analysis as any)?._unresolvedCount || 0;
-            if (unresolvedCount <= 0) return null;
-            return (
-              <TouchableOpacity
-                style={styles.reviewBanner}
-                onPress={() => router.push('/(main)/(tabs)/chat')}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.reviewBannerText}>
-                  {unresolvedCount} transaction{unresolvedCount !== 1 ? 's' : ''} couldn't be categorised.{' '}
-                  <Text style={styles.reviewBannerLink}>Tell me what they are</Text>
-                </Text>
-              </TouchableOpacity>
-            );
-          })()}
+          {unresolvedTxCount > 0 && (
+            <TouchableOpacity
+              style={styles.reviewBanner}
+              onPress={() => { setCatAssignments({}); setCatExpandedKey(null); setShowCatReview(true); }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.reviewBannerText}>
+                {unresolvedTxCount} transaction{unresolvedTxCount !== 1 ? 's' : ''} couldn't be categorised.{' '}
+                <Text style={styles.reviewBannerLink}>Tell me what they are</Text>
+              </Text>
+            </TouchableOpacity>
+          )}
 
           {/* ══════════════════════════════════════════════
               CARD 1 — YOUR INSIGHTS
@@ -1695,6 +1843,125 @@ export default function Home() {
                     </View>
                   </>
                 )}
+              </View>
+            </View>
+          </Modal>
+
+          {/* ── Categorise uncategorised transactions modal ── */}
+          <Modal visible={showCatReview} transparent animationType="fade">
+            <View style={styles.catReviewOverlay}>
+              <View style={styles.catReviewContainer}>
+                <View style={styles.catReviewHeader}>
+                  <View>
+                    <Text style={styles.modalTitle}>Categorise transactions</Text>
+                    <Text style={styles.catReviewSubtitle}>
+                      {unresolvedGroups.length} merchant{unresolvedGroups.length !== 1 ? 's' : ''} ({unresolvedTxCount} transaction{unresolvedTxCount !== 1 ? 's' : ''})
+                    </Text>
+                  </View>
+                  <TouchableOpacity onPress={() => setShowCatReview(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                    <Text style={styles.catReviewClose}>{'\u2715'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView style={styles.catReviewList} showsVerticalScrollIndicator={false}>
+                  {unresolvedGroups.map((group) => {
+                    const assigned = catAssignments[group.key];
+                    const isExpanded = catExpandedKey === group.key;
+
+                    return (
+                      <TouchableOpacity
+                        key={group.key}
+                        style={[styles.catReviewRow, assigned && styles.catReviewRowDone]}
+                        activeOpacity={0.7}
+                        onPress={() => setCatExpandedKey(isExpanded ? null : group.key)}
+                      >
+                        {/* Header: merchant name + amount */}
+                        <View style={styles.catReviewRowHeader}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.catReviewMerchant} numberOfLines={1}>
+                              {assigned ? '\u2713 ' : ''}{group.key}
+                            </Text>
+                            <Text style={styles.catReviewMeta}>
+                              {group.txs.length} transaction{group.txs.length !== 1 ? 's' : ''}
+                              {assigned ? ` \u2192 ${assigned.category}` : ''}
+                            </Text>
+                          </View>
+                          <Text style={styles.catReviewAmount}>
+                            {'\u00a3'}{group.total.toFixed(2)}
+                          </Text>
+                        </View>
+
+                        {/* Expanded: category chips + essential toggle */}
+                        {isExpanded && (
+                          <View style={styles.catReviewExpanded}>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                              {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
+                                <TouchableOpacity
+                                  key={cat}
+                                  style={[
+                                    styles.categoryChip,
+                                    assigned?.category === cat && styles.categoryChipActive,
+                                  ]}
+                                  onPress={() => {
+                                    setCatAssignments((prev) => ({
+                                      ...prev,
+                                      [group.key]: { category: cat, isEssential: prev[group.key]?.isEssential ?? true },
+                                    }));
+                                  }}
+                                >
+                                  <Text style={[
+                                    styles.categoryChipText,
+                                    assigned?.category === cat && styles.categoryChipTextActive,
+                                  ]}>{cat}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+
+                            {assigned && (
+                              <View style={styles.toggleRow}>
+                                <TouchableOpacity
+                                  style={[styles.toggleOption, assigned.isEssential && styles.toggleOptionActive]}
+                                  onPress={() => setCatAssignments((prev) => ({
+                                    ...prev,
+                                    [group.key]: { ...prev[group.key], isEssential: true },
+                                  }))}
+                                >
+                                  <Text style={[styles.toggleText, assigned.isEssential && styles.toggleTextActive]}>Essential</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[styles.toggleOption, !assigned.isEssential && styles.toggleOptionLifestyle]}
+                                  onPress={() => setCatAssignments((prev) => ({
+                                    ...prev,
+                                    [group.key]: { ...prev[group.key], isEssential: false },
+                                  }))}
+                                >
+                                  <Text style={[styles.toggleText, !assigned.isEssential && styles.toggleTextLifestyle]}>Lifestyle</Text>
+                                </TouchableOpacity>
+                              </View>
+                            )}
+                          </View>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                {/* Done button */}
+                <TouchableOpacity
+                  style={[styles.catReviewDone, Object.keys(catAssignments).length === 0 && styles.modalSaveDisabled]}
+                  onPress={saveCatReview}
+                  disabled={savingCatReview || Object.keys(catAssignments).length === 0}
+                >
+                  {savingCatReview ? (
+                    <ActivityIndicator color={colors.bg} size="small" />
+                  ) : (
+                    <Text style={styles.catReviewDoneText}>
+                      Done{Object.keys(catAssignments).length > 0
+                        ? ` (${Object.keys(catAssignments).length} categorised)`
+                        : ''}
+                    </Text>
+                  )}
+                </TouchableOpacity>
               </View>
             </View>
           </Modal>
@@ -2728,5 +2995,98 @@ const styles = StyleSheet.create({
   reviewBannerLink: {
     color: colors.green,
     fontFamily: fonts.semibold,
+  },
+
+  // ── Categorise review modal ──
+  catReviewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    padding: spacing.md,
+  },
+  catReviewContainer: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    maxHeight: '85%',
+    overflow: 'hidden',
+  },
+  catReviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    padding: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  catReviewSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+    marginTop: 4,
+  },
+  catReviewClose: {
+    fontFamily: fonts.medium,
+    fontSize: 18,
+    color: colors.muted,
+    padding: 4,
+  },
+  catReviewList: {
+    padding: spacing.md,
+  },
+  catReviewRow: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  catReviewRowDone: {
+    borderColor: 'rgba(0,212,170,0.25)',
+    backgroundColor: 'rgba(0,212,170,0.04)',
+  },
+  catReviewRowHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  catReviewMerchant: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: colors.text,
+  },
+  catReviewMeta: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.dim,
+    marginTop: 2,
+  },
+  catReviewAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: colors.text2,
+    marginLeft: spacing.sm,
+  },
+  catReviewExpanded: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  catReviewDone: {
+    backgroundColor: colors.green,
+    margin: spacing.md,
+    marginTop: 0,
+    paddingVertical: 14,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  catReviewDoneText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.bg,
   },
 });

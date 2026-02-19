@@ -1,7 +1,17 @@
 {
-  "buildCommand": "npx expo export --platform web",
+  "buildCommand": "npx expo export --platform web && sed -i 's/<body>/<body style=\"background-color:#050505\">/' dist/index.html && sed -i 's/<html lang=\"en\">/<html lang=\"en\" style=\"background-color:#050505\">/' dist/index.html",
   "outputDirectory": "dist",
   "framework": null,
+  "crons": [
+    {
+      "path": "/api/cron/weekly-digest",
+      "schedule": "0 9 * * 1"
+    },
+    {
+      "path": "/api/cron/checkins",
+      "schedule": "0 10 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",

@@ -41,22 +41,26 @@ export default async function handler(req, res) {
     }
 
     // Claim the row for this user so sync can find it later
-    // Also derive account_type from card_balances if not already set
     if (userId) {
-      const { data: row } = await admin.from('bank_data')
-        .select('card_balances, account_type')
-        .eq('connection_id', connectionId)
-        .single();
-
-      const updates = { user_id: userId };
-      if (!row?.account_type) {
-        updates.account_type = (row?.card_balances && row.card_balances.length > 0) ? 'credit' : 'bank';
-      }
-
       await admin.from('bank_data')
-        .update(updates)
+        .update({ user_id: userId })
         .eq('connection_id', connectionId)
         .is('user_id', null);
+
+      // Best-effort: derive account_type from card_balances if column exists
+      try {
+        const { data: row } = await admin.from('bank_data')
+          .select('card_balances, account_type')
+          .eq('connection_id', connectionId)
+          .single();
+
+        if (row && !row.account_type) {
+          const derived = (row.card_balances && row.card_balances.length > 0) ? 'credit' : 'bank';
+          await admin.from('bank_data')
+            .update({ account_type: derived })
+            .eq('connection_id', connectionId);
+        }
+      } catch {}
     }
 
     return res.json({ success: true, csv_data: data.csv_data });

@@ -209,10 +209,11 @@ function ProcessingInner() {
             setEnrichProgress(`Verifying batch ${batchIdx + 1} of ${totalBatches} (${batch.length} transactions)`);
 
             try {
-              const classifyRes = await fetch('/api/claude/classify', {
+              const classifyRes = await fetch('/api/claude', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                  action: 'classify',
                   transactions: batch.map(({ tx }) => ({
                     description: tx.description,
                     amount: tx.amount,
@@ -298,10 +299,11 @@ function ProcessingInner() {
       let refinedMoves = top3 as RankedMove[];
 
       try {
-        const res = await fetch('/api/claude/enrich', {
+        const res = await fetch('/api/claude', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            action: 'enrich',
             moves: top3.map((m) => ({
               action: m.action,
               category: m.category,
@@ -429,6 +431,115 @@ function ProcessingInner() {
           });
           if (insertError) {
             console.warn('[processing] Supabase insert failed:', insertError.message);
+          }
+
+          // ── Save score snapshot for historical tracking ──
+          try {
+            const savingsRate = analysis.monthly_income > 0
+              ? Math.round((analysis.surplus / analysis.monthly_income) * 100)
+              : 0;
+            await supabase.from('score_history').insert({
+              user_id: user.id,
+              decision_score: analysis.decision_score,
+              monthly_income: analysis.monthly_income,
+              monthly_spending: analysis.monthly_spending,
+              surplus: analysis.surplus,
+              savings_rate: savingsRate,
+              subscription_count: result.profile.metrics.subscriptionCount || 0,
+              debt_account_count: result.profile.metrics.debtAccountCount || 0,
+              archetype: analysis.archetype,
+            });
+          } catch (scoreErr: any) {
+            console.warn('[processing] Non-critical: score history save failed:', scoreErr?.message);
+          }
+
+          // ── Check achievements ──
+          try {
+            // Get previous snapshot
+            const { data: prevSnapshots } = await supabase
+              .from('score_history')
+              .select('decision_score, monthly_spending, surplus, savings_rate, subscription_count, debt_account_count, monthly_income')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false })
+              .range(1, 1); // Second most recent
+
+            const prevSnap = prevSnapshots?.[0] || null;
+            const currentSnap = {
+              decision_score: analysis.decision_score,
+              monthly_income: analysis.monthly_income,
+              monthly_spending: analysis.monthly_spending,
+              surplus: analysis.surplus,
+              savings_rate: analysis.monthly_income > 0
+                ? Math.round((analysis.surplus / analysis.monthly_income) * 100) : 0,
+              subscription_count: result.profile.metrics.subscriptionCount || 0,
+              debt_account_count: result.profile.metrics.debtAccountCount || 0,
+            };
+
+            // Get existing achievements
+            const { data: existingAch } = await supabase
+              .from('user_achievements')
+              .select('achievement_key')
+              .eq('user_id', user.id);
+
+            const existingKeys = (existingAch || []).map((a: any) => a.achievement_key);
+
+            // Check context
+            const { data: goalsData } = await supabase
+              .from('goals').select('id').eq('user_id', user.id).limit(1);
+            const { data: overridesData } = await supabase
+              .from('transaction_overrides').select('id').eq('user_id', user.id).limit(1);
+            const { data: plansData } = await supabase
+              .from('user_plans').select('id').eq('user_id', user.id).limit(1);
+            const { data: progressData } = await supabase
+              .from('plan_progress').select('completed_steps').eq('user_id', user.id);
+            const { data: streakData } = await supabase
+              .from('user_streaks').select('current_streak').eq('user_id', user.id).single();
+
+            const completedCount = (progressData || []).filter(
+              (p: any) => p.completed_steps && p.completed_steps.length > 0
+            ).length;
+
+            const { checkAchievements } = await import('@/lib/achievements');
+            const newAchievements = checkAchievements(currentSnap, prevSnap, existingKeys, {
+              hasGoals: !!(goalsData && goalsData.length > 0),
+              hasOverrides: !!(overridesData && overridesData.length > 0),
+              hasPlans: !!(plansData && plansData.length > 0),
+              planCompletedCount: completedCount,
+              totalMoveCount: (analysis.all_moves || []).length,
+              streakDays: streakData?.current_streak || 0,
+            });
+
+            if (newAchievements.length > 0) {
+              for (const key of newAchievements) {
+                await supabase.from('user_achievements').upsert({
+                  user_id: user.id,
+                  achievement_key: key,
+                  unlocked_at: new Date().toISOString(),
+                  notified: false,
+                }, { onConflict: 'user_id,achievement_key' });
+              }
+              console.log('[processing] New achievements:', newAchievements.join(', '));
+            }
+          } catch (achErr: any) {
+            console.warn('[processing] Non-critical: achievement check failed:', achErr?.message);
+          }
+
+          // ── Auto-create notification preferences if first analysis ──
+          try {
+            const { data: { user: authUser } } = await supabase.auth.getUser();
+            if (authUser?.email) {
+              await supabase.from('notification_preferences').upsert({
+                user_id: user.id,
+                email: authUser.email,
+                weekly_digest: true,
+                milestone_alerts: true,
+                checkin_prompts: true,
+                score_updates: true,
+                achievement_alerts: true,
+              }, { onConflict: 'user_id' });
+            }
+          } catch (prefErr: any) {
+            console.warn('[processing] Non-critical: notification preferences save failed:', prefErr?.message);
           }
 
           // Save card + account balances to debt_accounts (from TrueLayer data)
