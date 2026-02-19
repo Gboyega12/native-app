@@ -996,8 +996,9 @@ export default function Plan() {
                 <TouchableOpacity
                   key={j}
                   style={[styles.checklistRow, isNext && styles.checklistRowNext]}
-                  onPress={() => isActive ? toggleStep(moveKey, j, move.action) : null}
+                  onPress={isActive ? () => toggleStep(moveKey, j, move.action) : undefined}
                   activeOpacity={isActive ? 0.7 : 1}
+                  disabled={!isActive}
                 >
                   {isActive ? (
                     <View style={[styles.checkbox, isDone && styles.checkboxDone]}>

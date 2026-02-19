@@ -90,11 +90,18 @@ function AuthGate({ children }: { children: React.ReactNode }) {
                 .limit(1)
                 .then(({ data: rows }) => {
                   router.replace(rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect');
+                })
+                .catch(() => {
+                  router.replace('/(main)/connect');
                 });
             } else {
               // No identity yet — start education flow
               router.replace('/(main)/education');
             }
+          })
+          .catch(() => {
+            // Query failed — fall back to education flow
+            router.replace('/(main)/education');
           });
       }
     }

@@ -44,7 +44,12 @@ export default function SignUp() {
 
   const handleResend = async () => {
     setResending(true);
-    await supabase.auth.resend({ type: 'signup', email: email.trim() });
+    try {
+      const { error: resendError } = await supabase.auth.resend({ type: 'signup', email: email.trim() });
+      if (resendError) throw resendError;
+    } catch {
+      setError('Could not resend the email. Please try again.');
+    }
     setResending(false);
   };
 
@@ -58,6 +63,7 @@ export default function SignUp() {
             We've sent a verification link to{'\n'}
             <Text style={{ color: colors.accent }}>{email}</Text>
           </Text>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
           <TouchableOpacity
             style={styles.secondaryButton}
             onPress={handleResend}

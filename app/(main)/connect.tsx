@@ -125,6 +125,17 @@ export default function Connect() {
     init();
   }, []);
 
+  // Safety timeout: if redirectLoading stays true for 30s, show escape button
+  useEffect(() => {
+    if (!redirectLoading) return;
+    const timer = setTimeout(() => {
+      if (!errorMsg) {
+        setErrorMsg('Connection is taking longer than expected.');
+      }
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [redirectLoading]);
+
   // Handle redirect params — arriving back from TrueLayer
   useEffect(() => {
     if (params.status === 'success' && params.connection_id) {
@@ -436,6 +447,17 @@ export default function Connect() {
         <ActivityIndicator color={colors.accent} size="large" />
         <Text style={styles.loadingText}>{statusMsg || 'Connecting your account...'}</Text>
         <Text style={styles.loadingHint}>This may take a few seconds</Text>
+        {errorMsg ? (
+          <>
+            <Text style={styles.errorText}>{errorMsg}</Text>
+            <TouchableOpacity
+              style={[styles.primaryButton, { marginTop: spacing.lg }]}
+              onPress={() => { setRedirectLoading(false); setErrorMsg(''); }}
+            >
+              <Text style={styles.primaryButtonText}>Try again</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
       </View>
     );
   }
