@@ -121,9 +121,10 @@ export default function Home() {
 
   // Categorise review modal state
   const [showCatReview, setShowCatReview] = useState(false);
-  const [catExpandedKey, setCatExpandedKey] = useState<string | null>(null);
   const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean }>>({});
   const [savingCatReview, setSavingCatReview] = useState(false);
+
+  const ESSENTIAL_CATS = new Set(['Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Childcare', 'Health', 'Education', 'Debt Payments', 'Savings']);
 
   const BUDGET_CATEGORIES = [
     'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport',
@@ -278,15 +279,22 @@ export default function Home() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not signed in');
 
-      // Bulk save overrides
+      // Save overrides using delete-then-insert (no unique constraint on table)
       for (const matchKey of keys) {
         const a = catAssignments[matchKey];
-        await supabase.from('transaction_overrides').upsert({
+        // Remove any existing override for this merchant
+        await supabase.from('transaction_overrides')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('match_description', matchKey);
+        // Insert the new override
+        const { error: insertErr } = await supabase.from('transaction_overrides').insert({
           user_id: user.id,
           match_description: matchKey,
           category: a.category,
           is_essential: a.isEssential,
-        }, { onConflict: 'user_id,match_description' });
+        });
+        if (insertErr) throw new Error(`Failed to save ${matchKey}: ${insertErr.message}`);
       }
 
       // Optimistic UI: remove categorised transactions from "Other"
@@ -323,12 +331,15 @@ export default function Home() {
 
       setShowCatReview(false);
       setCatAssignments({});
-      setCatExpandedKey(null);
 
       // Re-enrich in background so scores/moves update
       syncInBackground(user.id);
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Could not save categories');
+      if (Platform.OS === 'web') {
+        window.alert(err.message || 'Could not save categories');
+      } else {
+        Alert.alert('Error', err.message || 'Could not save categories');
+      }
     }
     setSavingCatReview(false);
   };
@@ -339,13 +350,18 @@ export default function Home() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // Save override so future enrichment uses this category
-        await supabase.from('transaction_overrides').upsert({
+        // Save override so future enrichment uses this category (delete-then-insert, no unique constraint)
+        const matchDesc = recatTx.tx.merchant || recatTx.tx.description;
+        await supabase.from('transaction_overrides')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('match_description', matchDesc);
+        await supabase.from('transaction_overrides').insert({
           user_id: user.id,
-          match_description: recatTx.tx.merchant || recatTx.tx.description,
+          match_description: matchDesc,
           category: recatTarget,
           is_essential: recatEssential,
-        }, { onConflict: 'user_id,match_description' });
+        });
       }
 
       // Optimistic UI update: move transaction between categories
@@ -1039,7 +1055,7 @@ export default function Home() {
           {unresolvedTxCount > 0 && (
             <TouchableOpacity
               style={styles.reviewBanner}
-              onPress={() => { setCatAssignments({}); setCatExpandedKey(null); setShowCatReview(true); }}
+              onPress={() => { setCatAssignments({}); setShowCatReview(true); }}
               activeOpacity={0.7}
             >
               <Text style={styles.reviewBannerText}>
@@ -1855,7 +1871,7 @@ export default function Home() {
                   <View>
                     <Text style={styles.modalTitle}>Categorise transactions</Text>
                     <Text style={styles.catReviewSubtitle}>
-                      {unresolvedGroups.length} merchant{unresolvedGroups.length !== 1 ? 's' : ''} ({unresolvedTxCount} transaction{unresolvedTxCount !== 1 ? 's' : ''})
+                      Tap a category for each merchant
                     </Text>
                   </View>
                   <TouchableOpacity onPress={() => setShowCatReview(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
@@ -1866,82 +1882,36 @@ export default function Home() {
                 <ScrollView style={styles.catReviewList} showsVerticalScrollIndicator={false}>
                   {unresolvedGroups.map((group) => {
                     const assigned = catAssignments[group.key];
-                    const isExpanded = catExpandedKey === group.key;
-
                     return (
-                      <TouchableOpacity
-                        key={group.key}
-                        style={[styles.catReviewRow, assigned && styles.catReviewRowDone]}
-                        activeOpacity={0.7}
-                        onPress={() => setCatExpandedKey(isExpanded ? null : group.key)}
-                      >
-                        {/* Header: merchant name + amount */}
+                      <View key={group.key} style={[styles.catReviewRow, assigned && styles.catReviewRowDone]}>
                         <View style={styles.catReviewRowHeader}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.catReviewMerchant} numberOfLines={1}>
-                              {assigned ? '\u2713 ' : ''}{group.key}
-                            </Text>
-                            <Text style={styles.catReviewMeta}>
-                              {group.txs.length} transaction{group.txs.length !== 1 ? 's' : ''}
-                              {assigned ? ` \u2192 ${assigned.category}` : ''}
-                            </Text>
-                          </View>
+                          <Text style={styles.catReviewMerchant} numberOfLines={1}>
+                            {assigned ? '\u2713 ' : ''}{group.key}
+                          </Text>
                           <Text style={styles.catReviewAmount}>
-                            {'\u00a3'}{group.total.toFixed(2)}
+                            {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
                           </Text>
                         </View>
-
-                        {/* Expanded: category chips + essential toggle */}
-                        {isExpanded && (
-                          <View style={styles.catReviewExpanded}>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-                              {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
-                                <TouchableOpacity
-                                  key={cat}
-                                  style={[
-                                    styles.categoryChip,
-                                    assigned?.category === cat && styles.categoryChipActive,
-                                  ]}
-                                  onPress={() => {
-                                    setCatAssignments((prev) => ({
-                                      ...prev,
-                                      [group.key]: { category: cat, isEssential: prev[group.key]?.isEssential ?? true },
-                                    }));
-                                  }}
-                                >
-                                  <Text style={[
-                                    styles.categoryChipText,
-                                    assigned?.category === cat && styles.categoryChipTextActive,
-                                  ]}>{cat}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </ScrollView>
-
-                            {assigned && (
-                              <View style={styles.toggleRow}>
-                                <TouchableOpacity
-                                  style={[styles.toggleOption, assigned.isEssential && styles.toggleOptionActive]}
-                                  onPress={() => setCatAssignments((prev) => ({
-                                    ...prev,
-                                    [group.key]: { ...prev[group.key], isEssential: true },
-                                  }))}
-                                >
-                                  <Text style={[styles.toggleText, assigned.isEssential && styles.toggleTextActive]}>Essential</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={[styles.toggleOption, !assigned.isEssential && styles.toggleOptionLifestyle]}
-                                  onPress={() => setCatAssignments((prev) => ({
-                                    ...prev,
-                                    [group.key]: { ...prev[group.key], isEssential: false },
-                                  }))}
-                                >
-                                  <Text style={[styles.toggleText, !assigned.isEssential && styles.toggleTextLifestyle]}>Lifestyle</Text>
-                                </TouchableOpacity>
-                              </View>
-                            )}
-                          </View>
-                        )}
-                      </TouchableOpacity>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                          {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
+                            <TouchableOpacity
+                              key={cat}
+                              style={[styles.categoryChip, assigned?.category === cat && styles.categoryChipActive]}
+                              onPress={() => {
+                                setCatAssignments((prev) => ({
+                                  ...prev,
+                                  [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat) },
+                                }));
+                              }}
+                            >
+                              <Text style={[
+                                styles.categoryChipText,
+                                assigned?.category === cat && styles.categoryChipTextActive,
+                              ]}>{cat}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </View>
                     );
                   })}
                 </ScrollView>
@@ -3069,12 +3039,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text2,
     marginLeft: spacing.sm,
-  },
-  catReviewExpanded: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
   },
   catReviewDone: {
     backgroundColor: colors.green,
