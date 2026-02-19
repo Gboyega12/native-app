@@ -284,45 +284,49 @@ export default function Plan() {
 
   const loadData = async () => {
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setLoading(false); return; }
-    userIdRef.current = user.id;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoading(false); return; }
+      userIdRef.current = user.id;
 
-    const [analysisRes, plansRes, progressRes] = await Promise.all([
-      supabase.from('analyses').select('*').eq('user_id', user.id)
-        .order('created_at', { ascending: false }).limit(1).single(),
-      supabase.from('user_plans').select('*').eq('user_id', user.id)
-        .eq('status', 'active').order('created_at', { ascending: false }),
-      supabase.from('plan_progress').select('*').eq('user_id', user.id),
-    ]);
+      const [analysisRes, plansRes, progressRes] = await Promise.all([
+        supabase.from('analyses').select('*').eq('user_id', user.id)
+          .order('created_at', { ascending: false }).limit(1).single(),
+        supabase.from('user_plans').select('*').eq('user_id', user.id)
+          .eq('status', 'active').order('created_at', { ascending: false }),
+        supabase.from('plan_progress').select('*').eq('user_id', user.id),
+      ]);
 
-    setUserPlans(plansRes.data || []);
+      setUserPlans(plansRes.data || []);
 
-    const progressMap: Record<string, ProgressRow> = {};
-    const dismissedActions = new Set<string>();
-    for (const row of (progressRes.data || [])) {
-      if (row.move_key.startsWith('dismissed-')) {
-        dismissedActions.add(row.move_action);
-      } else {
-        progressMap[row.move_key] = {
-          move_key: row.move_key,
-          move_action: row.move_action,
-          approved: row.approved,
-          completed_steps: row.completed_steps || [],
-        };
+      const progressMap: Record<string, ProgressRow> = {};
+      const dismissedActions = new Set<string>();
+      for (const row of (progressRes.data || [])) {
+        if (row.move_key.startsWith('dismissed-')) {
+          dismissedActions.add(row.move_action);
+        } else {
+          progressMap[row.move_key] = {
+            move_key: row.move_key,
+            move_action: row.move_action,
+            approved: row.approved,
+            completed_steps: row.completed_steps || [],
+          };
+        }
       }
-    }
 
-    if (analysisRes.data && dismissedActions.size > 0) {
-      const filtered = (analysisRes.data.all_moves || []).filter(
-        (m: Move) => !dismissedActions.has(m.action),
-      );
-      setAnalysis({ ...analysisRes.data, all_moves: filtered });
-    } else {
-      setAnalysis(analysisRes.data);
-    }
+      if (analysisRes.data && dismissedActions.size > 0) {
+        const filtered = (analysisRes.data.all_moves || []).filter(
+          (m: Move) => !dismissedActions.has(m.action),
+        );
+        setAnalysis({ ...analysisRes.data, all_moves: filtered });
+      } else {
+        setAnalysis(analysisRes.data);
+      }
 
-    setProgress(progressMap);
+      setProgress(progressMap);
+    } catch (err) {
+      console.warn('[plan] loadData error:', err);
+    }
     setLoading(false);
   };
 

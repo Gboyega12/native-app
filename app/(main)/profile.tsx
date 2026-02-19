@@ -96,8 +96,10 @@ export default function Profile() {
   }, []);
 
   const loadUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       setName(user.user_metadata?.full_name || '');
       setEmail(user.email || '');
 
@@ -141,6 +143,8 @@ export default function Profile() {
           });
         }
       } catch {}
+    } catch (err) {
+      console.warn('[profile] loadUser error:', err);
     }
   };
 

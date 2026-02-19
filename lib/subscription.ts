@@ -80,22 +80,29 @@ export function useSubscription(): SubscriptionState {
 
   // Real-time: auto-update when Stripe webhook upserts the row
   useEffect(() => {
-    const channel = supabase
-      .channel('user_subscriptions_changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'user_subscriptions' },
-        (payload) => {
-          const row = payload.new as any;
-          if (row && row.user_id === userIdRef.current) {
-            applyRow(row);
-          }
-        },
-      )
-      .subscribe();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      channel = supabase
+        .channel('user_subscriptions_changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'user_subscriptions' },
+          (payload) => {
+            const row = payload.new as any;
+            if (row && row.user_id === userIdRef.current) {
+              applyRow(row);
+            }
+          },
+        )
+        .subscribe();
+    } catch (err) {
+      console.warn('[subscription] Realtime channel error:', err);
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch {}
+      }
     };
   }, [applyRow]);
 
