@@ -10,7 +10,6 @@ import {
 import { colors, fonts, spacing, radius } from '@/theme';
 import { getOfferings, purchasePackage, restorePurchases } from '@/lib/revenuecat';
 import { useSubscription } from '@/lib/subscription';
-import type { PurchasesPackage } from 'react-native-purchases';
 
 const FEATURES = [
   { label: 'All moves unlocked', desc: 'Full step-by-step execution plans for every recommendation' },
@@ -29,8 +28,8 @@ interface PaywallProps {
 
 export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   const { refresh } = useSubscription();
-  const [monthly, setMonthly] = useState<PurchasesPackage | null>(null);
-  const [annual, setAnnual] = useState<PurchasesPackage | null>(null);
+  const [monthly, setMonthly] = useState<any | null>(null);
+  const [annual, setAnnual] = useState<any | null>(null);
   const [selected, setSelected] = useState<'annual' | 'monthly'>('annual');
   const [purchasing, setPurchasing] = useState(false);
   const [restoring, setRestoring] = useState(false);
