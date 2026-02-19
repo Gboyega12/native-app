@@ -13,6 +13,7 @@ SplashScreen.preventAutoHideAsync();
 // This is critical because app/index.tsx's <Redirect> fires during render and
 // clears the URL params before useEffect can read them.
 let _pendingOAuth: { code: string; state: string } | null = null;
+let _pendingBankCallback = false;
 let _emailConfirmed = false;
 if (typeof window !== 'undefined') {
   const p = new URLSearchParams(window.location.search);
@@ -20,6 +21,10 @@ if (typeof window !== 'undefined') {
   const state = p.get('state');
   if (code && state) {
     _pendingOAuth = { code, state };
+  }
+  // Detect return from TrueLayer server callback (GET redirect flow)
+  if (p.get('connection_id') && p.get('status')) {
+    _pendingBankCallback = true;
   }
   // Detect email confirmation redirect (Supabase appends #...&type=signup)
   const hash = window.location.hash;
@@ -63,6 +68,17 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       const { code, state } = _pendingOAuth;
       _pendingOAuth = null; // consume so it doesn't fire again
       router.replace({ pathname: '/(main)/connect', params: { code, state } });
+      return;
+    }
+
+    // If returning from TrueLayer bank callback, let connect screen handle the URL params.
+    // Don't reroute — just clear the flag once session arrives.
+    if (_pendingBankCallback) {
+      if (session) {
+        _pendingBankCallback = false; // session restored, connect screen is handling it
+      }
+      // Whether session is null (restoring) or present, don't interfere —
+      // connect is already mounted with connection_id + status in the URL.
       return;
     }
 

@@ -189,10 +189,10 @@ export default function Connect() {
     }
   };
 
-  const fetchBankData = async (connId: string) => {
+  const fetchBankData = async (connId: string, attempt = 1) => {
     setLoading(true);
     setErrorMsg('');
-    setStatusMsg('Loading transactions...');
+    setStatusMsg(attempt > 1 ? 'Waiting for bank data...' : 'Loading transactions...');
     try {
       let userId = '';
       try {
@@ -204,6 +204,14 @@ export default function Connect() {
       const result = await res.json();
 
       if (!result.success || !result.csv_data) {
+        // Retry up to 4 times with increasing delay — the server callback
+        // may still be processing or the DB write may not have committed yet.
+        if (attempt < 4) {
+          const delayMs = attempt * 2000; // 2s, 4s, 6s
+          setStatusMsg(`Waiting for bank data... (attempt ${attempt + 1})`);
+          await new Promise((r) => setTimeout(r, delayMs));
+          return fetchBankData(connId, attempt + 1);
+        }
         setErrorMsg(result.error || 'No bank data found for this connection');
         setStatusMsg('');
         setLoading(false);

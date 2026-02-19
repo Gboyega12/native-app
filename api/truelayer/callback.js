@@ -1,5 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Allow up to 60s for the callback to process (Hobby plan max).
+// The default 10s is too tight for token exchange + multiple TrueLayer API calls.
+export const config = { maxDuration: 60 };
+
 // TrueLayer sandbox vs live – must match the frontend setting
 const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 'true';
 const TL_AUTH_HOST = IS_SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
