@@ -122,7 +122,7 @@ export default function RootLayout() {
 
   return (
     <AuthGate>
-      <Stack screenOptions={{ headerShown: false }} />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050505' } }} />
       <StatusBar style="light" />
     </AuthGate>
   );
