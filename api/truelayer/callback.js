@@ -154,15 +154,13 @@ export default async function handler(req, res) {
       : cards.length > 0 && accounts.length === 0 ? 'credit'
       : accounts.length > 0 ? 'bank' : null;
 
+    // Insert core fields first (guaranteed columns), then best-effort update extras
     const insertRow = {
       connection_id: connectionId,
       csv_data: csv,
       source: 'truelayer',
       refresh_token: tokenData.refresh_token || null,
-      provider_name: providerName,
-      account_type: accountType,
     };
-    // Set user_id directly if provided by the frontend (avoids claiming race condition)
     if (postUserId) insertRow.user_id = postUserId;
 
     const { error: dbError } = await admin.from('bank_data').insert(insertRow);
@@ -171,6 +169,17 @@ export default async function handler(req, res) {
       console.error('Failed to save bank data:', dbError);
       return fail(500, 'Failed to save bank data', dbError.message || dbError.code);
     }
+
+    // Best-effort: set provider_name + account_type (columns may not exist yet)
+    try {
+      const extras = {};
+      if (providerName) extras.provider_name = providerName;
+      if (accountType) extras.account_type = accountType;
+      if (Object.keys(extras).length > 0) {
+        await admin.from('bank_data').update(extras).eq('connection_id', connectionId);
+      }
+    } catch {}
+
 
     // Store card + account balances on bank_data row (best-effort, non-blocking)
     // Processing step will read these and upsert into debt_accounts with user_id
