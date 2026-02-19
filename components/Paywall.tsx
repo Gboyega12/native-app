@@ -1,15 +1,9 @@
 // ── Paywall modal ──
 // Shown when free users try to access Pro features.
-// Fetches live pricing from RevenueCat on native, shows fallback on web.
+// Matches the Nothing Phone OS design language.
 
-import { useState, useEffect } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView,
-  ActivityIndicator, Platform, Alert,
-} from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from 'react-native';
 import { colors, fonts, spacing, radius } from '@/theme';
-import { getOfferings, purchasePackage, restorePurchases } from '@/lib/revenuecat';
-import { useSubscription } from '@/lib/subscription';
 
 const FEATURES = [
   { label: 'All moves unlocked', desc: 'Full step-by-step execution plans for every recommendation' },
@@ -27,78 +21,11 @@ interface PaywallProps {
 }
 
 export default function Paywall({ visible, onClose, feature }: PaywallProps) {
-  const { refresh } = useSubscription();
-  const [monthly, setMonthly] = useState<any | null>(null);
-  const [annual, setAnnual] = useState<any | null>(null);
-  const [selected, setSelected] = useState<'annual' | 'monthly'>('annual');
-  const [purchasing, setPurchasing] = useState(false);
-  const [restoring, setRestoring] = useState(false);
-  const [loadingProducts, setLoadingProducts] = useState(false);
-
-  // Fetch offerings when paywall opens
-  useEffect(() => {
-    if (!visible) return;
-    loadProducts();
-  }, [visible]);
-
-  const loadProducts = async () => {
-    if (Platform.OS === 'web') return; // Web uses fallback pricing
-    setLoadingProducts(true);
-    const offering = await getOfferings();
-    if (offering) {
-      setMonthly(offering.monthly);
-      setAnnual(offering.annual);
-    }
-    setLoadingProducts(false);
-  };
-
-  const handlePurchase = async () => {
-    const pkg = selected === 'annual' ? annual : monthly;
-
-    if (Platform.OS === 'web' || !pkg) {
-      // Web: direct to Stripe checkout or show info
-      Alert.alert(
-        'Subscribe via app',
-        'In-app purchases are available on iOS and Android. Download the Bocy app to subscribe.',
-      );
-      return;
-    }
-
-    setPurchasing(true);
-    const { success } = await purchasePackage(pkg);
-    setPurchasing(false);
-
-    if (success) {
-      await refresh();
-      onClose();
-    }
-  };
-
-  const handleRestore = async () => {
-    setRestoring(true);
-    const info = await restorePurchases();
-    setRestoring(false);
-
-    if (info?.entitlements.active['pro']) {
-      await refresh();
-      onClose();
-    } else {
-      Alert.alert('No active subscription', 'We couldn\'t find an active Pro subscription to restore.');
-    }
-  };
-
   const contextMessage = feature === 'chat'
     ? 'Unlock AI chat to get personalised advice on your finances.'
     : feature === 'moves'
     ? 'Unlock all moves to see your full action plan with step-by-step guidance.'
     : 'Get the full Bocy experience.';
-
-  // Use live pricing from RevenueCat if available, fallback to hardcoded
-  const monthlyPrice = monthly?.product.priceString || '\u00a34.99';
-  const annualPrice = annual?.product.priceString || '\u00a339.99';
-  const annualMonthly = annual?.product.price
-    ? `\u00a3${(annual.product.price / 12).toFixed(2)}`
-    : '\u00a33.33';
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -112,30 +39,13 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               <Text style={styles.subtitle}>{contextMessage}</Text>
             </View>
 
-            {/* Plan selector */}
-            <View style={styles.planSelector}>
-              <TouchableOpacity
-                style={[styles.planOption, selected === 'annual' && styles.planOptionSelected]}
-                onPress={() => setSelected('annual')}
-                activeOpacity={0.8}
-              >
-                <View style={styles.planBestValue}>
-                  <Text style={styles.planBestValueText}>BEST VALUE</Text>
-                </View>
-                <Text style={styles.planName}>Annual</Text>
-                <Text style={styles.planPrice}>{annualPrice}/yr</Text>
-                <Text style={styles.planSub}>{annualMonthly}/mo</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.planOption, selected === 'monthly' && styles.planOptionSelected]}
-                onPress={() => setSelected('monthly')}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.planName}>Monthly</Text>
-                <Text style={styles.planPrice}>{monthlyPrice}/mo</Text>
-                <Text style={styles.planSub}>Cancel anytime</Text>
-              </TouchableOpacity>
+            {/* Price */}
+            <View style={styles.priceCard}>
+              <View style={styles.priceRow}>
+                <Text style={styles.priceAmount}>{'\u00a3'}4.99</Text>
+                <Text style={styles.pricePeriod}>/month</Text>
+              </View>
+              <Text style={styles.priceAlt}>or {'\u00a3'}39.99/year (save 33%)</Text>
             </View>
 
             {/* Features */}
@@ -154,35 +64,10 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
             </View>
 
             {/* CTA */}
-            <TouchableOpacity
-              style={[styles.upgradeBtn, purchasing && styles.upgradeBtnDisabled]}
-              onPress={handlePurchase}
-              activeOpacity={0.8}
-              disabled={purchasing || loadingProducts}
-            >
-              {purchasing ? (
-                <ActivityIndicator color="#000000" size="small" />
-              ) : (
-                <Text style={styles.upgradeBtnText}>Start free trial</Text>
-              )}
+            <TouchableOpacity style={styles.upgradeBtn} activeOpacity={0.8}>
+              <Text style={styles.upgradeBtnText}>Start free trial</Text>
             </TouchableOpacity>
             <Text style={styles.trialNote}>7-day free trial, cancel anytime</Text>
-
-            {/* Restore */}
-            {Platform.OS !== 'web' && (
-              <TouchableOpacity
-                style={styles.restoreBtn}
-                onPress={handleRestore}
-                activeOpacity={0.7}
-                disabled={restoring}
-              >
-                {restoring ? (
-                  <ActivityIndicator color={colors.dim} size="small" />
-                ) : (
-                  <Text style={styles.restoreBtnText}>Restore purchases</Text>
-                )}
-              </TouchableOpacity>
-            )}
 
             {/* Dismiss */}
             <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
@@ -248,56 +133,37 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
-  // Plan selector
-  planSelector: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.xl,
-  },
-  planOption: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    borderRadius: radius.md,
-    padding: spacing.md,
+  // Price
+  priceCard: {
     alignItems: 'center',
+    paddingVertical: spacing.lg,
+    marginBottom: spacing.lg,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
-  planOptionSelected: {
-    borderColor: colors.green,
-    backgroundColor: 'rgba(0,212,170,0.06)',
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
   },
-  planBestValue: {
-    backgroundColor: colors.green,
-    borderRadius: 100,
-    paddingVertical: 2,
-    paddingHorizontal: 8,
-    marginBottom: spacing.xs,
-  },
-  planBestValueText: {
+  priceAmount: {
     fontFamily: fonts.mono,
-    fontSize: 8,
-    letterSpacing: 1,
-    color: '#000000',
-    fontWeight: '700',
-  },
-  planName: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.text,
-    marginBottom: 2,
-  },
-  planPrice: {
-    fontFamily: fonts.mono,
-    fontSize: 18,
-    color: colors.text,
+    fontSize: 36,
     fontWeight: '300',
+    color: colors.text,
+    letterSpacing: -1,
   },
-  planSub: {
+  pricePeriod: {
     fontFamily: fonts.regular,
-    fontSize: 11,
+    fontSize: 16,
     color: colors.dim,
-    marginTop: 2,
+    marginLeft: 2,
+  },
+  priceAlt: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    marginTop: spacing.xs,
   },
 
   // Features
@@ -348,11 +214,6 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     paddingVertical: 16,
     alignItems: 'center',
-    minHeight: 52,
-    justifyContent: 'center',
-  },
-  upgradeBtnDisabled: {
-    opacity: 0.7,
   },
   upgradeBtnText: {
     fontFamily: fonts.semibold,
@@ -367,26 +228,11 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
 
-  // Restore
-  restoreBtn: {
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    marginTop: spacing.sm,
-    minHeight: 36,
-    justifyContent: 'center',
-  },
-  restoreBtnText: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.dim,
-    textDecorationLine: 'underline',
-  },
-
   // Close
   closeBtn: {
     alignItems: 'center',
     paddingVertical: spacing.md,
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
   },
   closeBtnText: {
     fontFamily: fonts.regular,

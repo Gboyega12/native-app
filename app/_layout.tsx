@@ -6,7 +6,6 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import { initRevenueCat, identifyUser, resetUser } from '@/lib/revenuecat';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -36,19 +35,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
 
   useEffect(() => {
-    // Initialize RevenueCat once
-    initRevenueCat();
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
       setSession(sess);
       setReady(true);
-
-      // Identify or reset RevenueCat user on auth change
-      if (sess?.user?.id) {
-        identifyUser(sess.user.id);
-      } else {
-        resetUser();
-      }
     });
     return () => subscription.unsubscribe();
   }, []);
