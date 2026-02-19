@@ -2,7 +2,7 @@
 // Shown when free users try to access Pro features.
 // Matches the Nothing Phone OS design language.
 
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable } from 'react-native';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 const FEATURES = [
@@ -29,9 +29,26 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
-          <ScrollView showsVerticalScrollIndicator={false} bounces={false} contentContainerStyle={styles.scrollContent}>
+      <Pressable style={styles.overlay} onPress={onClose}>
+        <Pressable style={styles.sheet} onPress={() => {}}>
+          {/* Close icon */}
+          <TouchableOpacity
+            style={styles.closeIcon}
+            onPress={onClose}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            activeOpacity={0.6}
+          >
+            <Text style={styles.closeIconText}>{'\u2715'}</Text>
+          </TouchableOpacity>
+
+          {/* Drag indicator */}
+          <View style={styles.dragIndicator} />
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            contentContainerStyle={styles.scrollContent}
+          >
             {/* Header */}
             <View style={styles.header}>
               <Text style={styles.proBadge}>PRO</Text>
@@ -65,17 +82,17 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
             {/* CTA */}
             <TouchableOpacity style={styles.upgradeBtn} activeOpacity={0.8}>
-              <Text style={styles.upgradeBtnText}>Start free trial</Text>
+              <Text style={styles.upgradeBtnText}>Subscribe</Text>
             </TouchableOpacity>
-            <Text style={styles.trialNote}>7-day free trial, cancel anytime</Text>
+            <Text style={styles.trialNote}>Cancel anytime</Text>
 
             {/* Dismiss */}
             <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
               <Text style={styles.closeBtnText}>Maybe later</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
-      </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
@@ -95,8 +112,37 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.10)',
     borderBottomWidth: 0,
   },
+  closeIcon: {
+    position: 'absolute',
+    top: 16,
+    right: 20,
+    zIndex: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeIconText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.dim,
+  },
+  dragIndicator: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignSelf: 'center',
+    marginTop: 10,
+    marginBottom: 4,
+  },
   scrollContent: {
     padding: spacing.xl,
+    paddingTop: spacing.lg,
     paddingBottom: spacing.xxl,
   },
 
@@ -123,6 +169,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.heading,
     fontSize: 22,
     color: colors.text,
+    textAlign: 'center',
     marginBottom: spacing.xs,
   },
   subtitle: {
@@ -184,7 +231,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(0,212,170,0.25)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: spacing.sm,
+    marginRight: spacing.sm + 4,
     marginTop: 1,
   },
   checkText: {
@@ -199,7 +246,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.medium,
     fontSize: 15,
     color: colors.text,
-    marginBottom: 1,
+    marginBottom: 2,
   },
   featureDesc: {
     fontFamily: fonts.regular,
