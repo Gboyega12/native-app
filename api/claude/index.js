@@ -285,7 +285,7 @@ async function handleEnrich(req, res) {
 function buildEnrichPrompt(moves, context) {
   const { monthly_income, monthly_spending, surplus, goals, ukpf_priority, ukpf_label } = context || {};
 
-  let prompt = `You are Bocy, an AI financial advisor. Rewrite these financial recommendations into specific, outcome-focused action plans.
+  let prompt = `You are Bocy, an AI financial assistant. Rewrite these financial recommendations into specific, outcome-focused action plans.
 
 RULES:
 - Name ACTUAL merchants from the merchants list (e.g. "Cancel Netflix, Spotify, Adobe" not "cancel some subscriptions")
@@ -297,7 +297,7 @@ RULES:
 - Keep the steps array as 3-4 concrete, executable actions
 - Use British English and £ symbol
 - NEVER use markdown formatting — no **bold**, no *italic*, no backticks. Output plain text only.
-- NEVER give regulated financial advice — suggest consulting a qualified advisor for investment decisions
+- NEVER give regulated financial guidance — suggest consulting a qualified financial planner for investment decisions
 - NEVER mention specific financial institutions or products (e.g. no "Monzo", "Chase", "Marcus", "Chip", "Vanguard", no savings account interest rates, no ISA providers). Keep recommendations institution-neutral
 
 MERCHANT CLEANUP RULES:

@@ -252,13 +252,32 @@ const MERCHANTS: MerchantEntry[] = [
   { patterns: ['hmrc', 'tax refund', 'tax credit'], merchant: 'HMRC', category: 'Income', isIncome: true },
   { patterns: ['dwp', 'universal credit', 'jobseekers'], merchant: 'DWP Benefits', category: 'Income', isIncome: true },
 
-  // ── Savings (special — not spending) ──
-  { patterns: ['vanguard'], merchant: 'Vanguard', category: 'Savings' },
-  { patterns: ['trading 212', 'trading212'], merchant: 'Trading 212', category: 'Savings' },
-  { patterns: ['nutmeg'], merchant: 'Nutmeg', category: 'Savings' },
+  // ── Savings (excluded from spending — money set aside) ──
   { patterns: ['moneybox'], merchant: 'Moneybox', category: 'Savings' },
   { patterns: ['plum'], merchant: 'Plum', category: 'Savings' },
   { patterns: ['chip'], merchant: 'Chip', category: 'Savings' },
+  { patterns: ['ns&i', 'nsandi', 'national savings'], merchant: 'NS&I', category: 'Savings' },
+  { patterns: ['premium bond'], merchant: 'NS&I Premium Bonds', category: 'Savings' },
+  { patterns: ['marcus'], merchant: 'Marcus', category: 'Savings' },
+  { patterns: ['chase savings', 'chase saver'], merchant: 'Chase Savings', category: 'Savings' },
+  { patterns: ['zopa'], merchant: 'Zopa', category: 'Savings' },
+
+  // ── Investments (excluded from spending — capital deployed) ──
+  { patterns: ['vanguard'], merchant: 'Vanguard', category: 'Investments' },
+  { patterns: ['trading 212', 'trading212'], merchant: 'Trading 212', category: 'Investments' },
+  { patterns: ['nutmeg'], merchant: 'Nutmeg', category: 'Investments' },
+  { patterns: ['freetrade'], merchant: 'Freetrade', category: 'Investments' },
+  { patterns: ['hargreaves', 'hl fund'], merchant: 'Hargreaves Lansdown', category: 'Investments' },
+  { patterns: ['aj bell', 'ajbell'], merchant: 'AJ Bell', category: 'Investments' },
+  { patterns: ['interactive investor', 'ii.co'], merchant: 'Interactive Investor', category: 'Investments' },
+  { patterns: ['interactive brokers', 'ibkr'], merchant: 'Interactive Brokers', category: 'Investments' },
+  { patterns: ['degiro'], merchant: 'DEGIRO', category: 'Investments' },
+  { patterns: ['etoro'], merchant: 'eToro', category: 'Investments' },
+  { patterns: ['coinbase'], merchant: 'Coinbase', category: 'Investments' },
+  { patterns: ['kraken'], merchant: 'Kraken', category: 'Investments' },
+  { patterns: ['crypto.com', 'cryptocom'], merchant: 'Crypto.com', category: 'Investments' },
+  { patterns: ['binance'], merchant: 'Binance', category: 'Investments' },
+  { patterns: ['wealthify'], merchant: 'Wealthify', category: 'Investments' },
 
   // ── International Transfers (not income, not spending — transfers) ──
   { patterns: ['lemfi'], merchant: 'LemFi', category: 'Transfers' },

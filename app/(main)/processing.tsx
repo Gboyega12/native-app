@@ -13,7 +13,7 @@ const STEPS = [
   'Scanning transactions',
   'Mapping income stability',
   'Enriching transactions',
-  'Verifying with AI',
+  'Verifying transactions',
   'Detecting optimisation opportunities',
   'Ranking highest impact actions',
   'Refining your action plan',
@@ -52,30 +52,46 @@ function buildFirstInsight(identity: any, profile: any, topMove: any): string {
   return `We've mapped your complete financial picture. ${topAction ? `Your top move: ${topAction.toLowerCase()}` : 'Your personalised action plan is ready'}.`;
 }
 
-// ── Animated scanning glyph ──
-const ScanGlyph = () => {
-  const pulse = useRef(new Animated.Value(0)).current;
-  const rotate = useRef(new Animated.Value(0)).current;
+// ── Nothing-style dot matrix animation ──
+// 7x7 grid of dots that pulse in concentric rings from the centre outward
+const DOT_GRID = 7;
+const DOT_RINGS = 4;
+
+const DotMatrix = () => {
+  const ringAnims = useRef(Array.from({ length: DOT_RINGS }, () => new Animated.Value(0))).current;
+
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 1200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ])
-    ).start();
-    Animated.loop(
-      Animated.timing(rotate, { toValue: 1, duration: 4000, easing: Easing.linear, useNativeDriver: true })
-    ).start();
+    const wave = () => {
+      ringAnims.forEach((a) => a.setValue(0));
+      Animated.stagger(
+        180,
+        ringAnims.map((anim) =>
+          Animated.sequence([
+            Animated.timing(anim, { toValue: 1, duration: 500, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+            Animated.timing(anim, { toValue: 0, duration: 500, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          ]),
+        ),
+      ).start(() => setTimeout(wave, 300));
+    };
+    wave();
   }, []);
-  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.1] });
-  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
-  const spin = rotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  const centre = (DOT_GRID - 1) / 2;
   return (
-    <View style={styles.glyphContainer}>
-      <Animated.View style={[styles.glyphRing, { transform: [{ rotate: spin }, { scale }], opacity }]} />
-      <Animated.Text style={[styles.glyphText, { opacity, transform: [{ scale }] }]}>
-        {'{ B }'}
-      </Animated.Text>
+    <View style={styles.dotGridContainer}>
+      {Array.from({ length: DOT_GRID }).map((_, r) => (
+        <View key={r} style={styles.dotRow}>
+          {Array.from({ length: DOT_GRID }).map((_, c) => {
+            const dist = Math.max(Math.abs(r - centre), Math.abs(c - centre));
+            const ring = Math.min(Math.floor(dist), DOT_RINGS - 1);
+            const opacity = ringAnims[ring].interpolate({ inputRange: [0, 1], outputRange: [0.12, 1] });
+            const scale = ringAnims[ring].interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.3] });
+            return (
+              <Animated.View key={c} style={[styles.dot, { opacity, transform: [{ scale }] }]} />
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 };
@@ -623,7 +639,7 @@ function ProcessingInner() {
 
   return (
     <View style={styles.container}>
-      <ScanGlyph />
+      <DotMatrix />
       <Text style={styles.title}>Analysing your data</Text>
 
       {/* Progress bar */}
@@ -694,27 +710,23 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
   },
 
-  // ── Scanning glyph ──
-  glyphContainer: {
+  // ── Nothing-style dot matrix ──
+  dotGridContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.xl,
-    height: 80,
+    paddingVertical: spacing.md,
   },
-  glyphRing: {
-    position: 'absolute',
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 1.5,
-    borderColor: colors.green,
-    borderTopColor: 'transparent',
+  dotRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
   },
-  glyphText: {
-    fontFamily: fonts.heading,
-    fontSize: 24,
-    color: colors.green,
-    letterSpacing: 2,
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.green,
+    margin: 5,
   },
 
   title: {

@@ -129,7 +129,7 @@ export default function Home() {
   const BUDGET_CATEGORIES = [
     'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport',
     'Dining', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
-    'Childcare', 'Education', 'Charity', 'Other',
+    'Childcare', 'Education', 'Charity', 'Transfers', 'Savings', 'Investments', 'Other',
   ];
 
   const saveAddItem = async () => {
@@ -429,12 +429,17 @@ export default function Home() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        await supabase.from('transaction_overrides').upsert({
+        // Delete-then-insert (no unique constraint on table)
+        await supabase.from('transaction_overrides')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('match_description', sourceName);
+        await supabase.from('transaction_overrides').insert({
           user_id: user.id,
           match_description: sourceName,
           category: 'Transfers',
           is_essential: false,
-        }, { onConflict: 'user_id,match_description' });
+        });
       }
 
       if (analysis) {
