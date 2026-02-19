@@ -3,8 +3,7 @@
 // Matches the Nothing Phone OS design language.
 
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, Platform, ActivityIndicator, Alert } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, Platform, ActivityIndicator, Alert, Linking } from 'react-native';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { supabase } from '@/lib/supabase';
 
@@ -63,7 +62,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       if (Platform.OS === 'web') {
         window.location.href = data.url;
       } else {
-        await WebBrowser.openBrowserAsync(data.url);
+        await Linking.openURL(data.url);
       }
     } catch (err) {
       console.warn('[Paywall] Checkout error:', err);
