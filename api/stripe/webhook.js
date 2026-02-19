@@ -90,18 +90,18 @@ export default async function handler(req, res) {
       case 'invoice.payment_failed': {
         const invoice = event.data.object;
         const customerId = invoice.customer;
+        const subscriptionId = invoice.subscription;
 
-        const { data: sub } = await admin
-          .from('user_subscriptions')
-          .select('user_id')
-          .eq('stripe_customer_id', customerId)
-          .single();
-
-        if (sub) {
-          await admin
+        if (subscriptionId) {
+          const { data: sub } = await admin
             .from('user_subscriptions')
-            .update({ status: 'past_due', updated_at: new Date().toISOString() })
-            .eq('user_id', sub.user_id);
+            .select('user_id')
+            .eq('stripe_customer_id', customerId)
+            .single();
+
+          if (sub) {
+            await upsertSubscription(admin, stripe, sub.user_id, subscriptionId, customerId);
+          }
         }
         break;
       }
@@ -130,7 +130,7 @@ async function upsertSubscription(admin, stripe, userId, subscriptionId, custome
 
   const row = {
     user_id: userId,
-    tier: status === 'active' ? 'pro' : 'free',
+    tier: (status === 'active' || status === 'past_due') ? 'pro' : 'free',
     status,
     stripe_customer_id: customerId,
     stripe_subscription_id: subscriptionId,
