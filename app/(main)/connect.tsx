@@ -66,6 +66,22 @@ export default function Connect() {
 
   const isFromProfile = params.from === 'profile';
 
+  // Must declare all hooks before any conditional returns (Rules of Hooks)
+  const primaryConnected = connectedCount > 0 && !isFromProfile;
+  const fadeIn = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (primaryConnected) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      Animated.timing(fadeIn, {
+        toValue: 1,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [primaryConnected]);
+
   // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
     const init = async () => {
@@ -423,22 +439,6 @@ export default function Connect() {
       </View>
     );
   }
-
-  // ── Onboarding flow: primary account connected state ──
-  const primaryConnected = connectedCount > 0 && !isFromProfile;
-  const fadeIn = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (primaryConnected) {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      Animated.timing(fadeIn, {
-        toValue: 1,
-        duration: 600,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [primaryConnected]);
 
   // Profile flow — simple add connection UI
   if (isFromProfile) {
