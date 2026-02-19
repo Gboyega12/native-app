@@ -6,6 +6,8 @@ import {
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { useSubscription } from '@/lib/subscription';
+import Paywall from '@/components/Paywall';
 import type { Analysis, Move, GoalTrajectory } from '@/lib/types';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -228,9 +230,14 @@ function confirmAction(title: string, message: string, onConfirm: () => void) {
   }
 }
 
+/** Number of moves visible on the free tier */
+const FREE_MOVE_LIMIT = 2;
+
 export default function Plan() {
   const router = useRouter();
   const { highlight } = useLocalSearchParams<{ highlight?: string }>();
+  const { isPro } = useSubscription();
+  const [showPaywall, setShowPaywall] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [userPlans, setUserPlans] = useState<UserPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -561,6 +568,9 @@ export default function Plan() {
         </View>
       </Modal>
 
+      {/* ── Paywall ── */}
+      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
+
       {/* ══════════════════════════════════════════════
           SECTION 1 — YOUR GOAL
           ══════════════════════════════════════════════ */}
@@ -823,7 +833,7 @@ export default function Plan() {
           </View>
 
           {/* Individual opportunity cards */}
-          {opportunities.map(({ move, index: i }, seqIdx) => {
+          {(isPro ? opportunities : opportunities.slice(0, FREE_MOVE_LIMIT)).map(({ move, index: i }, seqIdx) => {
             const isExpanded = expanded === i;
             const isHighlighted = highlightIdx === i;
             const moveKey = `move-${i}`;
@@ -883,6 +893,26 @@ export default function Plan() {
               </View>
             );
           })}
+
+          {/* ── Upgrade CTA for free users ── */}
+          {!isPro && opportunities.length > FREE_MOVE_LIMIT && (
+            <TouchableOpacity
+              style={styles.upgradeCard}
+              onPress={() => setShowPaywall(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.upgradeBadge}>PRO</Text>
+              <Text style={styles.upgradeTitle}>
+                +{opportunities.length - FREE_MOVE_LIMIT} more moves locked
+              </Text>
+              <Text style={styles.upgradeSubtitle}>
+                Unlock your full action plan with step-by-step guidance
+              </Text>
+              <View style={styles.upgradeBtn}>
+                <Text style={styles.upgradeBtnText}>See plans</Text>
+              </View>
+            </TouchableOpacity>
+          )}
         </>
       )}
 
@@ -1726,6 +1756,57 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 13,
     color: colors.coral,
+  },
+
+  // ── Upgrade card (free tier gate) ──
+  upgradeCard: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,170,0.25)',
+    borderRadius: 24,
+    padding: spacing.xl,
+    marginBottom: spacing.md,
+    alignItems: 'center',
+  },
+  upgradeBadge: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 3,
+    color: colors.green,
+    backgroundColor: 'rgba(0,212,170,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,170,0.25)',
+    borderRadius: 100,
+    paddingVertical: 3,
+    paddingHorizontal: 12,
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
+  },
+  upgradeTitle: {
+    fontFamily: fonts.medium,
+    fontSize: 16,
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  upgradeSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: spacing.md,
+  },
+  upgradeBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 100,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.xl,
+  },
+  upgradeBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: '#000000',
   },
 
 });

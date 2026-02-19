@@ -6,6 +6,8 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { useSubscription } from '@/lib/subscription';
+import Paywall from '@/components/Paywall';
 
 // ── Glyph micro-animation: fade+scale on mount ──
 const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
@@ -67,6 +69,8 @@ function getProviderInitial(name: string) {
 export default function Profile() {
   const router = useRouter();
   const { connected } = useLocalSearchParams<{ connected?: string }>();
+  const { tier, isPro } = useSubscription();
+  const [showPaywall, setShowPaywall] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
@@ -274,6 +278,45 @@ export default function Profile() {
           </View>
         </View>
       </AnimGlyph>
+
+      {/* ── Paywall ── */}
+      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} />
+
+      {/* ── Subscription ── */}
+      <View style={s.section}>
+        <Text style={s.sectionTitle}>Subscription</Text>
+        <View style={s.subCard}>
+          <View style={s.subCardHeader}>
+            <View style={[s.subBadge, isPro && s.subBadgePro]}>
+              <Text style={[s.subBadgeText, isPro && s.subBadgeTextPro]}>
+                {isPro ? 'PRO' : 'FREE'}
+              </Text>
+            </View>
+            <Text style={s.subTierLabel}>
+              {isPro ? 'Bocy Pro' : 'Free plan'}
+            </Text>
+          </View>
+          {!isPro && (
+            <>
+              <Text style={s.subDesc}>
+                Upgrade to unlock all moves, AI chat, weekly digests, and smart check-ins.
+              </Text>
+              <TouchableOpacity
+                style={s.subUpgradeBtn}
+                onPress={() => setShowPaywall(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={s.subUpgradeBtnText}>Upgrade to Pro</Text>
+              </TouchableOpacity>
+            </>
+          )}
+          {isPro && (
+            <Text style={s.subDesc}>
+              You have access to all Bocy features.
+            </Text>
+          )}
+        </View>
+      </View>
 
       {/* ── Accounts ── */}
       <View style={s.section}>
@@ -648,6 +691,66 @@ const s = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.dim,
+  },
+
+  // ── Subscription card ──
+  subCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  subCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: spacing.sm,
+  },
+  subBadge: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 100,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+  },
+  subBadgePro: {
+    backgroundColor: 'rgba(0,212,170,0.12)',
+    borderColor: 'rgba(0,212,170,0.25)',
+  },
+  subBadgeText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 2,
+    color: colors.dim,
+  },
+  subBadgeTextPro: {
+    color: colors.green,
+  },
+  subTierLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.text,
+  },
+  subDesc: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    lineHeight: 20,
+    marginBottom: spacing.sm,
+  },
+  subUpgradeBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 100,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  subUpgradeBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: '#000000',
   },
 
   // ── Section ──

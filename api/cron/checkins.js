@@ -47,6 +47,19 @@ export default async function handler(req, res) {
 
     for (const pref of prefs) {
       try {
+        // Only send check-ins to Pro subscribers
+        const { data: subRow } = await admin
+          .from('user_subscriptions')
+          .select('tier, status')
+          .eq('user_id', pref.user_id)
+          .eq('status', 'active')
+          .single();
+
+        if (subRow?.tier !== 'pro') {
+          results.skipped++;
+          continue;
+        }
+
         // Check if we already sent a check-in in the last 3 days
         const { data: recentNotif } = await admin
           .from('notification_log')
