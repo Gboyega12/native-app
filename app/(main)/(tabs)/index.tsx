@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Animated, Easing,
+  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Animated, Easing, Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -1684,10 +1684,15 @@ export default function Home() {
           })()}
 
           {/* Add budget item modal */}
-          <Modal visible={showAddItem} transparent animationType="fade">
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <Text style={styles.modalTitle}>Add budget item</Text>
+          <Modal visible={showAddItem} transparent animationType="fade" onRequestClose={() => { setAddItemError(''); setShowAddItem(false); }}>
+            <Pressable style={styles.modalOverlay} onPress={() => { setAddItemError(''); setShowAddItem(false); }}>
+              <Pressable style={styles.modalContent} onPress={() => {}}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Add budget item</Text>
+                  <TouchableOpacity style={styles.modalCloseIcon} onPress={() => { setAddItemError(''); setShowAddItem(false); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={styles.modalCloseIconText}>{'\u2715'}</Text>
+                  </TouchableOpacity>
+                </View>
                 <Text style={styles.modalSubtitle}>
                   For expenses not in your bank data (rent via partner, cash, etc.)
                 </Text>
@@ -1772,16 +1777,21 @@ export default function Home() {
                     )}
                   </TouchableOpacity>
                 </View>
-              </View>
-            </View>
+              </Pressable>
+            </Pressable>
           </Modal>
 
           {/* Verify move detail modal */}
-          <Modal visible={!!verifyMove} transparent animationType="fade">
-            <View style={styles.modalOverlay}>
-              <ScrollView style={{ maxHeight: '80%' }}>
-                <View style={styles.modalContent}>
+          <Modal visible={!!verifyMove} transparent animationType="fade" onRequestClose={() => setVerifyMove(null)}>
+            <Pressable style={styles.modalOverlay} onPress={() => setVerifyMove(null)}>
+              <Pressable style={styles.modalContentScrollable} onPress={() => {}}>
+                <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>Verify recommendation</Text>
+                  <TouchableOpacity style={styles.modalCloseIcon} onPress={() => setVerifyMove(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={styles.modalCloseIconText}>{'\u2715'}</Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView showsVerticalScrollIndicator={false} bounces={false} contentContainerStyle={{ paddingBottom: 8 }}>
 
                   {verifyMove && (
                     <>
@@ -1818,16 +1828,21 @@ export default function Home() {
                       </View>
                     </>
                   )}
-                </View>
-              </ScrollView>
-            </View>
+                </ScrollView>
+              </Pressable>
+            </Pressable>
           </Modal>
 
           {/* Re-categorize transaction modal */}
-          <Modal visible={!!recatTx} transparent animationType="fade">
-            <View style={styles.modalOverlay}>
-              <View style={styles.modalContent}>
-                <Text style={styles.modalTitle}>Move transaction</Text>
+          <Modal visible={!!recatTx} transparent animationType="fade" onRequestClose={() => setRecatTx(null)}>
+            <Pressable style={styles.modalOverlay} onPress={() => setRecatTx(null)}>
+              <Pressable style={styles.modalContent} onPress={() => {}}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Move transaction</Text>
+                  <TouchableOpacity style={styles.modalCloseIcon} onPress={() => setRecatTx(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={styles.modalCloseIconText}>{'\u2715'}</Text>
+                  </TouchableOpacity>
+                </View>
                 {recatTx && (
                   <>
                     <Text style={styles.modalSubtitle}>
@@ -1885,8 +1900,8 @@ export default function Home() {
                     </View>
                   </>
                 )}
-              </View>
-            </View>
+              </Pressable>
+            </Pressable>
           </Modal>
 
           {/* ── Categorise uncategorised transactions modal ── */}
@@ -2805,6 +2820,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',
     justifyContent: 'center',
+    alignItems: 'center',
     padding: 24,
   },
   modalContent: {
@@ -2813,14 +2829,48 @@ const styles = StyleSheet.create({
     padding: 24,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalContentScrollable: {
+    backgroundColor: '#0A0A0A',
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '80%',
+    overflow: 'hidden',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  modalCloseIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseIconText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
   },
   modalTitle: {
     fontFamily: fonts.mono,
     fontSize: 14,
     color: colors.text,
-    marginBottom: 6,
     letterSpacing: 1,
     textTransform: 'uppercase',
+    flex: 1,
   },
   modalSubtitle: {
     fontFamily: fonts.regular,

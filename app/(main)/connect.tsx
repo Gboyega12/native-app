@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform,
-  LayoutAnimation, Animated, Easing,
+  LayoutAnimation, Animated, Easing, Linking,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -492,11 +492,7 @@ export default function Connect() {
             )}
           </TouchableOpacity>
 
-          <View style={styles.trustRow}>
-            <TrustBadge text="FCA regulated" />
-            <TrustBadge text="Read-only access" />
-            <TrustBadge text="Data on device" />
-          </View>
+          <TrustSection />
 
           <View style={styles.divider}>
             <View style={styles.dividerLine} />
@@ -627,11 +623,7 @@ export default function Connect() {
               )}
             </TouchableOpacity>
 
-            <View style={styles.trustRow}>
-              <TrustBadge text="FCA regulated" />
-              <TrustBadge text="Read-only access" />
-              <TrustBadge text="Data on device" />
-            </View>
+            <TrustSection />
 
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
@@ -731,10 +723,38 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-function TrustBadge({ text }: { text: string }) {
+function TrustSection() {
   return (
-    <View style={styles.badge}>
-      <Text style={styles.badgeText}>{text}</Text>
+    <View style={styles.trustSection}>
+      {/* Trust badges */}
+      <View style={styles.trustRow}>
+        <View style={styles.badge}>
+          <View style={styles.badgeDot} />
+          <Text style={styles.badgeText}>FCA regulated</Text>
+        </View>
+        <View style={styles.badge}>
+          <View style={styles.badgeDot} />
+          <Text style={styles.badgeText}>Read-only access</Text>
+        </View>
+        <View style={styles.badge}>
+          <View style={styles.badgeDot} />
+          <Text style={styles.badgeText}>Data on device</Text>
+        </View>
+      </View>
+
+      {/* TrueLayer info */}
+      <View style={styles.trustInfo}>
+        <Text style={styles.trustInfoText}>
+          Powered by{' '}
+          <Text
+            style={styles.trustLink}
+            onPress={() => Linking.openURL('https://truelayer.com')}
+          >
+            TrueLayer
+          </Text>
+          , an FCA-authorised open banking provider used by Revolut, Freetrade, and other leading financial services. Bocy never sees your login details and can only read transactions.
+        </Text>
+      </View>
     </View>
   );
 }
@@ -879,24 +899,54 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.6,
   },
+  trustSection: {
+    marginBottom: spacing.xl,
+  },
   trustRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.md,
   },
   badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 6,
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(122,239,199,0.06)',
+    backgroundColor: 'rgba(0,212,170,0.06)',
     borderWidth: 1,
-    borderColor: colors.accentDim,
+    borderColor: 'rgba(0,212,170,0.15)',
     borderRadius: 20,
+    gap: 6,
+  },
+  badgeDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.green,
   },
   badgeText: {
     fontSize: 11,
-    color: colors.accent,
-    fontFamily: fonts.medium,
+    color: colors.green,
+    fontFamily: fonts.mono,
+    letterSpacing: 0.3,
+  },
+  trustInfo: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+  },
+  trustInfoText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.dim,
+    lineHeight: 18,
+  },
+  trustLink: {
+    color: colors.text2,
+    textDecorationLine: 'underline' as const,
   },
   divider: {
     flexDirection: 'row',

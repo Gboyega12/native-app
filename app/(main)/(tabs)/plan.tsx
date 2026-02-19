@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  Linking, Alert, LayoutAnimation, Platform, UIManager, Animated, Easing, Modal,
+  Linking, Alert, LayoutAnimation, Platform, UIManager, Animated, Easing, Modal, Pressable,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -525,8 +525,12 @@ export default function Plan() {
 
       {/* ── Info modal ── */}
       <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}>
-        <View style={styles.infoOverlay}>
-          <View style={styles.infoModal}>
+        <Pressable style={styles.infoOverlay} onPress={() => setShowInfo(false)}>
+          <Pressable style={styles.infoModal} onPress={() => {}}>
+            {/* Close icon */}
+            <TouchableOpacity style={styles.infoCloseIcon} onPress={() => setShowInfo(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={styles.infoCloseIconText}>{'\u2715'}</Text>
+            </TouchableOpacity>
             <ScrollView showsVerticalScrollIndicator={false} bounces={false} style={styles.infoScroll} contentContainerStyle={styles.infoScrollContent}>
               <Text style={styles.infoTitle}>How your plan works</Text>
 
@@ -564,8 +568,8 @@ export default function Plan() {
                 <Text style={styles.infoCloseText}>Got it</Text>
               </TouchableOpacity>
             </ScrollView>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* ── Paywall ── */}
@@ -1192,6 +1196,8 @@ const styles = StyleSheet.create({
   // ── Info modal ──
   infoOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
   infoModal: { backgroundColor: colors.surface, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 24, maxWidth: 400, width: '100%', maxHeight: '80%', overflow: 'hidden' },
+  infoCloseIcon: { position: 'absolute', top: 16, right: 16, zIndex: 10, width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', justifyContent: 'center', alignItems: 'center' },
+  infoCloseIconText: { fontFamily: fonts.regular, fontSize: 12, color: colors.dim },
   infoScroll: { flex: 1 },
   infoScrollContent: { padding: spacing.xl },
   infoTitle: { fontFamily: fonts.mono, fontSize: 16, color: colors.text, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: spacing.lg },
