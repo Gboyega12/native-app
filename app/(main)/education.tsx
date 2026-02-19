@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated,
-  LayoutAnimation, Platform, UIManager,
+  Platform, UIManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { BocyFace, IllustrationScan, IllustrationPlan, IllustrationPersonal } from '@/components/Bocy';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -14,33 +15,27 @@ const { width } = Dimensions.get('window');
 
 const SLIDES = [
   {
-    icon: '{ B }',
-    iconColor: colors.accent,
-    title: 'Not a budgeting app',
-    subtitle: 'Your financial decisions assistant',
-    body: "We don't track what you spend. We analyse your complete financial picture and tell you exactly what to do next — ranked by real impact on your life.",
+    illustration: 'scan' as const,
+    title: "This isn't a budgeting app",
+    body: "Bocy looks at your whole financial picture, not just what you spend. It finds the one move that'll make the biggest difference right now.",
     accent: colors.accent,
   },
   {
-    icon: '>>>',
-    iconColor: colors.sky,
-    title: 'Map. Detect. Execute.',
-    subtitle: 'Three layers of intelligence',
+    illustration: 'plan' as const,
+    title: 'See it. Rank it. Do it.',
     bullets: [
-      { label: 'Map', detail: 'income stability and spending identity' },
-      { label: 'Detect', detail: 'optimisation opportunities others miss' },
-      { label: 'Execute', detail: 'highest-impact actions first' },
+      { label: 'See', detail: 'your income, spending, and patterns in one place' },
+      { label: 'Rank', detail: 'every opportunity by how much it actually helps' },
+      { label: 'Do', detail: 'the highest impact action first, step by step' },
     ],
-    accent: colors.sky,
+    accent: colors.text2,
   },
   {
-    icon: '//',
-    iconColor: colors.lavender,
-    title: 'Personalised to your life',
-    subtitle: 'Your situation shapes every decision',
-    body: "A hybrid worker has different priorities than a commuter. A single parent faces different trade-offs than a couple. We need to understand who you are — not just what you spend.",
+    illustration: 'personal' as const,
+    title: 'Built around your life',
+    body: "Everyone's situation is different. Whether you're a freelancer, a parent, or just starting out, Bocy adapts to what matters to you.",
     cta: "Let's get to know you",
-    accent: colors.lavender,
+    accent: colors.green,
   },
 ];
 
@@ -81,14 +76,24 @@ export default function Education() {
       )}
 
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
-        {/* Icon */}
-        <View style={[styles.iconCircle, { borderColor: slide.accent + '30' }]}>
-          <Text style={[styles.iconText, { color: slide.accent }]}>{slide.icon}</Text>
+        {/* Illustration */}
+        <View style={styles.illustrationWrap}>
+          {slide.illustration === 'scan' && <IllustrationScan />}
+          {slide.illustration === 'plan' && <IllustrationPlan />}
+          {slide.illustration === 'personal' && <IllustrationPersonal />}
+        </View>
+
+        {/* Bocy face as companion indicator */}
+        <View style={styles.bocyIndicator}>
+          <BocyFace
+            mood={current === 0 ? 'neutral' : current === 1 ? 'thinking' : 'happy'}
+            size="sm"
+            breathing
+          />
         </View>
 
         {/* Title */}
         <Text style={styles.title}>{slide.title}</Text>
-        <Text style={[styles.subtitle, { color: slide.accent }]}>{slide.subtitle}</Text>
 
         {/* Body or bullets */}
         {slide.body && <Text style={styles.body}>{slide.body}</Text>}
@@ -125,11 +130,11 @@ export default function Education() {
         </View>
 
         <TouchableOpacity
-          style={[styles.button, { backgroundColor: slide.accent }]}
+          style={[styles.button, isLast && { backgroundColor: colors.green }]}
           onPress={handleNext}
           activeOpacity={0.8}
         >
-          <Text style={styles.buttonText}>
+          <Text style={[styles.buttonText, isLast && { color: '#000000' }]}>
             {isLast ? (slide.cta || 'Continue') : 'Next'}
           </Text>
         </TouchableOpacity>
@@ -162,31 +167,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  iconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 2,
-    justifyContent: 'center',
+  illustrationWrap: {
+    marginBottom: spacing.lg,
     alignItems: 'center',
-    marginBottom: spacing.xl,
   },
-  iconText: {
-    fontFamily: fonts.heading,
-    fontSize: 22,
+  bocyIndicator: {
+    marginBottom: spacing.lg,
   },
   title: {
     fontFamily: fonts.heading,
     fontSize: 26,
     color: colors.text,
     textAlign: 'center',
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   body: {
     fontFamily: fonts.regular,
@@ -257,6 +250,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: radius.md,
     alignItems: 'center',
+    backgroundColor: colors.accent,
   },
   buttonText: {
     fontFamily: fonts.semibold,

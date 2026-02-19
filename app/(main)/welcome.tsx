@@ -6,6 +6,7 @@ import {
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { BocyHero } from '@/components/Bocy';
 
 export default function Welcome() {
   const router = useRouter();
@@ -32,14 +33,20 @@ export default function Welcome() {
     return (
       <View style={styles.container}>
         <View style={styles.centerContent}>
-          <Text style={styles.brandEmoji}>{'{ B }'}</Text>
-          <Text style={styles.title}>Welcome to Bocy</Text>
-          <Text style={styles.subtitle}>Your AI financial strategist</Text>
+          <View style={styles.heroWrap}>
+            <BocyHero mood="happy" animate />
+          </View>
+
+          <Text style={styles.title}>Meet Bocy</Text>
+          <Text style={styles.subtitle}>
+            Your personal finance companion.{'\n'}
+            Always watching, always working for you.
+          </Text>
 
           <View style={styles.benefits}>
-            <BenefitItem text="Your most material financial move — identified" />
-            <BenefitItem text="Data-driven action plan — built" />
-            <BenefitItem text="One-tap execution — enabled" />
+            <BenefitItem text="Finds the smartest move you can make right now" />
+            <BenefitItem text="Builds a plan ranked by real impact" />
+            <BenefitItem text="Guides you through each step" />
           </View>
 
           <TouchableOpacity style={styles.button} onPress={() => setStep(1)}>
@@ -60,7 +67,7 @@ export default function Welcome() {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.title}>What's your name?</Text>
-        <Text style={styles.subtitle}>So we know what to call you</Text>
+        <Text style={styles.subtitle}>So Bocy knows what to call you</Text>
 
         <View style={styles.form}>
           <TextInput
@@ -100,7 +107,7 @@ export default function Welcome() {
 function BenefitItem({ text }: { text: string }) {
   return (
     <View style={styles.benefitRow}>
-      <Text style={styles.benefitBullet}>&gt;</Text>
+      <View style={styles.benefitDot} />
       <Text style={styles.benefitText}>{text}</Text>
     </View>
   );
@@ -116,25 +123,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: spacing.xl,
   },
-  brandEmoji: {
-    fontFamily: fonts.heading,
-    fontSize: 36,
-    color: colors.accent,
-    textAlign: 'center',
-    marginBottom: spacing.lg,
+  heroWrap: {
+    alignItems: 'center',
+    marginBottom: spacing.xl,
   },
   title: {
     fontFamily: fonts.heading,
-    fontSize: 24,
+    fontSize: 26,
     color: colors.text,
     textAlign: 'center',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   subtitle: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 15,
     color: colors.dim,
     textAlign: 'center',
+    lineHeight: 22,
     marginBottom: spacing.xl,
   },
   benefits: {
@@ -145,12 +150,13 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: spacing.md,
   },
-  benefitBullet: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: colors.accent,
-    marginRight: spacing.sm,
-    marginTop: 2,
+  benefitDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.green,
+    marginRight: spacing.sm + 4,
+    marginTop: 8,
   },
   benefitText: {
     fontFamily: fonts.regular,
