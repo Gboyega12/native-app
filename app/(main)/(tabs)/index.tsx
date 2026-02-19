@@ -145,8 +145,8 @@ export default function Home() {
   const ESSENTIAL_CATS = new Set(['Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Childcare', 'Health', 'Education', 'Debt Payments', 'Savings']);
 
   const BUDGET_CATEGORIES = [
-    'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport',
-    'Dining', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
+    'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Travel',
+    'Eating Out', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
     'Childcare', 'Education', 'Charity', 'Transfers', 'Savings', 'Investments', 'Other',
   ];
 
@@ -260,6 +260,20 @@ export default function Home() {
     setAddItemSaving(false);
   };
 
+  // Normalize merchant names so similar transactions group together
+  const normalizeMerchant = (raw: string) => {
+    let n = raw.trim();
+    // Remove common bank prefixes
+    n = n.replace(/^(PAYMENT TO |DIRECT DEBIT |DEBIT CARD PAYMENT |CARD PAYMENT TO |CARD PAYMENT |CONTACTLESS |POS )/i, '');
+    // Remove trailing reference numbers (6+ digits)
+    n = n.replace(/\s+\d{6,}$/, '');
+    // Remove trailing dates (dd/mm or dd-mm patterns)
+    n = n.replace(/\s+\d{2}[\/\-]\d{2}([\/\-]\d{2,4})?$/, '');
+    // Collapse whitespace
+    n = n.replace(/\s+/g, ' ').trim();
+    return n;
+  };
+
   // ── Unresolved transaction groups (for categorise modal) ──
   const unresolvedGroups = useMemo(() => {
     if (!analysis) return [];
@@ -272,12 +286,14 @@ export default function Home() {
         }
       }
     }
-    // Group by merchant/description — user assigns one category per merchant
-    const groups = new Map<string, { key: string; txs: TransactionDetail[]; total: number }>();
+    // Group by normalized merchant/description — user assigns one category per group
+    const groups = new Map<string, { key: string; label: string; merchants: string[]; txs: TransactionDetail[]; total: number }>();
     for (const tx of txs) {
-      const key = tx.merchant || tx.description;
-      if (!groups.has(key)) groups.set(key, { key, txs: [], total: 0 });
-      const g = groups.get(key)!;
+      const raw = tx.merchant || tx.description;
+      const normalized = normalizeMerchant(raw);
+      if (!groups.has(normalized)) groups.set(normalized, { key: normalized, label: raw, merchants: [], txs: [], total: 0 });
+      const g = groups.get(normalized)!;
+      if (!g.merchants.includes(raw)) g.merchants.push(raw);
       g.txs.push(tx);
       g.total += Math.abs(tx.amount);
     }
@@ -297,28 +313,36 @@ export default function Home() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not signed in');
 
-      // Save overrides using delete-then-insert (no unique constraint on table)
+      // Save overrides for each raw merchant name in the group
       for (const matchKey of keys) {
         const a = catAssignments[matchKey];
-        // Remove any existing override for this merchant
-        await supabase.from('transaction_overrides')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('match_description', matchKey);
-        // Insert the new override
-        const { error: insertErr } = await supabase.from('transaction_overrides').insert({
-          user_id: user.id,
-          match_description: matchKey,
-          category: a.category,
-          is_essential: a.isEssential,
-        });
-        if (insertErr) throw new Error(`Failed to save ${matchKey}: ${insertErr.message}`);
+        const group = unresolvedGroups.find(g => g.key === matchKey);
+        const merchantNames = group?.merchants || [matchKey];
+
+        for (const name of merchantNames) {
+          await supabase.from('transaction_overrides')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('match_description', name);
+          const { error: insertErr } = await supabase.from('transaction_overrides').insert({
+            user_id: user.id,
+            match_description: name,
+            category: a.category,
+            is_essential: a.isEssential,
+          });
+          if (insertErr) throw new Error(`Failed to save ${name}: ${insertErr.message}`);
+        }
       }
 
       // Optimistic UI: remove categorised transactions from "Other"
       if (analysis) {
         const updated = { ...analysis };
-        const assignedKeys = new Set(keys);
+        // Build set of all raw merchant names covered by assigned groups
+        const assignedMerchants = new Set<string>();
+        for (const matchKey of keys) {
+          const group = unresolvedGroups.find(g => g.key === matchKey);
+          (group?.merchants || [matchKey]).forEach(m => assignedMerchants.add(m));
+        }
 
         for (const sectionKey of ['discretionary', 'non_discretionary'] as const) {
           const section = { ...(updated as any)[sectionKey] };
@@ -327,7 +351,7 @@ export default function Home() {
           if (otherIdx >= 0) {
             const otherCat = { ...section.items[otherIdx] };
             otherCat.transactions = (otherCat.transactions || []).filter(
-              (tx: TransactionDetail) => !assignedKeys.has(tx.merchant || tx.description)
+              (tx: TransactionDetail) => !assignedMerchants.has(tx.merchant || tx.description)
             );
             otherCat.txs = otherCat.transactions.length;
             if (otherCat.txs === 0) {
@@ -1927,7 +1951,7 @@ export default function Home() {
                       <View key={group.key} style={[styles.catReviewRow, assigned && styles.catReviewRowDone]}>
                         <View style={styles.catReviewRowHeader}>
                           <Text style={styles.catReviewMerchant} numberOfLines={1}>
-                            {assigned ? '\u2713 ' : ''}{group.key}
+                            {assigned ? '\u2713 ' : ''}{group.label}
                           </Text>
                           <Text style={styles.catReviewAmount}>
                             {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}

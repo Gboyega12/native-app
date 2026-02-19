@@ -4,7 +4,7 @@
 // Rendered as a compact dot-matrix face that changes expression based on
 // the user's financial state.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { View, Animated, Easing, StyleSheet } from 'react-native';
 import { colors } from '@/theme';
 
@@ -88,6 +88,7 @@ export function BocyFace({
 }) {
   const breathAnim = useRef(new Animated.Value(0)).current;
   const enterAnim = useRef(new Animated.Value(0)).current;
+  const [isBlinking, setIsBlinking] = useState(false);
 
   const dotSize = size === 'sm' ? 4 : size === 'md' ? 6 : size === 'lg' ? 8 : 10;
   const gap = size === 'sm' ? 2 : size === 'md' ? 3 : size === 'lg' ? 4 : 5;
@@ -100,6 +101,24 @@ export function BocyFace({
       useNativeDriver: true,
     }).start();
   }, []);
+
+  // Blink: eyes close briefly every 2-5 seconds
+  useEffect(() => {
+    if (!breathing) return;
+    let timerId: ReturnType<typeof setTimeout>;
+    const scheduleNext = () => {
+      const delay = 2000 + Math.random() * 3000;
+      timerId = setTimeout(() => {
+        setIsBlinking(true);
+        setTimeout(() => {
+          setIsBlinking(false);
+          scheduleNext();
+        }, 150);
+      }, delay);
+    };
+    scheduleNext();
+    return () => clearTimeout(timerId);
+  }, [breathing]);
 
   useEffect(() => {
     if (!breathing) return;
@@ -123,7 +142,13 @@ export function BocyFace({
     return () => loop.stop();
   }, [breathing]);
 
-  const face = FACES[mood] || FACES.neutral;
+  // Apply blink: close eyes (row 1 all dim) when blinking
+  const face = useMemo(() => {
+    const base = FACES[mood] || FACES.neutral;
+    if (!isBlinking) return base;
+    return base.map((row, r) => (r === 1 ? [0, 0, 0, 0, 0] : row));
+  }, [mood, isBlinking]);
+
   const breathScale = breathing
     ? breathAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] })
     : 1;
@@ -174,6 +199,7 @@ export function BocyHero({
 }) {
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const enterAnim = useRef(new Animated.Value(0)).current;
+  const [isBlinking, setIsBlinking] = useState(false);
 
   useEffect(() => {
     Animated.timing(enterAnim, {
@@ -204,7 +230,29 @@ export function BocyHero({
     return () => loop.stop();
   }, [animate]);
 
-  const face = FACES[mood] || FACES.neutral;
+  // Blink for hero too
+  useEffect(() => {
+    if (!animate) return;
+    let timerId: ReturnType<typeof setTimeout>;
+    const scheduleNext = () => {
+      const delay = 2500 + Math.random() * 3500;
+      timerId = setTimeout(() => {
+        setIsBlinking(true);
+        setTimeout(() => {
+          setIsBlinking(false);
+          scheduleNext();
+        }, 150);
+      }, delay);
+    };
+    scheduleNext();
+    return () => clearTimeout(timerId);
+  }, [animate]);
+
+  const face = useMemo(() => {
+    const base = FACES[mood] || FACES.neutral;
+    if (!isBlinking) return base;
+    return base.map((row, r) => (r === 1 ? [0, 0, 0, 0, 0] : row));
+  }, [mood, isBlinking]);
   const dotSize = 12;
   const gap = 6;
 
