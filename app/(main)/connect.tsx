@@ -407,8 +407,8 @@ export default function Connect() {
     }
 
     clearConnectState();
-    // Onboarding: go to Goals first, then Goals routes to Processing
-    router.push({ pathname: '/(main)/goals', params: { csvData: mergedCSV } });
+    // Skip goals — identity flow already auto-generates them
+    router.push({ pathname: '/(main)/processing', params: { csvData: mergedCSV } });
   };
 
   const anyLoading = loading || loadingCSV || loadingPDF;
@@ -538,7 +538,7 @@ export default function Connect() {
             {/* Continue CTA */}
             <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
               <Text style={styles.continueText}>
-                Continue to set your goals
+                Start analysis
               </Text>
             </TouchableOpacity>
 

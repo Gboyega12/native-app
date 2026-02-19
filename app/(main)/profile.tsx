@@ -503,7 +503,7 @@ export default function Profile() {
       <View style={s.section}>
         <Text style={s.sectionTitle}>Preferences</Text>
 
-        <TouchableOpacity style={[s.menuRow, s.menuRowFirst]} onPress={() => router.push('/(main)/goals')} activeOpacity={0.7}>
+        <TouchableOpacity style={[s.menuRow, s.menuRowFirst]} onPress={() => router.push('/(main)/identity')} activeOpacity={0.7}>
           <Text style={s.menuLabel}>Goals</Text>
           <Text style={s.menuChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
