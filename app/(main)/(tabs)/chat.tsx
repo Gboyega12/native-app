@@ -502,7 +502,7 @@ export default function Chat() {
       }
     } catch {}
 
-    // Fetch user identity for personalised advice
+    // Fetch user identity for personalised context
     try {
       const { data: identityData } = await supabase
         .from('user_identity')
@@ -934,7 +934,7 @@ export default function Chat() {
 
           {/* Fade overlay + CTA */}
           <View style={styles.teaserOverlay}>
-            <Text style={styles.teaserTitle}>Your advisor is ready</Text>
+            <Text style={styles.teaserTitle}>Your assistant is ready</Text>
             <Text style={styles.teaserSubtitle}>
               Unlock personalised guidance based on your{score ? ` ${score}/100 financial score` : ' analysis'}
             </Text>

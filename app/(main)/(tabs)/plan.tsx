@@ -76,7 +76,7 @@ interface ProviderAction {
 /** Known providers by move category/type */
 const PROVIDER_ACTIONS: Record<string, ProviderAction[]> = {
   debt: [
-    { label: 'Call StepChange', sub: 'Free debt advice', phone: '0800 138 1111' },
+    { label: 'Call StepChange', sub: 'Free debt help', phone: '0800 138 1111' },
     { label: 'Visit StepChange', url: 'https://www.stepchange.org' },
     { label: 'Citizens Advice', sub: 'Debt guidance', phone: '0800 144 8848', url: 'https://www.citizensadvice.org.uk/debt-and-money' },
   ],
@@ -552,7 +552,7 @@ export default function Plan() {
 
               <Text style={styles.infoHeading}>Take action</Text>
               <Text style={styles.infoBody}>
-                Each move has direct links or buttons to help you act — compare rates, call providers, or ask Bocy for personalised advice.
+                Each move has direct links or buttons to help you act — compare rates, call providers, or ask Bocy for personalised guidance.
               </Text>
 
               <Text style={styles.infoHeading}>Automatic tracking</Text>
@@ -775,6 +775,18 @@ export default function Plan() {
                           <Text style={styles.miniProgressText}>{doneSteps.length}/{steps.length}</Text>
                         </View>
                       )}
+
+                      {/* Emergency fund info hint on collapsed active card */}
+                      {!isExpanded && ((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.action || '').toLowerCase().includes('rainy') || (move.category || '') === 'buffer') && (
+                        <View style={styles.emergencyHint}>
+                          <View style={styles.emergencyHintIcon}>
+                            <Text style={styles.emergencyHintIconText}>i</Text>
+                          </View>
+                          <Text style={styles.emergencyHintText}>
+                            A safety net for unexpected costs — tap to learn more
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -873,7 +885,7 @@ export default function Plan() {
                       </View>
 
                       {/* Emergency fund info hint on collapsed card */}
-                      {!isExpanded && ((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.category || '') === 'buffer') && (
+                      {!isExpanded && ((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.action || '').toLowerCase().includes('rainy') || (move.category || '') === 'buffer') && (
                         <View style={styles.emergencyHint}>
                           <View style={styles.emergencyHintIcon}>
                             <Text style={styles.emergencyHintIconText}>i</Text>

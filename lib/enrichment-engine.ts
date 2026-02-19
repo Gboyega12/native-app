@@ -176,7 +176,7 @@ const EnrichmentEngine = {
           isIncome: tx.amount > 0,
           isTransfer: false,
           isRefund: false,
-          isSavings: override.category === 'Savings',
+          isSavings: override.category === 'Savings' || override.category === 'Investments',
           confidence: 'high' as const,
           classifiedBy: 'user_override' as const,
         };
@@ -188,7 +188,8 @@ const EnrichmentEngine = {
     let isPerson = isPersonTransfer(tx.description);
     const isCredit = tx.amount > 0;
     const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
-    const isSavings = !!(tx.description.toLowerCase().match(/\bsaving|isa\b/i) && tx.amount < 0);
+    const isSavings = !!(tx.amount < 0 && tx.description.toLowerCase().match(/\bsaving|isa\b|premium bond|ns&i/i));
+    const isInvestment = !!(tx.amount < 0 && !isSavings && tx.description.toLowerCase().match(/\binvest|pension|sipp|stocks?\s*(?:&|and)\s*shares?/i));
 
     // ── Income decision tree ──
     // Credit comes in → determine if it's real income or a person transfer
@@ -204,10 +205,14 @@ const EnrichmentEngine = {
       // Use the classifier for category + essentiality
       const classification = classifyTransaction(tx.description, merchantMatch);
 
+      // Savings & Investments are both excluded from spending
+      const catFromDb = isIncome ? merchantMatch.category : (isCredit && !merchantMatch.isIncome ? 'Refunds' : classification.category);
+      const isSavingsOrInvest = isSavings || isInvestment || catFromDb === 'Savings' || catFromDb === 'Investments';
+
       return {
         ...tx,
         merchant: merchantMatch.merchant,
-        category: isIncome ? merchantMatch.category : (isCredit && !merchantMatch.isIncome ? 'Refunds' : classification.category),
+        category: catFromDb,
         isEssential: classification.isEssential,
         isSubscription: merchantMatch.isSubscription,
         isBNPL: merchantMatch.isBNPL,
@@ -215,7 +220,7 @@ const EnrichmentEngine = {
         isIncome,
         isTransfer: false, // Merchant DB match overrides person-name heuristic
         isRefund,
-        isSavings,
+        isSavings: isSavingsOrInvest,
         confidence: 'high',
         classifiedBy: 'merchant_db' as const,
       };
@@ -228,6 +233,7 @@ const EnrichmentEngine = {
       const fuzzyMatch = fuzzyMatchMerchant(tx.description, normalised);
       if (fuzzyMatch) {
         const classification = classifyTransaction(tx.description, fuzzyMatch);
+        const fuzzySavings = isSavings || isInvestment || classification.category === 'Savings' || classification.category === 'Investments';
         return {
           ...tx,
           merchant: fuzzyMatch.merchant,
@@ -239,7 +245,7 @@ const EnrichmentEngine = {
           isIncome: false,
           isTransfer: false,
           isRefund: false,
-          isSavings,
+          isSavings: fuzzySavings,
           confidence: 'medium',
           classifiedBy: 'fuzzy_match' as const,
         };
@@ -282,6 +288,9 @@ const EnrichmentEngine = {
       }
     } else if (isSavings) {
       category = 'Savings';
+      classifiedBy = 'keyword';
+    } else if (isInvestment) {
+      category = 'Investments';
       classifiedBy = 'keyword';
     } else {
       // Spending transaction with no merchant match — run keyword classifier

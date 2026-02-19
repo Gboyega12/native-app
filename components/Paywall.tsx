@@ -22,7 +22,7 @@ interface PaywallProps {
 
 export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   const contextMessage = feature === 'chat'
-    ? 'Unlock AI chat to get personalised advice on your finances.'
+    ? 'Unlock AI chat to get personalised insights on your finances.'
     : feature === 'moves'
     ? 'Unlock all moves to see your full action plan with step-by-step guidance.'
     : 'Get the full Bocy experience.';

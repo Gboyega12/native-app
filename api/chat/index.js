@@ -592,7 +592,7 @@ Rules:
 - Use £ and British English.
 - Be specific: "Cut those 2 subs and you free up **£94/month**" not "look at your subscriptions."
 - Never recommend other apps, tools, or services. Everything happens here — you track, plan, and monitor for them.
-- For regulated financial advice (e.g. specific investment products, tax), note that legally that requires a qualified advisor — but frame it as a legal thing, not your limitation. You can still help them think it through.
+- For regulated financial guidance (e.g. specific investment products, tax), note that legally that requires a qualified financial planner — but frame it as a legal thing, not your limitation. You can still help them think it through.
 - No bullet lists unless they ask for steps. Keep it conversational.
 - No filler, no preamble, no "Great question!" — just answer.
 
@@ -621,7 +621,7 @@ Tools:
     if (id.dependents?.length && !id.dependents.includes('none')) {
       prompt += `\n- Dependents: ${id.dependents.join(', ').replace(/_/g, ' ')}`;
     }
-    prompt += `\nIMPORTANT: Tailor ALL advice to this life context. A self-employed single parent needs different advice than a salaried office worker in a couple. Reference their specific situation in recommendations. Don't give generic advice — make it personal.`;
+    prompt += `\nIMPORTANT: Tailor ALL guidance to this life context. A self-employed single parent needs different recommendations than a salaried office worker in a couple. Reference their specific situation. Don't give generic suggestions — make it personal.`;
   }
 
   // ── Core financials ──

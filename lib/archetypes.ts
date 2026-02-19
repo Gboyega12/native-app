@@ -104,7 +104,7 @@ export const ARCHETYPES: Record<string, ArchetypeConfig> = {
     triggers: (m) => m.debtAccountCount >= 3,
     genPlaybook: (profile) => {
       const ct = profile.metrics.debtAccountCount;
-      return `${ct} active debt accounts detected. Consolidating or snowballing (smallest first) could simplify your finances and reduce interest. StepChange offers free UK debt advice.`;
+      return `${ct} active debt accounts detected. Consolidating or snowballing (smallest first) could simplify your finances and reduce interest. StepChange offers free UK debt support.`;
     },
   },
   impulse_surfer: {
