@@ -141,6 +141,7 @@ export default function Home() {
   const [showCatReview, setShowCatReview] = useState(false);
   const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean }>>({});
   const [savingCatReview, setSavingCatReview] = useState(false);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
 
   const ESSENTIAL_CATS = new Set(['Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Childcare', 'Health', 'Education', 'Debt Payments', 'Savings']);
 
@@ -149,6 +150,21 @@ export default function Home() {
     'Eating Out', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
     'Childcare', 'Education', 'Charity', 'Transfers', 'Savings', 'Investments', 'Other',
   ];
+
+  // Map Claude's broader categories to our BUDGET_CATEGORIES
+  const mapClaudeCategory = (cat: string): string => {
+    const map: Record<string, string> = {
+      'Delivery': 'Eating Out', 'Coffee & Cafes': 'Eating Out',
+      'Streaming': 'Subscriptions', 'Fitness': 'Health',
+      'BNPL': 'Shopping', 'Broadband & Phone': 'Bills',
+      'Council Tax': 'Bills', 'Energy': 'Bills', 'Water': 'Bills',
+      'TV Licence': 'Bills', 'Personal Care': 'Shopping',
+      'Gambling': 'Entertainment', 'Pets': 'Shopping',
+      'Debt Payments': 'Bills',
+    };
+    const mapped = map[cat] || cat;
+    return BUDGET_CATEGORIES.includes(mapped) ? mapped : 'Other';
+  };
 
   const saveAddItem = async () => {
     setAddItemError('');
@@ -304,6 +320,51 @@ export default function Home() {
     () => unresolvedGroups.reduce((sum, g) => sum + g.txs.length, 0),
     [unresolvedGroups],
   );
+
+  // Auto-suggest categories using Claude AI when modal opens
+  useEffect(() => {
+    if (!showCatReview || unresolvedGroups.length === 0) return;
+    let cancelled = false;
+
+    const fetchSuggestions = async () => {
+      setAiSuggesting(true);
+      try {
+        const txList = unresolvedGroups.map((g) => ({
+          description: g.label,
+          amount: -(g.total / Math.max(g.txs.length, 1)),
+        }));
+
+        const res = await fetch('/api/claude', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'classify', transactions: txList }),
+        });
+        const data = await res.json();
+
+        if (cancelled || !data.success || !data.classifications) return;
+
+        const suggestions: Record<string, { category: string; isEssential: boolean }> = {};
+        for (const cls of data.classifications) {
+          const group = unresolvedGroups[cls.index];
+          if (!group) continue;
+          const category = mapClaudeCategory(cls.category);
+          if (category === 'Other') continue;
+          suggestions[group.key] = { category, isEssential: ESSENTIAL_CATS.has(category) };
+        }
+        setCatAssignments((prev) => {
+          const merged = { ...suggestions };
+          for (const [k, v] of Object.entries(prev)) merged[k] = v;
+          return merged;
+        });
+      } catch (err) {
+        console.warn('[home] AI suggest failed:', err);
+      }
+      if (!cancelled) setAiSuggesting(false);
+    };
+
+    fetchSuggestions();
+    return () => { cancelled = true; };
+  }, [showCatReview, unresolvedGroups.length]);
 
   const saveCatReview = async () => {
     const keys = Object.keys(catAssignments);
@@ -1933,16 +1994,27 @@ export default function Home() {
             <View style={styles.catReviewOverlay}>
               <View style={styles.catReviewContainer}>
                 <View style={styles.catReviewHeader}>
-                  <View>
+                  <View style={{ flex: 1 }}>
                     <Text style={styles.modalTitle}>Categorise transactions</Text>
                     <Text style={styles.catReviewSubtitle}>
-                      Tap a category for each merchant
+                      {aiSuggesting
+                        ? 'Bocy is suggesting categories...'
+                        : Object.keys(catAssignments).length > 0
+                          ? 'Review suggestions, adjust any, then accept'
+                          : 'Tap a category for each merchant'}
                     </Text>
                   </View>
                   <TouchableOpacity onPress={() => setShowCatReview(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
                     <Text style={styles.catReviewClose}>{'\u2715'}</Text>
                   </TouchableOpacity>
                 </View>
+
+                {aiSuggesting && (
+                  <View style={styles.aiSuggestBar}>
+                    <ActivityIndicator color={colors.green} size="small" />
+                    <Text style={styles.aiSuggestText}>Analysing merchants...</Text>
+                  </View>
+                )}
 
                 <ScrollView style={styles.catReviewList} showsVerticalScrollIndicator={false}>
                   {unresolvedGroups.map((group) => {
@@ -3159,5 +3231,23 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 15,
     color: colors.bg,
+  },
+
+  // ── AI suggest loading bar ──
+  aiSuggestBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: 'rgba(0,212,170,0.04)',
+  },
+  aiSuggestText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.green,
+    letterSpacing: 0.3,
   },
 });
