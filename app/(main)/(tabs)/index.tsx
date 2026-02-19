@@ -10,6 +10,7 @@ import { getLastResult } from '@/app/(main)/processing';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
@@ -30,6 +31,23 @@ const SMOOTH_ANIM = {
 // Nothing OS — monochrome extended palette
 const gold = '#A7A7A7';
 const goldSoft = 'rgba(255,255,255,0.04)';
+
+// ── Breathing bar: subtle pulse on progress indicators ──
+const BreathingBar = ({ color, width: barWidth, style }: { color: string; width: string; style?: any }) => {
+  const breathAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(breathAnim, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+        Animated.timing(breathAnim, { toValue: 0, duration: 2000, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
+      ]),
+    ).start();
+  }, []);
+  const opacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
+  return (
+    <Animated.View style={[style, { width: barWidth, backgroundColor: color, opacity }]} />
+  );
+};
 
 // ── Glyph micro-animation: fade+scale on mount ──
 const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
@@ -1019,15 +1037,20 @@ export default function Home() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
-      {/* ── Header ── */}
+      {/* ── Header with Bocy ── */}
       <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.greeting}>
-            Hello, {userName || 'there'}
-          </Text>
-          {syncing && (
-            <Text style={styles.syncText}>Syncing latest transactions...</Text>
-          )}
+        <View style={styles.headerLeft}>
+          <View style={styles.bocyHeaderWrap}>
+            <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
+          </View>
+          <View>
+            <Text style={styles.greeting}>
+              Hello, {userName || 'there'}
+            </Text>
+            {syncing && (
+              <Text style={styles.syncText}>Syncing latest transactions...</Text>
+            )}
+          </View>
         </View>
         <TouchableOpacity
           style={styles.menuButton}
@@ -1042,10 +1065,12 @@ export default function Home() {
       {!analysis ? (
         /* ── Empty State ── */
         <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>B</Text>
+          <View style={styles.emptyBocyWrap}>
+            <BocyFace mood="neutral" size="lg" breathing />
+          </View>
           <Text style={styles.emptyTitle}>Your #1 financial move awaits</Text>
           <Text style={styles.emptyDesc}>
-            Connect your bank account so I can analyse your transactions and identify the single most impactful action you can take right now.
+            Connect your bank account so Bocy can analyse your transactions and find the most impactful action you can take right now.
           </Text>
           <TouchableOpacity
             style={styles.ctaButton}
@@ -1256,16 +1281,12 @@ export default function Home() {
               </View>
             </AnimGlyph>
 
-            {/* Progress bar */}
+            {/* Progress bar with breathing animation */}
             <View style={styles.safeToSpendBar}>
-              <View
-                style={[
-                  styles.safeToSpendBarFill,
-                  {
-                    width: `${weeklyUsedPct}%`,
-                    backgroundColor: weeklyHealthy ? colors.green : colors.coral,
-                  },
-                ]}
+              <BreathingBar
+                color={weeklyHealthy ? colors.green : colors.coral}
+                width={`${weeklyUsedPct}%`}
+                style={styles.safeToSpendBarFill}
               />
             </View>
 
@@ -1973,6 +1994,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 40,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  bocyHeaderWrap: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   greeting: {
     fontFamily: fonts.mono,
     fontSize: 22,
@@ -2012,12 +2044,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.xxl,
     alignItems: 'center',
   },
-  emptyIcon: {
-    fontFamily: fonts.mono,
-    fontSize: 48,
-    color: colors.text,
+  emptyBocyWrap: {
     marginBottom: spacing.lg,
-    letterSpacing: 2,
   },
   emptyTitle: {
     fontFamily: fonts.semibold,

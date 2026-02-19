@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
-import { View, Text, Animated, StyleSheet, Easing } from 'react-native';
+import { View, Text, Animated, StyleSheet, Easing, TouchableOpacity } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import type { RankedMove } from '@/lib/move-engine';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { colors, fonts, spacing } from '@/theme';
+import { colors, fonts, spacing, radius } from '@/theme';
+import { BocyHero } from '@/components/Bocy';
 import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
 
 const STEPS = [
@@ -605,14 +606,10 @@ function ProcessingInner() {
         ).length,
       } as any;
 
-      // Show personalised first insight before navigating
+      // Show personalised first insight — user navigates manually
       const firstInsight = buildFirstInsight(identityData, result.profile, topMove);
-      if (firstInsight) {
-        setInsight(firstInsight);
-        await delay(3500);
-      }
-
-      router.replace('/(main)/(tabs)');
+      setInsight(firstInsight || 'Your personalised action plan is ready.');
+      // User will tap the button to navigate
     } catch (err: any) {
       setError(err.message || 'Analysis failed. Please try again.');
     }
@@ -630,9 +627,36 @@ function ProcessingInner() {
   if (insight) {
     return (
       <View style={styles.container}>
-        <Text style={styles.insightEmoji}>{'{ B }'}</Text>
+        <View style={styles.insightHero}>
+          <BocyHero mood="celebrating" animate />
+        </View>
         <Text style={styles.insightTitle}>Your plan is ready</Text>
         <Text style={styles.insightText}>{insight}</Text>
+
+        {/* Key numbers at a glance */}
+        <View style={styles.insightStats}>
+          <View style={styles.insightStat}>
+            <Text style={styles.insightStatValue}>
+              {STEPS.length}
+            </Text>
+            <Text style={styles.insightStatLabel}>layers analysed</Text>
+          </View>
+          <View style={styles.insightStatDivider} />
+          <View style={styles.insightStat}>
+            <Text style={[styles.insightStatValue, { color: colors.green }]}>
+              {'\u2713'}
+            </Text>
+            <Text style={styles.insightStatLabel}>plan built</Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={styles.insightButton}
+          onPress={() => router.replace('/(main)/(tabs)')}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.insightButtonText}>Go to dashboard</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -800,16 +824,13 @@ const styles = StyleSheet.create({
     color: colors.green,
     marginTop: 2,
   },
-  insightEmoji: {
-    fontFamily: fonts.heading,
-    fontSize: 36,
-    color: colors.accent,
-    textAlign: 'center',
-    marginBottom: spacing.lg,
+  insightHero: {
+    alignItems: 'center',
+    marginBottom: spacing.xl,
   },
   insightTitle: {
     fontFamily: fonts.heading,
-    fontSize: 22,
+    fontSize: 24,
     color: colors.text,
     textAlign: 'center',
     marginBottom: spacing.md,
@@ -821,6 +842,47 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
     paddingHorizontal: spacing.md,
+  },
+  insightStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.xl,
+    marginBottom: spacing.xl,
+    gap: spacing.lg,
+  },
+  insightStat: {
+    alignItems: 'center',
+  },
+  insightStatValue: {
+    fontFamily: fonts.mono,
+    fontSize: 24,
+    color: colors.accent,
+    marginBottom: 4,
+  },
+  insightStatLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.dim,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  insightStatDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  insightButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 16,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    marginHorizontal: spacing.md,
+  },
+  insightButtonText: {
+    fontFamily: fonts.semibold,
+    fontSize: 16,
+    color: colors.bg,
   },
   errorIcon: {
     fontFamily: fonts.medium,

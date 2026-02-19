@@ -1247,7 +1247,7 @@ const styles = StyleSheet.create({
   trajCompareItem: {
   },
   trajCompareValue: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.mono,
     fontSize: 15,
     marginBottom: 2,
   },

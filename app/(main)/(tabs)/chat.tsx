@@ -9,6 +9,7 @@ import { colors, fonts, spacing, radius } from '@/theme';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
+import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/lib/types';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
@@ -960,7 +961,12 @@ export default function Chat() {
       {/* ── Header ── */}
       {messages.length > 0 && (
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Bocy</Text>
+          <View style={styles.headerLeftChat}>
+            <View style={styles.chatBocyWrap}>
+              <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
+            </View>
+            <Text style={styles.headerTitle}>Bocy</Text>
+          </View>
           <TouchableOpacity onPress={clearChat} style={styles.clearButton}>
             <Text style={styles.clearText}>New chat</Text>
           </TouchableOpacity>
@@ -976,8 +982,11 @@ export default function Chat() {
       >
         {messages.length === 0 && (
           <View style={styles.suggestedContainer}>
+            <View style={styles.chatBocyHero}>
+              <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
+            </View>
             <Text style={styles.suggestedTitle}>Ask Bocy</Text>
-            <Text style={styles.suggestedSubtitle}>Your financial decisions platform</Text>
+            <Text style={styles.suggestedSubtitle}>Your financial companion</Text>
             {suggestedQuestions.map((q, i) => (
               <TouchableOpacity
                 key={i}
@@ -1121,6 +1130,20 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+  },
+  headerLeftChat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  chatBocyWrap: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatBocyHero: {
+    marginBottom: spacing.lg,
   },
   headerTitle: {
     fontFamily: fonts.semibold,
@@ -1268,7 +1291,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   actionStatValue: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.mono,
     fontSize: 14,
     color: colors.accent,
   },
@@ -1401,7 +1424,7 @@ const styles = StyleSheet.create({
     color: colors.dim,
   },
   goalFieldValue: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.mono,
     fontSize: 13,
     color: colors.sky,
   },
