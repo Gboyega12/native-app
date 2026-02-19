@@ -3,7 +3,8 @@
 // Matches the Nothing Phone OS design language.
 
 import { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, Platform, ActivityIndicator, Alert } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { supabase } from '@/lib/supabase';
 
@@ -37,6 +38,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
+        Alert.alert('Sign in required', 'Please sign in to subscribe.');
         setLoading(false);
         return;
       }
@@ -51,11 +53,21 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       });
 
       const data = await res.json();
-      if (data.url && Platform.OS === 'web') {
+
+      if (!data.url) {
+        Alert.alert('Something went wrong', data.error || 'Unable to start checkout. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      if (Platform.OS === 'web') {
         window.location.href = data.url;
+      } else {
+        await WebBrowser.openBrowserAsync(data.url);
       }
     } catch (err) {
       console.warn('[Paywall] Checkout error:', err);
+      Alert.alert('Something went wrong', 'Could not connect to the payment server. Please try again.');
     }
     setLoading(false);
   };
