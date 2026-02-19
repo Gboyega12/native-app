@@ -209,10 +209,11 @@ function ProcessingInner() {
             setEnrichProgress(`Verifying batch ${batchIdx + 1} of ${totalBatches} (${batch.length} transactions)`);
 
             try {
-              const classifyRes = await fetch('/api/claude/classify', {
+              const classifyRes = await fetch('/api/claude', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
+                  action: 'classify',
                   transactions: batch.map(({ tx }) => ({
                     description: tx.description,
                     amount: tx.amount,
@@ -298,10 +299,11 @@ function ProcessingInner() {
       let refinedMoves = top3 as RankedMove[];
 
       try {
-        const res = await fetch('/api/claude/enrich', {
+        const res = await fetch('/api/claude', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            action: 'enrich',
             moves: top3.map((m) => ({
               action: m.action,
               category: m.category,

@@ -391,10 +391,10 @@ export default function Plan() {
     if (!uid) return;
 
     try {
-      await fetch('/api/plans/dismiss', {
+      await fetch('/api/plans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan_id: planId, user_id: uid }),
+        body: JSON.stringify({ action: 'dismiss', plan_id: planId, user_id: uid }),
       });
     } catch {}
 

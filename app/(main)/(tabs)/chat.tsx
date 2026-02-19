@@ -569,10 +569,10 @@ export default function Chat() {
 
       if (planId) {
         // Server already created the plan as 'proposed' — approve it
-        const res = await fetch('/api/plans/approve', {
+        const res = await fetch('/api/plans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan_id: planId, user_id: uid }),
+          body: JSON.stringify({ action: 'approve', plan_id: planId, user_id: uid }),
         });
         const data = await res.json();
 
@@ -643,10 +643,10 @@ export default function Chat() {
     // Dismiss server-side if we have a plan ID
     if (planId && uid) {
       try {
-        await fetch('/api/plans/dismiss', {
+        await fetch('/api/plans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ plan_id: planId, user_id: uid }),
+          body: JSON.stringify({ action: 'dismiss', plan_id: planId, user_id: uid }),
         });
       } catch {
         // Non-critical — still update UI
