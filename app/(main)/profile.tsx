@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
-  LayoutAnimation, Animated, Easing, Switch, Platform,
+  LayoutAnimation, Animated, Easing, Switch, Platform, ActivityIndicator,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -68,14 +68,16 @@ function getProviderInitial(name: string) {
 
 export default function Profile() {
   const router = useRouter();
-  const { connected } = useLocalSearchParams<{ connected?: string }>();
-  const { tier, isPro } = useSubscription();
+  const { connected, upgraded } = useLocalSearchParams<{ connected?: string; upgraded?: string }>();
+  const { tier, isPro, refresh: refreshTier } = useSubscription();
   const [showPaywall, setShowPaywall] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
   const [showSuccess, setShowSuccess] = useState(connected === 'true');
+  const [showUpgradeSuccess, setShowUpgradeSuccess] = useState(upgraded === 'true');
   const [notifPrefs, setNotifPrefs] = useState({
     weekly_digest: true,
     milestone_alerts: true,
@@ -83,6 +85,11 @@ export default function Profile() {
     achievement_alerts: true,
   });
   const [notifExpanded, setNotifExpanded] = useState(false);
+
+  // Refresh tier after returning from Stripe Checkout
+  useEffect(() => {
+    if (upgraded === 'true') refreshTier();
+  }, [upgraded]);
 
   useEffect(() => {
     loadUser();
@@ -179,6 +186,29 @@ export default function Profile() {
     router.push({ pathname: '/(main)/connect', params: { from: 'profile' } });
   };
 
+  const handleManageSubscription = async () => {
+    setPortalLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const res = await fetch('/api/stripe/portal', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const data = await res.json();
+      if (data.url && Platform.OS === 'web') {
+        window.location.href = data.url;
+      }
+    } catch (err) {
+      console.warn('[Profile] Portal error:', err);
+    }
+    setPortalLoading(false);
+  };
+
   const PRO_ONLY_NOTIFS: (keyof typeof notifPrefs)[] = ['weekly_digest', 'checkin_prompts', 'achievement_alerts'];
 
   const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
@@ -264,6 +294,14 @@ export default function Profile() {
         <View style={{ width: 24 }} />
       </View>
 
+      {/* Upgrade success banner */}
+      {showUpgradeSuccess && (
+        <TouchableOpacity style={s.upgradeBanner} onPress={() => setShowUpgradeSuccess(false)} activeOpacity={0.8}>
+          <Text style={s.upgradeText}>Welcome to Bocy Pro!</Text>
+          <Text style={s.successDismiss}>{'\u2715'}</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Success banner */}
       {showSuccess && (
         <TouchableOpacity style={s.successBanner} onPress={() => setShowSuccess(false)} activeOpacity={0.8}>
@@ -317,9 +355,23 @@ export default function Profile() {
             </>
           )}
           {isPro && (
-            <Text style={s.subDesc}>
-              You have access to all Bocy features.
-            </Text>
+            <>
+              <Text style={s.subDesc}>
+                You have access to all Bocy features.
+              </Text>
+              <TouchableOpacity
+                style={s.manageSubBtn}
+                onPress={handleManageSubscription}
+                activeOpacity={0.7}
+                disabled={portalLoading}
+              >
+                {portalLoading ? (
+                  <ActivityIndicator size="small" color={colors.accent} />
+                ) : (
+                  <Text style={s.manageSubBtnText}>Manage subscription</Text>
+                )}
+              </TouchableOpacity>
+            </>
           )}
         </View>
       </View>
@@ -659,6 +711,24 @@ const s = StyleSheet.create({
     letterSpacing: -0.2,
   },
 
+  // ── Upgrade banner ──
+  upgradeBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,212,170,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,170,0.25)',
+    borderRadius: radius.sm,
+    padding: 12,
+    marginBottom: spacing.md,
+  },
+  upgradeText: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.green,
+  },
+
   // ── Success banner ──
   successBanner: {
     flexDirection: 'row',
@@ -778,6 +848,18 @@ const s = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: '#000000',
+  },
+  manageSubBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 100,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  manageSubBtnText: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: colors.accent,
   },
 
   // ── Section ──
