@@ -897,24 +897,55 @@ export default function Chat() {
 
   const suggestedQuestions = getContextualQuestions(analysis, goals);
 
-  // ── Free tier: show locked chat state ──
+  // ── Free tier: show teaser chat preview ──
   if (!isPro) {
+    // Build personalised teaser from user's actual data
+    const surplus = analysis?.surplus;
+    const topMove = analysis?.top_move;
+    const score = analysis?.decision_score;
+    const teaserMsg = topMove?.action
+      ? `Based on your spending, I found a way to save £${topMove.monthlyImpact || 'more'}/mo. Want me to walk you through "${stripMd(topMove.action)}" step by step?`
+      : surplus != null
+        ? `I've analysed your finances and found some opportunities. Your surplus is £${Math.round(surplus)}/mo — let's make it work harder for you.`
+        : `I've finished analysing your spending and have personalised recommendations ready. Want to explore them together?`;
+
     return (
       <View style={styles.container}>
         <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
-        <View style={styles.lockedContainer}>
-          <Text style={styles.lockedIcon}>{'\u{1F512}'}</Text>
-          <Text style={styles.lockedTitle}>AI Chat is a Pro feature</Text>
-          <Text style={styles.lockedSubtitle}>
-            Get unlimited personalised financial guidance from Bocy.
-          </Text>
-          <TouchableOpacity
-            style={styles.lockedBtn}
-            onPress={() => setShowPaywall(true)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.lockedBtnText}>Upgrade to Pro</Text>
-          </TouchableOpacity>
+        <View style={styles.teaserContainer}>
+          {/* Fake conversation preview */}
+          <View style={styles.teaserChat}>
+            <View style={styles.teaserBubbleAi}>
+              <Text style={styles.teaserBubbleAiText}>{teaserMsg}</Text>
+            </View>
+            <View style={styles.teaserBubbleUser}>
+              <Text style={styles.teaserBubbleUserText}>
+                {topMove?.action ? 'Yes, show me how!' : 'What should I do first?'}
+              </Text>
+            </View>
+            <View style={styles.teaserBubbleAi}>
+              <View style={styles.teaserTypingRow}>
+                <View style={styles.teaserDot} />
+                <View style={[styles.teaserDot, { opacity: 0.6 }]} />
+                <View style={[styles.teaserDot, { opacity: 0.3 }]} />
+              </View>
+            </View>
+          </View>
+
+          {/* Fade overlay + CTA */}
+          <View style={styles.teaserOverlay}>
+            <Text style={styles.teaserTitle}>Your advisor is ready</Text>
+            <Text style={styles.teaserSubtitle}>
+              Unlock personalised guidance based on your{score ? ` ${score}/100 financial score` : ' analysis'}
+            </Text>
+            <TouchableOpacity
+              style={styles.teaserBtn}
+              onPress={() => setShowPaywall(true)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.teaserBtnText}>Continue conversation</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
@@ -1452,39 +1483,86 @@ const styles = StyleSheet.create({
     color: colors.bg,
   },
 
-  // ── Locked state (free tier) ──
-  lockedContainer: {
+  // ── Teaser chat preview (free tier) ──
+  teaserContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.xl,
   },
-  lockedIcon: {
-    fontSize: 40,
-    marginBottom: spacing.lg,
+  teaserChat: {
+    flex: 1,
+    padding: spacing.lg,
+    paddingTop: 60,
+    gap: 12,
   },
-  lockedTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 20,
-    color: colors.text,
-    marginBottom: spacing.sm,
+  teaserBubbleAi: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: 14,
+    maxWidth: '85%',
+    alignSelf: 'flex-start',
   },
-  lockedSubtitle: {
+  teaserBubbleAiText: {
     fontFamily: fonts.regular,
     fontSize: 14,
+    color: colors.text2,
+    lineHeight: 21,
+  },
+  teaserBubbleUser: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: radius.md,
+    padding: 14,
+    maxWidth: '75%',
+    alignSelf: 'flex-end',
+  },
+  teaserBubbleUserText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: colors.text,
+    lineHeight: 21,
+  },
+  teaserTypingRow: {
+    flexDirection: 'row',
+    gap: 4,
+    paddingVertical: 4,
+  },
+  teaserDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.dim,
+  },
+  teaserOverlay: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: 40,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    alignItems: 'center',
+    backgroundColor: colors.bg,
+  },
+  teaserTitle: {
+    fontFamily: fonts.heading,
+    fontSize: 18,
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  teaserSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
     color: colors.dim,
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: spacing.xl,
+    lineHeight: 20,
+    marginBottom: spacing.lg,
     maxWidth: 280,
   },
-  lockedBtn: {
+  teaserBtn: {
     backgroundColor: '#FFFFFF',
     borderRadius: 100,
     paddingVertical: 14,
     paddingHorizontal: spacing.xl + spacing.md,
   },
-  lockedBtnText: {
+  teaserBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 15,
     color: '#000000',

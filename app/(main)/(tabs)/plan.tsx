@@ -872,6 +872,18 @@ export default function Plan() {
                         <Text style={styles.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                       </View>
 
+                      {/* Emergency fund info hint on collapsed card */}
+                      {!isExpanded && ((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.category || '') === 'buffer') && (
+                        <View style={styles.emergencyHint}>
+                          <View style={styles.emergencyHintIcon}>
+                            <Text style={styles.emergencyHintIconText}>i</Text>
+                          </View>
+                          <Text style={styles.emergencyHintText}>
+                            A safety net for unexpected costs — tap to learn more
+                          </Text>
+                        </View>
+                      )}
+
                       {/* Merchant chips preview */}
                       {!isExpanded && move.merchants && move.merchants.length > 0 && (
                         <View style={styles.merchantChips}>
@@ -1492,6 +1504,41 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.text2,
     lineHeight: 18,
+  },
+
+  // ── Emergency hint on collapsed card ──
+  emergencyHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    backgroundColor: 'rgba(0,212,170,0.06)',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,170,0.12)',
+  },
+  emergencyHintIcon: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,170,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emergencyHintIconText: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: colors.green,
+    lineHeight: 14,
+  },
+  emergencyHintText: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: colors.green,
+    flex: 1,
   },
 
   // ── Expanded section ──
