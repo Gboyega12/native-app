@@ -42,10 +42,10 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
             {/* Price */}
             <View style={styles.priceCard}>
               <View style={styles.priceRow}>
-                <Text style={styles.priceAmount}>{'\u00a3'}4.99</Text>
+                <Text style={styles.priceAmount}>{'\u00a3'}9.99</Text>
                 <Text style={styles.pricePeriod}>/month</Text>
               </View>
-              <Text style={styles.priceAlt}>or {'\u00a3'}39.99/year (save 33%)</Text>
+              <Text style={styles.priceAlt}>or {'\u00a3'}79.99/year (save 33%)</Text>
             </View>
 
             {/* Features */}

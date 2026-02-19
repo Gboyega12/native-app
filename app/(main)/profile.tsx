@@ -179,7 +179,13 @@ export default function Profile() {
     router.push({ pathname: '/(main)/connect', params: { from: 'profile' } });
   };
 
+  const PRO_ONLY_NOTIFS: (keyof typeof notifPrefs)[] = ['weekly_digest', 'checkin_prompts', 'achievement_alerts'];
+
   const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
+    if (!isPro && PRO_ONLY_NOTIFS.includes(key)) {
+      setShowPaywall(true);
+      return;
+    }
     const newVal = !notifPrefs[key];
     setNotifPrefs((prev) => ({ ...prev, [key]: newVal }));
     try {
@@ -508,8 +514,8 @@ export default function Profile() {
           <Text style={s.menuChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={s.menuRow} onPress={() => Linking.openURL('mailto:support@bocy.app?subject=Bug%20Report')} activeOpacity={0.7}>
-          <Text style={s.menuLabel}>Report a bug</Text>
+        <TouchableOpacity style={s.menuRow} onPress={() => Linking.openURL('mailto:hello@bocy.io?subject=Feedback')} activeOpacity={0.7}>
+          <Text style={s.menuLabel}>Give feedback</Text>
           <Text style={s.menuChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
@@ -529,38 +535,50 @@ export default function Profile() {
           <View style={s.notifSection}>
             <View style={s.notifRow}>
               <View style={s.notifInfo}>
-                <Text style={s.notifLabel}>Weekly digest</Text>
+                <View style={s.notifLabelRow}>
+                  <Text style={[s.notifLabel, !isPro && s.notifLabelLocked]}>Weekly digest</Text>
+                  {!isPro && <Text style={s.proBadge}>PRO</Text>}
+                </View>
                 <Text style={s.notifDesc}>Score, spending & moves recap every Monday</Text>
               </View>
               <Switch
-                value={notifPrefs.weekly_digest}
+                value={isPro ? notifPrefs.weekly_digest : false}
                 onValueChange={() => toggleNotifPref('weekly_digest')}
                 trackColor={{ false: '#333', true: colors.green + '60' }}
-                thumbColor={notifPrefs.weekly_digest ? colors.green : '#666'}
+                thumbColor={isPro && notifPrefs.weekly_digest ? colors.green : '#666'}
+                disabled={!isPro}
               />
             </View>
             <View style={s.notifRow}>
               <View style={s.notifInfo}>
-                <Text style={s.notifLabel}>Check-in prompts</Text>
+                <View style={s.notifLabelRow}>
+                  <Text style={[s.notifLabel, !isPro && s.notifLabelLocked]}>Check-in prompts</Text>
+                  {!isPro && <Text style={s.proBadge}>PRO</Text>}
+                </View>
                 <Text style={s.notifDesc}>Bocy reaches out when something needs attention</Text>
               </View>
               <Switch
-                value={notifPrefs.checkin_prompts}
+                value={isPro ? notifPrefs.checkin_prompts : false}
                 onValueChange={() => toggleNotifPref('checkin_prompts')}
                 trackColor={{ false: '#333', true: colors.green + '60' }}
-                thumbColor={notifPrefs.checkin_prompts ? colors.green : '#666'}
+                thumbColor={isPro && notifPrefs.checkin_prompts ? colors.green : '#666'}
+                disabled={!isPro}
               />
             </View>
             <View style={s.notifRow}>
               <View style={s.notifInfo}>
-                <Text style={s.notifLabel}>Achievements</Text>
+                <View style={s.notifLabelRow}>
+                  <Text style={[s.notifLabel, !isPro && s.notifLabelLocked]}>Achievements</Text>
+                  {!isPro && <Text style={s.proBadge}>PRO</Text>}
+                </View>
                 <Text style={s.notifDesc}>Celebrate milestones and progress</Text>
               </View>
               <Switch
-                value={notifPrefs.achievement_alerts}
+                value={isPro ? notifPrefs.achievement_alerts : false}
                 onValueChange={() => toggleNotifPref('achievement_alerts')}
                 trackColor={{ false: '#333', true: colors.green + '60' }}
-                thumbColor={notifPrefs.achievement_alerts ? colors.green : '#666'}
+                thumbColor={isPro && notifPrefs.achievement_alerts ? colors.green : '#666'}
+                disabled={!isPro}
               />
             </View>
             <View style={[s.notifRow, s.notifRowLast]}>
@@ -575,6 +593,15 @@ export default function Profile() {
                 thumbColor={notifPrefs.milestone_alerts ? colors.green : '#666'}
               />
             </View>
+            {!isPro && (
+              <TouchableOpacity
+                style={s.notifUpgradeHint}
+                onPress={() => setShowPaywall(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={s.notifUpgradeText}>Upgrade to Pro to unlock all notifications</Text>
+              </TouchableOpacity>
+            )}
             {Platform.OS === 'web' && (
               <Text style={s.notifNote}>
                 Notifications are sent via email. Push notifications will be available when the app launches on iOS and Android.
@@ -1084,6 +1111,36 @@ const s = StyleSheet.create({
     color: colors.muted,
     marginTop: 2,
     lineHeight: 16,
+  },
+  notifLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  notifLabelLocked: {
+    color: colors.dim,
+  },
+  proBadge: {
+    fontFamily: fonts.mono,
+    fontSize: 8,
+    letterSpacing: 1.5,
+    color: colors.green,
+    backgroundColor: 'rgba(0,212,170,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,170,0.25)',
+    borderRadius: 100,
+    paddingVertical: 1,
+    paddingHorizontal: 6,
+    overflow: 'hidden',
+  },
+  notifUpgradeHint: {
+    padding: 12,
+    alignItems: 'center',
+  },
+  notifUpgradeText: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: colors.green,
   },
   notifNote: {
     fontFamily: fonts.regular,
