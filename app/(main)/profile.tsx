@@ -243,49 +243,6 @@ export default function Profile() {
     .toUpperCase()
     .slice(0, 2);
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    router.replace('/(auth)/sign-in');
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete account',
-      'This will permanently delete your account and all associated data. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { data: { session } } = await supabase.auth.getSession();
-              if (!session) {
-                Alert.alert('Error', 'You are not signed in.');
-                return;
-              }
-              const res = await fetch('/api/delete-account', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${session.access_token}`,
-                },
-              });
-              const data = await res.json();
-              if (data.success) {
-                await supabase.auth.signOut();
-                router.replace('/(auth)/sign-in');
-              } else {
-                Alert.alert('Error', data.error || 'Could not delete account. Please try again.');
-              }
-            } catch (err: any) {
-              Alert.alert('Error', err.message || 'Something went wrong. Please try again.');
-            }
-          },
-        },
-      ],
-    );
-  };
 
   const allAccounts = connectedBanks;
   const hasAccounts = allAccounts.length > 0 || debtAccounts.length > 0;
@@ -689,20 +646,7 @@ export default function Profile() {
         )}
       </View>
 
-      {/* ── Account ── */}
-      <View style={[s.section, { marginBottom: spacing.xxl }]}>
-        <Text style={s.sectionTitle}>Account</Text>
-
-        <TouchableOpacity style={[s.menuRow, s.menuRowFirst]} onPress={handleSignOut} activeOpacity={0.7}>
-          <Text style={s.menuLabel}>Sign out</Text>
-          <Text style={s.menuChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[s.menuRow, s.menuRowLast, s.menuRowDanger]} onPress={handleDeleteAccount} activeOpacity={0.7}>
-          <Text style={[s.menuLabel, { color: colors.coral }]}>Delete account</Text>
-          <Text style={[s.menuChevron, { color: colors.coral }]}>{'\u203A'}</Text>
-        </TouchableOpacity>
-      </View>
+      <View style={{ marginBottom: spacing.xxl }} />
     </ScrollView>
   );
 }
