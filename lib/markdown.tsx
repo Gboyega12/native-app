@@ -1,5 +1,5 @@
 import React, { useMemo, createContext, useContext } from 'react';
-import { Text, View, Image, StyleSheet } from 'react-native';
+import { Text, View, Image, StyleSheet, Platform } from 'react-native';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 
@@ -37,6 +37,24 @@ function useMdStyles() {
   return useContext(MdStylesCtx)!;
 }
 
+/** Renders GIF images — uses native <img> on web for reliable GIF playback */
+function GifImage({ uri, style }: { uri: string; style: any }) {
+  if (Platform.OS === 'web') {
+    return React.createElement('img', {
+      src: uri,
+      alt: 'gif',
+      style: {
+        width: style.width ?? 200,
+        height: style.height ?? 150,
+        borderRadius: style.borderRadius ?? 0,
+        objectFit: 'cover',
+        display: 'block',
+      },
+    });
+  }
+  return <Image source={{ uri }} style={style} resizeMode="cover" />;
+}
+
 function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
   const s = useMdStyles();
   const lines = text.split('\n');
@@ -47,7 +65,7 @@ function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
     if (gifMatch) {
       return (
         <View style={[s.gifContainer, !isLast && s.paragraphGap]}>
-          <Image source={{ uri: gifMatch[1] }} style={s.gif} resizeMode="cover" />
+          <GifImage uri={gifMatch[1]} style={s.gif} />
         </View>
       );
     }
@@ -77,7 +95,7 @@ function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
         flushText(`t-${j}`);
         elements.push(
           <View key={`g-${j}`} style={s.gifContainer}>
-            <Image source={{ uri: gifMatch[1] }} style={s.gif} resizeMode="cover" />
+            <GifImage uri={gifMatch[1]} style={s.gif} />
           </View>,
         );
       } else {
