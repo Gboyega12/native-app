@@ -352,6 +352,9 @@ function buildWeeklyContext(
     adaptiveBudget = Math.min(staticBudget, adaptiveFromPeriod);
   }
 
+  // Hard cap: adaptive budget can never exceed the total monthly unallocated amount
+  adaptiveBudget = Math.min(adaptiveBudget, leftToDecide);
+
   return {
     adaptiveBudget: Math.round(adaptiveBudget * 100) / 100,
     staticBudget: Math.round(staticBudget * 100) / 100,
