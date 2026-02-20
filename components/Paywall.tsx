@@ -2,8 +2,10 @@
 // Shown when free users try to access Pro features.
 // Matches the Nothing Phone OS design language.
 
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, Platform, ActivityIndicator, Alert, Linking } from 'react-native';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { supabase } from '@/lib/supabase';
 
 const FEATURES = [
   { label: 'All moves unlocked', desc: 'Full step-by-step execution plans for every recommendation' },
@@ -21,11 +23,98 @@ interface PaywallProps {
 }
 
 export default function Paywall({ visible, onClose, feature }: PaywallProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedPrice, setSelectedPrice] = useState<'monthly' | 'yearly'>('monthly');
+
+  // Reset state whenever modal opens so stale loading/error don't stick
+  useEffect(() => {
+    if (visible) {
+      setLoading(false);
+      setError(null);
+    }
+  }, [visible]);
+
+  // Reset loading when the page is restored from bfcache (e.g. user
+  // navigated to Stripe Checkout then pressed the browser back button).
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const reset = (e: PageTransitionEvent) => {
+      if (e.persisted) setLoading(false);
+    };
+    window.addEventListener('pageshow', reset);
+    return () => window.removeEventListener('pageshow', reset);
+  }, []);
+
   const contextMessage = feature === 'chat'
     ? 'Unlock AI chat to get personalised insights on your finances.'
     : feature === 'moves'
     ? 'Unlock all moves to see your full action plan with step-by-step guidance.'
     : 'Get the full Bocy experience.';
+
+  const showError = (msg: string) => {
+    setError(msg);
+    setLoading(false);
+  };
+
+  const handleSubscribe = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Refresh the session so the access token is fresh (it may have
+      // expired while the user was on the Stripe Checkout page).
+      const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
+      const session = refreshed?.session;
+      if (refreshErr || !session) {
+        showError('Please sign in to subscribe.');
+        return;
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ price: selectedPrice }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        let msg = 'Unable to start checkout. Please try again.';
+        try { msg = JSON.parse(text).error || msg; } catch {}
+        showError(msg);
+        return;
+      }
+
+      const data = await res.json();
+
+      if (!data.url) {
+        showError(data.error || 'Unable to start checkout. Please try again.');
+        return;
+      }
+
+      if (Platform.OS === 'web') {
+        window.location.href = data.url;
+        return; // page is navigating away; don't touch state
+      } else {
+        await Linking.openURL(data.url);
+      }
+    } catch (err: any) {
+      console.warn('[Paywall] Checkout error:', err);
+      const msg = err?.name === 'AbortError'
+        ? 'Request timed out. Please try again.'
+        : 'Could not connect to the payment server. Please try again.';
+      showError(msg);
+    }
+    setLoading(false);
+  };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -56,13 +145,37 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               <Text style={styles.subtitle}>{contextMessage}</Text>
             </View>
 
-            {/* Price */}
-            <View style={styles.priceCard}>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceAmount}>{'\u00a3'}9.99</Text>
-                <Text style={styles.pricePeriod}>/month</Text>
-              </View>
-              <Text style={styles.priceAlt}>or {'\u00a3'}79.99/year (save 33%)</Text>
+            {/* Price toggle */}
+            <View style={styles.priceToggle}>
+              <TouchableOpacity
+                style={[styles.priceOption, selectedPrice === 'monthly' && styles.priceOptionActive]}
+                onPress={() => setSelectedPrice('monthly')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.priceAmount, selectedPrice !== 'monthly' && styles.priceAmountInactive]}>
+                  {'\u00a3'}9.99
+                </Text>
+                <Text style={[styles.pricePeriod, selectedPrice !== 'monthly' && styles.pricePeriodInactive]}>
+                  /month
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.priceOption, selectedPrice === 'yearly' && styles.priceOptionActive]}
+                onPress={() => setSelectedPrice('yearly')}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.priceAmount, selectedPrice !== 'yearly' && styles.priceAmountInactive]}>
+                  {'\u00a3'}79.99
+                </Text>
+                <Text style={[styles.pricePeriod, selectedPrice !== 'yearly' && styles.pricePeriodInactive]}>
+                  /year
+                </Text>
+                {selectedPrice === 'yearly' && (
+                  <View style={styles.saveBadge}>
+                    <Text style={styles.saveBadgeText}>save 33%</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
             </View>
 
             {/* Features */}
@@ -81,9 +194,23 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
             </View>
 
             {/* CTA */}
-            <TouchableOpacity style={styles.upgradeBtn} activeOpacity={0.8}>
-              <Text style={styles.upgradeBtnText}>Subscribe</Text>
+            <TouchableOpacity
+              style={[styles.upgradeBtn, loading && styles.upgradeBtnDisabled]}
+              activeOpacity={0.8}
+              onPress={handleSubscribe}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#000000" />
+              ) : (
+                <Text style={styles.upgradeBtnText}>Subscribe</Text>
+              )}
             </TouchableOpacity>
+            {error && (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
             <Text style={styles.trialNote}>Cancel anytime</Text>
 
             {/* Dismiss */}
@@ -180,37 +307,56 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
-  // Price
-  priceCard: {
-    alignItems: 'center',
-    paddingVertical: spacing.lg,
-    marginBottom: spacing.lg,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  priceRow: {
+  // Price toggle
+  priceToggle: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  priceOption: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  priceOptionActive: {
+    borderColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   priceAmount: {
     fontFamily: fonts.mono,
-    fontSize: 36,
+    fontSize: 24,
     fontWeight: '300',
     color: colors.text,
     letterSpacing: -1,
   },
-  pricePeriod: {
-    fontFamily: fonts.regular,
-    fontSize: 16,
+  priceAmountInactive: {
     color: colors.dim,
-    marginLeft: 2,
   },
-  priceAlt: {
+  pricePeriod: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.dim,
+    marginTop: 2,
+  },
+  pricePeriodInactive: {
+    color: colors.muted,
+  },
+  saveBadge: {
+    backgroundColor: 'rgba(0,212,170,0.12)',
+    borderRadius: 100,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     marginTop: spacing.xs,
+  },
+  saveBadgeText: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 0.5,
+    color: colors.green,
   },
 
   // Features
@@ -262,10 +408,28 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
   },
+  upgradeBtnDisabled: {
+    opacity: 0.6,
+  },
   upgradeBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: '#000000',
+  },
+  errorBanner: {
+    backgroundColor: 'rgba(255,107,107,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,107,107,0.25)',
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    marginTop: spacing.md,
+  },
+  errorText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: '#FF6B6B',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   trialNote: {
     fontFamily: fonts.regular,

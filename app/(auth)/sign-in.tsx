@@ -12,6 +12,7 @@ export default function SignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
   const [emailConfirmed, setEmailConfirmed] = useState(false);
 
@@ -41,6 +42,24 @@ export default function SignIn() {
         ? 'Wrong email or password. Please try again.'
         : authError.message);
     }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setGoogleLoading(true);
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: Platform.OS === 'web'
+          ? window.location.origin
+          : 'https://native-app-ashy.vercel.app/',
+      },
+    });
+    if (oauthError) {
+      setError(oauthError.message);
+      setGoogleLoading(false);
+    }
+    // On success, browser redirects to Google — no need to reset loading
   };
 
   return (
@@ -88,12 +107,33 @@ export default function SignIn() {
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleSignIn}
-            disabled={loading}
+            disabled={loading || googleLoading}
           >
             {loading ? (
               <ActivityIndicator color={colors.bg} />
             ) : (
               <Text style={styles.buttonText}>Sign in</Text>
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.divider}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
+            onPress={handleGoogleSignIn}
+            disabled={loading || googleLoading}
+          >
+            {googleLoading ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <>
+                <Text style={styles.googleIcon}>G</Text>
+                <Text style={styles.googleButtonText}>Continue with Google</Text>
+              </>
             )}
           </TouchableOpacity>
         </View>
@@ -168,6 +208,43 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: spacing.lg,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  dividerText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.muted,
+    marginHorizontal: spacing.md,
+  },
+  googleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+  },
+  googleIcon: {
+    fontFamily: fonts.heading,
+    fontSize: 18,
+    color: colors.text,
+    marginRight: spacing.sm,
+  },
+  googleButtonText: {
+    fontFamily: fonts.medium,
+    fontSize: 16,
+    color: colors.text,
   },
   link: {
     fontFamily: fonts.regular,
