@@ -27,23 +27,23 @@ export const darkColors = {
 
   // Functional tones — monochrome-first, subtle when needed
   mint: '#FFFFFF',
-  mintDim: 'rgba(255,255,255,0.06)',
-  sky: '#A0A0A0',
+  mintDim: 'rgba(255,255,255,0.08)',    // 8 % — visible dividers (was 6 %)
+  sky: '#A0A0A0',                        // 8.1:1 on black
   skyDim: 'rgba(160,160,160,0.10)',
-  lavender: '#666666',
+  lavender: '#777777',                   // 4.7:1 on black (was #666666 / 3.7:1)
 
-  // Text hierarchy
-  text: '#FFFFFF',
-  text2: '#A7A7A7',
-  dim: '#848484',
-  muted: '#3D3D3D',
+  // Text hierarchy — all WCAG AA on black (#000)
+  text: '#FFFFFF',                       // 21:1
+  text2: '#A7A7A7',                      // 8.8:1
+  dim: '#8A8A8A',                        // 6.1:1  — clearer tertiary (was #848484 / 5.6:1)
+  muted: '#757575',                      // 4.6:1  — readable quaternary (was #3D3D3D / 1.9:1)
 
   // Card surface
   card: '#0A0A0A',
 
   // Switch / toggle controls
-  trackOff: '#333333',
-  thumbOff: '#666666',
+  trackOff: '#404040',                   // Perceptible track (was #333333)
+  thumbOff: '#707070',                   // Visible inactive thumb (was #666666)
 };
 
 export const lightColors: ThemeColors = {
