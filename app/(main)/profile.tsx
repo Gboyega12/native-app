@@ -437,7 +437,7 @@ export default function Profile() {
                         s.consentFill,
                         {
                           flex: Math.max(0, Math.min(CONSENT_DAYS, CONSENT_DAYS - daysLeft)),
-                          backgroundColor: expired ? colors.coral : expiring ? '#E8C55A' : isBank ? colors.green : colors.accent,
+                          backgroundColor: expired ? colors.coral : expiring ? colors.amber : isBank ? colors.green : colors.accent,
                         },
                       ]}
                     />
@@ -449,7 +449,7 @@ export default function Profile() {
                 {expired ? (
                   <View style={[s.statusDot, { backgroundColor: colors.coral }]} />
                 ) : expiring ? (
-                  <View style={[s.statusDot, { backgroundColor: '#E8C55A' }]} />
+                  <View style={[s.statusDot, { backgroundColor: colors.amber }]} />
                 ) : (
                   <View style={[s.statusDot, { backgroundColor: isBank ? colors.green : colors.accent }]} />
                 )}
@@ -522,7 +522,7 @@ export default function Profile() {
                           s.utilFill,
                           {
                             width: `${Math.min(100, util || 0)}%`,
-                            backgroundColor: isHigh ? colors.coral : (util || 0) > 50 ? '#E8C55A' : colors.accent,
+                            backgroundColor: isHigh ? colors.coral : (util || 0) > 50 ? colors.amber : colors.accent,
                           },
                         ]}
                       />
@@ -587,8 +587,8 @@ export default function Profile() {
           <Switch
             value={!isDark}
             onValueChange={toggleTheme}
-            trackColor={{ false: '#333', true: colors.green + '60' }}
-            thumbColor={isDark ? '#666' : colors.green}
+            trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+            thumbColor={isDark ? colors.thumbOff : colors.green}
           />
         </View>
 
@@ -622,8 +622,8 @@ export default function Profile() {
               <Switch
                 value={isPro ? notifPrefs.weekly_digest : false}
                 onValueChange={() => toggleNotifPref('weekly_digest')}
-                trackColor={{ false: '#333', true: colors.green + '60' }}
-                thumbColor={isPro && notifPrefs.weekly_digest ? colors.green : '#666'}
+                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+                thumbColor={isPro && notifPrefs.weekly_digest ? colors.green : colors.thumbOff}
                 disabled={!isPro}
               />
             </View>
@@ -638,8 +638,8 @@ export default function Profile() {
               <Switch
                 value={isPro ? notifPrefs.checkin_prompts : false}
                 onValueChange={() => toggleNotifPref('checkin_prompts')}
-                trackColor={{ false: '#333', true: colors.green + '60' }}
-                thumbColor={isPro && notifPrefs.checkin_prompts ? colors.green : '#666'}
+                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+                thumbColor={isPro && notifPrefs.checkin_prompts ? colors.green : colors.thumbOff}
                 disabled={!isPro}
               />
             </View>
@@ -654,8 +654,8 @@ export default function Profile() {
               <Switch
                 value={isPro ? notifPrefs.achievement_alerts : false}
                 onValueChange={() => toggleNotifPref('achievement_alerts')}
-                trackColor={{ false: '#333', true: colors.green + '60' }}
-                thumbColor={isPro && notifPrefs.achievement_alerts ? colors.green : '#666'}
+                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+                thumbColor={isPro && notifPrefs.achievement_alerts ? colors.green : colors.thumbOff}
                 disabled={!isPro}
               />
             </View>
@@ -667,8 +667,8 @@ export default function Profile() {
               <Switch
                 value={notifPrefs.milestone_alerts}
                 onValueChange={() => toggleNotifPref('milestone_alerts')}
-                trackColor={{ false: '#333', true: colors.green + '60' }}
-                thumbColor={notifPrefs.milestone_alerts ? colors.green : '#666'}
+                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+                thumbColor={notifPrefs.milestone_alerts ? colors.green : colors.thumbOff}
               />
             </View>
             {!isPro && (
@@ -1080,7 +1080,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.coral,
   },
   renewBtn: {
-    backgroundColor: 'rgba(232,197,90,0.12)',
+    backgroundColor: c.amberDim,
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 8,
@@ -1088,7 +1088,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   renewBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 12,
-    color: '#E8C55A',
+    color: c.amber,
   },
   removeLink: {
     fontFamily: fonts.regular,

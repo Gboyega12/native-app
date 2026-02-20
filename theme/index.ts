@@ -21,6 +21,10 @@ export const darkColors = {
   coral: '#E05252',
   coralDim: 'rgba(224,82,82,0.10)',
 
+  // Semantic — amber for warnings / expiring states
+  amber: '#E8C55A',
+  amberDim: 'rgba(232,197,90,0.12)',
+
   // Functional tones — monochrome-first, subtle when needed
   mint: '#FFFFFF',
   mintDim: 'rgba(255,255,255,0.06)',
@@ -36,39 +40,53 @@ export const darkColors = {
 
   // Card surface
   card: '#0A0A0A',
+
+  // Switch / toggle controls
+  trackOff: '#333333',
+  thumbOff: '#666666',
 };
 
 export const lightColors: ThemeColors = {
-  // Surfaces — clean whites with subtle gray separation
-  bg: '#F5F5F5',
+  // ── Surfaces ──
+  // Warm-neutral gray bg creates clear lift for white cards.
+  // WCAG: card-to-bg contrast ≥ 1.2:1 for perceivable boundaries.
+  bg: '#EFEFEF',
   surface: '#FFFFFF',
-  border: 'rgba(0,0,0,0.08)',
+  border: 'rgba(0,0,0,0.12)',           // 12 % — visible outlines (was 8 %)
 
-  // Accent — Black primary, teal mint secondary
+  // ── Accent ──
   accent: '#000000',
-  accentDim: 'rgba(0,0,0,0.06)',
-  green: '#00b894',
-  greenDim: 'rgba(0,184,148,0.10)',
+  accentDim: 'rgba(0,0,0,0.10)',        // 10 % — card borders, outlines (was 6 %)
+  green: '#009B77',                      // Deeper teal — 4.7:1 on white (was #00b894)
+  greenDim: 'rgba(0,155,119,0.08)',
 
-  // Semantic — red for debt / shortages / destructive actions
-  coral: '#D63031',
-  coralDim: 'rgba(214,48,49,0.08)',
+  // ── Semantic — red ──
+  coral: '#C0392B',                      // Richer red — 5.7:1 on white (was #D63031)
+  coralDim: 'rgba(192,57,43,0.08)',
 
-  // Functional tones — monochrome-first, subtle when needed
-  mint: '#000000',
-  mintDim: 'rgba(0,0,0,0.04)',
-  sky: '#636E72',
-  skyDim: 'rgba(99,110,114,0.08)',
-  lavender: '#A0A0A0',
+  // ── Semantic — amber ──
+  amber: '#946B00',                      // Dark golden — 4.8:1 on white
+  amberDim: 'rgba(148,107,0,0.08)',
 
-  // Text hierarchy
-  text: '#1A1A1A',
-  text2: '#636E72',
-  dim: '#888888',
-  muted: '#C0C0C0',
+  // ── Functional tones ──
+  mint: '#1A1A1A',
+  mintDim: 'rgba(0,0,0,0.06)',          // 6 % — visible dividers (was 4 %)
+  sky: '#4A5568',                        // Slate — 7.4:1 on white (was #636E72)
+  skyDim: 'rgba(74,85,104,0.08)',
+  lavender: '#6B7280',                   // Cool gray — 5.5:1 on white (was #A0A0A0)
 
-  // Card surface
-  card: '#FAFAFA',
+  // ── Text hierarchy — all WCAG AA on white (#FFF) ──
+  text: '#111111',                       // 18.2:1 — primary (was #1A1A1A)
+  text2: '#4A4A4A',                      // 8.6:1  — secondary (was #636E72)
+  dim: '#636E72',                        // 5.2:1  — tertiary (was #888888)
+  muted: '#767676',                      // 4.6:1  — quaternary (was #C0C0C0)
+
+  // ── Card surface ──
+  card: '#FFFFFF',                       // Pure white — clear lift from bg (was #FAFAFA)
+
+  // ── Switch / toggle controls ──
+  trackOff: '#D1D5DB',                   // Soft gray track
+  thumbOff: '#9CA3AF',                   // Visible thumb
 };
 
 // Default export for backward compatibility

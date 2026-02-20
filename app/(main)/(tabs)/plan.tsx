@@ -1264,7 +1264,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Goal trajectory ──
   trajectoryCard: {
-    backgroundColor: 'transparent',
+    backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.accentDim,
     borderRadius: 24,
@@ -1349,7 +1349,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Cards ──
   card: {
-    backgroundColor: 'transparent',
+    backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 24,
@@ -1491,7 +1491,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Impact comparison bars ──
   impactCompare: {
-    backgroundColor: 'transparent',
+    backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 24,
@@ -1882,7 +1882,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Upgrade card (free tier gate) ──
   upgradeCard: {
-    backgroundColor: 'transparent',
+    backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.greenDim,
     borderRadius: 24,

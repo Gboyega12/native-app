@@ -30,9 +30,6 @@ const SMOOTH_ANIM = {
   delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
 };
 
-// Nothing OS — monochrome extended palette
-const gold = '#A7A7A7';
-const goldSoft = 'rgba(255,255,255,0.04)';
 
 // ── Breathing bar: subtle pulse on progress indicators ──
 const BreathingBar = ({ color, width: barWidth, style }: { color: string; width: string; style?: any }) => {
@@ -1962,9 +1959,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // ── Shared Card — Nothing OS: border-defined, no fill ──
+  // ── Shared Card — Nothing OS: border-defined, card surface fill ──
   card: {
-    backgroundColor: 'transparent',
+    backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.accentDim,
     borderRadius: 24,
@@ -2210,7 +2207,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginBottom: 4,
   },
   sourceCard: {
-    backgroundColor: 'transparent',
+    backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 16,
