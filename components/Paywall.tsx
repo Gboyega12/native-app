@@ -2,7 +2,7 @@
 // Shown when free users try to access Pro features.
 // Matches the Nothing Phone OS design language.
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, Platform, ActivityIndicator, Alert, Linking } from 'react-native';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { supabase } from '@/lib/supabase';
@@ -27,6 +27,14 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedPrice, setSelectedPrice] = useState<'monthly' | 'yearly'>('monthly');
 
+  // Reset state whenever modal opens so stale loading/error don't stick
+  useEffect(() => {
+    if (visible) {
+      setLoading(false);
+      setError(null);
+    }
+  }, [visible]);
+
   const contextMessage = feature === 'chat'
     ? 'Unlock AI chat to get personalised insights on your finances.'
     : feature === 'moves'
@@ -48,6 +56,9 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
         return;
       }
 
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
       const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: {
@@ -55,7 +66,10 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
           Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({ price: selectedPrice }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeout);
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
@@ -77,9 +91,12 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       } else {
         await Linking.openURL(data.url);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[Paywall] Checkout error:', err);
-      showError('Could not connect to the payment server. Please try again.');
+      const msg = err?.name === 'AbortError'
+        ? 'Request timed out. Please try again.'
+        : 'Could not connect to the payment server. Please try again.';
+      showError(msg);
     }
     setLoading(false);
   };
