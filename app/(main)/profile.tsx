@@ -151,42 +151,42 @@ export default function Profile() {
     }
   };
 
-  const handleRemoveBank = (bankId: string, label: string) => {
-    Alert.alert(
-      `Remove ${label}?`,
-      'This will disconnect this account and remove its data. You can reconnect later.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            await supabase.from('bank_data').delete().eq('id', bankId);
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            setConnectedBanks((prev) => prev.filter((b) => b.id !== bankId));
-          },
-        },
-      ],
-    );
+  const handleRemoveBank = async (bankId: string, label: string) => {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm(`Remove ${label}?\n\nThis will disconnect this account and remove its data. You can reconnect later.`)
+      : await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            `Remove ${label}?`,
+            'This will disconnect this account and remove its data. You can reconnect later.',
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
+            ],
+          ),
+        );
+    if (!confirmed) return;
+    await supabase.from('bank_data').delete().eq('id', bankId);
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setConnectedBanks((prev) => prev.filter((b) => b.id !== bankId));
   };
 
-  const handleRemoveDebtAccount = (debtId: string, label: string) => {
-    Alert.alert(
-      `Remove ${label}?`,
-      'This will remove this account from your profile.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            await supabase.from('debt_accounts').delete().eq('id', debtId);
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            setDebtAccounts((prev) => prev.filter((d) => d.id !== debtId));
-          },
-        },
-      ],
-    );
+  const handleRemoveDebtAccount = async (debtId: string, label: string) => {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm(`Remove ${label}?\n\nThis will remove this account from your profile.`)
+      : await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            `Remove ${label}?`,
+            'This will remove this account from your profile.',
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
+            ],
+          ),
+        );
+    if (!confirmed) return;
+    await supabase.from('debt_accounts').delete().eq('id', debtId);
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setDebtAccounts((prev) => prev.filter((d) => d.id !== debtId));
   };
 
   const handleAddAccount = () => {
@@ -243,6 +243,55 @@ export default function Profile() {
     .toUpperCase()
     .slice(0, 2);
 
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.replace('/(auth)/sign-in');
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirmed = Platform.OS === 'web'
+      ? window.confirm('Delete account?\n\nThis will permanently delete your account and all associated data. This action cannot be undone.')
+      : await new Promise<boolean>((resolve) =>
+          Alert.alert(
+            'Delete account',
+            'This will permanently delete your account and all associated data. This action cannot be undone.',
+            [
+              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
+            ],
+          ),
+        );
+    if (!confirmed) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        if (Platform.OS === 'web') window.alert('You are not signed in.');
+        else Alert.alert('Error', 'You are not signed in.');
+        return;
+      }
+      const res = await fetch('/api/delete-account', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+      const data = await res.json();
+      if (data.success) {
+        await supabase.auth.signOut();
+        router.replace('/(auth)/sign-in');
+      } else {
+        const msg = data.error || 'Could not delete account. Please try again.';
+        if (Platform.OS === 'web') window.alert(msg);
+        else Alert.alert('Error', msg);
+      }
+    } catch (err: any) {
+      const msg = err.message || 'Something went wrong. Please try again.';
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Error', msg);
+    }
+  };
 
   const allAccounts = connectedBanks;
   const hasAccounts = allAccounts.length > 0 || debtAccounts.length > 0;
@@ -646,7 +695,20 @@ export default function Profile() {
         )}
       </View>
 
-      <View style={{ marginBottom: spacing.xxl }} />
+      {/* ── Account ── */}
+      <View style={[s.section, { marginBottom: spacing.xxl }]}>
+        <Text style={s.sectionTitle}>Account</Text>
+
+        <TouchableOpacity style={[s.menuRow, s.menuRowFirst]} onPress={handleSignOut} activeOpacity={0.7}>
+          <Text style={s.menuLabel}>Sign out</Text>
+          <Text style={s.menuChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[s.menuRow, s.menuRowLast, s.menuRowDanger]} onPress={handleDeleteAccount} activeOpacity={0.7}>
+          <Text style={[s.menuLabel, { color: colors.coral }]}>Delete account</Text>
+          <Text style={[s.menuChevron, { color: colors.coral }]}>{'\u203A'}</Text>
+        </TouchableOpacity>
+      </View>
     </ScrollView>
   );
 }
