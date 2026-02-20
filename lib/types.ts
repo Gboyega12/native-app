@@ -178,6 +178,20 @@ export interface GoalTrajectory {
   newMonths: number;
   monthsSaved: number;
   insight: string;
+  /** Monte Carlo confidence bands — probabilistic timeline */
+  confidence?: {
+    p10: number;        // Optimistic — 10th percentile
+    p50: number;        // Most likely — median
+    p90: number;        // Conservative — 90th percentile
+    hitRate12m: number; // % chance of reaching goal within 12 months
+    hitRate24m: number; // % chance of reaching goal within 24 months
+  };
+  /** Personalized emergency buffer recommendation */
+  bufferRecommendation?: {
+    months: number;        // Recommended buffer in months of expenses
+    amount: number;        // £ amount
+    coverageRate: number;  // % of scenarios this buffer covers
+  };
 }
 
 // ── Enrichment Metrics ──
@@ -273,6 +287,19 @@ export interface ChatContext {
     currentMonths: number;
     newMonths: number;
     insight: string;
+    /** Monte Carlo confidence bands */
+    confidence?: {
+      p10: number;
+      p50: number;
+      p90: number;
+      hitRate12m: number;
+      hitRate24m: number;
+    };
+    bufferRecommendation?: {
+      months: number;
+      amount: number;
+      coverageRate: number;
+    };
   } | null;
 }
 

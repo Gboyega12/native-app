@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useMemo, createContext, useContext } from 'react';
 import { Text, View, StyleSheet } from 'react-native';
-import { colors, fonts, spacing } from '@/theme';
+import { fonts, spacing, type ThemeColors } from '@/theme';
+import { useTheme } from '@/lib/theme-context';
 
 interface Props {
   children: string;
 }
+
+// Internal context to pass styles down without prop drilling
+const MdStylesCtx = createContext<ReturnType<typeof createStyles> | null>(null);
 
 /**
  * Lightweight markdown renderer for React Native.
@@ -12,17 +16,26 @@ interface Props {
  * and paragraph breaks. No external dependencies.
  */
 export default function Markdown({ children }: Props) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const paragraphs = children.split(/\n\n+/);
   return (
-    <View style={styles.container}>
-      {paragraphs.map((para, i) => (
-        <Paragraph key={i} text={para} isLast={i === paragraphs.length - 1} />
-      ))}
-    </View>
+    <MdStylesCtx.Provider value={s}>
+      <View>
+        {paragraphs.map((para, i) => (
+          <Paragraph key={i} text={para} isLast={i === paragraphs.length - 1} />
+        ))}
+      </View>
+    </MdStylesCtx.Provider>
   );
 }
 
+function useMdStyles() {
+  return useContext(MdStylesCtx)!;
+}
+
 function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
+  const s = useMdStyles();
   const lines = text.split('\n');
 
   // Detect bullet list: every non-empty line starts with - or *
@@ -31,13 +44,13 @@ function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
   );
   if (isBulletList) {
     return (
-      <View style={!isLast && styles.paragraphGap}>
+      <View style={!isLast && s.paragraphGap}>
         {lines.filter((l) => l.trim()).map((l, j) => {
           const content = l.replace(/^\s*[-*]\s+/, '');
           return (
-            <View key={j} style={styles.listRow}>
-              <Text style={styles.bullet}>{'\u2022'}</Text>
-              <Text style={styles.listText}><Inline text={content} /></Text>
+            <View key={j} style={s.listRow}>
+              <Text style={s.bullet}>{'\u2022'}</Text>
+              <Text style={s.listText}><Inline text={content} /></Text>
             </View>
           );
         })}
@@ -51,13 +64,13 @@ function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
   );
   if (isNumberedList) {
     return (
-      <View style={!isLast && styles.paragraphGap}>
+      <View style={!isLast && s.paragraphGap}>
         {lines.filter((l) => l.trim()).map((l, j) => {
           const content = l.replace(/^\s*\d+[.)]\s+/, '');
           return (
-            <View key={j} style={styles.listRow}>
-              <Text style={styles.listNumber}>{j + 1}.</Text>
-              <Text style={styles.listText}><Inline text={content} /></Text>
+            <View key={j} style={s.listRow}>
+              <Text style={s.listNumber}>{j + 1}.</Text>
+              <Text style={s.listText}><Inline text={content} /></Text>
             </View>
           );
         })}
@@ -68,7 +81,7 @@ function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
   // Regular paragraph (may contain single line breaks)
   const joined = lines.join('\n');
   return (
-    <Text style={[styles.paragraph, !isLast && styles.paragraphGap]}>
+    <Text style={[s.paragraph, !isLast && s.paragraphGap]}>
       <Inline text={joined} />
     </Text>
   );
@@ -79,6 +92,7 @@ function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
  * Returns an array of <Text> nodes.
  */
 function Inline({ text }: { text: string }) {
+  const s = useMdStyles();
   const parts: React.ReactNode[] = [];
   // Regex matches **bold**, *italic*, or `code` (non-greedy)
   const rx = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
@@ -94,17 +108,17 @@ function Inline({ text }: { text: string }) {
     if (match[2]) {
       // **bold**
       parts.push(
-        <Text key={match.index} style={styles.bold}>{match[2]}</Text>,
+        <Text key={match.index} style={s.bold}>{match[2]}</Text>,
       );
     } else if (match[3]) {
       // *italic*
       parts.push(
-        <Text key={match.index} style={styles.italic}>{match[3]}</Text>,
+        <Text key={match.index} style={s.italic}>{match[3]}</Text>,
       );
     } else if (match[4]) {
       // `code`
       parts.push(
-        <Text key={match.index} style={styles.code}>{match[4]}</Text>,
+        <Text key={match.index} style={s.code}>{match[4]}</Text>,
       );
     }
 
@@ -119,20 +133,19 @@ function Inline({ text }: { text: string }) {
   return <>{parts}</>;
 }
 
-const styles = StyleSheet.create({
-  container: {},
+const createStyles = (c: ThemeColors) => StyleSheet.create({
   paragraph: {
     fontFamily: fonts.regular,
     fontSize: 14,
     lineHeight: 22,
-    color: colors.text2,
+    color: c.text2,
   },
   paragraphGap: {
     marginBottom: spacing.sm + 2,
   },
   bold: {
     fontFamily: fonts.semibold,
-    color: colors.text,
+    color: c.text,
   },
   italic: {
     fontStyle: 'italic',
@@ -140,8 +153,8 @@ const styles = StyleSheet.create({
   code: {
     fontFamily: fonts.mono,
     fontSize: 13,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    color: colors.accent,
+    backgroundColor: c.accentDim,
+    color: c.accent,
   },
   listRow: {
     flexDirection: 'row',
@@ -152,14 +165,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 14,
     lineHeight: 22,
-    color: colors.accent,
+    color: c.accent,
     width: 18,
   },
   listNumber: {
     fontFamily: fonts.medium,
     fontSize: 14,
     lineHeight: 22,
-    color: colors.accent,
+    color: c.accent,
     width: 22,
   },
   listText: {
@@ -167,6 +180,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 14,
     lineHeight: 22,
-    color: colors.text2,
+    color: c.text2,
   },
 });

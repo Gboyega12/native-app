@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { View, Animated, Easing, StyleSheet } from 'react-native';
-import { colors } from '@/theme';
+import { useTheme } from '@/lib/theme-context';
 
 // ── Bocy mood states ──
 export type BocyMood = 'neutral' | 'happy' | 'alert' | 'thinking' | 'celebrating' | 'sleepy';
@@ -86,6 +86,7 @@ export function BocyFace({
   size?: 'sm' | 'md' | 'lg' | 'xl';
   breathing?: boolean;
 }) {
+  const { colors } = useTheme();
   const breathAnim = useRef(new Animated.Value(0)).current;
   const enterAnim = useRef(new Animated.Value(0)).current;
   const [isBlinking, setIsBlinking] = useState(false);
@@ -177,7 +178,7 @@ export function BocyFace({
                   height: dotSize,
                   borderRadius: dotSize / 2,
                 },
-                val === 0 && { backgroundColor: 'rgba(255,255,255,0.08)' },
+                val === 0 && { backgroundColor: colors.accentDim },
                 val === 1 && { backgroundColor: colors.accent },
                 val === 2 && { backgroundColor: colors.green },
               ]}
@@ -197,6 +198,7 @@ export function BocyHero({
   mood?: BocyMood;
   animate?: boolean;
 }) {
+  const { colors } = useTheme();
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const enterAnim = useRef(new Animated.Value(0)).current;
   const [isBlinking, setIsBlinking] = useState(false);
@@ -280,13 +282,14 @@ export function BocyHero({
         style={[
           styles.heroRing,
           {
+            borderColor: colors.accent,
             opacity: ringOpacity,
             transform: [{ scale: ringScale as any }],
           },
         ]}
       />
       {/* Inner ring */}
-      <View style={styles.heroInnerRing}>
+      <View style={[styles.heroInnerRing, { borderColor: colors.border }]}>
         {face.map((row, r) => (
           <View key={r} style={[styles.faceRow, { gap }]}>
             {row.map((val, c) => (
@@ -298,7 +301,7 @@ export function BocyHero({
                     height: dotSize,
                     borderRadius: dotSize / 2,
                   },
-                  val === 0 && { backgroundColor: 'rgba(255,255,255,0.06)' },
+                  val === 0 && { backgroundColor: colors.accentDim },
                   val === 1 && { backgroundColor: colors.accent },
                   val === 2 && { backgroundColor: colors.green },
                 ]}
@@ -314,6 +317,7 @@ export function BocyHero({
 // ── Visual illustration components for education screens ──
 
 export function IllustrationScan() {
+  const { colors } = useTheme();
   const scanAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -360,6 +364,7 @@ export function IllustrationScan() {
 }
 
 export function IllustrationPlan() {
+  const { colors } = useTheme();
   const anim1 = useRef(new Animated.Value(0)).current;
   const anim2 = useRef(new Animated.Value(0)).current;
   const anim3 = useRef(new Animated.Value(0)).current;
@@ -404,6 +409,7 @@ export function IllustrationPlan() {
 }
 
 export function IllustrationPersonal() {
+  const { colors } = useTheme();
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -476,14 +482,12 @@ const styles = StyleSheet.create({
     height: 140,
     borderRadius: 70,
     borderWidth: 2,
-    borderColor: colors.accent,
   },
   heroInnerRing: {
     width: 100,
     height: 100,
     borderRadius: 50,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
@@ -503,7 +507,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: 'rgba(128,128,128,0.25)',
   },
   planBar: {
     height: 14,

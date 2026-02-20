@@ -746,10 +746,30 @@ Tools:
     }
   }
 
-  // ── Goal trajectory ──
+  // ── Goal trajectory (with Monte Carlo confidence bands) ──
   if (ctx.goal_trajectory) {
     const gt = ctx.goal_trajectory;
     prompt += `\n\nGoal trajectory: "${gt.goalLabel}" — currently ${gt.currentMonths} months away, could be ${gt.newMonths} months with moves. ${gt.insight}`;
+
+    if (gt.confidence) {
+      const c = gt.confidence;
+      prompt += `\n\nMonte Carlo analysis (1,000 simulations accounting for income volatility, spending variance, and emergencies):`;
+      prompt += `\n- Optimistic: ${c.p10} months (10th percentile)`;
+      prompt += `\n- Most likely: ${c.p50} months (median)`;
+      prompt += `\n- Conservative: ${c.p90} months (90th percentile)`;
+      if (c.hitRate12m > 0 && c.hitRate12m < 100) {
+        prompt += `\n- ${c.hitRate12m}% probability of reaching goal within 12 months`;
+      }
+      if (c.hitRate24m > 0 && c.hitRate24m < 100) {
+        prompt += `\n- ${c.hitRate24m}% probability of reaching goal within 24 months`;
+      }
+      prompt += `\nWhen discussing timelines, use these probability ranges instead of single-point estimates. Say "most likely X months" rather than "X months". Mention the range when relevant (e.g. "between X and Y months depending on circumstances"). Reference the hit rate percentages to set realistic expectations.`;
+    }
+
+    if (gt.bufferRecommendation) {
+      const b = gt.bufferRecommendation;
+      prompt += `\n\nPersonalised buffer recommendation (Monte Carlo): £${b.amount.toLocaleString()} (${b.months} months of expenses) covers ${b.coverageRate}% of simulated income shock scenarios. Use this instead of generic "3-6 months" advice.`;
+    }
   }
 
   // ── Behavioral patterns ──

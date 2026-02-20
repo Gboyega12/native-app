@@ -6,6 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { ThemeProvider, useTheme } from '@/lib/theme-context';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -83,7 +84,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     if (!session && !inAuth) {
-      router.replace('/(auth)/sign-in');
+      router.replace('/(auth)/splash');
     } else if (session && inAuth) {
       const name = session.user.user_metadata?.full_name;
       if (!name) {
@@ -126,6 +127,17 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function InnerLayout() {
+  const { colors, isDark } = useTheme();
+
+  return (
+    <AuthGate>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+    </AuthGate>
+  );
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
@@ -144,9 +156,8 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthGate>
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#050505' } }} />
-      <StatusBar style="light" />
-    </AuthGate>
+    <ThemeProvider>
+      <InnerLayout />
+    </ThemeProvider>
   );
 }

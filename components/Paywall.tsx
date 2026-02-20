@@ -2,9 +2,10 @@
 // Shown when free users try to access Pro features.
 // Matches the Nothing Phone OS design language.
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, Platform, ActivityIndicator, Alert, Linking } from 'react-native';
-import { colors, fonts, spacing, radius } from '@/theme';
+import { fonts, spacing, radius, type ThemeColors } from '@/theme';
+import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
 
 const FEATURES = [
@@ -23,6 +24,8 @@ interface PaywallProps {
 }
 
 export default function Paywall({ visible, onClose, feature }: PaywallProps) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPrice, setSelectedPrice] = useState<'monthly' | 'yearly'>('monthly');
@@ -118,76 +121,76 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.overlay} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
+      <Pressable style={s.overlay} onPress={onClose}>
+        <Pressable style={s.sheet} onPress={() => {}}>
           {/* Close icon */}
           <TouchableOpacity
-            style={styles.closeIcon}
+            style={s.closeIcon}
             onPress={onClose}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             activeOpacity={0.6}
           >
-            <Text style={styles.closeIconText}>{'\u2715'}</Text>
+            <Text style={s.closeIconText}>{'\u2715'}</Text>
           </TouchableOpacity>
 
           {/* Drag indicator */}
-          <View style={styles.dragIndicator} />
+          <View style={s.dragIndicator} />
 
           <ScrollView
             showsVerticalScrollIndicator={false}
             bounces={false}
-            contentContainerStyle={styles.scrollContent}
+            contentContainerStyle={s.scrollContent}
           >
             {/* Header */}
-            <View style={styles.header}>
-              <Text style={styles.proBadge}>PRO</Text>
-              <Text style={styles.title}>Upgrade to Bocy Pro</Text>
-              <Text style={styles.subtitle}>{contextMessage}</Text>
+            <View style={s.header}>
+              <Text style={s.proBadge}>PRO</Text>
+              <Text style={s.title}>Upgrade to Bocy Pro</Text>
+              <Text style={s.subtitle}>{contextMessage}</Text>
             </View>
 
             {/* Price toggle */}
-            <View style={styles.priceToggle}>
+            <View style={s.priceToggle}>
               <TouchableOpacity
-                style={[styles.priceOption, selectedPrice === 'monthly' && styles.priceOptionActive]}
+                style={[s.priceOption, selectedPrice === 'monthly' && s.priceOptionActive]}
                 onPress={() => setSelectedPrice('monthly')}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.priceAmount, selectedPrice !== 'monthly' && styles.priceAmountInactive]}>
+                <Text style={[s.priceAmount, selectedPrice !== 'monthly' && s.priceAmountInactive]}>
                   {'\u00a3'}9.99
                 </Text>
-                <Text style={[styles.pricePeriod, selectedPrice !== 'monthly' && styles.pricePeriodInactive]}>
+                <Text style={[s.pricePeriod, selectedPrice !== 'monthly' && s.pricePeriodInactive]}>
                   /month
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.priceOption, selectedPrice === 'yearly' && styles.priceOptionActive]}
+                style={[s.priceOption, selectedPrice === 'yearly' && s.priceOptionActive]}
                 onPress={() => setSelectedPrice('yearly')}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.priceAmount, selectedPrice !== 'yearly' && styles.priceAmountInactive]}>
+                <Text style={[s.priceAmount, selectedPrice !== 'yearly' && s.priceAmountInactive]}>
                   {'\u00a3'}79.99
                 </Text>
-                <Text style={[styles.pricePeriod, selectedPrice !== 'yearly' && styles.pricePeriodInactive]}>
+                <Text style={[s.pricePeriod, selectedPrice !== 'yearly' && s.pricePeriodInactive]}>
                   /year
                 </Text>
                 {selectedPrice === 'yearly' && (
-                  <View style={styles.saveBadge}>
-                    <Text style={styles.saveBadgeText}>save 33%</Text>
+                  <View style={s.saveBadge}>
+                    <Text style={s.saveBadgeText}>save 33%</Text>
                   </View>
                 )}
               </TouchableOpacity>
             </View>
 
             {/* Features */}
-            <View style={styles.features}>
+            <View style={s.features}>
               {FEATURES.map((f, i) => (
-                <View key={i} style={styles.featureRow}>
-                  <View style={styles.checkCircle}>
-                    <Text style={styles.checkText}>{'\u2713'}</Text>
+                <View key={i} style={s.featureRow}>
+                  <View style={s.checkCircle}>
+                    <Text style={s.checkText}>{'\u2713'}</Text>
                   </View>
-                  <View style={styles.featureContent}>
-                    <Text style={styles.featureLabel}>{f.label}</Text>
-                    <Text style={styles.featureDesc}>{f.desc}</Text>
+                  <View style={s.featureContent}>
+                    <Text style={s.featureLabel}>{f.label}</Text>
+                    <Text style={s.featureDesc}>{f.desc}</Text>
                   </View>
                 </View>
               ))}
@@ -195,7 +198,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
             {/* CTA */}
             <TouchableOpacity
-              style={[styles.upgradeBtn, loading && styles.upgradeBtnDisabled]}
+              style={[s.upgradeBtn, loading && s.upgradeBtnDisabled]}
               activeOpacity={0.8}
               onPress={handleSubscribe}
               disabled={loading}
@@ -203,19 +206,19 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               {loading ? (
                 <ActivityIndicator size="small" color="#000000" />
               ) : (
-                <Text style={styles.upgradeBtnText}>Subscribe</Text>
+                <Text style={s.upgradeBtnText}>Subscribe</Text>
               )}
             </TouchableOpacity>
             {error && (
-              <View style={styles.errorBanner}>
-                <Text style={styles.errorText}>{error}</Text>
+              <View style={s.errorBanner}>
+                <Text style={s.errorText}>{error}</Text>
               </View>
             )}
-            <Text style={styles.trialNote}>Cancel anytime</Text>
+            <Text style={s.trialNote}>Cancel anytime</Text>
 
             {/* Dismiss */}
-            <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
-              <Text style={styles.closeBtnText}>Maybe later</Text>
+            <TouchableOpacity style={s.closeBtn} onPress={onClose} activeOpacity={0.7}>
+              <Text style={s.closeBtnText}>Maybe later</Text>
             </TouchableOpacity>
           </ScrollView>
         </Pressable>
@@ -224,19 +227,19 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (c: ThemeColors) => StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     maxHeight: '90%',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: c.border,
     borderBottomWidth: 0,
   },
   closeIcon: {
@@ -247,22 +250,22 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: c.accentDim,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: c.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
   closeIconText: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.dim,
+    color: c.dim,
   },
   dragIndicator: {
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: c.muted,
     alignSelf: 'center',
     marginTop: 10,
     marginBottom: 4,
@@ -282,8 +285,8 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 11,
     letterSpacing: 3,
-    color: colors.green,
-    backgroundColor: 'rgba(0,212,170,0.12)',
+    color: c.green,
+    backgroundColor: c.greenDim,
     borderWidth: 1,
     borderColor: 'rgba(0,212,170,0.25)',
     borderRadius: 100,
@@ -295,14 +298,14 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: fonts.heading,
     fontSize: 22,
-    color: colors.text,
+    color: c.text,
     textAlign: 'center',
     marginBottom: spacing.xs,
   },
   subtitle: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.text2,
+    color: c.text2,
     textAlign: 'center',
     lineHeight: 22,
   },
@@ -319,34 +322,34 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderColor: c.border,
+    backgroundColor: c.mintDim,
   },
   priceOptionActive: {
-    borderColor: 'rgba(255,255,255,0.25)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: c.accent,
+    backgroundColor: c.accentDim,
   },
   priceAmount: {
     fontFamily: fonts.mono,
     fontSize: 24,
     fontWeight: '300',
-    color: colors.text,
+    color: c.text,
     letterSpacing: -1,
   },
   priceAmountInactive: {
-    color: colors.dim,
+    color: c.dim,
   },
   pricePeriod: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.dim,
+    color: c.dim,
     marginTop: 2,
   },
   pricePeriodInactive: {
-    color: colors.muted,
+    color: c.muted,
   },
   saveBadge: {
-    backgroundColor: 'rgba(0,212,170,0.12)',
+    backgroundColor: c.greenDim,
     borderRadius: 100,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -356,7 +359,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 9,
     letterSpacing: 0.5,
-    color: colors.green,
+    color: c.green,
   },
 
   // Features
@@ -372,7 +375,7 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(0,212,170,0.12)',
+    backgroundColor: c.greenDim,
     borderWidth: 1,
     borderColor: 'rgba(0,212,170,0.25)',
     justifyContent: 'center',
@@ -383,7 +386,7 @@ const styles = StyleSheet.create({
   checkText: {
     fontFamily: fonts.semibold,
     fontSize: 12,
-    color: colors.green,
+    color: c.green,
   },
   featureContent: {
     flex: 1,
@@ -391,19 +394,19 @@ const styles = StyleSheet.create({
   featureLabel: {
     fontFamily: fonts.medium,
     fontSize: 15,
-    color: colors.text,
+    color: c.text,
     marginBottom: 2,
   },
   featureDesc: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
     lineHeight: 18,
   },
 
   // CTA
   upgradeBtn: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: c.accent,
     borderRadius: 100,
     paddingVertical: 16,
     alignItems: 'center',
@@ -414,10 +417,10 @@ const styles = StyleSheet.create({
   upgradeBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 16,
-    color: '#000000',
+    color: c.bg,
   },
   errorBanner: {
-    backgroundColor: 'rgba(255,107,107,0.12)',
+    backgroundColor: c.coralDim,
     borderWidth: 1,
     borderColor: 'rgba(255,107,107,0.25)',
     borderRadius: radius.md,
@@ -427,14 +430,14 @@ const styles = StyleSheet.create({
   errorText: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: '#FF6B6B',
+    color: c.coral,
     textAlign: 'center',
     lineHeight: 20,
   },
   trialNote: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.muted,
+    color: c.muted,
     textAlign: 'center',
     marginTop: spacing.sm,
   },
@@ -448,6 +451,6 @@ const styles = StyleSheet.create({
   closeBtnText: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.dim,
+    color: c.dim,
   },
 });
