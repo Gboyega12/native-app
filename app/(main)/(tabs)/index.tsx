@@ -888,12 +888,13 @@ export default function Home() {
   })();
 
   // ── Safe-to-spend weekly calculation ──
-  // Use adaptive budget from sync if available (accounts for committed payments
-  // like rent/transfers that already consumed part of this period's income)
+  // Static weekly budget is the baseline: unallocated monthly / 4.33 weeks
   const staticWeeklyBudget = leftToDecide / 4.33;
+  // Adaptive budget from sync may use stale analysis data where leftToDecide
+  // was different, so always cap it at the current static weekly figure.
+  // The adaptive budget should only LOWER the weekly figure, never raise it.
   const rawWeeklyBudget = weeklyCtx?.adaptiveBudget ?? staticWeeklyBudget;
-  // HARD CAP: weekly budget can never exceed leftToDecide (the total monthly unallocated amount)
-  const calculatedWeeklyBudget = Math.min(rawWeeklyBudget, leftToDecide);
+  const calculatedWeeklyBudget = Math.min(rawWeeklyBudget, staticWeeklyBudget);
 
   // Get start of current week (Monday)
   const getWeekStart = () => {
