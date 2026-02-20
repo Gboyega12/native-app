@@ -16,6 +16,9 @@ import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/li
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 
+/** Free users can send this many messages before the paywall gate kicks in */
+const FREE_MESSAGE_LIMIT = 2;
+
 // ── Suggested questions (contextual) ──
 
 function getContextualQuestions(analysis: Analysis | null, goals: Goals | null): string[] {
@@ -753,6 +756,12 @@ export default function Chat() {
   const sendMessage = async (text: string) => {
     if (!text.trim() || loading) return;
 
+    // Gate free users after they've used their teaser messages
+    if (!isPro && messages.filter((m) => m.role === 'user').length >= FREE_MESSAGE_LIMIT) {
+      setShowPaywall(true);
+      return;
+    }
+
     const userMsg: ChatMessage = { role: 'user', content: text.trim() };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
@@ -913,59 +922,10 @@ export default function Chat() {
 
   const suggestedQuestions = getContextualQuestions(analysis, goals);
 
-  // ── Free tier: show teaser chat preview ──
-  if (!isPro) {
-    // Build personalised teaser from user's actual data
-    const surplus = analysis?.surplus;
-    const topMove = analysis?.top_move;
-    const score = analysis?.decision_score;
-    const teaserMsg = topMove?.action
-      ? `Based on your spending, I found a way to save £${topMove.monthlyImpact || 'more'}/mo. Want me to walk you through "${stripMd(topMove.action)}" step by step?`
-      : surplus != null
-        ? `I've analysed your finances and found some opportunities. Your surplus is £${Math.round(surplus)}/mo — let's make it work harder for you.`
-        : `I've finished analysing your spending and have personalised recommendations ready. Want to explore them together?`;
-
-    return (
-      <View style={s.container}>
-        <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
-        <View style={s.teaserContainer}>
-          {/* Fake conversation preview */}
-          <View style={s.teaserChat}>
-            <View style={s.teaserBubbleAi}>
-              <Text style={s.teaserBubbleAiText}>{teaserMsg}</Text>
-            </View>
-            <View style={s.teaserBubbleUser}>
-              <Text style={s.teaserBubbleUserText}>
-                {topMove?.action ? 'Yes, show me how!' : 'What should I do first?'}
-              </Text>
-            </View>
-            <View style={s.teaserBubbleAi}>
-              <View style={s.teaserTypingRow}>
-                <View style={s.teaserDot} />
-                <View style={[s.teaserDot, { opacity: 0.6 }]} />
-                <View style={[s.teaserDot, { opacity: 0.3 }]} />
-              </View>
-            </View>
-          </View>
-
-          {/* Fade overlay + CTA */}
-          <View style={s.teaserOverlay}>
-            <Text style={s.teaserTitle}>Your assistant is ready</Text>
-            <Text style={s.teaserSubtitle}>
-              Unlock personalised guidance based on your{score ? ` ${score}/100 financial score` : ' analysis'}
-            </Text>
-            <TouchableOpacity
-              style={s.teaserBtn}
-              onPress={() => setShowPaywall(true)}
-              activeOpacity={0.8}
-            >
-              <Text style={s.teaserBtnText}>Continue conversation</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  }
+  // ── Free tier: count user messages for gate ──
+  const userMessageCount = messages.filter((m) => m.role === 'user').length;
+  const freeGateReached = !isPro && userMessageCount >= FREE_MESSAGE_LIMIT;
+  const freeMessagesRemaining = isPro ? Infinity : Math.max(0, FREE_MESSAGE_LIMIT - userMessageCount);
 
   return (
     <KeyboardAvoidingView
@@ -1070,41 +1030,64 @@ export default function Chat() {
         )}
       </ScrollView>
 
-      {/* ── Input ── */}
-      <View style={s.inputRow}>
-        <TextInput
-          ref={inputRef}
-          style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
-          placeholder={listening ? 'Listening...' : 'Ask about your finances...'}
-          placeholderTextColor={listening ? colors.green : colors.muted}
-          value={input}
-          onChangeText={setInput}
-          onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
-          onSubmitEditing={() => sendMessage(input)}
-          returnKeyType="send"
-          multiline
-          maxLength={1000}
-          blurOnSubmit
-        />
-        {voiceSupported && (
+      {/* ── Input / Gate ── */}
+      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
+      {freeGateReached ? (
+        <View style={s.gateRow}>
+          <Text style={s.gateText}>You've used your {FREE_MESSAGE_LIMIT} free messages</Text>
           <TouchableOpacity
-            style={[s.voiceButton, listening && s.voiceButtonActive]}
-            onPress={toggleVoice}
-            activeOpacity={0.7}
+            style={s.gateBtn}
+            onPress={() => setShowPaywall(true)}
+            activeOpacity={0.8}
           >
-            <Text style={[s.voiceIcon, listening && s.voiceIconActive]}>
-              {listening ? '\u23F9' : '\u{1F3A4}'}
-            </Text>
+            <Text style={s.gateBtnText}>Unlock unlimited chat</Text>
           </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          style={[s.sendButton, (!input.trim() || loading) && s.sendDisabled]}
-          onPress={() => sendMessage(input)}
-          disabled={!input.trim() || loading}
-        >
-          <Text style={s.sendText}>{'\u2191'}</Text>
-        </TouchableOpacity>
-      </View>
+        </View>
+      ) : (
+        <>
+          {!isPro && userMessageCount > 0 && (
+            <View style={s.freeBadgeRow}>
+              <Text style={s.freeBadgeText}>
+                {freeMessagesRemaining} of {FREE_MESSAGE_LIMIT} free {freeMessagesRemaining === 1 ? 'message' : 'messages'} left
+              </Text>
+            </View>
+          )}
+          <View style={[s.inputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }]}>
+            <TextInput
+              ref={inputRef}
+              style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
+              placeholder={listening ? 'Listening...' : 'Ask about your finances...'}
+              placeholderTextColor={listening ? colors.green : colors.muted}
+              value={input}
+              onChangeText={setInput}
+              onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+              onSubmitEditing={() => sendMessage(input)}
+              returnKeyType="send"
+              multiline
+              maxLength={1000}
+              blurOnSubmit
+            />
+            {voiceSupported && (
+              <TouchableOpacity
+                style={[s.voiceButton, listening && s.voiceButtonActive]}
+                onPress={toggleVoice}
+                activeOpacity={0.7}
+              >
+                <Text style={[s.voiceIcon, listening && s.voiceIconActive]}>
+                  {listening ? '\u23F9' : '\u{1F3A4}'}
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[s.sendButton, (!input.trim() || loading) && s.sendDisabled]}
+              onPress={() => sendMessage(input)}
+              disabled={!input.trim() || loading}
+            >
+              <Text style={s.sendText}>{'\u2191'}</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -1521,88 +1504,45 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.bg,
   },
 
-  // ── Teaser chat preview (free tier) ──
-  teaserContainer: {
-    flex: 1,
-  },
-  teaserChat: {
-    flex: 1,
-    padding: spacing.lg,
-    paddingTop: 60,
-    gap: 12,
-  },
-  teaserBubbleAi: {
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radius.md,
-    padding: 14,
-    maxWidth: '85%',
-    alignSelf: 'flex-start',
-  },
-  teaserBubbleAiText: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: c.text2,
-    lineHeight: 21,
-  },
-  teaserBubbleUser: {
-    backgroundColor: c.accentDim,
-    borderRadius: radius.md,
-    padding: 14,
-    maxWidth: '75%',
-    alignSelf: 'flex-end',
-  },
-  teaserBubbleUserText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: c.text,
-    lineHeight: 21,
-  },
-  teaserTypingRow: {
-    flexDirection: 'row',
-    gap: 4,
-    paddingVertical: 4,
-  },
-  teaserDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: c.dim,
-  },
-  teaserOverlay: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: 40,
+  // ── Free tier gate (replaces input after limit reached) ──
+  gateRow: {
+    padding: spacing.md,
+    paddingBottom: spacing.lg,
     borderTopWidth: 1,
     borderTopColor: c.border,
+    backgroundColor: c.surface,
     alignItems: 'center',
-    backgroundColor: c.bg,
+    gap: spacing.sm,
   },
-  teaserTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 18,
-    color: c.text,
-    marginBottom: spacing.xs,
-  },
-  teaserSubtitle: {
+  gateText: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: c.dim,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: spacing.lg,
-    maxWidth: 280,
   },
-  teaserBtn: {
+  gateBtn: {
     backgroundColor: c.accent,
     borderRadius: 100,
     paddingVertical: 14,
     paddingHorizontal: spacing.xl + spacing.md,
   },
-  teaserBtnText: {
+  gateBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 15,
     color: c.bg,
+  },
+  // ── Free message counter badge ──
+  freeBadgeRow: {
+    alignItems: 'center',
+    paddingTop: spacing.xs,
+    paddingBottom: 2,
+    backgroundColor: c.surface,
+    borderTopWidth: 1,
+    borderTopColor: c.border,
+  },
+  freeBadgeText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.muted,
+    letterSpacing: 0.3,
   },
 });
