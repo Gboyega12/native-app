@@ -7,7 +7,11 @@
     "web": "expo start --web",
     "build": "expo export --platform web",
     "android": "expo start --android",
-    "ios": "expo start --ios"
+    "ios": "expo start --ios",
+    "eas:build:dev": "eas build --platform ios --profile development",
+    "eas:build:preview": "eas build --platform ios --profile preview",
+    "eas:build:prod": "eas build --platform ios --profile production",
+    "eas:submit:ios": "eas submit --platform ios --profile production"
   },
   "dependencies": {
     "@expo-google-fonts/poppins": "^0.4.1",

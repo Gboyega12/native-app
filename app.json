@@ -15,7 +15,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.bocy.app"
+      "bundleIdentifier": "com.bocy.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Bocy needs camera access to scan documents.",
+        "NSPhotoLibraryUsageDescription": "Bocy needs photo library access to upload documents."
+      }
     },
     "android": {
       "adaptiveIcon": {
