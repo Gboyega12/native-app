@@ -441,6 +441,8 @@ export default function Chat() {
         currentMonths: a.goal_context.currentMonths,
         newMonths: a.goal_context.newMonths,
         insight: a.goal_context.insight,
+        confidence: a.goal_context.confidence,
+        bufferRecommendation: a.goal_context.bufferRecommendation,
       } : null,
     };
 

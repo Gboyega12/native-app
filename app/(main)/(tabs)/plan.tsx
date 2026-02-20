@@ -637,15 +637,80 @@ export default function Plan() {
             </Text>
           )}
 
-          {goalCtx.newMonths > 0 ? (
+          {goalCtx.confidence && goalCtx.confidence.p50 > 0 ? (
             <View style={s.trajTimeline}>
-              {/* Clear primary metric */}
+              {/* Monte Carlo primary metric — median months */}
+              <AnimGlyph delay={100}>
+                <Text style={s.trajHeroNumber}>{goalCtx.confidence.p50}</Text>
+                <Text style={s.trajHeroLabel}>months — most likely</Text>
+              </AnimGlyph>
+
+              {/* Confidence bands */}
+              <View style={s.confidenceBands}>
+                <View style={s.confidenceRow}>
+                  <Text style={[s.confidenceLabel, { color: colors.green }]}>Optimistic</Text>
+                  <View style={s.confidenceBarTrack}>
+                    <View style={[s.confidenceBarFill, s.confidenceBarOptimistic, { width: `${Math.min(100, (goalCtx.confidence.p10 / goalCtx.confidence.p90) * 100)}%` }]} />
+                  </View>
+                  <Text style={[s.confidenceValue, { color: colors.green }]}>{goalCtx.confidence.p10}mo</Text>
+                </View>
+                <View style={s.confidenceRow}>
+                  <Text style={s.confidenceLabel}>Likely</Text>
+                  <View style={s.confidenceBarTrack}>
+                    <View style={[s.confidenceBarFill, s.confidenceBarLikely, { width: `${Math.min(100, (goalCtx.confidence.p50 / goalCtx.confidence.p90) * 100)}%` }]} />
+                  </View>
+                  <Text style={s.confidenceValue}>{goalCtx.confidence.p50}mo</Text>
+                </View>
+                <View style={s.confidenceRow}>
+                  <Text style={[s.confidenceLabel, { color: colors.dim }]}>Conservative</Text>
+                  <View style={s.confidenceBarTrack}>
+                    <View style={[s.confidenceBarFill, s.confidenceBarConservative, { width: '100%' }]} />
+                  </View>
+                  <Text style={[s.confidenceValue, { color: colors.dim }]}>{goalCtx.confidence.p90}mo</Text>
+                </View>
+              </View>
+
+              {/* Hit rate */}
+              {goalCtx.confidence.hitRate12m > 0 && goalCtx.confidence.hitRate12m < 100 && (
+                <View style={s.hitRateRow}>
+                  <Text style={s.hitRateValue}>{goalCtx.confidence.hitRate12m}%</Text>
+                  <Text style={s.hitRateLabel}> chance within 12 months</Text>
+                </View>
+              )}
+
+              {/* Savings comparison */}
+              {goalCtx.monthsSaved > 0 && goalCtx.currentMonths > 0 && (
+                <View style={s.trajCompareRow}>
+                  <View style={s.trajCompareItem}>
+                    <Text style={[s.trajCompareValue, { color: colors.green }]}>
+                      {goalCtx.monthsSaved} months faster
+                    </Text>
+                    <Text style={s.trajCompareLabel}>
+                      vs {goalCtx.currentMonths} months without a plan
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Buffer recommendation for emergency fund goals */}
+              {goalCtx.bufferRecommendation && (
+                <View style={s.bufferRow}>
+                  <Text style={s.bufferLabel}>PERSONALISED BUFFER</Text>
+                  <Text style={s.bufferValue}>
+                    {'\u00a3'}{goalCtx.bufferRecommendation.amount.toLocaleString()} ({goalCtx.bufferRecommendation.months} months)
+                  </Text>
+                  <Text style={s.bufferNote}>
+                    Covers {goalCtx.bufferRecommendation.coverageRate}% of simulated scenarios
+                  </Text>
+                </View>
+              )}
+            </View>
+          ) : goalCtx.newMonths > 0 ? (
+            <View style={s.trajTimeline}>
               <AnimGlyph delay={100}>
                 <Text style={s.trajHeroNumber}>{goalCtx.newMonths}</Text>
                 <Text style={s.trajHeroLabel}>months to reach your goal</Text>
               </AnimGlyph>
-
-              {/* Savings comparison */}
               {goalCtx.monthsSaved > 0 && goalCtx.currentMonths > 0 && (
                 <View style={s.trajCompareRow}>
                   <View style={s.trajCompareItem}>
@@ -663,7 +728,7 @@ export default function Plan() {
             <Text style={s.trajInsight}>{goalCtx.insight}</Text>
           ) : null}
 
-          {goalCtx.newMonths > 0 && goalCtx.insight && (
+          {goalCtx.insight && (
             <Text style={s.trajInsight}>{goalCtx.insight}</Text>
           )}
         </View>
@@ -1324,6 +1389,98 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.text2,
     lineHeight: 20,
     marginTop: spacing.sm,
+  },
+
+  // ── Monte Carlo confidence bands ──
+  confidenceBands: {
+    gap: 10,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: c.mintDim,
+  },
+  confidenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  confidenceLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.text2,
+    letterSpacing: 0.3,
+    width: 80,
+    textTransform: 'uppercase',
+  },
+  confidenceBarTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: c.mintDim,
+    overflow: 'hidden',
+  },
+  confidenceBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  confidenceBarOptimistic: {
+    backgroundColor: c.green,
+  },
+  confidenceBarLikely: {
+    backgroundColor: c.accent,
+  },
+  confidenceBarConservative: {
+    backgroundColor: c.dim,
+  },
+  confidenceValue: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.text2,
+    width: 36,
+    textAlign: 'right',
+  },
+  hitRateRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    paddingTop: spacing.sm,
+  },
+  hitRateValue: {
+    fontFamily: fonts.mono,
+    fontSize: 20,
+    fontWeight: '300',
+    color: c.green,
+  },
+  hitRateLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.text2,
+  },
+  bufferRow: {
+    borderTopWidth: 1,
+    borderTopColor: c.mintDim,
+    paddingTop: spacing.md,
+    marginTop: spacing.md,
+  },
+  bufferLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: c.dim,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  bufferValue: {
+    fontFamily: fonts.mono,
+    fontSize: 18,
+    fontWeight: '300',
+    color: c.text,
+  },
+  bufferNote: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.dim,
+    marginTop: 2,
   },
 
   // ── Section headers ──

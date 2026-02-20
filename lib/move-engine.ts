@@ -1,5 +1,12 @@
-import type { Goals, Move, GoalTrajectory, FlowchartPosition } from './types';
+import type { Goals, Move, GoalTrajectory, FlowchartPosition, FinancialProfile, UserIdentity } from './types';
 import { MAX_TRAJECTORY_MONTHS } from './constants';
+import {
+  estimateVolatility,
+  simulateGoalTimeline,
+  simulateBufferNeed,
+  calcMoveConsistency,
+  type VolatilityProfile,
+} from './monte-carlo';
 
 const GOAL_LABELS: Record<string, string> = {
   clear_debt: 'Clear all debt',
@@ -80,24 +87,35 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null, de
 // ── Layer 2: Move Ranking ──
 // Takes raw moves from enrichment engine + UKPF priority + goals.
 // Re-ranks so the RIGHT TYPE of move comes first, not just biggest £ amount.
-// Calculates goal trajectories for each move.
+// Phase 3: Incorporates Monte Carlo consistency scoring for risk-adjusted ranking.
 
 export interface RankedMove extends Move {
   rank: number;
   trajectory: GoalTrajectory | null;
   ukpfScore: number;
+  /** Monte Carlo: risk-adjusted monthly impact (accounts for follow-through) */
+  riskAdjustedImpact?: number;
+  /** Monte Carlo: 0-1 consistency score (1 = highly reliable) */
+  consistencyScore?: number;
 }
 
 export function rankMoves(
   decisionStack: Move[],
   profile: any,
-  goals: Goals | null
+  goals: Goals | null,
+  identity?: UserIdentity | null,
 ): RankedMove[] {
   if (!decisionStack || decisionStack.length === 0) return [];
 
   const ukpf = determineFlowchartPosition(profile, goals);
 
-  const scored: RankedMove[] = decisionStack.map((move) => {
+  // Compute volatility once for all moves (Phase 3)
+  let vol: VolatilityProfile | null = null;
+  if (profile.budgetReality) {
+    vol = estimateVolatility(profile as FinancialProfile, identity);
+  }
+
+  const scored: RankedMove[] = decisionStack.map((move, idx) => {
     // Base score: annual impact normalised
     let score = move.annualImpact / 100;
 
@@ -127,18 +145,31 @@ export function rankMoves(
     if (goals?.one_year_goal === 'save_target' && moveCategory === 'savings') score *= 1.3;
     if (goals?.one_year_goal === 'invest' && moveCategory === 'invest') score *= 1.3;
 
-    // Calculate trajectory for this move
-    const trajectory = calcGoalTrajectory(profile, goals, move);
+    // Phase 3: Monte Carlo consistency — reward reliable moves
+    let riskAdjustedImpact: number | undefined;
+    let consistencyScore: number | undefined;
+    if (vol) {
+      const mc = calcMoveConsistency(move, vol, 456 + idx);
+      riskAdjustedImpact = mc.expectedMonthly;
+      consistencyScore = mc.consistencyScore;
+      // Blend: 70% UKPF score + 30% consistency-adjusted score
+      score = score * 0.7 + (mc.expectedMonthly / 100) * mc.consistencyScore * 0.3 * 100;
+    }
+
+    // Calculate trajectory for this move (with Monte Carlo if profile available)
+    const trajectory = calcGoalTrajectory(profile, goals, move, identity);
 
     return {
       ...move,
       rank: 0,
       trajectory,
       ukpfScore: score,
+      riskAdjustedImpact,
+      consistencyScore,
     };
   });
 
-  // Sort by UKPF-weighted score
+  // Sort by UKPF-weighted score (now includes consistency)
   scored.sort((a, b) => b.ukpfScore - a.ukpfScore);
 
   // Assign ranks
@@ -158,12 +189,14 @@ export function findMostMaterialMove(
 }
 
 // ── Goal Trajectory Calculator ──
-// "Reach target in X months, Y months sooner"
+// Phase 1: Deterministic baseline + Monte Carlo confidence bands.
+// "70% chance of reaching goal in 13 months" replaces "13 months to goal".
 
 export function calcGoalTrajectory(
   profile: any,
   goals: Goals | null,
-  move: Move | null
+  move: Move | null,
+  identity?: UserIdentity | null,
 ): GoalTrajectory {
   const oneYear = goals?.one_year_goal || '';
   const label = GOAL_LABELS[oneYear] || oneYear;
@@ -172,10 +205,10 @@ export function calcGoalTrajectory(
   const surplus = profile.monthly.surplus;
   const moveSaving = move?.monthlyImpact || 0;
 
+  // ── Deterministic baseline (backward-compatible) ──
   const rawCurrentMonths = surplus > 0 ? Math.ceil(targetAmount / surplus) : Infinity;
   const rawNewMonths = (surplus + moveSaving) > 0 ? Math.ceil(targetAmount / (surplus + moveSaving)) : Infinity;
 
-  // Cap months at a displayable maximum (600 = 50 years)
   const currentMonths = rawCurrentMonths === Infinity ? -1 : Math.min(rawCurrentMonths, MAX_TRAJECTORY_MONTHS);
   const newMonths = rawNewMonths === Infinity ? -1 : Math.min(rawNewMonths, MAX_TRAJECTORY_MONTHS);
   const monthsSaved = currentMonths < 0 ? 0 : Math.max(0, currentMonths - (newMonths < 0 ? currentMonths : newMonths));
@@ -189,7 +222,7 @@ export function calcGoalTrajectory(
     insight = `You're on track (${currentMonths} months). This move accelerates it.`;
   }
 
-  return {
+  const result: GoalTrajectory = {
     goalLabel: label,
     targetAmount,
     currentMonths,
@@ -197,4 +230,38 @@ export function calcGoalTrajectory(
     monthsSaved,
     insight,
   };
+
+  // ── Monte Carlo confidence bands (Phase 1) ──
+  // Only run if we have enough profile data for variance estimation.
+  if (targetAmount > 0 && profile.budgetReality) {
+    const vol = estimateVolatility(profile as FinancialProfile, identity);
+    const confidence = simulateGoalTimeline(
+      profile as FinancialProfile,
+      targetAmount,
+      moveSaving,
+      vol,
+    );
+    result.confidence = confidence;
+
+    // Phase 3b: personalized buffer recommendation for emergency_fund goals
+    if (oneYear === 'emergency_fund' || oneYear === 'buffer') {
+      result.bufferRecommendation = simulateBufferNeed(profile as FinancialProfile, vol);
+    }
+
+    // Enrich insight with probability
+    if (confidence.p50 > 0 && confidence.p50 < 120) {
+      const spread = confidence.p90 - confidence.p10;
+      if (spread > 3) {
+        insight = `Most likely ${confidence.p50} months (${confidence.p10}\u2013${confidence.p90} range). `;
+        if (confidence.hitRate12m > 0 && confidence.hitRate12m < 100) {
+          insight += `${confidence.hitRate12m}% chance within 12 months.`;
+        }
+      } else {
+        insight = `On track — ${confidence.p50} months with high certainty.`;
+      }
+      result.insight = insight;
+    }
+  }
+
+  return result;
 }
