@@ -92,6 +92,21 @@ const TOOLS = [
     },
   },
   {
+    name: 'search_gif',
+    description:
+      'Search for a reaction GIF to include in your reply. Use this roughly 1 in 4 messages to keep the vibe fun and human. Call this tool BEFORE writing your text reply — the returned URL will be available for you to embed. Good moments: user hits a milestone, overspent hilariously, you deliver a harsh truth, user asks something simple. NEVER use when delivering serious bad news or when the user is stressed.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Short search query for the GIF mood. E.g. "money rain", "facepalm", "celebration", "shocked", "thumbs up", "deal with it". Keep it to 1-3 words.',
+        },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'suggest_goal_update',
     description:
       'Suggest the user update their financial goals when their situation has clearly changed. Use this when: (1) The user says their circumstances changed (got a raise, paid off debt, new expense, job loss). (2) Their financial data shows they\'ve achieved or outgrown their current goal (e.g. debt is nearly cleared but goal is still "clear debt"). (3) They explicitly ask to change their goals. Do NOT use this for minor progress updates — only for genuine goal shifts.',
@@ -387,6 +402,9 @@ async function executeTool(name, input, userId) {
   if (name === 'suggest_goal_update') {
     return executeGoalUpdate(input, userId);
   }
+  if (name === 'search_gif') {
+    return executeGifSearch(input);
+  }
   return { response: { error: 'Unknown tool' }, action: null };
 }
 
@@ -573,6 +591,47 @@ async function executeGoalUpdate(input, userId) {
   };
 }
 
+async function executeGifSearch(input) {
+  const apiKey = process.env.GIPHY_API_KEY;
+  if (!apiKey) {
+    return { response: { success: false, error: 'GIF search not configured' }, action: null };
+  }
+
+  try {
+    const q = encodeURIComponent(input.query || 'thumbs up');
+    const url = `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${q}&limit=5&rating=pg`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      return { response: { success: false, error: 'GIPHY request failed' }, action: null };
+    }
+
+    const data = await res.json();
+    const gifs = data.data || [];
+    if (gifs.length === 0) {
+      return { response: { success: false, error: 'No GIFs found for that query' }, action: null };
+    }
+
+    // Pick a random one from top 5 for variety
+    const pick = gifs[Math.floor(Math.random() * gifs.length)];
+    const gifUrl = pick.images?.fixed_height?.url || pick.images?.original?.url;
+
+    if (!gifUrl) {
+      return { response: { success: false, error: 'No usable GIF URL' }, action: null };
+    }
+
+    return {
+      response: {
+        success: true,
+        gif_url: gifUrl,
+        instruction: `Include this GIF in your reply using: ![gif](${gifUrl}) on its own line, after your text.`,
+      },
+      action: null,
+    };
+  } catch (err) {
+    return { response: { success: false, error: err.message }, action: null };
+  }
+}
+
 // ── System prompt builder ──
 
 function buildSystemPrompt(ctx) {
@@ -598,13 +657,14 @@ Rules:
 - Don't repeat back what the user said. Don't summarise before answering. Jump straight to the point.
 
 GIFs:
-- Occasionally (roughly 1 in 4 replies), drop in a reaction GIF to keep the vibe human and fun.
-- Use the markdown format: ![gif](URL) on its own line, AFTER your text.
-- Pick from GIPHY URLs. Use the /media/ format: https://media.giphy.com/media/{id}/giphy.gif
+- Occasionally (roughly 1 in 4 replies), use the search_gif tool to fetch a reaction GIF.
+- Call search_gif FIRST with a short mood query (e.g. "money rain", "facepalm", "celebration"). You'll get back a real URL.
+- Then include it in your text reply using: ![gif](THE_URL) on its own line, AFTER your text.
+- NEVER fabricate or guess GIF URLs. ALWAYS use the URL returned by search_gif.
 - Match the emotion: celebratory for wins, empathetic for tough moments, cheeky for spending call-outs.
 - Good GIF moments: user hits a milestone, user overspent hilariously, you deliver a harsh truth, user asks something simple.
 - NEVER use a GIF when delivering serious bad news or when the user is stressed. Read the room.
-- Keep it to ONE gif per message max. Never two.
+- Keep it to ONE gif per message max. Never two. If the tool fails, just skip the GIF — don't mention it.
 
 Tools:
 - When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction. For the match_description, use the EXACT bank description shown in the transfers list if available — partial matches work (e.g. "JOHN" will match "TFR TO JOHN SMITH"). Common cases: rent paid to partner/housemate, bill splits, debt repayments showing as transfers.
