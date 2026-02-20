@@ -1,9 +1,11 @@
 // ── Nothing Phone OS-inspired design system ──
-// Pure AMOLED black, monochrome philosophy.
-// Primary accent: white. Secondary accent: teal mint.
+// Monochrome philosophy with dark/light mode support.
+// Primary accent: white (dark) / black (light). Secondary accent: teal mint.
 // Typography: SpaceMono for dot-matrix feel, Poppins for body.
 
-export const colors = {
+export type ThemeColors = typeof darkColors;
+
+export const darkColors = {
   // Surfaces — true black for AMOLED, subtle grays for separation
   bg: '#000000',
   surface: '#141414',
@@ -35,6 +37,42 @@ export const colors = {
   // Card surface
   card: '#0A0A0A',
 };
+
+export const lightColors: ThemeColors = {
+  // Surfaces — clean whites with subtle gray separation
+  bg: '#F5F5F5',
+  surface: '#FFFFFF',
+  border: 'rgba(0,0,0,0.08)',
+
+  // Accent — Black primary, teal mint secondary
+  accent: '#000000',
+  accentDim: 'rgba(0,0,0,0.06)',
+  green: '#00b894',
+  greenDim: 'rgba(0,184,148,0.10)',
+
+  // Semantic — red for debt / shortages / destructive actions
+  coral: '#D63031',
+  coralDim: 'rgba(214,48,49,0.08)',
+
+  // Functional tones — monochrome-first, subtle when needed
+  mint: '#000000',
+  mintDim: 'rgba(0,0,0,0.04)',
+  sky: '#636E72',
+  skyDim: 'rgba(99,110,114,0.08)',
+  lavender: '#A0A0A0',
+
+  // Text hierarchy
+  text: '#1A1A1A',
+  text2: '#636E72',
+  dim: '#888888',
+  muted: '#C0C0C0',
+
+  // Card surface
+  card: '#FAFAFA',
+};
+
+// Default export for backward compatibility
+export const colors = darkColors;
 
 export const fonts = {
   heading: 'Poppins_700Bold',

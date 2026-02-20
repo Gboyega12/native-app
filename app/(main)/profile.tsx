@@ -1,11 +1,12 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
   LayoutAnimation, Animated, Easing, Switch, Platform, ActivityIndicator,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { colors, fonts, spacing, radius } from '@/theme';
+import { fonts, spacing, radius, type ThemeColors } from '@/theme';
+import { useTheme } from '@/lib/theme-context';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 
@@ -70,6 +71,8 @@ export default function Profile() {
   const router = useRouter();
   const { connected, upgraded } = useLocalSearchParams<{ connected?: string; upgraded?: string }>();
   const { tier, isPro, status, billingInterval, currentPeriodEnd, cancelAtPeriodEnd, refresh: refreshTier } = useSubscription();
+  const { colors, isDark, toggleTheme } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const [showPaywall, setShowPaywall] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
   const [name, setName] = useState('');
@@ -576,6 +579,19 @@ export default function Profile() {
           <Text style={s.menuChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
+        <View style={s.menuRow}>
+          <View>
+            <Text style={s.menuLabel}>Appearance</Text>
+            <Text style={s.themeHint}>{isDark ? 'Dark mode' : 'Light mode'}</Text>
+          </View>
+          <Switch
+            value={!isDark}
+            onValueChange={toggleTheme}
+            trackColor={{ false: '#333', true: colors.green + '60' }}
+            thumbColor={isDark ? '#666' : colors.green}
+          />
+        </View>
+
         <TouchableOpacity style={s.menuRow} onPress={() => Linking.openURL('mailto:hello@bocy.io?subject=Feedback')} activeOpacity={0.7}>
           <Text style={s.menuLabel}>Give feedback</Text>
           <Text style={s.menuChevron}>{'\u203A'}</Text>
@@ -691,10 +707,10 @@ export default function Profile() {
   );
 }
 
-const s = StyleSheet.create({
+const createStyles = (c: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: c.bg,
   },
   scroll: {
     padding: spacing.lg,
@@ -712,12 +728,12 @@ const s = StyleSheet.create({
   backBtn: {
     fontFamily: fonts.regular,
     fontSize: 22,
-    color: colors.accent,
+    color: c.accent,
   },
   headerTitle: {
     fontFamily: fonts.semibold,
     fontSize: 16,
-    color: colors.text,
+    color: c.text,
     letterSpacing: -0.2,
   },
 
@@ -726,7 +742,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,212,170,0.12)',
+    backgroundColor: c.greenDim,
     borderWidth: 1,
     borderColor: 'rgba(0,212,170,0.25)',
     borderRadius: radius.sm,
@@ -736,7 +752,7 @@ const s = StyleSheet.create({
   upgradeText: {
     fontFamily: fonts.medium,
     fontSize: 13,
-    color: colors.green,
+    color: c.green,
   },
 
   // ── Success banner ──
@@ -744,7 +760,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: colors.accentDim,
+    backgroundColor: c.accentDim,
     borderRadius: radius.sm,
     padding: 12,
     marginBottom: spacing.md,
@@ -752,11 +768,11 @@ const s = StyleSheet.create({
   successText: {
     fontFamily: fonts.medium,
     fontSize: 13,
-    color: colors.accent,
+    color: c.accent,
   },
   successDismiss: {
     fontSize: 12,
-    color: colors.accent,
+    color: c.accent,
     padding: 4,
   },
 
@@ -764,9 +780,9 @@ const s = StyleSheet.create({
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.lg,
     padding: spacing.lg,
     marginBottom: spacing.xl,
@@ -775,7 +791,7 @@ const s = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: colors.accent,
+    backgroundColor: c.accent,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.md,
@@ -783,7 +799,7 @@ const s = StyleSheet.create({
   avatarText: {
     fontFamily: fonts.semibold,
     fontSize: 20,
-    color: colors.bg,
+    color: c.bg,
   },
   profileInfo: {
     flex: 1,
@@ -791,20 +807,20 @@ const s = StyleSheet.create({
   profileName: {
     fontFamily: fonts.semibold,
     fontSize: 18,
-    color: colors.text,
+    color: c.text,
     marginBottom: 2,
   },
   profileEmail: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.dim,
+    color: c.dim,
   },
 
   // ── Subscription card ──
   subCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
@@ -816,40 +832,40 @@ const s = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   subBadge: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: c.accentDim,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: c.border,
     borderRadius: 100,
     paddingVertical: 3,
     paddingHorizontal: 10,
   },
   subBadgePro: {
-    backgroundColor: 'rgba(0,212,170,0.12)',
+    backgroundColor: c.greenDim,
     borderColor: 'rgba(0,212,170,0.25)',
   },
   subBadgeText: {
     fontFamily: fonts.mono,
     fontSize: 10,
     letterSpacing: 2,
-    color: colors.dim,
+    color: c.dim,
   },
   subBadgeTextPro: {
-    color: colors.green,
+    color: c.green,
   },
   subTierLabel: {
     fontFamily: fonts.semibold,
     fontSize: 15,
-    color: colors.text,
+    color: c.text,
   },
   subDesc: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.dim,
+    color: c.dim,
     lineHeight: 20,
     marginBottom: spacing.sm,
   },
   subUpgradeBtn: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: c.accent,
     borderRadius: 100,
     paddingVertical: 12,
     alignItems: 'center',
@@ -857,11 +873,11 @@ const s = StyleSheet.create({
   subUpgradeBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: '#000000',
+    color: c.bg,
   },
   manageSubBtn: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: c.border,
     borderRadius: 100,
     paddingVertical: 10,
     alignItems: 'center',
@@ -869,7 +885,7 @@ const s = StyleSheet.create({
   manageSubBtnText: {
     fontFamily: fonts.medium,
     fontSize: 13,
-    color: colors.accent,
+    color: c.accent,
   },
 
   // ── Section ──
@@ -879,16 +895,16 @@ const s = StyleSheet.create({
   sectionTitle: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.text,
+    color: c.text,
     letterSpacing: -0.2,
     marginBottom: spacing.md,
   },
 
   // ── Account card ──
   accountCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
@@ -907,27 +923,27 @@ const s = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: colors.accentDim,
+    backgroundColor: c.accentDim,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   accountIconExpired: {
-    backgroundColor: colors.coralDim,
+    backgroundColor: c.coralDim,
   },
   accountIconBank: {
-    backgroundColor: colors.greenDim,
+    backgroundColor: c.greenDim,
   },
   accountIconText: {
     fontFamily: fonts.semibold,
     fontSize: 16,
-    color: colors.accent,
+    color: c.accent,
   },
   accountIconTextExpired: {
-    color: colors.coral,
+    color: c.coral,
   },
   accountIconTextBank: {
-    color: colors.green,
+    color: c.green,
   },
   accountInfo: {
     flex: 1,
@@ -941,32 +957,32 @@ const s = StyleSheet.create({
   accountName: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
   },
   typeBadge: {
-    backgroundColor: colors.accentDim,
+    backgroundColor: c.accentDim,
     paddingHorizontal: 6,
     paddingVertical: 1,
     borderRadius: 4,
   },
   typeBadgeCredit: {
-    backgroundColor: colors.skyDim,
+    backgroundColor: c.skyDim,
   },
   typeBadgeBank: {
-    backgroundColor: colors.greenDim,
+    backgroundColor: c.greenDim,
   },
   typeBadgeText: {
     fontFamily: fonts.medium,
     fontSize: 9,
-    color: colors.accent,
+    color: c.accent,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   typeBadgeTextCredit: {
-    color: colors.sky,
+    color: c.sky,
   },
   typeBadgeTextBank: {
-    color: colors.green,
+    color: c.green,
   },
   connectedBadge: {
     flexDirection: 'row',
@@ -977,19 +993,19 @@ const s = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: colors.green,
+    backgroundColor: c.green,
   },
   connectedText: {
     fontFamily: fonts.mono,
     fontSize: 9,
-    color: colors.green,
+    color: c.green,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   accountMeta: {
     fontFamily: fonts.regular,
     fontSize: 11,
-    color: colors.dim,
+    color: c.dim,
     marginTop: 2,
   },
   statusDot: {
@@ -1005,7 +1021,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     height: 3,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: c.mintDim,
     marginTop: 8,
     overflow: 'hidden',
   },
@@ -1023,17 +1039,17 @@ const s = StyleSheet.create({
   balanceAmount: {
     fontFamily: fonts.semibold,
     fontSize: 16,
-    color: colors.text,
+    color: c.text,
   },
   balanceLimit: {
     fontFamily: fonts.regular,
     fontSize: 11,
-    color: colors.dim,
+    color: c.dim,
   },
   utilBar: {
     height: 3,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: c.mintDim,
     marginTop: 8,
     overflow: 'hidden',
   },
@@ -1050,10 +1066,10 @@ const s = StyleSheet.create({
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.04)',
+    borderTopColor: c.mintDim,
   },
   reconnectBtn: {
-    backgroundColor: colors.coralDim,
+    backgroundColor: c.coralDim,
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 8,
@@ -1061,7 +1077,7 @@ const s = StyleSheet.create({
   reconnectBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 12,
-    color: colors.coral,
+    color: c.coral,
   },
   renewBtn: {
     backgroundColor: 'rgba(232,197,90,0.12)',
@@ -1077,13 +1093,13 @@ const s = StyleSheet.create({
   removeLink: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
   },
 
   // ── Add account ──
   addAccountBtn: {
     borderWidth: 1,
-    borderColor: colors.accentDim,
+    borderColor: c.accentDim,
     borderStyle: 'dashed',
     borderRadius: radius.md,
     paddingVertical: 14,
@@ -1093,14 +1109,14 @@ const s = StyleSheet.create({
   addAccountText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: colors.accent,
+    color: c.accent,
   },
 
   // ── Empty state ──
   emptyCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.md,
     padding: spacing.xl,
     alignItems: 'center',
@@ -1109,20 +1125,20 @@ const s = StyleSheet.create({
   emptyText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: colors.text2,
+    color: c.text2,
     marginBottom: 4,
   },
   emptyHint: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.muted,
+    color: c.muted,
   },
 
   // ── Consent note ──
   consentNote: {
     fontFamily: fonts.regular,
     fontSize: 11,
-    color: colors.muted,
+    color: c.muted,
     lineHeight: 16,
     textAlign: 'center',
     marginTop: spacing.md,
@@ -1133,9 +1149,9 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderTopLeftRadius: 0,
     borderTopRightRadius: 0,
     borderBottomLeftRadius: 0,
@@ -1158,19 +1174,27 @@ const s = StyleSheet.create({
   menuLabel: {
     fontFamily: fonts.regular,
     fontSize: 15,
-    color: colors.text,
+    color: c.text,
   },
   menuChevron: {
     fontFamily: fonts.regular,
     fontSize: 18,
-    color: colors.muted,
+    color: c.muted,
+  },
+
+  // ── Theme toggle ──
+  themeHint: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: c.dim,
+    marginTop: 2,
   },
 
   // ── Notification settings ──
   notifSection: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.md,
     marginBottom: 1,
     overflow: 'hidden',
@@ -1182,7 +1206,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: c.border,
   },
   notifRowLast: {
     borderBottomWidth: 0,
@@ -1194,13 +1218,13 @@ const s = StyleSheet.create({
   notifLabel: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
     letterSpacing: -0.1,
   },
   notifDesc: {
     fontFamily: fonts.regular,
     fontSize: 11,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 2,
     lineHeight: 16,
   },
@@ -1210,14 +1234,14 @@ const s = StyleSheet.create({
     gap: 6,
   },
   notifLabelLocked: {
-    color: colors.dim,
+    color: c.dim,
   },
   proBadge: {
     fontFamily: fonts.mono,
     fontSize: 8,
     letterSpacing: 1.5,
-    color: colors.green,
-    backgroundColor: 'rgba(0,212,170,0.12)',
+    color: c.green,
+    backgroundColor: c.greenDim,
     borderWidth: 1,
     borderColor: 'rgba(0,212,170,0.25)',
     borderRadius: 100,
@@ -1232,12 +1256,12 @@ const s = StyleSheet.create({
   notifUpgradeText: {
     fontFamily: fonts.medium,
     fontSize: 12,
-    color: colors.green,
+    color: c.green,
   },
   notifNote: {
     fontFamily: fonts.regular,
     fontSize: 11,
-    color: colors.muted,
+    color: c.muted,
     padding: 12,
     lineHeight: 16,
     textAlign: 'center',

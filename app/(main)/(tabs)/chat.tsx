@@ -1,11 +1,12 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { colors, fonts, spacing, radius } from '@/theme';
+import { fonts, spacing, radius, type ThemeColors } from '@/theme';
+import { useTheme } from '@/lib/theme-context';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
@@ -55,6 +56,8 @@ function getContextualQuestions(analysis: Analysis | null, goals: Goals | null):
 // ── Animated typing dots ──
 
 function TypingIndicator() {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
 
   useEffect(() => {
@@ -72,13 +75,13 @@ function TypingIndicator() {
   }, []);
 
   return (
-    <View style={[styles.bubble, styles.assistantBubble]}>
-      <View style={styles.dotsRow}>
+    <View style={[s.bubble, s.assistantBubble]}>
+      <View style={s.dotsRow}>
         {dots.map((dot, i) => (
           <Animated.View
             key={i}
             style={[
-              styles.dot,
+              s.dot,
               { opacity: dot.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) },
               { transform: [{ translateY: dot.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }) }] },
             ]}
@@ -102,46 +105,48 @@ function PlanCard({
   onDismiss: () => void;
   saving?: boolean;
 }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
   const isApproved = action.status === 'approved';
   const isDismissed = action.status === 'dismissed';
 
   return (
-    <View style={[styles.actionCard, isApproved && styles.actionCardApproved]}>
-      <Text style={styles.actionCardLabel}>{isApproved ? 'PLAN ADDED' : 'PLAN SUGGESTED'}</Text>
-      <Text style={styles.actionCardTitle}>{stripMd(d.action)}</Text>
-      <View style={styles.actionCardStats}>
+    <View style={[s.actionCard, isApproved && s.actionCardApproved]}>
+      <Text style={s.actionCardLabel}>{isApproved ? 'PLAN ADDED' : 'PLAN SUGGESTED'}</Text>
+      <Text style={s.actionCardTitle}>{stripMd(d.action)}</Text>
+      <View style={s.actionCardStats}>
         {d.target_amount != null && (
-          <View style={styles.actionStat}>
-            <Text style={styles.actionStatValue}>{'\u00a3'}{d.target_amount.toLocaleString()}</Text>
-            <Text style={styles.actionStatLabel}>target</Text>
+          <View style={s.actionStat}>
+            <Text style={s.actionStatValue}>{'\u00a3'}{d.target_amount.toLocaleString()}</Text>
+            <Text style={s.actionStatLabel}>target</Text>
           </View>
         )}
         {d.monthly_saving != null && (
-          <View style={styles.actionStat}>
-            <Text style={styles.actionStatValue}>{'\u00a3'}{d.monthly_saving.toLocaleString()}/mo</Text>
-            <Text style={styles.actionStatLabel}>saving</Text>
+          <View style={s.actionStat}>
+            <Text style={s.actionStatValue}>{'\u00a3'}{d.monthly_saving.toLocaleString()}/mo</Text>
+            <Text style={s.actionStatLabel}>saving</Text>
           </View>
         )}
         {d.timeline && (
-          <View style={styles.actionStat}>
-            <Text style={styles.actionStatValue}>{d.timeline}</Text>
-            <Text style={styles.actionStatLabel}>timeline</Text>
+          <View style={s.actionStat}>
+            <Text style={s.actionStatValue}>{d.timeline}</Text>
+            <Text style={s.actionStatLabel}>timeline</Text>
           </View>
         )}
       </View>
       {isApproved ? (
-        <View style={styles.approvedBanner}>
-          <Text style={styles.approvedBannerText}>{'\u2713'} Added to your plan</Text>
+        <View style={s.approvedBanner}>
+          <Text style={s.approvedBannerText}>{'\u2713'} Added to your plan</Text>
         </View>
       ) : isDismissed ? (
-        <View style={styles.dismissedBanner}>
-          <Text style={styles.dismissedBannerText}>Removed from plan</Text>
+        <View style={s.dismissedBanner}>
+          <Text style={s.dismissedBannerText}>Removed from plan</Text>
         </View>
       ) : (
-        <View style={styles.actionCardButtons}>
+        <View style={s.actionCardButtons}>
           <TouchableOpacity
-            style={[styles.approveBtn, saving && styles.approveBtnSaving]}
+            style={[s.approveBtn, saving && s.approveBtnSaving]}
             onPress={onApprove}
             activeOpacity={0.8}
             disabled={saving}
@@ -149,11 +154,11 @@ function PlanCard({
             {saving ? (
               <ActivityIndicator size="small" color={colors.bg} />
             ) : (
-              <Text style={styles.approveBtnText}>Add to plan</Text>
+              <Text style={s.approveBtnText}>Add to plan</Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.dismissBtn} onPress={onDismiss} activeOpacity={0.8}>
-            <Text style={styles.dismissBtnText}>Dismiss</Text>
+          <TouchableOpacity style={s.dismissBtn} onPress={onDismiss} activeOpacity={0.8}>
+            <Text style={s.dismissBtnText}>Dismiss</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -162,44 +167,48 @@ function PlanCard({
 }
 
 function BudgetItemCard({ action }: { action: ChatAction }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
   return (
-    <View style={[styles.actionCard, styles.actionCardApproved]}>
-      <Text style={styles.actionCardLabel}>BUDGET UPDATED</Text>
-      <Text style={styles.actionCardTitle}>{d.description}</Text>
-      <View style={styles.actionCardStats}>
-        <View style={styles.actionStat}>
-          <Text style={styles.actionStatValue}>{'\u00a3'}{(d.monthly_amount || 0).toLocaleString()}/mo</Text>
-          <Text style={styles.actionStatLabel}>amount</Text>
+    <View style={[s.actionCard, s.actionCardApproved]}>
+      <Text style={s.actionCardLabel}>BUDGET UPDATED</Text>
+      <Text style={s.actionCardTitle}>{d.description}</Text>
+      <View style={s.actionCardStats}>
+        <View style={s.actionStat}>
+          <Text style={s.actionStatValue}>{'\u00a3'}{(d.monthly_amount || 0).toLocaleString()}/mo</Text>
+          <Text style={s.actionStatLabel}>amount</Text>
         </View>
-        <View style={styles.actionStat}>
-          <Text style={styles.actionStatValue}>{d.is_essential ? 'Essential' : 'Lifestyle'}</Text>
-          <Text style={styles.actionStatLabel}>type</Text>
+        <View style={s.actionStat}>
+          <Text style={s.actionStatValue}>{d.is_essential ? 'Essential' : 'Lifestyle'}</Text>
+          <Text style={s.actionStatLabel}>type</Text>
         </View>
         {d.category && (
-          <View style={styles.actionStat}>
-            <Text style={styles.actionStatValue}>{d.category}</Text>
-            <Text style={styles.actionStatLabel}>category</Text>
+          <View style={s.actionStat}>
+            <Text style={s.actionStatValue}>{d.category}</Text>
+            <Text style={s.actionStatLabel}>category</Text>
           </View>
         )}
       </View>
-      <View style={styles.approvedBanner}>
-        <Text style={styles.approvedBannerText}>{'\u2713'} Added to your budget</Text>
+      <View style={s.approvedBanner}>
+        <Text style={s.approvedBannerText}>{'\u2713'} Added to your budget</Text>
       </View>
     </View>
   );
 }
 
 function OverrideCard({ action }: { action: ChatAction }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
   return (
-    <View style={styles.actionCard}>
-      <Text style={styles.actionCardLabel}>TRANSACTION UPDATED</Text>
-      <Text style={styles.overrideDescription}>
+    <View style={s.actionCard}>
+      <Text style={s.actionCardLabel}>TRANSACTION UPDATED</Text>
+      <Text style={s.overrideDescription}>
         {'\u201C'}{d.match_description}{'\u201D'} {'\u2192'} {d.category}
         {d.is_essential ? ' (essential)' : ' (discretionary)'}
       </Text>
-      <Text style={styles.overrideNote}>Will apply on your next analysis.</Text>
+      <Text style={s.overrideNote}>Will apply on your next analysis.</Text>
     </View>
   );
 }
@@ -223,46 +232,48 @@ function GoalUpdateCard({
   onKeep: () => void;
   saving?: boolean;
 }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
   const isAccepted = action.status === 'approved';
   const isDismissed = action.status === 'dismissed';
 
   return (
-    <View style={[styles.actionCard, styles.goalUpdateCard, isAccepted && styles.actionCardApproved]}>
-      <Text style={styles.goalUpdateLabel}>GOAL CHECK-IN</Text>
-      <Text style={styles.goalUpdateReason}>{stripMd(d.reason)}</Text>
-      <View style={styles.goalUpdateFields}>
-        <View style={styles.goalField}>
-          <Text style={styles.goalFieldLabel}>Situation</Text>
-          <Text style={styles.goalFieldValue}>{GOAL_LABELS[d.new_situation || ''] || d.new_situation}</Text>
+    <View style={[s.actionCard, s.goalUpdateCard, isAccepted && s.actionCardApproved]}>
+      <Text style={s.goalUpdateLabel}>GOAL CHECK-IN</Text>
+      <Text style={s.goalUpdateReason}>{stripMd(d.reason)}</Text>
+      <View style={s.goalUpdateFields}>
+        <View style={s.goalField}>
+          <Text style={s.goalFieldLabel}>Situation</Text>
+          <Text style={s.goalFieldValue}>{GOAL_LABELS[d.new_situation || ''] || d.new_situation}</Text>
         </View>
-        <View style={styles.goalField}>
-          <Text style={styles.goalFieldLabel}>1-year goal</Text>
-          <Text style={styles.goalFieldValue}>{GOAL_LABELS[d.new_one_year_goal || ''] || d.new_one_year_goal}</Text>
+        <View style={s.goalField}>
+          <Text style={s.goalFieldLabel}>1-year goal</Text>
+          <Text style={s.goalFieldValue}>{GOAL_LABELS[d.new_one_year_goal || ''] || d.new_one_year_goal}</Text>
         </View>
-        <View style={styles.goalField}>
-          <Text style={styles.goalFieldLabel}>2-year goal</Text>
-          <Text style={styles.goalFieldValue}>{GOAL_LABELS[d.new_two_year_goal || ''] || d.new_two_year_goal}</Text>
+        <View style={s.goalField}>
+          <Text style={s.goalFieldLabel}>2-year goal</Text>
+          <Text style={s.goalFieldValue}>{GOAL_LABELS[d.new_two_year_goal || ''] || d.new_two_year_goal}</Text>
         </View>
         {d.new_target_amount != null && (
-          <View style={styles.goalField}>
-            <Text style={styles.goalFieldLabel}>Target</Text>
-            <Text style={styles.goalFieldValue}>{'\u00a3'}{d.new_target_amount}</Text>
+          <View style={s.goalField}>
+            <Text style={s.goalFieldLabel}>Target</Text>
+            <Text style={s.goalFieldValue}>{'\u00a3'}{d.new_target_amount}</Text>
           </View>
         )}
       </View>
       {isAccepted ? (
-        <View style={styles.approvedBanner}>
-          <Text style={styles.approvedBannerText}>{'\u2713'} Goals updated</Text>
+        <View style={s.approvedBanner}>
+          <Text style={s.approvedBannerText}>{'\u2713'} Goals updated</Text>
         </View>
       ) : isDismissed ? (
-        <View style={styles.dismissedBanner}>
-          <Text style={styles.dismissedBannerText}>Keeping current goals</Text>
+        <View style={s.dismissedBanner}>
+          <Text style={s.dismissedBannerText}>Keeping current goals</Text>
         </View>
       ) : (
-        <View style={styles.actionCardButtons}>
+        <View style={s.actionCardButtons}>
           <TouchableOpacity
-            style={[styles.approveBtn, saving && styles.approveBtnSaving]}
+            style={[s.approveBtn, saving && s.approveBtnSaving]}
             onPress={onAccept}
             activeOpacity={0.8}
             disabled={saving}
@@ -270,11 +281,11 @@ function GoalUpdateCard({
             {saving ? (
               <ActivityIndicator size="small" color={colors.bg} />
             ) : (
-              <Text style={styles.approveBtnText}>Update goals</Text>
+              <Text style={s.approveBtnText}>Update goals</Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.dismissBtn} onPress={onKeep} activeOpacity={0.8} disabled={saving}>
-            <Text style={styles.dismissBtnText}>Keep current</Text>
+          <TouchableOpacity style={s.dismissBtn} onPress={onKeep} activeOpacity={0.8} disabled={saving}>
+            <Text style={s.dismissBtnText}>Keep current</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -288,6 +299,8 @@ export default function Chat() {
   const router = useRouter();
   const { prefill } = useLocalSearchParams<{ prefill?: string }>();
   const { isPro } = useSubscription();
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const [showPaywall, setShowPaywall] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -911,40 +924,40 @@ export default function Chat() {
         : `I've finished analysing your spending and have personalised recommendations ready. Want to explore them together?`;
 
     return (
-      <View style={styles.container}>
+      <View style={s.container}>
         <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
-        <View style={styles.teaserContainer}>
+        <View style={s.teaserContainer}>
           {/* Fake conversation preview */}
-          <View style={styles.teaserChat}>
-            <View style={styles.teaserBubbleAi}>
-              <Text style={styles.teaserBubbleAiText}>{teaserMsg}</Text>
+          <View style={s.teaserChat}>
+            <View style={s.teaserBubbleAi}>
+              <Text style={s.teaserBubbleAiText}>{teaserMsg}</Text>
             </View>
-            <View style={styles.teaserBubbleUser}>
-              <Text style={styles.teaserBubbleUserText}>
+            <View style={s.teaserBubbleUser}>
+              <Text style={s.teaserBubbleUserText}>
                 {topMove?.action ? 'Yes, show me how!' : 'What should I do first?'}
               </Text>
             </View>
-            <View style={styles.teaserBubbleAi}>
-              <View style={styles.teaserTypingRow}>
-                <View style={styles.teaserDot} />
-                <View style={[styles.teaserDot, { opacity: 0.6 }]} />
-                <View style={[styles.teaserDot, { opacity: 0.3 }]} />
+            <View style={s.teaserBubbleAi}>
+              <View style={s.teaserTypingRow}>
+                <View style={s.teaserDot} />
+                <View style={[s.teaserDot, { opacity: 0.6 }]} />
+                <View style={[s.teaserDot, { opacity: 0.3 }]} />
               </View>
             </View>
           </View>
 
           {/* Fade overlay + CTA */}
-          <View style={styles.teaserOverlay}>
-            <Text style={styles.teaserTitle}>Your assistant is ready</Text>
-            <Text style={styles.teaserSubtitle}>
+          <View style={s.teaserOverlay}>
+            <Text style={s.teaserTitle}>Your assistant is ready</Text>
+            <Text style={s.teaserSubtitle}>
               Unlock personalised guidance based on your{score ? ` ${score}/100 financial score` : ' analysis'}
             </Text>
             <TouchableOpacity
-              style={styles.teaserBtn}
+              style={s.teaserBtn}
               onPress={() => setShowPaywall(true)}
               activeOpacity={0.8}
             >
-              <Text style={styles.teaserBtnText}>Continue conversation</Text>
+              <Text style={s.teaserBtnText}>Continue conversation</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -954,21 +967,21 @@ export default function Chat() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={s.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
       {/* ── Header ── */}
       {messages.length > 0 && (
-        <View style={styles.header}>
-          <View style={styles.headerLeftChat}>
-            <View style={styles.chatBocyWrap}>
+        <View style={s.header}>
+          <View style={s.headerLeftChat}>
+            <View style={s.chatBocyWrap}>
               <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
             </View>
-            <Text style={styles.headerTitle}>Bocy</Text>
+            <Text style={s.headerTitle}>Bocy</Text>
           </View>
-          <TouchableOpacity onPress={clearChat} style={styles.clearButton}>
-            <Text style={styles.clearText}>New chat</Text>
+          <TouchableOpacity onPress={clearChat} style={s.clearButton}>
+            <Text style={s.clearText}>New chat</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -976,24 +989,24 @@ export default function Chat() {
       {/* ── Messages ── */}
       <ScrollView
         ref={scrollRef}
-        style={styles.messages}
-        contentContainerStyle={styles.messagesContent}
+        style={s.messages}
+        contentContainerStyle={s.messagesContent}
         keyboardShouldPersistTaps="handled"
       >
         {messages.length === 0 && (
-          <View style={styles.suggestedContainer}>
-            <View style={styles.chatBocyHero}>
+          <View style={s.suggestedContainer}>
+            <View style={s.chatBocyHero}>
               <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
             </View>
-            <Text style={styles.suggestedTitle}>Ask Bocy</Text>
-            <Text style={styles.suggestedSubtitle}>Your financial companion</Text>
+            <Text style={s.suggestedTitle}>Ask Bocy</Text>
+            <Text style={s.suggestedSubtitle}>Your financial companion</Text>
             {suggestedQuestions.map((q, i) => (
               <TouchableOpacity
                 key={i}
-                style={styles.suggestedButton}
+                style={s.suggestedButton}
                 onPress={() => sendMessage(q)}
               >
-                <Text style={styles.suggestedText}>{q}</Text>
+                <Text style={s.suggestedText}>{q}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -1003,12 +1016,12 @@ export default function Chat() {
           <View key={i}>
             <View
               style={[
-                styles.bubble,
-                msg.role === 'user' ? styles.userBubble : styles.assistantBubble,
+                s.bubble,
+                msg.role === 'user' ? s.userBubble : s.assistantBubble,
               ]}
             >
               {msg.role === 'user' ? (
-                <Text style={[styles.bubbleText, styles.userText]}>{msg.content}</Text>
+                <Text style={[s.bubbleText, s.userText]}>{msg.content}</Text>
               ) : (
                 <Markdown>{msg.content}</Markdown>
               )}
@@ -1016,7 +1029,7 @@ export default function Chat() {
 
             {/* Render action cards below assistant messages */}
             {msg.actions?.map((action, j) => (
-              <View key={`action-${i}-${j}`} style={styles.actionCardWrapper}>
+              <View key={`action-${i}-${j}`} style={s.actionCardWrapper}>
                 {action.type === 'plan_proposed' ? (
                   <PlanCard
                     action={action}
@@ -1025,8 +1038,8 @@ export default function Chat() {
                     saving={savingPlan === `${i}-${j}`}
                   />
                 ) : action.type === 'plan_error' ? (
-                  <View style={styles.errorCard}>
-                    <Text style={styles.errorCardText}>{action.data.error || 'Plan could not be saved.'}</Text>
+                  <View style={s.errorCard}>
+                    <Text style={s.errorCardText}>{action.data.error || 'Plan could not be saved.'}</Text>
                   </View>
                 ) : action.type === 'override_saved' ? (
                   <OverrideCard action={action} />
@@ -1048,18 +1061,18 @@ export default function Chat() {
         {loading && <TypingIndicator />}
 
         {error && (
-          <TouchableOpacity style={styles.retryBanner} onPress={retryLastMessage}>
-            <Text style={styles.retryText}>{error}</Text>
-            <Text style={styles.retryAction}>Tap to retry</Text>
+          <TouchableOpacity style={s.retryBanner} onPress={retryLastMessage}>
+            <Text style={s.retryText}>{error}</Text>
+            <Text style={s.retryAction}>Tap to retry</Text>
           </TouchableOpacity>
         )}
       </ScrollView>
 
       {/* ── Input ── */}
-      <View style={styles.inputRow}>
+      <View style={s.inputRow}>
         <TextInput
           ref={inputRef}
-          style={[styles.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
+          style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
           placeholder={listening ? 'Listening...' : 'Ask about your finances...'}
           placeholderTextColor={listening ? colors.green : colors.muted}
           value={input}
@@ -1073,21 +1086,21 @@ export default function Chat() {
         />
         {voiceSupported && (
           <TouchableOpacity
-            style={[styles.voiceButton, listening && styles.voiceButtonActive]}
+            style={[s.voiceButton, listening && s.voiceButtonActive]}
             onPress={toggleVoice}
             activeOpacity={0.7}
           >
-            <Text style={[styles.voiceIcon, listening && styles.voiceIconActive]}>
+            <Text style={[s.voiceIcon, listening && s.voiceIconActive]}>
               {listening ? '\u23F9' : '\u{1F3A4}'}
             </Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity
-          style={[styles.sendButton, (!input.trim() || loading) && styles.sendDisabled]}
+          style={[s.sendButton, (!input.trim() || loading) && s.sendDisabled]}
           onPress={() => sendMessage(input)}
           disabled={!input.trim() || loading}
         >
-          <Text style={styles.sendText}>{'\u2191'}</Text>
+          <Text style={s.sendText}>{'\u2191'}</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -1116,10 +1129,10 @@ function buildSpendingBreakdown(a: Analysis | null): { category: string; monthly
 
 // ── Styles ──
 
-const styles = StyleSheet.create({
+const createStyles = (c: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: c.bg,
   },
   header: {
     flexDirection: 'row',
@@ -1129,7 +1142,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xxl + spacing.sm,
     paddingBottom: spacing.sm,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: c.border,
   },
   headerLeftChat: {
     flexDirection: 'row',
@@ -1148,7 +1161,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontFamily: fonts.semibold,
     fontSize: 16,
-    color: colors.text,
+    color: c.text,
   },
   clearButton: {
     paddingVertical: spacing.xs,
@@ -1157,7 +1170,7 @@ const styles = StyleSheet.create({
   clearText: {
     fontFamily: fonts.medium,
     fontSize: 13,
-    color: colors.accent,
+    color: c.accent,
   },
   messages: {
     flex: 1,
@@ -1174,19 +1187,19 @@ const styles = StyleSheet.create({
   suggestedTitle: {
     fontFamily: fonts.heading,
     fontSize: 20,
-    color: colors.text,
+    color: c.text,
   },
   suggestedSubtitle: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.dim,
+    color: c.dim,
     marginBottom: spacing.lg,
     marginTop: spacing.xs,
   },
   suggestedButton: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.md,
     paddingVertical: 14,
     paddingHorizontal: spacing.md,
@@ -1196,7 +1209,7 @@ const styles = StyleSheet.create({
   suggestedText: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: colors.text2,
+    color: c.text2,
     textAlign: 'center',
   },
   bubble: {
@@ -1206,14 +1219,14 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   userBubble: {
-    backgroundColor: colors.accent,
+    backgroundColor: c.accent,
     alignSelf: 'flex-end',
     borderBottomRightRadius: radius.sm,
   },
   assistantBubble: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     alignSelf: 'flex-start',
     borderBottomLeftRadius: radius.sm,
   },
@@ -1223,7 +1236,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   userText: {
-    color: colors.bg,
+    color: c.bg,
   },
   // ── Animated typing dots ──
   dotsRow: {
@@ -1237,7 +1250,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.accent,
+    backgroundColor: c.accent,
   },
   // ── Action cards ──
   actionCardWrapper: {
@@ -1246,39 +1259,39 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   errorCard: {
-    backgroundColor: 'rgba(255,100,100,0.08)',
+    backgroundColor: c.coralDim,
     borderWidth: 1,
-    borderColor: 'rgba(255,100,100,0.2)',
+    borderColor: c.coral,
     borderRadius: radius.md,
     padding: spacing.md,
   },
   errorCardText: {
     fontFamily: fonts.medium,
     fontSize: 13,
-    color: colors.coral,
+    color: c.coral,
     lineHeight: 20,
   },
   actionCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.accentDim,
+    borderColor: c.accentDim,
     borderRadius: radius.lg,
     padding: spacing.md,
   },
   actionCardApproved: {
-    borderColor: colors.accent,
+    borderColor: c.accent,
   },
   actionCardLabel: {
     fontFamily: fonts.semibold,
     fontSize: 10,
     letterSpacing: 1,
-    color: colors.accent,
+    color: c.accent,
     marginBottom: spacing.xs,
   },
   actionCardTitle: {
     fontFamily: fonts.semibold,
     fontSize: 15,
-    color: colors.text,
+    color: c.text,
     lineHeight: 22,
     marginBottom: spacing.sm,
   },
@@ -1293,12 +1306,12 @@ const styles = StyleSheet.create({
   actionStatValue: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    color: colors.accent,
+    color: c.accent,
   },
   actionStatLabel: {
     fontFamily: fonts.regular,
     fontSize: 11,
-    color: colors.dim,
+    color: c.dim,
     marginTop: 2,
   },
   actionCardButtons: {
@@ -1307,7 +1320,7 @@ const styles = StyleSheet.create({
   },
   approveBtn: {
     flex: 1,
-    backgroundColor: colors.accent,
+    backgroundColor: c.accent,
     paddingVertical: 12,
     borderRadius: radius.md,
     alignItems: 'center',
@@ -1320,12 +1333,12 @@ const styles = StyleSheet.create({
   approveBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: colors.bg,
+    color: c.bg,
   },
   dismissBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     paddingVertical: 12,
     borderRadius: radius.md,
     alignItems: 'center',
@@ -1335,10 +1348,10 @@ const styles = StyleSheet.create({
   dismissBtnText: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: colors.dim,
+    color: c.dim,
   },
   approvedBanner: {
-    backgroundColor: colors.accentDim,
+    backgroundColor: c.accentDim,
     borderRadius: radius.sm,
     paddingVertical: 10,
     alignItems: 'center',
@@ -1346,7 +1359,7 @@ const styles = StyleSheet.create({
   approvedBannerText: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.accent,
+    color: c.accent,
   },
   dismissedBanner: {
     paddingVertical: 10,
@@ -1355,10 +1368,10 @@ const styles = StyleSheet.create({
   dismissedBannerText: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.muted,
+    color: c.muted,
   },
   viewPlanBanner: {
-    backgroundColor: colors.accentDim,
+    backgroundColor: c.accentDim,
     borderRadius: radius.sm,
     paddingVertical: 10,
     alignItems: 'center',
@@ -1366,7 +1379,7 @@ const styles = StyleSheet.create({
   viewPlanBannerText: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.accent,
+    color: c.accent,
   },
   dismissLink: {
     paddingVertical: 8,
@@ -1375,35 +1388,35 @@ const styles = StyleSheet.create({
   dismissLinkText: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.muted,
+    color: c.muted,
   },
   overrideDescription: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: colors.text2,
+    color: c.text2,
     lineHeight: 22,
   },
   overrideNote: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
     marginTop: spacing.xs,
   },
   // ── Goal update card ──
   goalUpdateCard: {
-    borderColor: colors.skyDim,
+    borderColor: c.skyDim,
   },
   goalUpdateLabel: {
     fontFamily: fonts.semibold,
     fontSize: 10,
     letterSpacing: 1,
-    color: colors.sky,
+    color: c.sky,
     marginBottom: spacing.xs,
   },
   goalUpdateReason: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
     lineHeight: 22,
     marginBottom: spacing.sm,
   },
@@ -1416,21 +1429,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: c.border,
   },
   goalFieldLabel: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
   },
   goalFieldValue: {
     fontFamily: fonts.mono,
     fontSize: 13,
-    color: colors.sky,
+    color: c.sky,
   },
   // ── Retry banner ──
   retryBanner: {
-    backgroundColor: colors.coralDim,
+    backgroundColor: c.coralDim,
     borderRadius: radius.md,
     padding: spacing.md,
     marginTop: spacing.xs,
@@ -1439,13 +1452,13 @@ const styles = StyleSheet.create({
   retryText: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.coral,
+    color: c.coral,
     textAlign: 'center',
   },
   retryAction: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.coral,
+    color: c.coral,
     marginTop: spacing.xs,
   },
   // ── Input row ──
@@ -1453,44 +1466,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     padding: spacing.md,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
+    borderTopColor: c.border,
+    backgroundColor: c.surface,
     gap: spacing.sm,
     alignItems: 'flex-end',
   },
   input: {
     flex: 1,
     fontFamily: fonts.regular,
-    backgroundColor: colors.bg,
+    backgroundColor: c.bg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.md,
     paddingVertical: 10,
     paddingHorizontal: spacing.md,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
   },
   voiceButton: {
     width: 44,
     height: 44,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: c.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
   voiceButtonActive: {
-    borderColor: colors.green,
-    backgroundColor: 'rgba(0,212,170,0.10)',
+    borderColor: c.green,
+    backgroundColor: c.greenDim,
   },
   voiceIcon: {
     fontSize: 18,
   },
   voiceIconActive: {
-    color: colors.green,
+    color: c.green,
   },
   sendButton: {
-    backgroundColor: colors.accent,
+    backgroundColor: c.accent,
     width: 44,
     height: 44,
     borderRadius: radius.md,
@@ -1503,7 +1516,7 @@ const styles = StyleSheet.create({
   sendText: {
     fontFamily: fonts.semibold,
     fontSize: 20,
-    color: colors.bg,
+    color: c.bg,
   },
 
   // ── Teaser chat preview (free tier) ──
@@ -1517,9 +1530,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   teaserBubbleAi: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.md,
     padding: 14,
     maxWidth: '85%',
@@ -1528,11 +1541,11 @@ const styles = StyleSheet.create({
   teaserBubbleAiText: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.text2,
+    color: c.text2,
     lineHeight: 21,
   },
   teaserBubbleUser: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: c.accentDim,
     borderRadius: radius.md,
     padding: 14,
     maxWidth: '75%',
@@ -1541,7 +1554,7 @@ const styles = StyleSheet.create({
   teaserBubbleUserText: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
     lineHeight: 21,
   },
   teaserTypingRow: {
@@ -1553,34 +1566,34 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: colors.dim,
+    backgroundColor: c.dim,
   },
   teaserOverlay: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xl,
     paddingBottom: 40,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: c.border,
     alignItems: 'center',
-    backgroundColor: colors.bg,
+    backgroundColor: c.bg,
   },
   teaserTitle: {
     fontFamily: fonts.heading,
     fontSize: 18,
-    color: colors.text,
+    color: c.text,
     marginBottom: spacing.xs,
   },
   teaserSubtitle: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.dim,
+    color: c.dim,
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: spacing.lg,
     maxWidth: 280,
   },
   teaserBtn: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: c.accent,
     borderRadius: 100,
     paddingVertical: 14,
     paddingHorizontal: spacing.xl + spacing.md,
@@ -1588,6 +1601,6 @@ const styles = StyleSheet.create({
   teaserBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 15,
-    color: '#000000',
+    color: c.bg,
   },
 });

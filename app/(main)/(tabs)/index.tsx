@@ -10,7 +10,8 @@ import { getLastResult } from '@/app/(main)/processing';
 import { syncBankData } from '@/lib/sync';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
-import { colors, fonts, spacing, radius } from '@/theme';
+import { fonts, spacing, radius, type ThemeColors } from '@/theme';
+import { useTheme } from '@/lib/theme-context';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 
@@ -81,6 +82,8 @@ const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; 
 
 export default function Home() {
   const router = useRouter();
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState('');
@@ -804,8 +807,8 @@ export default function Home() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator color="#FFFFFF" size="large" />
+      <View style={s.loadingContainer}>
+        <ActivityIndicator color={colors.accent} size="large" />
       </View>
     );
   }
@@ -890,47 +893,47 @@ export default function Home() {
   const weeklyHealthy = spentThisWeek <= weeklyBudget;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scroll}>
+    <ScrollView style={s.container} contentContainerStyle={s.scroll}>
       {/* ── Header with Bocy ── */}
-      <View style={styles.headerRow}>
-        <View style={styles.headerLeft}>
-          <View style={styles.bocyHeaderWrap}>
+      <View style={s.headerRow}>
+        <View style={s.headerLeft}>
+          <View style={s.bocyHeaderWrap}>
             <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
           </View>
           <View>
-            <Text style={styles.greeting}>
+            <Text style={s.greeting}>
               Hello, {userName || 'there'}
             </Text>
             {syncing && (
-              <Text style={styles.syncText}>Syncing latest transactions...</Text>
+              <Text style={s.syncText}>Syncing latest transactions...</Text>
             )}
           </View>
         </View>
         <TouchableOpacity
-          style={styles.menuButton}
+          style={s.menuButton}
           onPress={() => router.push('/(main)/profile')}
         >
-          <View style={styles.menuLine} />
-          <View style={[styles.menuLine, styles.menuLineShort]} />
-          <View style={styles.menuLine} />
+          <View style={s.menuLine} />
+          <View style={[s.menuLine, s.menuLineShort]} />
+          <View style={s.menuLine} />
         </TouchableOpacity>
       </View>
 
       {!analysis ? (
         /* ── Empty State ── */
-        <View style={styles.emptyState}>
-          <View style={styles.emptyBocyWrap}>
+        <View style={s.emptyState}>
+          <View style={s.emptyBocyWrap}>
             <BocyFace mood="neutral" size="lg" breathing />
           </View>
-          <Text style={styles.emptyTitle}>Your #1 financial move awaits</Text>
-          <Text style={styles.emptyDesc}>
+          <Text style={s.emptyTitle}>Your #1 financial move awaits</Text>
+          <Text style={s.emptyDesc}>
             Connect your bank account so Bocy can analyse your transactions and find the most impactful action you can take right now.
           </Text>
           <TouchableOpacity
-            style={styles.ctaButton}
+            style={s.ctaButton}
             onPress={() => router.push('/(main)/connect')}
           >
-            <Text style={styles.ctaText}>Connect your bank</Text>
+            <Text style={s.ctaText}>Connect your bank</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -938,13 +941,13 @@ export default function Home() {
           {/* ── Unresolved transactions nudge ── */}
           {unresolvedTxCount > 0 && (
             <TouchableOpacity
-              style={styles.reviewBanner}
+              style={s.reviewBanner}
               onPress={() => { setCatAssignments({}); setShowCatReview(true); }}
               activeOpacity={0.7}
             >
-              <Text style={styles.reviewBannerText}>
+              <Text style={s.reviewBannerText}>
                 {unresolvedTxCount} transaction{unresolvedTxCount !== 1 ? 's' : ''} couldn't be categorised.{' '}
-                <Text style={styles.reviewBannerLink}>Tell me what they are</Text>
+                <Text style={s.reviewBannerLink}>Tell me what they are</Text>
               </Text>
             </TouchableOpacity>
           )}
@@ -952,33 +955,33 @@ export default function Home() {
           {/* ══════════════════════════════════════════════
               CARD 1 — YOUR INSIGHTS
               ══════════════════════════════════════════════ */}
-          <View style={styles.card}>
+          <View style={s.card}>
             <AnimGlyph delay={0}>
-              <Text style={styles.cardTitle}>Your Insights</Text>
+              <Text style={s.cardTitle}>Your Insights</Text>
             </AnimGlyph>
 
             {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
               const effortClr = move.effort === 'high' ? colors.green
-                : move.effort === 'medium' ? colors.dim : '#666666';
+                : move.effort === 'medium' ? colors.dim : colors.lavender;
               return (
                 <AnimGlyph key={i} delay={i * 120}>
                   <View
                     accessibilityRole="summary"
                     accessibilityLabel={`Insight: ${move.action}, saves ${move.annualImpact} pounds per year`}
-                    style={styles.moveItemFull}
+                    style={s.moveItemFull}
                   >
-                    <Text style={styles.moveTitle}>
+                    <Text style={s.moveTitle}>
                       {stripMd(move.action)}
                     </Text>
 
                     {/* Impact + effort on one line */}
-                    <View style={styles.moveMeta}>
-                      <Text style={styles.moveImpact}>
+                    <View style={s.moveMeta}>
+                      <Text style={s.moveImpact}>
                         +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
                       </Text>
                       {move.effort && (
-                        <View style={[styles.effortPill, { borderColor: effortClr + '40' }]}>
-                          <Text style={[styles.effortPillText, { color: effortClr }]}>
+                        <View style={[s.effortPill, { borderColor: effortClr + '40' }]}>
+                          <Text style={[s.effortPillText, { color: effortClr }]}>
                             {move.effort}
                           </Text>
                         </View>
@@ -986,36 +989,36 @@ export default function Home() {
                     </View>
 
                     {/* Action buttons */}
-                    <View style={styles.moveActions}>
+                    <View style={s.moveActions}>
                       <TouchableOpacity
-                        style={styles.moveApproveBtn}
+                        style={s.moveApproveBtn}
                         onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlight: String(i) } })}
                       >
-                        <Text style={styles.moveApproveBtnText}>View</Text>
+                        <Text style={s.moveApproveBtnText}>View</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        style={styles.moveDeleteBtn}
+                        style={s.moveDeleteBtn}
                         onPress={() => handleDeleteMove(move)}
                       >
-                        <Text style={styles.moveDeleteBtnText}>Delete</Text>
+                        <Text style={s.moveDeleteBtnText}>Delete</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
                 </AnimGlyph>
               );
             }) : (
-              <Text style={styles.noDataText}>
+              <Text style={s.noDataText}>
                 No actionable insights yet. Upload a statement to get started.
               </Text>
             )}
 
             {dashboardMoves.length > 2 && (
               <TouchableOpacity
-                style={styles.viewAllBtn}
+                style={s.viewAllBtn}
                 onPress={() => router.push('/(main)/(tabs)/plan')}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.viewAllText, { color: colors.green }]}>
+                <Text style={[s.viewAllText, { color: colors.green }]}>
                   View plan {'\u203A'}
                 </Text>
               </TouchableOpacity>
@@ -1025,73 +1028,73 @@ export default function Home() {
           {/* ══════════════════════════════════════════════
               CARD 2 — YOUR INCOME
               ══════════════════════════════════════════════ */}
-          <View style={styles.card} accessibilityRole="summary" accessibilityLabel={`Monthly income: ${Math.round(income)} pounds`}>
+          <View style={s.card} accessibilityRole="summary" accessibilityLabel={`Monthly income: ${Math.round(income)} pounds`}>
             <AnimGlyph delay={50}>
-              <View style={styles.cardTitleRow}>
-                <Text style={styles.cardTitle}>Your income</Text>
+              <View style={s.cardTitleRow}>
+                <Text style={s.cardTitle}>Your income</Text>
                 <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'income' ? null : 'income')}>
-                  <Text style={styles.infoIcon}>i</Text>
+                  <Text style={s.infoIcon}>i</Text>
                 </TouchableOpacity>
               </View>
             </AnimGlyph>
             {infoCard === 'income' && (
-              <View style={styles.infoBox}>
-                <Text style={styles.infoBoxText}>
+              <View style={s.infoBox}>
+                <Text style={s.infoBoxText}>
                   Income is detected from your bank account transactions only (not credit cards). Regular credits matching salary, benefit, or employer patterns are identified. Remove any that aren't real income.
                 </Text>
               </View>
             )}
 
             <AnimGlyph delay={100}>
-              <View style={styles.bigNumberWrap}>
-                <Text style={styles.bigNumber} accessibilityRole="text">
+              <View style={s.bigNumberWrap}>
+                <Text style={s.bigNumber} accessibilityRole="text">
                   {'\u00a3'}{Math.round(income).toLocaleString()}
                 </Text>
-                <Text style={styles.bigNumberLabel}>monthly</Text>
+                <Text style={s.bigNumberLabel}>monthly</Text>
               </View>
             </AnimGlyph>
 
             {incomeSources.length > 0 ? (
               <>
-                <View style={styles.divider} />
-                <Text style={styles.incomeSourcesHeader}>
+                <View style={s.divider} />
+                <Text style={s.incomeSourcesHeader}>
                   {incomeSources.length} source{incomeSources.length !== 1 ? 's' : ''}
                 </Text>
                 {incomeSources.map((src: IncomeSource, i: number) => (
                   <AnimGlyph key={i} delay={150 + i * 80}>
-                    <View style={styles.sourceCard}>
-                      <View style={styles.sourceRow}>
-                        <View style={styles.sourceInfo}>
-                          <Text style={styles.sourceName}>{src.source}</Text>
-                          <View style={styles.sourceTagRow}>
-                            <Text style={styles.sourceFreq}>
+                    <View style={s.sourceCard}>
+                      <View style={s.sourceRow}>
+                        <View style={s.sourceInfo}>
+                          <Text style={s.sourceName}>{src.source}</Text>
+                          <View style={s.sourceTagRow}>
+                            <Text style={s.sourceFreq}>
                               {src.frequency.charAt(0).toUpperCase() + src.frequency.slice(1)}
                             </Text>
                             {src.isSalary && (
-                              <View style={[styles.primaryTag, { backgroundColor: colors.greenDim, borderColor: colors.green + '30' }]}>
-                                <Text style={[styles.primaryTagText, { color: colors.green }]}>PRIMARY</Text>
+                              <View style={[s.primaryTag, { backgroundColor: colors.greenDim, borderColor: colors.green + '30' }]}>
+                                <Text style={[s.primaryTagText, { color: colors.green }]}>PRIMARY</Text>
                               </View>
                             )}
                         </View>
                       </View>
-                      <View style={styles.sourceAmountWrap}>
-                        <Text style={styles.sourceAmount}>
+                      <View style={s.sourceAmountWrap}>
+                        <Text style={s.sourceAmount}>
                           {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
                         </Text>
-                        <Text style={styles.sourceAmountPer}>
+                        <Text style={s.sourceAmountPer}>
                           per {src.frequency === 'weekly' ? 'week' : src.frequency === 'fortnightly' ? 'fortnight' : 'month'}
                         </Text>
                       </View>
                     </View>
                     {/* Remove non-income */}
                     <TouchableOpacity
-                      style={styles.removeSourceBtn}
+                      style={s.removeSourceBtn}
                       onPress={() => handleRemoveIncomeSource(src.source)}
                       disabled={removingSource === src.source}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       activeOpacity={0.6}
                     >
-                      <Text style={styles.removeSourceText}>
+                      <Text style={s.removeSourceText}>
                         {removingSource === src.source ? 'Removing...' : 'Not income? Remove'}
                       </Text>
                     </TouchableOpacity>
@@ -1100,59 +1103,59 @@ export default function Home() {
                 ))}
               </>
             ) : (
-              <Text style={styles.noDataText}>No income sources detected from bank accounts.</Text>
+              <Text style={s.noDataText}>No income sources detected from bank accounts.</Text>
             )}
           </View>
 
           {/* ══════════════════════════════════════════════
               CARD 3 — SAFE TO SPEND
               ══════════════════════════════════════════════ */}
-          <View style={styles.card}>
+          <View style={s.card}>
             <AnimGlyph delay={100}>
-              <View style={styles.cardTitleRow}>
-                <Text style={styles.cardTitle}>Safe to spend</Text>
+              <View style={s.cardTitleRow}>
+                <Text style={s.cardTitle}>Safe to spend</Text>
                 <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'safe' ? null : 'safe')}>
-                  <Text style={styles.infoIcon}>i</Text>
+                  <Text style={s.infoIcon}>i</Text>
                 </TouchableOpacity>
               </View>
             </AnimGlyph>
             {infoCard === 'safe' && (
-              <View style={styles.infoBox}>
-                <Text style={styles.infoBoxText}>
+              <View style={s.infoBox}>
+                <Text style={s.infoBoxText}>
                   This is your weekly lifestyle budget: (Monthly income - Essentials) / 4.33, minus what you've already spent on lifestyle this month. It tells you how much discretionary spending you can still afford this week.
                 </Text>
               </View>
             )}
-            <Text style={styles.cardSubtitle}>Your weekly lifestyle allowance</Text>
+            <Text style={s.cardSubtitle}>Your weekly lifestyle allowance</Text>
 
             {/* Big remaining number */}
             <AnimGlyph delay={150}>
-              <View style={styles.safeToSpendHero}>
-                <Text style={[styles.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }]}>
+              <View style={s.safeToSpendHero}>
+                <Text style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }]}>
                   {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
                 </Text>
-                <Text style={styles.safeToSpendLabel}>left this week</Text>
+                <Text style={s.safeToSpendLabel}>left this week</Text>
               </View>
             </AnimGlyph>
 
             {/* Progress bar with breathing animation */}
-            <View style={styles.safeToSpendBar}>
+            <View style={s.safeToSpendBar}>
               <BreathingBar
                 color={weeklyHealthy ? colors.green : colors.coral}
                 width={`${weeklyUsedPct}%`}
-                style={styles.safeToSpendBarFill}
+                style={s.safeToSpendBarFill}
               />
             </View>
 
             {/* Spent vs budget row */}
-            <View style={styles.safeToSpendRow}>
+            <View style={s.safeToSpendRow}>
               <View>
-                <Text style={styles.safeToSpendMeta}>
+                <Text style={s.safeToSpendMeta}>
                   {'\u00a3'}{Math.round(spentThisWeek).toLocaleString()} spent
                 </Text>
               </View>
               <View>
-                <Text style={styles.safeToSpendMeta}>
+                <Text style={s.safeToSpendMeta}>
                   {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()} budget
                 </Text>
               </View>
@@ -1162,62 +1165,62 @@ export default function Home() {
           {/* ══════════════════════════════════════════════
               CARD 4 — YOUR BUDGET REALITY
               ══════════════════════════════════════════════ */}
-          <View style={styles.card}>
+          <View style={s.card}>
             {/* Info icon for budget card */}
-            <View style={styles.cardTitleRow}>
+            <View style={s.cardTitleRow}>
               <View style={{ flex: 1 }} />
               <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'budget' ? null : 'budget')}>
-                <Text style={styles.infoIcon}>i</Text>
+                <Text style={s.infoIcon}>i</Text>
               </TouchableOpacity>
             </View>
             {infoCard === 'budget' && (
-              <View style={styles.infoBox}>
-                <Text style={styles.infoBoxText}>
+              <View style={s.infoBox}>
+                <Text style={s.infoBoxText}>
                   Your spending is split into Essentials (rent, bills, groceries) and Lifestyle (dining, shopping, entertainment). Categories are determined by transaction enrichment and merchant matching. You can re-categorize any transaction by tapping it.
                 </Text>
               </View>
             )}
 
             {/* Header */}
-            <View style={styles.budgetHeaderRow}>
-              <Text style={styles.cardTitle}>Your budget reality</Text>
+            <View style={s.budgetHeaderRow}>
+              <Text style={s.cardTitle}>Your budget reality</Text>
             </View>
 
             {/* 3-segment stacked bar — monochrome */}
-            <View style={styles.budgetBar}>
+            <View style={s.budgetBar}>
               {nonDiscFlex > 0 && (
-                <View style={[styles.barSeg, { flex: nonDiscFlex, backgroundColor: '#FFFFFF' }]} />
+                <View style={[s.barSeg, { flex: nonDiscFlex, backgroundColor: colors.accent }]} />
               )}
               {discFlex > 0 && (
-                <View style={[styles.barSeg, { flex: discFlex, backgroundColor: '#666666' }]} />
+                <View style={[s.barSeg, { flex: discFlex, backgroundColor: colors.lavender }]} />
               )}
               {leftFlex > 0 && (
-                <View style={[styles.barSeg, { flex: leftFlex, backgroundColor: colors.green + '30' }]} />
+                <View style={[s.barSeg, { flex: leftFlex, backgroundColor: colors.green + '30' }]} />
               )}
             </View>
 
             {/* Summary row — always visible */}
-            <View style={[styles.summaryRow, !budgetExpanded && { marginBottom: 0 }]}>
-              <AnimGlyph delay={80} style={styles.summaryItem}>
-                <Text style={[styles.summaryAmount, { color: '#FFFFFF' }]}>
+            <View style={[s.summaryRow, !budgetExpanded && { marginBottom: 0 }]}>
+              <AnimGlyph delay={80} style={s.summaryItem}>
+                <Text style={[s.summaryAmount, { color: colors.accent }]}>
                   {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
                 </Text>
-                <Text style={styles.summaryLabel}>Essentials</Text>
-                <Text style={styles.summaryPct}>{nonDiscPct}%</Text>
+                <Text style={s.summaryLabel}>Essentials</Text>
+                <Text style={s.summaryPct}>{nonDiscPct}%</Text>
               </AnimGlyph>
-              <AnimGlyph delay={160} style={styles.summaryItem}>
-                <Text style={[styles.summaryAmount, { color: '#999999' }]}>
+              <AnimGlyph delay={160} style={s.summaryItem}>
+                <Text style={[s.summaryAmount, { color: colors.lavender }]}>
                   {'\u00a3'}{Math.round(discTotal).toLocaleString()}
                 </Text>
-                <Text style={styles.summaryLabel}>Lifestyle</Text>
-                <Text style={styles.summaryPct}>{discPct}%</Text>
+                <Text style={s.summaryLabel}>Lifestyle</Text>
+                <Text style={s.summaryPct}>{discPct}%</Text>
               </AnimGlyph>
-              <AnimGlyph delay={240} style={styles.summaryItem}>
-                <Text style={[styles.summaryAmount, { color: colors.green }]}>
+              <AnimGlyph delay={240} style={s.summaryItem}>
+                <Text style={[s.summaryAmount, { color: colors.green }]}>
                   {'\u00a3'}{Math.round(leftToDecide).toLocaleString()}
                 </Text>
-                <Text style={styles.summaryLabel}>Left to decide</Text>
-                <Text style={[styles.summaryPct, { color: colors.green }]}>{leftPct}%</Text>
+                <Text style={s.summaryLabel}>Left to decide</Text>
+                <Text style={[s.summaryPct, { color: colors.green }]}>{leftPct}%</Text>
               </AnimGlyph>
             </View>
 
@@ -1226,10 +1229,10 @@ export default function Home() {
               <>
                 {/* Non-negotiable breakdown */}
                   <>
-                    <View style={styles.breakdownHeaderRow}>
-                      <Text style={styles.breakdownHeader}>ESSENTIALS</Text>
+                    <View style={s.breakdownHeaderRow}>
+                      <Text style={s.breakdownHeader}>ESSENTIALS</Text>
                       <TouchableOpacity
-                        style={styles.addItemBtn}
+                        style={s.addItemBtn}
                         onPress={() => {
                           LayoutAnimation.configureNext(SMOOTH_ANIM);
                           setAddItemEssential(true);
@@ -1238,12 +1241,12 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={[styles.addItemLabel, { color: colors.green }]}>Add item</Text>
-                        <Text style={[styles.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
+                        <Text style={[s.addItemLabel, { color: colors.green }]}>Add item</Text>
+                        <Text style={[s.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
                       </TouchableOpacity>
                     </View>
                     {nonDiscItems.length === 0 && (
-                      <Text style={styles.noDataText}>No essential items yet. Add one to track it.</Text>
+                      <Text style={s.noDataText}>No essential items yet. Add one to track it.</Text>
                     )}
                     {nonDiscItems.map((item: BudgetCategory, i: number) => {
                       const key = `nd-${item.category}`;
@@ -1255,29 +1258,29 @@ export default function Home() {
                           <TouchableOpacity
                             activeOpacity={0.7}
                             onPress={() => toggleCategory(key)}
-                            style={[styles.dataRow, i === nonDiscItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                            style={[s.dataRow, i === nonDiscItems.length - 1 && !isExpanded && s.dataRowLast]}
                           >
-                            <View style={styles.dataRowLeft}>
-                              <Text style={[styles.catArrow, { color: colors.text }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
-                              <View style={styles.catInfo}>
-                                <Text style={styles.dataLabel}>{item.category}</Text>
-                                <Text style={styles.dataMeta}>
+                            <View style={s.dataRowLeft}>
+                              <Text style={[s.catArrow, { color: colors.text }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
+                              <View style={s.catInfo}>
+                                <Text style={s.dataLabel}>{item.category}</Text>
+                                <Text style={s.dataMeta}>
                                   {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of essentials
                                 </Text>
                               </View>
                             </View>
-                            <View style={styles.dataRowRight}>
-                              <Text style={[styles.dataValue, { color: colors.text }]}>
+                            <View style={s.dataRowRight}>
+                              <Text style={[s.dataValue, { color: colors.text }]}>
                                 {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
                             </View>
                           </TouchableOpacity>
                           {isExpanded && txs.length > 0 && (
-                            <View style={styles.txDropdown}>
+                            <View style={s.txDropdown}>
                               {txs.map((tx, j) => (
                                 <TouchableOpacity
                                   key={j}
-                                  style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}
+                                  style={[s.txRow, j === txs.length - 1 && s.txRowLast]}
                                   onLongPress={() => {
                                     setRecatTx({ tx, catKey: item.category, section: 'essential' });
                                     setRecatTarget('');
@@ -1285,23 +1288,23 @@ export default function Home() {
                                   }}
                                   activeOpacity={0.7}
                                 >
-                                  <View style={styles.txLeft}>
-                                    <Text style={styles.txMerchant}>{tx.merchant}</Text>
-                                    <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                                  <View style={s.txLeft}>
+                                    <Text style={s.txMerchant}>{tx.merchant}</Text>
+                                    <Text style={s.txDate}>{formatDate(tx.date)}</Text>
                                   </View>
-                                  <View style={styles.txRightCol}>
-                                    <Text style={[styles.txAmount, { color: colors.text2 }]}>
+                                  <View style={s.txRightCol}>
+                                    <Text style={[s.txAmount, { color: colors.text2 }]}>
                                       {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
                                     </Text>
-                                    <Text style={styles.txRecatHint}>Hold to move</Text>
+                                    <Text style={s.txRecatHint}>Hold to move</Text>
                                   </View>
                                 </TouchableOpacity>
                               ))}
                             </View>
                           )}
                           {isExpanded && txs.length === 0 && (
-                            <View style={styles.txDropdown}>
-                              <Text style={styles.txEmpty}>No transaction details available</Text>
+                            <View style={s.txDropdown}>
+                              <Text style={s.txEmpty}>No transaction details available</Text>
                             </View>
                           )}
                         </View>
@@ -1311,10 +1314,10 @@ export default function Home() {
 
                 {/* Lifestyle spending */}
                   <>
-                    <View style={[styles.breakdownHeaderRow, { marginTop: 28 }]}>
-                      <Text style={styles.breakdownHeader}>LIFESTYLE</Text>
+                    <View style={[s.breakdownHeaderRow, { marginTop: 28 }]}>
+                      <Text style={s.breakdownHeader}>LIFESTYLE</Text>
                       <TouchableOpacity
-                        style={styles.addItemBtn}
+                        style={s.addItemBtn}
                         onPress={() => {
                           LayoutAnimation.configureNext(SMOOTH_ANIM);
                           setAddItemEssential(false);
@@ -1323,12 +1326,12 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={[styles.addItemLabel, { color: colors.green }]}>Add item</Text>
-                        <Text style={[styles.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
+                        <Text style={[s.addItemLabel, { color: colors.green }]}>Add item</Text>
+                        <Text style={[s.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
                       </TouchableOpacity>
                     </View>
                     {discItems.length === 0 && (
-                      <Text style={styles.noDataText}>No lifestyle items yet. Add one to track it.</Text>
+                      <Text style={s.noDataText}>No lifestyle items yet. Add one to track it.</Text>
                     )}
                     {discItems.map((item: BudgetCategory, i: number) => {
                       const key = `d-${item.category}`;
@@ -1340,29 +1343,29 @@ export default function Home() {
                           <TouchableOpacity
                             activeOpacity={0.7}
                             onPress={() => toggleCategory(key)}
-                            style={[styles.dataRow, i === discItems.length - 1 && !isExpanded && styles.dataRowLast]}
+                            style={[s.dataRow, i === discItems.length - 1 && !isExpanded && s.dataRowLast]}
                           >
-                            <View style={styles.dataRowLeft}>
-                              <Text style={[styles.catArrow, { color: colors.dim }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
-                              <View style={styles.catInfo}>
-                                <Text style={styles.dataLabel}>{item.category}</Text>
-                                <Text style={styles.dataMeta}>
+                            <View style={s.dataRowLeft}>
+                              <Text style={[s.catArrow, { color: colors.dim }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
+                              <View style={s.catInfo}>
+                                <Text style={s.dataLabel}>{item.category}</Text>
+                                <Text style={s.dataMeta}>
                                   {item.txs} txn{item.txs !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
                                 </Text>
                               </View>
                             </View>
-                            <View style={styles.dataRowRight}>
-                              <Text style={[styles.dataValue, { color: colors.dim }]}>
+                            <View style={s.dataRowRight}>
+                              <Text style={[s.dataValue, { color: colors.dim }]}>
                                 {'\u00a3'}{Math.round(item.monthly).toLocaleString()}
                               </Text>
                             </View>
                           </TouchableOpacity>
                           {isExpanded && txs.length > 0 && (
-                            <View style={styles.txDropdown}>
+                            <View style={s.txDropdown}>
                               {txs.map((tx, j) => (
                                 <TouchableOpacity
                                   key={j}
-                                  style={[styles.txRow, j === txs.length - 1 && styles.txRowLast]}
+                                  style={[s.txRow, j === txs.length - 1 && s.txRowLast]}
                                   onLongPress={() => {
                                     setRecatTx({ tx, catKey: item.category, section: 'lifestyle' });
                                     setRecatTarget('');
@@ -1370,23 +1373,23 @@ export default function Home() {
                                   }}
                                   activeOpacity={0.7}
                                 >
-                                  <View style={styles.txLeft}>
-                                    <Text style={styles.txMerchant}>{tx.merchant}</Text>
-                                    <Text style={styles.txDate}>{formatDate(tx.date)}</Text>
+                                  <View style={s.txLeft}>
+                                    <Text style={s.txMerchant}>{tx.merchant}</Text>
+                                    <Text style={s.txDate}>{formatDate(tx.date)}</Text>
                                   </View>
-                                  <View style={styles.txRightCol}>
-                                    <Text style={[styles.txAmount, { color: colors.dim }]}>
+                                  <View style={s.txRightCol}>
+                                    <Text style={[s.txAmount, { color: colors.dim }]}>
                                       {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
                                     </Text>
-                                    <Text style={styles.txRecatHint}>Hold to move</Text>
+                                    <Text style={s.txRecatHint}>Hold to move</Text>
                                   </View>
                                 </TouchableOpacity>
                               ))}
                             </View>
                           )}
                           {isExpanded && txs.length === 0 && (
-                            <View style={styles.txDropdown}>
-                              <Text style={styles.txEmpty}>No transaction details available</Text>
+                            <View style={s.txDropdown}>
+                              <Text style={s.txEmpty}>No transaction details available</Text>
                             </View>
                           )}
                         </View>
@@ -1394,25 +1397,25 @@ export default function Home() {
                     })}
                   </>
 
-                <Text style={styles.cardFooter}>Tap any category to expand transactions</Text>
+                <Text style={s.cardFooter}>Tap any category to expand transactions</Text>
 
                 <TouchableOpacity
                   onPress={() => {
                     LayoutAnimation.configureNext(SMOOTH_ANIM);
                     setBudgetExpanded(false);
                   }}
-                  style={styles.viewTransactionsBtn}
+                  style={s.viewTransactionsBtn}
                 >
-                  <Text style={styles.viewTransactionsText}>Hide transactions</Text>
+                  <Text style={s.viewTransactionsText}>Hide transactions</Text>
                 </TouchableOpacity>
               </>
             )}
 
             {/* Quick add buttons — always visible when collapsed */}
             {!budgetExpanded && (
-              <View style={styles.quickAddRow}>
+              <View style={s.quickAddRow}>
                 <TouchableOpacity
-                  style={styles.quickAddBtn}
+                  style={s.quickAddBtn}
                   onPress={() => {
                     LayoutAnimation.configureNext(SMOOTH_ANIM);
                     setAddItemEssential(true);
@@ -1424,11 +1427,11 @@ export default function Home() {
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.quickAddIcon}>+</Text>
-                  <Text style={styles.quickAddText}>Add essential</Text>
+                  <Text style={s.quickAddIcon}>+</Text>
+                  <Text style={s.quickAddText}>Add essential</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={styles.quickAddBtn}
+                  style={s.quickAddBtn}
                   onPress={() => {
                     LayoutAnimation.configureNext(SMOOTH_ANIM);
                     setAddItemEssential(false);
@@ -1440,8 +1443,8 @@ export default function Home() {
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.quickAddIcon}>+</Text>
-                  <Text style={styles.quickAddText}>Add lifestyle</Text>
+                  <Text style={s.quickAddIcon}>+</Text>
+                  <Text style={s.quickAddText}>Add lifestyle</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -1453,9 +1456,9 @@ export default function Home() {
                   LayoutAnimation.configureNext(SMOOTH_ANIM);
                   setBudgetExpanded(true);
                 }}
-                style={styles.viewTransactionsBtn}
+                style={s.viewTransactionsBtn}
               >
-                <Text style={styles.viewTransactionsText}>View transactions</Text>
+                <Text style={s.viewTransactionsText}>View transactions</Text>
               </TouchableOpacity>
             )}
 
@@ -1469,34 +1472,34 @@ export default function Home() {
             const totalLimit = debtAccounts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
             const overallUtil = totalLimit > 0 ? Math.round((totalDebt / totalLimit) * 100) : null;
             return (
-              <View style={styles.card}>
+              <View style={s.card}>
                 <AnimGlyph delay={50}>
-                  <View style={styles.cardTitleRow}>
-                    <Text style={styles.cardTitle}>Your debt</Text>
+                  <View style={s.cardTitleRow}>
+                    <Text style={s.cardTitle}>Your debt</Text>
                     <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'debt' ? null : 'debt')}>
-                      <Text style={styles.infoIcon}>i</Text>
+                      <Text style={s.infoIcon}>i</Text>
                     </TouchableOpacity>
                   </View>
                 </AnimGlyph>
                 {infoCard === 'debt' && (
-                  <View style={styles.infoBox}>
-                    <Text style={styles.infoBoxText}>
+                  <View style={s.infoBox}>
+                    <Text style={s.infoBoxText}>
                       Debt balances are pulled from your connected credit cards via Open Banking (TrueLayer). Utilisation shows how much of your credit limit is currently used. Over 75% utilisation can affect your credit score.
                     </Text>
                   </View>
                 )}
-                <Text style={styles.cardSubtitle}>
+                <Text style={s.cardSubtitle}>
                   {debtAccounts.length} account{debtAccounts.length !== 1 ? 's' : ''}
                   {overallUtil != null ? ` · ${overallUtil}% utilised` : ''}
                 </Text>
 
                 {/* Total debt hero */}
                 <AnimGlyph delay={100}>
-                  <View style={styles.debtHero}>
-                    <Text style={styles.debtHeroAmount}>
+                  <View style={s.debtHero}>
+                    <Text style={s.debtHeroAmount}>
                       {'\u00a3'}{Math.round(totalDebt).toLocaleString()}
                     </Text>
-                    <Text style={styles.debtHeroLabel}>total outstanding</Text>
+                    <Text style={s.debtHeroLabel}>total outstanding</Text>
                   </View>
                 </AnimGlyph>
 
@@ -1513,18 +1516,18 @@ export default function Home() {
                   return (
                     <AnimGlyph key={i} delay={150 + i * 80}>
                       <View
-                        style={[styles.debtRow, i === debtAccounts.length - 1 && styles.debtRowLast]}
+                        style={[s.debtRow, i === debtAccounts.length - 1 && s.debtRowLast]}
                       >
-                      <View style={styles.debtRowLeft}>
-                        <Text style={styles.debtName}>{d.account_name}</Text>
-                        <Text style={styles.debtType}>{typeLabel}</Text>
+                      <View style={s.debtRowLeft}>
+                        <Text style={s.debtName}>{d.account_name}</Text>
+                        <Text style={s.debtType}>{typeLabel}</Text>
                       </View>
-                      <View style={styles.debtRowRight}>
-                        <Text style={[styles.debtBalance, isHigh && { color: colors.coral }]}>
+                      <View style={s.debtRowRight}>
+                        <Text style={[s.debtBalance, isHigh && { color: colors.coral }]}>
                           {'\u00a3'}{Math.round(bal).toLocaleString()}
                         </Text>
                         {lim > 0 && (
-                          <Text style={[styles.debtUtil, isHigh && { color: colors.coral }]}>
+                          <Text style={[s.debtUtil, isHigh && { color: colors.coral }]}>
                             / {'\u00a3'}{Math.round(lim).toLocaleString()} ({util}%)
                           </Text>
                         )}
@@ -1539,20 +1542,20 @@ export default function Home() {
 
           {/* Add budget item modal */}
           <Modal visible={showAddItem} transparent animationType="fade" onRequestClose={() => { setAddItemError(''); setShowAddItem(false); }}>
-            <Pressable style={styles.modalOverlay} onPress={() => { setAddItemError(''); setShowAddItem(false); }}>
-              <Pressable style={styles.modalContent} onPress={() => {}}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Add budget item</Text>
-                  <TouchableOpacity style={styles.modalCloseIcon} onPress={() => { setAddItemError(''); setShowAddItem(false); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Text style={styles.modalCloseIconText}>{'\u2715'}</Text>
+            <Pressable style={s.modalOverlay} onPress={() => { setAddItemError(''); setShowAddItem(false); }}>
+              <Pressable style={s.modalContent} onPress={() => {}}>
+                <View style={s.modalHeader}>
+                  <Text style={s.modalTitle}>Add budget item</Text>
+                  <TouchableOpacity style={s.modalCloseIcon} onPress={() => { setAddItemError(''); setShowAddItem(false); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={styles.modalSubtitle}>
+                <Text style={s.modalSubtitle}>
                   For expenses not in your bank data (rent via partner, cash, etc.)
                 </Text>
 
                 <TextInput
-                  style={styles.modalInput}
+                  style={s.modalInput}
                   placeholder="Description (e.g. Rent)"
                   placeholderTextColor={colors.muted}
                   value={addItemDesc}
@@ -1560,7 +1563,7 @@ export default function Home() {
                 />
 
                 <TextInput
-                  style={styles.modalInput}
+                  style={s.modalInput}
                   placeholder="Monthly amount"
                   placeholderTextColor={colors.muted}
                   keyboardType="numeric"
@@ -1569,15 +1572,15 @@ export default function Home() {
                 />
 
                 {/* Category picker */}
-                <Text style={styles.modalLabel}>Category</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+                <Text style={s.modalLabel}>Category</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.categoryScroll}>
                   {BUDGET_CATEGORIES.map((cat) => (
                     <TouchableOpacity
                       key={cat}
-                      style={[styles.categoryChip, addItemCategory === cat && styles.categoryChipActive]}
+                      style={[s.categoryChip, addItemCategory === cat && s.categoryChipActive]}
                       onPress={() => setAddItemCategory(cat)}
                     >
-                      <Text style={[styles.categoryChipText, addItemCategory === cat && styles.categoryChipTextActive]}>
+                      <Text style={[s.categoryChipText, addItemCategory === cat && s.categoryChipTextActive]}>
                         {cat}
                       </Text>
                     </TouchableOpacity>
@@ -1585,41 +1588,41 @@ export default function Home() {
                 </ScrollView>
 
                 {/* Essential toggle */}
-                <View style={styles.essentialRow}>
-                  <Text style={styles.modalLabel}>Type</Text>
-                  <View style={styles.toggleRow}>
+                <View style={s.essentialRow}>
+                  <Text style={s.modalLabel}>Type</Text>
+                  <View style={s.toggleRow}>
                     <TouchableOpacity
-                      style={[styles.toggleOption, addItemEssential && styles.toggleOptionActive]}
+                      style={[s.toggleOption, addItemEssential && s.toggleOptionActive]}
                       onPress={() => setAddItemEssential(true)}
                     >
-                      <Text style={[styles.toggleText, addItemEssential && styles.toggleTextActive]}>Essential</Text>
+                      <Text style={[s.toggleText, addItemEssential && s.toggleTextActive]}>Essential</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.toggleOption, !addItemEssential && styles.toggleOptionLifestyle]}
+                      style={[s.toggleOption, !addItemEssential && s.toggleOptionLifestyle]}
                       onPress={() => setAddItemEssential(false)}
                     >
-                      <Text style={[styles.toggleText, !addItemEssential && styles.toggleTextLifestyle]}>Lifestyle</Text>
+                      <Text style={[s.toggleText, !addItemEssential && s.toggleTextLifestyle]}>Lifestyle</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
 
                 {/* Error message */}
                 {addItemError ? (
-                  <Text style={styles.addItemErrorText}>{addItemError}</Text>
+                  <Text style={s.addItemErrorText}>{addItemError}</Text>
                 ) : null}
 
                 {/* Actions */}
-                <View style={styles.modalActions}>
+                <View style={s.modalActions}>
                   <TouchableOpacity
-                    style={styles.modalCancel}
+                    style={s.modalCancel}
                     onPress={() => { setAddItemError(''); setShowAddItem(false); }}
                   >
-                    <Text style={styles.modalCancelText}>Cancel</Text>
+                    <Text style={s.modalCancelText}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[
-                      styles.modalSave,
-                      (!addItemDesc.trim() || !addItemCategory || !addItemAmount) && styles.modalSaveDisabled,
+                      s.modalSave,
+                      (!addItemDesc.trim() || !addItemCategory || !addItemAmount) && s.modalSaveDisabled,
                     ]}
                     onPress={saveAddItem}
                     disabled={addItemSaving}
@@ -1627,7 +1630,7 @@ export default function Home() {
                     {addItemSaving ? (
                       <ActivityIndicator color={colors.bg} size="small" />
                     ) : (
-                      <Text style={styles.modalSaveText}>Add</Text>
+                      <Text style={s.modalSaveText}>Add</Text>
                     )}
                   </TouchableOpacity>
                 </View>
@@ -1637,47 +1640,47 @@ export default function Home() {
 
           {/* Verify move detail modal */}
           <Modal visible={!!verifyMove} transparent animationType="fade" onRequestClose={() => setVerifyMove(null)}>
-            <Pressable style={styles.modalOverlay} onPress={() => setVerifyMove(null)}>
-              <Pressable style={styles.modalContentScrollable} onPress={() => {}}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Verify recommendation</Text>
-                  <TouchableOpacity style={styles.modalCloseIcon} onPress={() => setVerifyMove(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Text style={styles.modalCloseIconText}>{'\u2715'}</Text>
+            <Pressable style={s.modalOverlay} onPress={() => setVerifyMove(null)}>
+              <Pressable style={s.modalContentScrollable} onPress={() => {}}>
+                <View style={s.modalHeader}>
+                  <Text style={s.modalTitle}>Verify recommendation</Text>
+                  <TouchableOpacity style={s.modalCloseIcon} onPress={() => setVerifyMove(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
                   </TouchableOpacity>
                 </View>
                 <ScrollView showsVerticalScrollIndicator={false} bounces={false} contentContainerStyle={{ paddingBottom: 8 }}>
 
                   {verifyMove && (
                     <>
-                      <Text style={styles.verifySection}>WHAT</Text>
-                      <Text style={styles.verifyText}>{stripMd(verifyMove.action)}</Text>
+                      <Text style={s.verifySection}>WHAT</Text>
+                      <Text style={s.verifyText}>{stripMd(verifyMove.action)}</Text>
 
-                      <Text style={styles.verifySection}>WHY</Text>
-                      <Text style={styles.verifyText}>{stripMd(verifyMove.strategy)}</Text>
+                      <Text style={s.verifySection}>WHY</Text>
+                      <Text style={s.verifyText}>{stripMd(verifyMove.strategy)}</Text>
 
-                      <Text style={styles.verifySection}>HOW</Text>
+                      <Text style={s.verifySection}>HOW</Text>
                       {(verifyMove.steps || []).map((step, i) => (
-                        <Text key={i} style={styles.verifyStep}>{i + 1}. {stripMd(step)}</Text>
+                        <Text key={i} style={s.verifyStep}>{i + 1}. {stripMd(step)}</Text>
                       ))}
 
-                      <Text style={styles.verifySection}>EFFECT</Text>
-                      <Text style={styles.verifyText}>
+                      <Text style={s.verifySection}>EFFECT</Text>
+                      <Text style={s.verifyText}>
                         {stripMd(verifyMove.effect || '')}
                         {verifyMove.timeline ? `\n${stripMd(verifyMove.timeline)}` : ''}
                       </Text>
 
-                      <View style={styles.verifyActions}>
+                      <View style={s.verifyActions}>
                         <TouchableOpacity
-                          style={styles.moveApproveBtn}
+                          style={s.moveApproveBtn}
                           onPress={() => { setVerifyMove(null); router.push('/(main)/(tabs)/plan'); }}
                         >
-                          <Text style={styles.moveApproveBtnText}>Continue to plan</Text>
+                          <Text style={s.moveApproveBtnText}>Continue to plan</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                          style={styles.moveVerifyBtn}
+                          style={s.moveVerifyBtn}
                           onPress={() => setVerifyMove(null)}
                         >
-                          <Text style={styles.moveVerifyBtnText}>Close</Text>
+                          <Text style={s.moveVerifyBtnText}>Close</Text>
                         </TouchableOpacity>
                       </View>
                     </>
@@ -1689,66 +1692,66 @@ export default function Home() {
 
           {/* Re-categorize transaction modal */}
           <Modal visible={!!recatTx} transparent animationType="fade" onRequestClose={() => setRecatTx(null)}>
-            <Pressable style={styles.modalOverlay} onPress={() => setRecatTx(null)}>
-              <Pressable style={styles.modalContent} onPress={() => {}}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Move transaction</Text>
-                  <TouchableOpacity style={styles.modalCloseIcon} onPress={() => setRecatTx(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Text style={styles.modalCloseIconText}>{'\u2715'}</Text>
+            <Pressable style={s.modalOverlay} onPress={() => setRecatTx(null)}>
+              <Pressable style={s.modalContent} onPress={() => {}}>
+                <View style={s.modalHeader}>
+                  <Text style={s.modalTitle}>Move transaction</Text>
+                  <TouchableOpacity style={s.modalCloseIcon} onPress={() => setRecatTx(null)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
                   </TouchableOpacity>
                 </View>
                 {recatTx && (
                   <>
-                    <Text style={styles.modalSubtitle}>
+                    <Text style={s.modalSubtitle}>
                       "{recatTx.tx.merchant}" ({'\u00a3'}{Math.abs(recatTx.tx.amount).toFixed(2)}) is currently in {recatTx.catKey}. Choose the correct category:
                     </Text>
 
-                    <Text style={styles.modalLabel}>Category</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+                    <Text style={s.modalLabel}>Category</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.categoryScroll}>
                       {BUDGET_CATEGORIES.map((cat) => (
                         <TouchableOpacity
                           key={cat}
-                          style={[styles.categoryChip, recatTarget === cat && styles.categoryChipActive]}
+                          style={[s.categoryChip, recatTarget === cat && s.categoryChipActive]}
                           onPress={() => setRecatTarget(cat)}
                         >
-                          <Text style={[styles.categoryChipText, recatTarget === cat && styles.categoryChipTextActive]}>
+                          <Text style={[s.categoryChipText, recatTarget === cat && s.categoryChipTextActive]}>
                             {cat}
                           </Text>
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
 
-                    <View style={styles.essentialRow}>
-                      <Text style={styles.modalLabel}>Type</Text>
-                      <View style={styles.toggleRow}>
+                    <View style={s.essentialRow}>
+                      <Text style={s.modalLabel}>Type</Text>
+                      <View style={s.toggleRow}>
                         <TouchableOpacity
-                          style={[styles.toggleOption, recatEssential && styles.toggleOptionActive]}
+                          style={[s.toggleOption, recatEssential && s.toggleOptionActive]}
                           onPress={() => setRecatEssential(true)}
                         >
-                          <Text style={[styles.toggleText, recatEssential && styles.toggleTextActive]}>Essential</Text>
+                          <Text style={[s.toggleText, recatEssential && s.toggleTextActive]}>Essential</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                          style={[styles.toggleOption, !recatEssential && styles.toggleOptionLifestyle]}
+                          style={[s.toggleOption, !recatEssential && s.toggleOptionLifestyle]}
                           onPress={() => setRecatEssential(false)}
                         >
-                          <Text style={[styles.toggleText, !recatEssential && styles.toggleTextLifestyle]}>Lifestyle</Text>
+                          <Text style={[s.toggleText, !recatEssential && s.toggleTextLifestyle]}>Lifestyle</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
 
-                    <View style={styles.modalActions}>
-                      <TouchableOpacity style={styles.modalCancel} onPress={() => setRecatTx(null)}>
-                        <Text style={styles.modalCancelText}>Cancel</Text>
+                    <View style={s.modalActions}>
+                      <TouchableOpacity style={s.modalCancel} onPress={() => setRecatTx(null)}>
+                        <Text style={s.modalCancelText}>Cancel</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
-                        style={[styles.modalSave, !recatTarget && styles.modalSaveDisabled]}
+                        style={[s.modalSave, !recatTarget && s.modalSaveDisabled]}
                         onPress={saveRecategorize}
                         disabled={savingRecat || !recatTarget}
                       >
                         {savingRecat ? (
                           <ActivityIndicator color={colors.bg} size="small" />
                         ) : (
-                          <Text style={styles.modalSaveText}>Move</Text>
+                          <Text style={s.modalSaveText}>Move</Text>
                         )}
                       </TouchableOpacity>
                     </View>
@@ -1760,12 +1763,12 @@ export default function Home() {
 
           {/* ── Categorise uncategorised transactions modal ── */}
           <Modal visible={showCatReview} transparent animationType="fade">
-            <View style={styles.catReviewOverlay}>
-              <View style={styles.catReviewContainer}>
-                <View style={styles.catReviewHeader}>
+            <View style={s.catReviewOverlay}>
+              <View style={s.catReviewContainer}>
+                <View style={s.catReviewHeader}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.modalTitle}>Categorise transactions</Text>
-                    <Text style={styles.catReviewSubtitle}>
+                    <Text style={s.modalTitle}>Categorise transactions</Text>
+                    <Text style={s.catReviewSubtitle}>
                       {aiSuggesting
                         ? 'Bocy is suggesting categories...'
                         : Object.keys(catAssignments).length > 0
@@ -1774,27 +1777,27 @@ export default function Home() {
                     </Text>
                   </View>
                   <TouchableOpacity onPress={() => setShowCatReview(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-                    <Text style={styles.catReviewClose}>{'\u2715'}</Text>
+                    <Text style={s.catReviewClose}>{'\u2715'}</Text>
                   </TouchableOpacity>
                 </View>
 
                 {aiSuggesting && (
-                  <View style={styles.aiSuggestBar}>
+                  <View style={s.aiSuggestBar}>
                     <ActivityIndicator color={colors.green} size="small" />
-                    <Text style={styles.aiSuggestText}>Analysing merchants...</Text>
+                    <Text style={s.aiSuggestText}>Analysing merchants...</Text>
                   </View>
                 )}
 
-                <ScrollView style={styles.catReviewList} showsVerticalScrollIndicator={false}>
+                <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
                   {unresolvedGroups.map((group) => {
                     const assigned = catAssignments[group.key];
                     return (
-                      <View key={group.key} style={[styles.catReviewRow, assigned && styles.catReviewRowDone]}>
-                        <View style={styles.catReviewRowHeader}>
-                          <Text style={styles.catReviewMerchant} numberOfLines={1}>
+                      <View key={group.key} style={[s.catReviewRow, assigned && s.catReviewRowDone]}>
+                        <View style={s.catReviewRowHeader}>
+                          <Text style={s.catReviewMerchant} numberOfLines={1}>
                             {assigned ? '\u2713 ' : ''}{group.label}
                           </Text>
-                          <Text style={styles.catReviewAmount}>
+                          <Text style={s.catReviewAmount}>
                             {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
                           </Text>
                         </View>
@@ -1802,7 +1805,7 @@ export default function Home() {
                           {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
                             <TouchableOpacity
                               key={cat}
-                              style={[styles.categoryChip, assigned?.category === cat && styles.categoryChipActive]}
+                              style={[s.categoryChip, assigned?.category === cat && s.categoryChipActive]}
                               onPress={() => {
                                 setCatAssignments((prev) => ({
                                   ...prev,
@@ -1811,8 +1814,8 @@ export default function Home() {
                               }}
                             >
                               <Text style={[
-                                styles.categoryChipText,
-                                assigned?.category === cat && styles.categoryChipTextActive,
+                                s.categoryChipText,
+                                assigned?.category === cat && s.categoryChipTextActive,
                               ]}>{cat}</Text>
                             </TouchableOpacity>
                           ))}
@@ -1824,14 +1827,14 @@ export default function Home() {
 
                 {/* Done button */}
                 <TouchableOpacity
-                  style={[styles.catReviewDone, Object.keys(catAssignments).length === 0 && styles.modalSaveDisabled]}
+                  style={[s.catReviewDone, Object.keys(catAssignments).length === 0 && s.modalSaveDisabled]}
                   onPress={saveCatReview}
                   disabled={savingCatReview || Object.keys(catAssignments).length === 0}
                 >
                   {savingCatReview ? (
                     <ActivityIndicator color={colors.bg} size="small" />
                   ) : (
-                    <Text style={styles.catReviewDoneText}>
+                    <Text style={s.catReviewDoneText}>
                       Done{Object.keys(catAssignments).length > 0
                         ? ` (${Object.keys(catAssignments).length} categorised)`
                         : ''}
@@ -1850,10 +1853,10 @@ export default function Home() {
 
 // ── Nothing OS Design System Styles ──
 
-const styles = StyleSheet.create({
+const createStyles = (c: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: c.bg,
   },
   scroll: {
     padding: 24,
@@ -1862,7 +1865,7 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: c.bg,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1888,7 +1891,7 @@ const styles = StyleSheet.create({
   greeting: {
     fontFamily: fonts.mono,
     fontSize: 22,
-    color: colors.text,
+    color: c.text,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
@@ -1903,17 +1906,17 @@ const styles = StyleSheet.create({
   menuLine: {
     width: 20,
     height: 1.5,
-    backgroundColor: colors.text,
+    backgroundColor: c.text,
     borderRadius: 1,
   },
   menuLineShort: {
     width: 12,
-    backgroundColor: colors.dim,
+    backgroundColor: c.dim,
   },
   syncText: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.dim,
+    color: c.dim,
     marginTop: 6,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
@@ -1930,7 +1933,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontFamily: fonts.semibold,
     fontSize: 18,
-    color: colors.text,
+    color: c.text,
     textAlign: 'center',
     marginBottom: spacing.sm,
     letterSpacing: -0.2,
@@ -1938,14 +1941,14 @@ const styles = StyleSheet.create({
   emptyDesc: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.dim,
+    color: c.dim,
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: spacing.xl,
     paddingHorizontal: spacing.md,
   },
   ctaButton: {
-    backgroundColor: colors.accent,
+    backgroundColor: c.accent,
     paddingVertical: 16,
     paddingHorizontal: spacing.xl,
     borderRadius: 100,
@@ -1955,7 +1958,7 @@ const styles = StyleSheet.create({
   ctaText: {
     fontFamily: fonts.semibold,
     fontSize: 15,
-    color: '#000000',
+    color: c.bg,
     letterSpacing: 0.3,
   },
 
@@ -1963,7 +1966,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: c.accentDim,
     borderRadius: 24,
     padding: 28,
     paddingTop: 32,
@@ -1974,7 +1977,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontFamily: fonts.mono,
     fontSize: 13,
-    color: colors.text2,
+    color: c.text2,
     letterSpacing: 1.5,
     textTransform: 'uppercase',
     marginBottom: 10,
@@ -1982,14 +1985,14 @@ const styles = StyleSheet.create({
   cardSubtitle: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.dim,
+    color: c.dim,
     lineHeight: 22,
     marginBottom: 28,
   },
   noDataText: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.dim,
+    color: c.dim,
     lineHeight: 22,
   },
 
@@ -2002,41 +2005,41 @@ const styles = StyleSheet.create({
   infoIcon: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.dim,
+    color: c.dim,
     width: 22,
     height: 22,
     lineHeight: 22,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: c.accentDim,
     borderRadius: 11,
     overflow: 'hidden',
   },
   infoBox: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: c.mintDim,
     borderRadius: 12,
     padding: 14,
     marginTop: 10,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: c.mintDim,
   },
   infoBoxText: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
     lineHeight: 18,
   },
 
   // ── Emergency fund info ──
   emergencyInfoBox: {
-    backgroundColor: colors.greenDim,
+    backgroundColor: c.greenDim,
     borderRadius: 12,
     padding: 14,
     marginTop: 10,
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: colors.green + '20',
+    borderColor: c.green + '20',
   },
   emergencyInfoHeader: {
     flexDirection: 'row',
@@ -2047,26 +2050,26 @@ const styles = StyleSheet.create({
   emergencyInfoIcon: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.green,
+    color: c.green,
     width: 20,
     height: 20,
     lineHeight: 20,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: colors.green + '40',
+    borderColor: c.green + '40',
     borderRadius: 10,
     overflow: 'hidden',
   },
   emergencyInfoTitle: {
     fontFamily: fonts.semibold,
     fontSize: 12,
-    color: colors.green,
+    color: c.green,
     letterSpacing: 0.3,
   },
   emergencyInfoText: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
     lineHeight: 18,
   },
 
@@ -2074,12 +2077,12 @@ const styles = StyleSheet.create({
   moveItemFull: {
     paddingVertical: 20,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
+    borderBottomColor: c.mintDim,
   },
   moveTitle: {
     fontFamily: fonts.medium,
     fontSize: 16,
-    color: colors.text,
+    color: c.text,
     lineHeight: 24,
   },
   moveMeta: {
@@ -2092,14 +2095,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 14,
     fontWeight: '700',
-    color: colors.green,
+    color: c.green,
   },
   effortPill: {
     borderRadius: 100,
     paddingVertical: 3,
     paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: c.accentDim,
     backgroundColor: 'transparent',
   },
   effortPillText: {
@@ -2116,7 +2119,7 @@ const styles = StyleSheet.create({
   moveStrategy: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.dim,
+    color: c.dim,
     lineHeight: 20,
     marginTop: 8,
   },
@@ -2127,7 +2130,7 @@ const styles = StyleSheet.create({
   },
   moveApproveBtn: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: c.accent,
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -2135,13 +2138,13 @@ const styles = StyleSheet.create({
   moveApproveBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: '#000000',
+    color: c.bg,
   },
   moveVerifyBtn: {
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: c.accentDim,
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -2149,13 +2152,13 @@ const styles = StyleSheet.create({
   moveVerifyBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: colors.dim,
+    color: c.dim,
   },
   moveDeleteBtn: {
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: c.accentDim,
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -2163,19 +2166,19 @@ const styles = StyleSheet.create({
   moveDeleteBtnText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
   },
   viewAllBtn: {
     alignItems: 'center',
     paddingVertical: 16,
     marginTop: 4,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
+    borderTopColor: c.mintDim,
   },
   viewAllText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.text,
+    color: c.text,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
@@ -2190,26 +2193,26 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 52,
     fontWeight: '300',
-    color: colors.text,
+    color: c.text,
     letterSpacing: -2,
   },
   bigNumberLabel: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 8,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: c.mintDim,
     marginBottom: 4,
   },
   sourceCard: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: c.border,
     borderRadius: 16,
     padding: 16,
     marginTop: 12,
@@ -2226,7 +2229,7 @@ const styles = StyleSheet.create({
   sourceName: {
     fontFamily: fonts.medium,
     fontSize: 16,
-    color: colors.text,
+    color: c.text,
     lineHeight: 24,
     marginBottom: 8,
   },
@@ -2238,22 +2241,22 @@ const styles = StyleSheet.create({
   sourceFreq: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.text2,
+    color: c.text2,
     letterSpacing: 0.3,
   },
   primaryTag: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: c.mintDim,
     paddingVertical: 3,
     paddingHorizontal: 8,
     borderRadius: 100,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: c.accentDim,
   },
   primaryTagText: {
     fontFamily: fonts.mono,
     fontSize: 9,
     fontWeight: '600',
-    color: colors.text,
+    color: c.text,
     letterSpacing: 1,
   },
   sourceAmountWrap: {
@@ -2263,18 +2266,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 20,
     fontWeight: '300',
-    color: colors.text,
+    color: c.text,
   },
   sourceAmountPer: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 2,
   },
   incomeSourcesHeader: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.muted,
+    color: c.muted,
     letterSpacing: 1,
     marginBottom: 4,
     marginTop: 8,
@@ -2288,12 +2291,12 @@ const styles = StyleSheet.create({
     borderRadius: 100,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(224,82,82,0.25)',
+    borderColor: c.coralDim,
   },
   removeSourceText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.coral,
+    color: c.coral,
     letterSpacing: 0.3,
   },
 
@@ -2307,13 +2310,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 48,
     fontWeight: '300',
-    color: colors.text,
+    color: c.text,
     letterSpacing: -2,
   },
   safeToSpendLabel: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 8,
     letterSpacing: 1,
     textTransform: 'uppercase',
@@ -2321,7 +2324,7 @@ const styles = StyleSheet.create({
   safeToSpendBar: {
     height: 4,
     borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: c.mintDim,
     overflow: 'hidden',
     marginBottom: 16,
   },
@@ -2336,7 +2339,7 @@ const styles = StyleSheet.create({
   safeToSpendMeta: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.text2,
+    color: c.text2,
     letterSpacing: 0.3,
   },
 
@@ -2350,23 +2353,23 @@ const styles = StyleSheet.create({
   expandHint: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 2,
   },
   expandToggle: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: c.mintDim,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: c.border,
   },
   expandToggleText: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.dim,
+    color: c.dim,
   },
   budgetBar: {
     flexDirection: 'row',
@@ -2399,13 +2402,13 @@ const styles = StyleSheet.create({
   summaryLabel: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.text2,
+    color: c.text2,
     marginTop: 8,
   },
   summaryPct: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.dim,
+    color: c.dim,
     marginTop: 4,
     letterSpacing: 0.5,
   },
@@ -2420,7 +2423,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 1.5,
     textTransform: 'uppercase',
-    color: colors.dim,
+    color: c.dim,
   },
   addItemBtn: {
     flexDirection: 'row',
@@ -2430,20 +2433,20 @@ const styles = StyleSheet.create({
   addItemLabel: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.text,
+    color: c.text,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
   addItemIcon: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
     width: 20,
     height: 20,
     lineHeight: 18,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: c.accentDim,
     borderRadius: 10,
     overflow: 'hidden',
   },
@@ -2454,7 +2457,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     minHeight: 48,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomColor: c.mintDim,
   },
   dataRowLast: {
     borderBottomWidth: 0,
@@ -2476,13 +2479,13 @@ const styles = StyleSheet.create({
   dataLabel: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
     letterSpacing: 0.2,
   },
   dataMeta: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.dim,
+    color: c.dim,
     marginTop: 4,
     letterSpacing: 0.3,
   },
@@ -2499,7 +2502,7 @@ const styles = StyleSheet.create({
   txDropdown: {
     backgroundColor: 'transparent',
     borderLeftWidth: 1,
-    borderLeftColor: 'rgba(255,255,255,0.08)',
+    borderLeftColor: c.border,
     marginLeft: 10,
     marginBottom: 8,
     paddingLeft: 14,
@@ -2511,7 +2514,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.03)',
+    borderBottomColor: c.mintDim,
   },
   txRowLast: {
     borderBottomWidth: 0,
@@ -2523,12 +2526,12 @@ const styles = StyleSheet.create({
   txMerchant: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.text2,
+    color: c.text2,
   },
   txDate: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 3,
     letterSpacing: 0.3,
   },
@@ -2543,7 +2546,7 @@ const styles = StyleSheet.create({
   txRecatHint: {
     fontFamily: fonts.mono,
     fontSize: 8,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 3,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
@@ -2551,20 +2554,20 @@ const styles = StyleSheet.create({
   txEmpty: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.muted,
+    color: c.muted,
     paddingVertical: 8,
   },
   breakdownSubtext: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.muted,
+    color: c.muted,
     marginBottom: 12,
     lineHeight: 18,
   },
   cardFooter: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.muted,
+    color: c.muted,
     textAlign: 'center',
     marginTop: 16,
     letterSpacing: 0.5,
@@ -2578,7 +2581,7 @@ const styles = StyleSheet.create({
   viewTransactionsText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.green,
+    color: c.green,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
@@ -2593,13 +2596,13 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 44,
     fontWeight: '300',
-    color: colors.coral,
+    color: c.coral,
     letterSpacing: -2,
   },
   debtHeroLabel: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 8,
     letterSpacing: 1,
     textTransform: 'uppercase',
@@ -2610,7 +2613,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomColor: c.mintDim,
   },
   debtRowLast: {
     borderBottomWidth: 0,
@@ -2622,12 +2625,12 @@ const styles = StyleSheet.create({
   debtName: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
   },
   debtType: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 3,
     letterSpacing: 0.3,
     textTransform: 'uppercase',
@@ -2639,12 +2642,12 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 16,
     fontWeight: '400',
-    color: colors.text,
+    color: c.text,
   },
   debtUtil: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.muted,
+    color: c.muted,
     marginTop: 3,
     letterSpacing: 0.3,
   },
@@ -2663,19 +2666,19 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: colors.green + '30',
+    borderColor: c.green + '30',
     borderRadius: 12,
     borderStyle: 'dashed',
   },
   quickAddIcon: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    color: colors.green,
+    color: c.green,
   },
   quickAddText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.green,
+    color: c.green,
     letterSpacing: 0.3,
     textTransform: 'uppercase',
   },
@@ -2689,20 +2692,20 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   modalContent: {
-    backgroundColor: '#0A0A0A',
+    backgroundColor: c.card,
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: c.accentDim,
     width: '100%',
     maxWidth: 400,
   },
   modalContentScrollable: {
-    backgroundColor: '#0A0A0A',
+    backgroundColor: c.card,
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: c.accentDim,
     width: '100%',
     maxWidth: 400,
     maxHeight: '80%',
@@ -2718,21 +2721,21 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: c.mintDim,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: c.border,
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalCloseIconText: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
   },
   modalTitle: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
     letterSpacing: 1,
     textTransform: 'uppercase',
     flex: 1,
@@ -2740,26 +2743,26 @@ const styles = StyleSheet.create({
   modalSubtitle: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.dim,
+    color: c.dim,
     marginBottom: 20,
     lineHeight: 18,
   },
   modalInput: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: c.mintDim,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: c.border,
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,
     fontFamily: fonts.regular,
     fontSize: 15,
-    color: colors.text,
+    color: c.text,
     marginBottom: 12,
   },
   modalLabel: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: colors.dim,
+    color: c.dim,
     letterSpacing: 1,
     marginBottom: 8,
     textTransform: 'uppercase',
@@ -2771,23 +2774,23 @@ const styles = StyleSheet.create({
   categoryChip: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: c.border,
     borderRadius: 100,
     paddingVertical: 8,
     paddingHorizontal: 14,
     marginRight: 8,
   },
   categoryChipActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
+    backgroundColor: c.accent,
+    borderColor: c.accent,
   },
   categoryChipText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.dim,
+    color: c.dim,
   },
   categoryChipTextActive: {
-    color: '#000000',
+    color: c.bg,
   },
   essentialRow: {
     marginBottom: 20,
@@ -2803,27 +2806,27 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: c.border,
   },
   toggleOptionActive: {
-    borderColor: '#FFFFFF',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: c.accent,
+    backgroundColor: c.mintDim,
   },
   toggleOptionLifestyle: {
-    borderColor: '#FFFFFF',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: c.accent,
+    backgroundColor: c.mintDim,
   },
   toggleText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
     letterSpacing: 0.3,
   },
   toggleTextActive: {
-    color: colors.text,
+    color: c.text,
   },
   toggleTextLifestyle: {
-    color: colors.text,
+    color: c.text,
   },
   modalActions: {
     flexDirection: 'row',
@@ -2836,19 +2839,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: c.accentDim,
   },
   modalCancelText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: colors.dim,
+    color: c.dim,
   },
   modalSave: {
     flex: 1,
     paddingVertical: 14,
     borderRadius: 100,
     alignItems: 'center',
-    backgroundColor: colors.accent,
+    backgroundColor: c.accent,
   },
   modalSaveDisabled: {
     opacity: 0.3,
@@ -2856,14 +2859,14 @@ const styles = StyleSheet.create({
   addItemErrorText: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.coral,
+    color: c.coral,
     marginBottom: 12,
     lineHeight: 18,
   },
   modalSaveText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: '#000000',
+    color: c.bg,
   },
 
   // ── Verify modal ──
@@ -2871,7 +2874,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 9,
     letterSpacing: 2,
-    color: colors.dim,
+    color: c.dim,
     marginTop: 16,
     marginBottom: 6,
     textTransform: 'uppercase',
@@ -2879,13 +2882,13 @@ const styles = StyleSheet.create({
   verifyText: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: colors.text2,
+    color: c.text2,
     lineHeight: 22,
   },
   verifyStep: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.text2,
+    color: c.text2,
     lineHeight: 22,
     marginLeft: 4,
   },
@@ -2897,9 +2900,9 @@ const styles = StyleSheet.create({
 
   // ── Review banner for unresolved transactions ──
   reviewBanner: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.md,
@@ -2907,11 +2910,11 @@ const styles = StyleSheet.create({
   reviewBannerText: {
     fontFamily: fonts.regular,
     fontSize: 13,
-    color: colors.text2,
+    color: c.text2,
     lineHeight: 20,
   },
   reviewBannerLink: {
-    color: colors.green,
+    color: c.green,
     fontFamily: fonts.semibold,
   },
 
@@ -2923,10 +2926,10 @@ const styles = StyleSheet.create({
     padding: spacing.md,
   },
   catReviewContainer: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     maxHeight: '85%',
     overflow: 'hidden',
   },
@@ -2937,34 +2940,34 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: c.border,
   },
   catReviewSubtitle: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: colors.dim,
+    color: c.dim,
     marginTop: 4,
   },
   catReviewClose: {
     fontFamily: fonts.medium,
     fontSize: 18,
-    color: colors.muted,
+    color: c.muted,
     padding: 4,
   },
   catReviewList: {
     padding: spacing.md,
   },
   catReviewRow: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: c.mintDim,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.sm,
   },
   catReviewRowDone: {
-    borderColor: 'rgba(0,212,170,0.25)',
-    backgroundColor: 'rgba(0,212,170,0.04)',
+    borderColor: c.green + '40',
+    backgroundColor: c.greenDim,
   },
   catReviewRowHeader: {
     flexDirection: 'row',
@@ -2974,22 +2977,22 @@ const styles = StyleSheet.create({
   catReviewMerchant: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: colors.text,
+    color: c.text,
   },
   catReviewMeta: {
     fontFamily: fonts.regular,
     fontSize: 11,
-    color: colors.dim,
+    color: c.dim,
     marginTop: 2,
   },
   catReviewAmount: {
     fontFamily: fonts.mono,
     fontSize: 13,
-    color: colors.text2,
+    color: c.text2,
     marginLeft: spacing.sm,
   },
   catReviewDone: {
-    backgroundColor: colors.green,
+    backgroundColor: c.green,
     margin: spacing.md,
     marginTop: 0,
     paddingVertical: 14,
@@ -2999,7 +3002,7 @@ const styles = StyleSheet.create({
   catReviewDoneText: {
     fontFamily: fonts.semibold,
     fontSize: 15,
-    color: colors.bg,
+    color: c.bg,
   },
 
   // ── AI suggest loading bar ──
@@ -3010,13 +3013,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: 'rgba(0,212,170,0.04)',
+    borderBottomColor: c.border,
+    backgroundColor: c.greenDim,
   },
   aiSuggestText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.green,
+    color: c.green,
     letterSpacing: 0.3,
   },
 });
