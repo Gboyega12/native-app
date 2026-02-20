@@ -756,7 +756,7 @@ const EnrichmentEngine = {
     }
 
     // ── Debt analysis with good/bad debt differentiation ──
-    // Check connected debt accounts for utilization rates
+    // Include both synced and manual debt accounts for holistic view
     const connectedDebts = debtAccounts || [];
     const totalLimit = connectedDebts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
     const totalBalance = connectedDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
@@ -765,32 +765,36 @@ const EnrichmentEngine = {
     const isMediumUtil = overallUtil > 30 && overallUtil <= 75;
     const isHighUtil = overallUtil > 75;
 
+    // Use the higher of transaction-detected debt count or actual debt accounts
+    // This ensures manually-added debts (without matching transactions) are counted
+    const actualDebtCount = Math.max(m.debtAccountCount, connectedDebts.length);
+
     // Debt snowball — only for bad/medium debt, not for good debt users
-    if (m.debtAccountCount >= 2) {
+    if (actualDebtCount >= 2) {
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       if (isGoodDebt) {
         // Low utilization, paying on time — good debt for points
         moves.push({
-          action: `Maximise credit card rewards across ${m.debtAccountCount} cards`,
+          action: `Maximise credit card rewards across ${actualDebtCount} cards`,
           annualImpact: Math.round(totalBalance * 0.02), // ~2% rewards
           monthlyImpact: Math.round(totalBalance * 0.02 / 12),
           effort: 'low',
           category: 'savings',
           merchants: debtMerchants,
-          strategy: `${m.debtAccountCount} credit cards with ${Math.round(overallUtil)}% utilisation — well managed. Focus on maximising points and cashback.`,
+          strategy: `${actualDebtCount} credit cards with ${Math.round(overallUtil)}% utilisation — well managed. Focus on maximising points and cashback.`,
           steps: ['Route all regular spending through your rewards card', 'Always pay in full to avoid interest', 'Review whether your card gives the best rewards for your spend', 'I\'ll flag if utilisation creeps up'],
           effect: `Earn more from spending you're already doing.`,
         });
       } else {
         const debtSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
         moves.push({
-          action: `Attack ${m.debtAccountCount} debts with snowball method`,
+          action: `Attack ${actualDebtCount} debts with snowball method`,
           annualImpact: debtSaving * 12,
           monthlyImpact: debtSaving,
           effort: 'high',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `${m.debtAccountCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}`,
+          strategy: `${actualDebtCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}`,
           steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Direct your surplus at the smallest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'],
           effect: `Saves \u00a3${debtSaving * 12}/year in interest.`,
         });
@@ -798,7 +802,7 @@ const EnrichmentEngine = {
     }
 
     // Single debt account
-    if (m.debtAccountCount === 1) {
+    if (actualDebtCount === 1) {
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       if (isGoodDebt) {
         moves.push({

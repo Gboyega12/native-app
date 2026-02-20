@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
   LayoutAnimation, Animated, Easing, Switch, Platform, ActivityIndicator,
+  Modal, Pressable, TextInput,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -88,6 +89,27 @@ export default function Profile() {
     achievement_alerts: true,
   });
   const [notifExpanded, setNotifExpanded] = useState(false);
+
+  // Add debt modal state
+  const [showAddDebt, setShowAddDebt] = useState(false);
+  const [addDebtName, setAddDebtName] = useState('');
+  const [addDebtType, setAddDebtType] = useState('credit_card');
+  const [addDebtBalance, setAddDebtBalance] = useState('');
+  const [addDebtLimit, setAddDebtLimit] = useState('');
+  const [addDebtRate, setAddDebtRate] = useState('');
+  const [addDebtMinPayment, setAddDebtMinPayment] = useState('');
+  const [addDebtSaving, setAddDebtSaving] = useState(false);
+  const [addDebtError, setAddDebtError] = useState('');
+
+  const DEBT_TYPES = [
+    { value: 'credit_card', label: 'Credit card' },
+    { value: 'personal_loan', label: 'Personal loan' },
+    { value: 'overdraft', label: 'Overdraft' },
+    { value: 'student_loan', label: 'Student loan' },
+    { value: 'car_finance', label: 'Car finance' },
+    { value: 'bnpl', label: 'Buy now pay later' },
+    { value: 'other', label: 'Other' },
+  ];
 
   // Refresh tier after returning from Stripe Checkout
   useEffect(() => {
@@ -191,6 +213,78 @@ export default function Profile() {
 
   const handleAddAccount = () => {
     router.push({ pathname: '/(main)/connect', params: { from: 'profile' } });
+  };
+
+  const handleSaveDebt = async () => {
+    setAddDebtError('');
+    if (!addDebtName.trim()) {
+      setAddDebtError('Please enter an account name.');
+      return;
+    }
+    const balance = parseFloat(addDebtBalance);
+    if (isNaN(balance) || balance <= 0) {
+      setAddDebtError('Please enter a valid outstanding balance.');
+      return;
+    }
+
+    setAddDebtSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setAddDebtError('Not signed in. Please sign in and try again.');
+        setAddDebtSaving(false);
+        return;
+      }
+
+      const limit = parseFloat(addDebtLimit) || null;
+      const rate = parseFloat(addDebtRate) || null;
+      const minPayment = parseFloat(addDebtMinPayment) || null;
+
+      const newDebt = {
+        user_id: user.id,
+        account_name: addDebtName.trim(),
+        account_type: addDebtType,
+        outstanding_balance: balance,
+        credit_limit: limit,
+        interest_rate: rate,
+        minimum_payment: minPayment,
+        source: 'manual',
+        last_updated: new Date().toISOString(),
+      };
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from('debt_accounts')
+        .insert(newDebt)
+        .select()
+        .single();
+
+      if (insertErr) {
+        if (insertErr.message?.includes('unique') || insertErr.code === '23505') {
+          setAddDebtError('A debt account with this name already exists.');
+        } else {
+          setAddDebtError(`Could not save: ${insertErr.message || 'Unknown error'}`);
+        }
+        setAddDebtSaving(false);
+        return;
+      }
+
+      // Optimistic UI update
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setDebtAccounts((prev) => [...prev, inserted]);
+
+      // Reset form
+      setAddDebtName('');
+      setAddDebtType('credit_card');
+      setAddDebtBalance('');
+      setAddDebtLimit('');
+      setAddDebtRate('');
+      setAddDebtMinPayment('');
+      setAddDebtError('');
+      setShowAddDebt(false);
+    } catch (err: any) {
+      setAddDebtError('Something went wrong. Please try again.');
+    }
+    setAddDebtSaving(false);
   };
 
   const handleManageSubscription = async () => {
@@ -507,7 +601,13 @@ export default function Profile() {
                     <Text style={s.accountName}>{d.account_name}</Text>
                     <View style={[s.typeBadge, s.typeBadgeCredit]}>
                       <Text style={[s.typeBadgeText, s.typeBadgeTextCredit]}>
-                        {d.account_type === 'credit_card' ? 'Credit' : d.account_type || 'Debt'}
+                        {d.account_type === 'credit_card' ? 'Credit'
+                          : d.account_type === 'personal_loan' ? 'Loan'
+                          : d.account_type === 'overdraft' ? 'Overdraft'
+                          : d.account_type === 'student_loan' ? 'Student'
+                          : d.account_type === 'car_finance' ? 'Car'
+                          : d.account_type === 'bnpl' ? 'BNPL'
+                          : d.account_type || 'Debt'}
                       </Text>
                     </View>
                   </View>
@@ -536,7 +636,7 @@ export default function Profile() {
                   )}
                   {d.last_updated && (
                     <Text style={s.accountMeta}>
-                      Updated {new Date(d.last_updated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                      {d.source === 'manual' ? 'Added manually' : 'Updated'} {new Date(d.last_updated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                     </Text>
                   )}
                 </View>
@@ -563,10 +663,115 @@ export default function Profile() {
           </View>
         )}
 
-        {/* Add account button */}
-        <TouchableOpacity style={s.addAccountBtn} onPress={handleAddAccount} activeOpacity={0.7}>
-          <Text style={s.addAccountText}>+ Add account</Text>
-        </TouchableOpacity>
+        {/* Add account / Add debt buttons */}
+        <View style={s.addButtonsRow}>
+          <TouchableOpacity style={[s.addAccountBtn, { flex: 1 }]} onPress={handleAddAccount} activeOpacity={0.7}>
+            <Text style={s.addAccountText}>+ Add account</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.addAccountBtn, { flex: 1, borderColor: colors.skyDim }]}
+            onPress={() => setShowAddDebt(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={[s.addAccountText, { color: colors.sky }]}>+ Add debt</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Add debt modal */}
+        <Modal visible={showAddDebt} transparent animationType="fade" onRequestClose={() => { setAddDebtError(''); setShowAddDebt(false); }}>
+          <Pressable style={s.modalOverlay} onPress={() => { setAddDebtError(''); setShowAddDebt(false); }}>
+            <Pressable style={s.modalContent} onPress={() => {}}>
+              <View style={s.modalHeader}>
+                <Text style={s.modalTitle}>Add debt</Text>
+                <TouchableOpacity style={s.modalCloseIcon} onPress={() => { setAddDebtError(''); setShowAddDebt(false); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={s.modalDesc}>Track debts that aren't connected via Open Banking.</Text>
+
+              {/* Account name */}
+              <Text style={s.modalLabel}>Account name</Text>
+              <TextInput
+                style={s.modalInput}
+                value={addDebtName}
+                onChangeText={setAddDebtName}
+                placeholder="e.g. Barclaycard, Klarna, Car loan"
+                placeholderTextColor={colors.muted}
+              />
+
+              {/* Debt type */}
+              <Text style={s.modalLabel}>Type</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.debtTypeScroll}>
+                {DEBT_TYPES.map((t) => (
+                  <TouchableOpacity
+                    key={t.value}
+                    style={[s.debtTypeChip, addDebtType === t.value && s.debtTypeChipActive]}
+                    onPress={() => setAddDebtType(t.value)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[s.debtTypeChipText, addDebtType === t.value && s.debtTypeChipTextActive]}>
+                      {t.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Outstanding balance */}
+              <Text style={s.modalLabel}>Outstanding balance</Text>
+              <TextInput
+                style={s.modalInput}
+                value={addDebtBalance}
+                onChangeText={setAddDebtBalance}
+                placeholder="\u00a3 0.00"
+                placeholderTextColor={colors.muted}
+                keyboardType="decimal-pad"
+              />
+
+              {/* Credit limit (optional) */}
+              <Text style={s.modalLabel}>Credit limit <Text style={s.modalOptional}>(optional)</Text></Text>
+              <TextInput
+                style={s.modalInput}
+                value={addDebtLimit}
+                onChangeText={setAddDebtLimit}
+                placeholder="\u00a3 0.00"
+                placeholderTextColor={colors.muted}
+                keyboardType="decimal-pad"
+              />
+
+              {/* Interest rate (optional) */}
+              <Text style={s.modalLabel}>Interest rate <Text style={s.modalOptional}>(optional)</Text></Text>
+              <TextInput
+                style={s.modalInput}
+                value={addDebtRate}
+                onChangeText={setAddDebtRate}
+                placeholder="e.g. 22.9"
+                placeholderTextColor={colors.muted}
+                keyboardType="decimal-pad"
+              />
+
+              {/* Minimum payment (optional) */}
+              <Text style={s.modalLabel}>Minimum payment <Text style={s.modalOptional}>(optional)</Text></Text>
+              <TextInput
+                style={s.modalInput}
+                value={addDebtMinPayment}
+                onChangeText={setAddDebtMinPayment}
+                placeholder="\u00a3 0.00"
+                placeholderTextColor={colors.muted}
+                keyboardType="decimal-pad"
+              />
+
+              {addDebtError ? <Text style={s.modalError}>{addDebtError}</Text> : null}
+
+              <TouchableOpacity style={s.modalSaveBtn} onPress={handleSaveDebt} disabled={addDebtSaving} activeOpacity={0.8}>
+                {addDebtSaving ? (
+                  <ActivityIndicator color={colors.bg} size="small" />
+                ) : (
+                  <Text style={s.modalSaveBtnText}>Save debt</Text>
+                )}
+              </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         {/* Consent info */}
         {connectedBanks.length > 0 && (
@@ -1116,6 +1321,115 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: c.accent,
+  },
+  addButtonsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+
+  // ── Add debt modal ──
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  modalContent: {
+    backgroundColor: c.surface,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  modalTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    color: c.text,
+  },
+  modalCloseIcon: {
+    padding: 4,
+  },
+  modalCloseIconText: {
+    fontSize: 14,
+    color: c.muted,
+  },
+  modalDesc: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.dim,
+    marginBottom: spacing.md,
+    lineHeight: 18,
+  },
+  modalLabel: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: c.text,
+    marginBottom: 6,
+    marginTop: spacing.sm,
+  },
+  modalOptional: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: c.muted,
+  },
+  modalInput: {
+    backgroundColor: c.bg,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.sm,
+    padding: 12,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text,
+  },
+  modalError: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.coral,
+    marginTop: spacing.sm,
+  },
+  modalSaveBtn: {
+    backgroundColor: c.accent,
+    borderRadius: 100,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  modalSaveBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.bg,
+  },
+  debtTypeScroll: {
+    flexGrow: 0,
+    marginBottom: 4,
+  },
+  debtTypeChip: {
+    backgroundColor: c.bg,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 100,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 8,
+  },
+  debtTypeChipActive: {
+    backgroundColor: c.skyDim,
+    borderColor: c.sky,
+  },
+  debtTypeChipText: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: c.dim,
+  },
+  debtTypeChipTextActive: {
+    color: c.sky,
   },
 
   // ── Empty state ──

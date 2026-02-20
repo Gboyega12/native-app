@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { getLastResult } from '@/app/(main)/processing';
-import { syncBankData } from '@/lib/sync';
+import { syncBankData, type WeeklyContext } from '@/lib/sync';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
@@ -88,6 +88,7 @@ export default function Home() {
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
   const [budgetExpanded, setBudgetExpanded] = useState(false);
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
+  const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
@@ -732,7 +733,7 @@ export default function Home() {
             .eq('user_id', user.id),
           supabase
             .from('debt_accounts')
-            .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated')
+            .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source')
             .eq('user_id', user.id),
         ]);
         if (adjRes.data) adjustments = adjRes.data;
@@ -782,8 +783,19 @@ export default function Home() {
       const result = await syncBankData(userId);
       if (!result) { setSyncing(false); return; }
 
-      // Update debt accounts
-      if (result.debtAccounts.length > 0) setDebtAccounts(result.debtAccounts);
+      // Update debt accounts: merge synced with any manual debts
+      try {
+        const { data: allDebt } = await supabase
+          .from('debt_accounts')
+          .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source')
+          .eq('user_id', userId);
+        if (allDebt) setDebtAccounts(allDebt);
+      } catch {
+        if (result.debtAccounts.length > 0) setDebtAccounts(result.debtAccounts);
+      }
+
+      // Update adaptive weekly context
+      if (result.weeklyContext) setWeeklyCtx(result.weeklyContext);
 
       // Re-fetch budget adjustments and apply for display
       let budgetAdjustments: any[] = [];
@@ -862,7 +874,10 @@ export default function Home() {
   })();
 
   // ── Safe-to-spend weekly calculation ──
-  const weeklyBudget = leftToDecide / 4.33;
+  // Use adaptive budget from sync if available (accounts for committed payments
+  // like rent/transfers that already consumed part of this period's income)
+  const staticWeeklyBudget = leftToDecide / 4.33;
+  const weeklyBudget = weeklyCtx?.adaptiveBudget ?? staticWeeklyBudget;
 
   // Get start of current week (Monday)
   const getWeekStart = () => {
@@ -947,6 +962,27 @@ export default function Home() {
                 <Text style={s.reviewBannerLink}>Tell me what they are</Text>
               </Text>
             </TouchableOpacity>
+          )}
+
+          {/* ── Income arrival alert ── */}
+          {weeklyCtx?.incomeArrivedThisWeek && weeklyCtx.recentIncomeEvents.length > 0 && (
+            <AnimGlyph delay={0}>
+              <View style={s.incomeAlert}>
+                <Text style={s.incomeAlertTitle}>Income received</Text>
+                <Text style={s.incomeAlertText}>
+                  {weeklyCtx.recentIncomeEvents.map((e) =>
+                    `\u00a3${Math.round(e.amount).toLocaleString()} from ${e.source}`
+                  ).join(', ')}
+                  {' '}landed this week.
+                  {weeklyCtx.committedThisWeek > 0
+                    ? ` \u00a3${Math.round(weeklyCtx.committedThisWeek).toLocaleString()} already committed to bills & essentials.`
+                    : ''}
+                </Text>
+                <Text style={s.incomeAlertBudget}>
+                  Adaptive safe-to-spend: {'\u00a3'}{Math.round(weeklyCtx.adaptiveBudget).toLocaleString()}/week
+                </Text>
+              </View>
+            </AnimGlyph>
           )}
 
           {/* ══════════════════════════════════════════════
@@ -1481,7 +1517,7 @@ export default function Home() {
                 {infoCard === 'debt' && (
                   <View style={s.infoBox}>
                     <Text style={s.infoBoxText}>
-                      Debt balances are pulled from your connected credit cards via Open Banking (TrueLayer). Utilisation shows how much of your credit limit is currently used. Over 75% utilisation can affect your credit score.
+                      Debt balances are pulled from your connected accounts via Open Banking, or added manually in your profile. Utilisation shows how much of your credit limit is currently used. Over 75% utilisation can affect your credit score.
                     </Text>
                   </View>
                 )}
@@ -1509,6 +1545,10 @@ export default function Home() {
                   const typeLabel = d.account_type === 'credit_card' ? 'Credit card'
                     : d.account_type === 'overdraft' ? 'Overdraft'
                     : d.account_type === 'overdraft_facility' ? 'Overdraft facility'
+                    : d.account_type === 'personal_loan' ? 'Personal loan'
+                    : d.account_type === 'student_loan' ? 'Student loan'
+                    : d.account_type === 'car_finance' ? 'Car finance'
+                    : d.account_type === 'bnpl' ? 'BNPL'
                     : d.account_type || 'Account';
                   return (
                     <AnimGlyph key={i} delay={150 + i * 80}>
@@ -2913,6 +2953,34 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   reviewBannerLink: {
     color: c.green,
     fontFamily: fonts.semibold,
+  },
+
+  // ── Income arrival alert ──
+  incomeAlert: {
+    backgroundColor: c.greenDim,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,170,0.25)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  incomeAlertTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.green,
+    marginBottom: 4,
+  },
+  incomeAlertText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.text2,
+    lineHeight: 20,
+  },
+  incomeAlertBudget: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: c.green,
+    marginTop: 6,
   },
 
   // ── Categorise review modal ──
