@@ -1,4 +1,4 @@
-import React, { useMemo, createContext, useContext } from 'react';
+import React, { useMemo, useState, createContext, useContext } from 'react';
 import { Text, View, Image, StyleSheet, Platform } from 'react-native';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
@@ -37,12 +37,18 @@ function useMdStyles() {
   return useContext(MdStylesCtx)!;
 }
 
-/** Renders GIF images — uses native <img> on web for reliable GIF playback */
+/** Renders GIF images — uses native <img> on web for reliable GIF playback.
+ *  Hides itself when the URL fails to load (e.g. fabricated/expired URLs). */
 function GifImage({ uri, style }: { uri: string; style: any }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) return null;
+
   if (Platform.OS === 'web') {
     return React.createElement('img', {
       src: uri,
-      alt: 'gif',
+      alt: '',
+      onError: () => setFailed(true),
       style: {
         width: style.width ?? 200,
         height: style.height ?? 150,
@@ -52,7 +58,14 @@ function GifImage({ uri, style }: { uri: string; style: any }) {
       },
     });
   }
-  return <Image source={{ uri }} style={style} resizeMode="cover" />;
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode="cover"
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
