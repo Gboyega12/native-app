@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { syncBankData } from '@/lib/sync';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
@@ -241,6 +242,7 @@ export default function Plan() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [userPlans, setUserPlans] = useState<UserPlan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, ProgressRow>>({});
@@ -324,10 +326,33 @@ export default function Plan() {
       }
 
       setProgress(progressMap);
+
+      // Trigger background sync so moves/scores reflect latest bank data
+      syncInBackground(user.id, dismissedActions);
     } catch (err) {
       console.warn('[plan] loadData error:', err);
     }
     setLoading(false);
+  };
+
+  // Background sync: re-fetch TrueLayer data and update moves
+  const syncInBackground = async (userId: string, dismissedActions: Set<string>) => {
+    try {
+      setSyncing(true);
+      const result = await syncBankData(userId);
+      if (!result) { setSyncing(false); return; }
+
+      // Apply dismissed-move filter
+      const moves = result.analysis.all_moves || [];
+      const filtered = dismissedActions.size > 0
+        ? moves.filter((m: Move) => !dismissedActions.has(m.action))
+        : moves;
+
+      setAnalysis({ ...result.analysis, all_moves: filtered });
+    } catch (err: any) {
+      console.warn('[plan] Background sync failed:', err?.message);
+    }
+    setSyncing(false);
   };
 
   // ── Persist progress ──
@@ -530,8 +555,10 @@ export default function Plan() {
           <View>
             <Text style={styles.heading}>Your Plan</Text>
             <Text style={styles.headingSub}>
-              {activeMoves.length + userPlans.length} in progress
-              {opportunities.length > 0 ? ` \u00B7 ${opportunities.length} recommended` : ''}
+              {syncing ? 'Syncing latest data...' : (
+                `${activeMoves.length + userPlans.length} in progress` +
+                (opportunities.length > 0 ? ` \u00B7 ${opportunities.length} recommended` : '')
+              )}
             </Text>
           </View>
           <TouchableOpacity style={styles.infoBtn} onPress={() => setShowInfo(true)} activeOpacity={0.7}>

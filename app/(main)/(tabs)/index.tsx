@@ -7,6 +7,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { getLastResult } from '@/app/(main)/processing';
+import { syncBankData } from '@/lib/sync';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import { colors, fonts, spacing, radius } from '@/theme';
@@ -778,206 +779,14 @@ export default function Home() {
     try {
       setSyncing(true);
 
-      // Try TrueLayer sync for fresh data
-      let csvData: string | null = null;
-      try {
-        const res = await fetch('/api/truelayer/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId }),
-        });
-        const data = await res.json();
-        if (data.success && data.csv_data) {
-          csvData = data.csv_data;
-        }
-      } catch {}
+      const result = await syncBankData(userId);
+      if (!result) { setSyncing(false); return; }
 
-      // If TrueLayer sync failed, fall back to existing CSV from ALL bank_data rows
-      if (!csvData) {
-        try {
-          const { data: bankRows } = await supabase
-            .from('bank_data')
-            .select('csv_data')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false });
-          if (bankRows && bankRows.length > 0) {
-            // Merge CSVs: take header from first, data lines from all
-            const allLines: string[] = ['Date,Description,Amount'];
-            for (const row of bankRows) {
-              if (!row.csv_data) continue;
-              const lines = row.csv_data.split('\n');
-              // Skip header line (first line) from each CSV
-              allLines.push(...lines.slice(1).filter((l: string) => l.trim()));
-            }
-            csvData = allLines.join('\n');
-          }
-        } catch {}
-      }
+      // Update debt accounts
+      if (result.debtAccounts.length > 0) setDebtAccounts(result.debtAccounts);
 
-      if (!csvData) {
-        setSyncing(false);
-        return;
-      }
-
-      // Fetch user's transaction overrides + budget adjustments
-      let overrides: any[] = [];
+      // Re-fetch budget adjustments and apply for display
       let budgetAdjustments: any[] = [];
-      try {
-        const [overrideRes, adjustmentRes] = await Promise.all([
-          supabase
-            .from('transaction_overrides')
-            .select('match_description, category, is_essential')
-            .eq('user_id', userId),
-          supabase
-            .from('budget_adjustments')
-            .select('description, category, monthly_amount, is_essential')
-            .eq('user_id', userId),
-        ]);
-        if (overrideRes.data) overrides = overrideRes.data;
-        if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
-      } catch {}
-
-      // Fetch debt accounts and identity for personalisation
-      let debtAccountsData: any[] = [];
-      let identityData: any = null;
-      try {
-        const [debtRes, idRes] = await Promise.all([
-          supabase
-            .from('debt_accounts')
-            .select('account_name, account_type, outstanding_balance, credit_limit')
-            .eq('user_id', userId),
-          supabase
-            .from('user_identity')
-            .select('*')
-            .eq('user_id', userId)
-            .single(),
-        ]);
-        if (debtRes.data) debtAccountsData = debtRes.data;
-        if (idRes.data) identityData = idRes.data;
-      } catch {}
-
-      // Re-run enrichment engine with fresh data (fast, ~1 second)
-      const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
-      if (result.enrichedTransactions.length === 0) {
-        setSyncing(false);
-        return;
-      }
-
-      // Fetch goals for move ranking
-      let goals: Goals | null = null;
-      const { data: goalsData } = await supabase
-        .from('goals')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-      goals = goalsData;
-
-      // Run move engine
-      const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
-      const rankedMoves = rankMoves(result.decisionStack, result.profile, goals);
-      const topRanked = rankedMoves[0] || null;
-      const goalTrajectory = topRanked ? topRanked.trajectory : null;
-
-      const allMoves = rankedMoves;
-      // Filter out recommendations the user has dismissed so they don't reappear.
-      // Dismissed moves are stored in plan_progress with a 'dismissed-' key prefix.
-      try {
-        const { data: progressRows } = await supabase
-          .from('plan_progress')
-          .select('move_key, move_action')
-          .eq('user_id', userId)
-          .like('move_key', 'dismissed-%');
-        if (progressRows && progressRows.length > 0) {
-          const dismissedActions = new Set(progressRows.map((r: any) => r.move_action));
-          for (let i = allMoves.length - 1; i >= 0; i--) {
-            if (dismissedActions.has(allMoves[i].action)) allMoves.splice(i, 1);
-          }
-        }
-      } catch {}
-
-      const topMove = allMoves[0] || null;
-
-      // Build raw analysis WITHOUT budget adjustments (those are applied at display time)
-      const rawNonDisc = result.profile.budgetReality.nonDiscretionary;
-      const rawDisc = result.profile.budgetReality.discretionary;
-
-      const rawAnalysis: Analysis = {
-        user_id: userId,
-        archetype: result.archetype.key,
-        decision_score: result.decisionScore.score,
-        monthly_income: Math.round(result.profile.monthly.income),
-        monthly_spending: Math.round(result.profile.monthly.spending),
-        surplus: Math.round(result.profile.monthly.surplus),
-        non_discretionary: rawNonDisc,
-        discretionary: rawDisc,
-        income_sources: result.profile.incomeSources,
-        top_move: topMove || ({} as any),
-        all_moves: allMoves,
-        behavioral_patterns: result.behavioralPatterns,
-        goal_context: goalTrajectory,
-      };
-
-      // Upsert to Supabase — update latest row instead of creating duplicates
-      const { data: existingRow } = await supabase
-        .from('analyses')
-        .select('id')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (existingRow?.id) {
-        await supabase.from('analyses').update({
-          archetype: rawAnalysis.archetype,
-          decision_score: rawAnalysis.decision_score,
-          monthly_income: rawAnalysis.monthly_income,
-          monthly_spending: rawAnalysis.monthly_spending,
-          surplus: rawAnalysis.surplus,
-          non_discretionary: rawAnalysis.non_discretionary,
-          discretionary: rawAnalysis.discretionary,
-          income_sources: rawAnalysis.income_sources,
-          top_move: rawAnalysis.top_move,
-          all_moves: rawAnalysis.all_moves,
-          behavioral_patterns: rawAnalysis.behavioral_patterns,
-          goal_context: rawAnalysis.goal_context,
-        }).eq('id', existingRow.id);
-      } else {
-        await supabase.from('analyses').insert({
-          user_id: userId,
-          archetype: rawAnalysis.archetype,
-          decision_score: rawAnalysis.decision_score,
-          monthly_income: rawAnalysis.monthly_income,
-          monthly_spending: rawAnalysis.monthly_spending,
-          surplus: rawAnalysis.surplus,
-          non_discretionary: rawAnalysis.non_discretionary,
-          discretionary: rawAnalysis.discretionary,
-          income_sources: rawAnalysis.income_sources,
-          top_move: rawAnalysis.top_move,
-          all_moves: rawAnalysis.all_moves,
-          behavioral_patterns: rawAnalysis.behavioral_patterns,
-          goal_context: rawAnalysis.goal_context,
-        });
-      }
-
-      // ── Save score snapshot on background sync ──
-      try {
-        const savingsRate = rawAnalysis.monthly_income > 0
-          ? Math.round((rawAnalysis.surplus / rawAnalysis.monthly_income) * 100) : 0;
-        await supabase.from('score_history').insert({
-          user_id: userId,
-          decision_score: rawAnalysis.decision_score,
-          monthly_income: rawAnalysis.monthly_income,
-          monthly_spending: rawAnalysis.monthly_spending,
-          surplus: rawAnalysis.surplus,
-          savings_rate: savingsRate,
-          subscription_count: result.profile.metrics.subscriptionCount || 0,
-          debt_account_count: result.profile.metrics.debtAccountCount || 0,
-          archetype: rawAnalysis.archetype,
-        });
-      } catch {}
-
-      // Re-fetch budget adjustments right before merging so we capture
-      // any items the user added while the sync was running.
       try {
         const { data: freshAdj } = await supabase
           .from('budget_adjustments')
@@ -986,47 +795,7 @@ export default function Home() {
         if (freshAdj) budgetAdjustments = freshAdj;
       } catch {}
 
-      // Apply budget adjustments for display only (not saved)
-      const updatedAnalysis = mergeAdjustments(rawAnalysis, budgetAdjustments);
-
-      // Sync debt accounts from ALL bank_data.card_balances
-      try {
-        const { data: bankRows } = await supabase
-          .from('bank_data')
-          .select('card_balances')
-          .eq('user_id', userId)
-          .not('card_balances', 'is', null);
-
-        if (bankRows && bankRows.length > 0) {
-          const debtRows: any[] = [];
-          for (const row of bankRows) {
-            if (!Array.isArray(row.card_balances)) continue;
-            for (const card of row.card_balances) {
-              const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
-                user_id: userId,
-                account_name: card.name || 'Card',
-                account_type: card.type || 'credit_card',
-                outstanding_balance: card.balance,
-                credit_limit: card.limit,
-                source: 'truelayer',
-                last_updated: new Date().toISOString(),
-              }, { onConflict: 'user_id,account_name' });
-              if (!upsertErr) {
-                debtRows.push({
-                  account_name: card.name || 'Card',
-                  account_type: card.type || 'credit_card',
-                  outstanding_balance: card.balance,
-                  credit_limit: card.limit,
-                });
-              }
-            }
-          }
-          if (debtRows.length > 0) setDebtAccounts(debtRows);
-        }
-      } catch {}
-
-      // Update dashboard
-      setAnalysis(updatedAnalysis);
+      setAnalysis(mergeAdjustments(result.analysis, budgetAdjustments));
     } catch (err: any) {
       console.warn('[home] Background sync failed:', err?.message);
     }
