@@ -83,7 +83,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     if (!session && !inAuth) {
-      router.replace('/(auth)/sign-in');
+      router.replace('/(auth)/splash');
     } else if (session && inAuth) {
       const name = session.user.user_metadata?.full_name;
       if (!name) {
