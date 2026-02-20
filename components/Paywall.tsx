@@ -61,8 +61,11 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     setLoading(true);
     setError(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      // Refresh the session so the access token is fresh (it may have
+      // expired while the user was on the Stripe Checkout page).
+      const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
+      const session = refreshed?.session;
+      if (refreshErr || !session) {
         showError('Please sign in to subscribe.');
         return;
       }
@@ -204,7 +207,9 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               )}
             </TouchableOpacity>
             {error && (
-              <Text style={styles.errorText}>{error}</Text>
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
             )}
             <Text style={styles.trialNote}>Cancel anytime</Text>
 
@@ -411,12 +416,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000000',
   },
+  errorBanner: {
+    backgroundColor: 'rgba(255,107,107,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,107,107,0.25)',
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    marginTop: spacing.md,
+  },
   errorText: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: '#FF6B6B',
     textAlign: 'center',
-    marginTop: spacing.sm,
     lineHeight: 20,
   },
   trialNote: {
