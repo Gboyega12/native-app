@@ -291,7 +291,7 @@ export default function Profile() {
     <ScrollView style={s.container} contentContainerStyle={s.scroll}>
       {/* Header */}
       <View style={s.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(main)/(tabs)')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={s.backBtn}>{'\u2190'}</Text>
         </TouchableOpacity>
         <Text style={s.headerTitle}>Profile</Text>
