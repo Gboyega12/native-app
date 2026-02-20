@@ -35,6 +35,17 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     }
   }, [visible]);
 
+  // Reset loading when the page is restored from bfcache (e.g. user
+  // navigated to Stripe Checkout then pressed the browser back button).
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const reset = (e: PageTransitionEvent) => {
+      if (e.persisted) setLoading(false);
+    };
+    window.addEventListener('pageshow', reset);
+    return () => window.removeEventListener('pageshow', reset);
+  }, []);
+
   const contextMessage = feature === 'chat'
     ? 'Unlock AI chat to get personalised insights on your finances.'
     : feature === 'moves'
@@ -88,6 +99,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
       if (Platform.OS === 'web') {
         window.location.href = data.url;
+        return; // page is navigating away; don't touch state
       } else {
         await Linking.openURL(data.url);
       }
