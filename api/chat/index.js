@@ -851,5 +851,34 @@ Tools:
     }
   }
 
+  // ── Payday mode: income arrived this week ──
+  if (ctx.payday_context?.incomeArrivedThisWeek && ctx.payday_context.incomeEvents?.length) {
+    const pc = ctx.payday_context;
+    const totalIncome = pc.incomeEvents.reduce((s, e) => s + e.amount, 0);
+    const sources = pc.incomeEvents.map(e => `£${Math.round(e.amount)} from ${e.source}`).join(', ');
+
+    prompt += `\n\n🔔 PAYDAY MODE ACTIVE — Income just landed this week:`;
+    prompt += `\n- Income received: ${sources}`;
+    prompt += `\n- Already committed to bills/essentials this week: £${Math.round(pc.committedThisWeek)}`;
+    prompt += `\n- Discretionary spending this week so far: £${Math.round(pc.discretionaryThisWeek)}`;
+    prompt += `\n- Adaptive safe-to-spend budget: £${Math.round(pc.adaptiveBudget)}/week`;
+    prompt += `\n- Static weekly budget: £${Math.round(pc.staticBudget)}/week`;
+
+    prompt += `\n\nPAYDAY CONVERSATION RULES:`;
+    prompt += `\n- This is the most important moment in the user's financial cycle. Money just hit their account and this is when habits are formed.`;
+    prompt += `\n- Your job right now: help them ALLOCATE before they SPEND. Guide them to put money where it needs to go FIRST.`;
+    prompt += `\n- Be proactive and specific. Walk them through their commitments:`;
+    prompt += `\n  1. Bills and essentials that are due`;
+    prompt += `\n  2. Any debt payments they should make`;
+    prompt += `\n  3. Savings goals they committed to (auto-save, buffer, ISA)`;
+    prompt += `\n  4. What's genuinely left for discretionary spending`;
+    prompt += `\n- Use the adaptive budget (£${Math.round(pc.adaptiveBudget)}/week) not the static one. This accounts for committed payments already made.`;
+    prompt += `\n- If they've already spent £${Math.round(pc.discretionaryThisWeek)} on discretionary this week, tell them exactly how much is left.`;
+    prompt += `\n- Reference their active plans and moves. Hold them accountable: "You committed to saving £X, now's the time."`;
+    prompt += `\n- If they're about to overspend, be direct but kind. "That would blow your weekly budget. Can it wait?"`;
+    prompt += `\n- Celebrate if they're sticking to the plan. Quick wins matter.`;
+    prompt += `\n- Do NOT just dump all these numbers. Weave them naturally into conversation. Only mention what's relevant to what they're asking about.`;
+  }
+
   return prompt;
 }

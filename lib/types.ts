@@ -282,6 +282,14 @@ export interface ChatContext {
   debt_accounts?: { name: string; type: string; balance: number | null; limit: number | null }[];
   budget_adjustments?: { description: string; category: string; amount: number; essential: boolean }[];
   behavioral_patterns?: string[];
+  payday_context?: {
+    incomeArrivedThisWeek: boolean;
+    incomeEvents: { source: string; amount: number; date: string; frequency: string }[];
+    committedThisWeek: number;
+    discretionaryThisWeek: number;
+    adaptiveBudget: number;
+    staticBudget: number;
+  };
   goal_trajectory?: {
     goalLabel: string;
     currentMonths: number;

@@ -21,12 +21,35 @@ const FREE_MESSAGE_LIMIT = 2;
 
 // ── Suggested questions (contextual) ──
 
-function getContextualQuestions(analysis: Analysis | null, goals: Goals | null): string[] {
+function getContextualQuestions(analysis: Analysis | null, goals: Goals | null, paydayActive?: boolean): string[] {
   if (!analysis) {
     return [
       'What can Bocy help me with?',
       'How does the financial analysis work?',
     ];
+  }
+
+  // Payday mode: prioritise allocation-focused questions
+  if (paydayActive) {
+    const questions: string[] = [];
+    questions.push('I just got paid. Walk me through what to do first.');
+    questions.push('How much can I safely spend this week?');
+
+    const moves = analysis.all_moves || [];
+    if (moves.length > 0) {
+      questions.push('Am I on track with my plan?');
+    } else {
+      questions.push('Help me set up a budget for this pay period.');
+    }
+
+    if (goals?.one_year_goal) {
+      const goalName = goals.one_year_goal.replace(/_/g, ' ');
+      questions.push(`How does this pay cycle move me closer to ${goalName}?`);
+    } else {
+      questions.push('What should I do with any leftover money?');
+    }
+
+    return questions;
   }
 
   const questions: string[] = [];
@@ -533,6 +556,75 @@ export default function Chat() {
       }
     } catch {}
 
+    // Build payday context from latest sync's weekly context
+    // We detect income arrivals by scanning recent income transactions this week
+    try {
+      const now = new Date();
+      const day = now.getDay();
+      const diff = day === 0 ? 6 : day - 1;
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - diff);
+      weekStart.setHours(0, 0, 0, 0);
+
+      // Check income sources from analysis
+      const incomeSources = a?.income_sources || [];
+      const primarySource = incomeSources.find((s: any) => s.isSalary) || incomeSources[0];
+
+      if (primarySource && a) {
+        // Check all non-discretionary + discretionary transactions for recent income
+        const allTxs: any[] = [];
+        for (const section of [a.non_discretionary, a.discretionary]) {
+          if (!section?.items) continue;
+          for (const item of section.items) {
+            allTxs.push(...(item.transactions || []));
+          }
+        }
+
+        // Look for credits this week that match known income sources
+        const recentIncome = allTxs.filter((tx: any) => {
+          if (!tx.date || tx.amount <= 0) return false;
+          const txDate = new Date(tx.date);
+          return txDate >= weekStart && tx.amount >= primarySource.avgAmount * 0.5;
+        });
+
+        // Committed (essential) spending this week
+        const essentialItems = a.non_discretionary?.items || [];
+        const committedThisWeek = essentialItems
+          .flatMap((item: any) => item.transactions || [])
+          .filter((tx: any) => tx.date && new Date(tx.date) >= weekStart && tx.amount < 0)
+          .reduce((sum: number, tx: any) => sum + Math.abs(tx.amount), 0);
+
+        // Discretionary spending this week
+        const discItems = a.discretionary?.items || [];
+        const discThisWeek = discItems
+          .flatMap((item: any) => item.transactions || [])
+          .filter((tx: any) => tx.date && new Date(tx.date) >= weekStart && tx.amount < 0)
+          .reduce((sum: number, tx: any) => sum + Math.abs(tx.amount), 0);
+
+        const income = a.monthly_income || 0;
+        const nonDiscTotal = a.non_discretionary?.total || 0;
+        const discTotal = a.discretionary?.total || 0;
+        const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
+        const staticBudget = leftToDecide / 4.33;
+
+        if (recentIncome.length > 0) {
+          ctx.payday_context = {
+            incomeArrivedThisWeek: true,
+            incomeEvents: recentIncome.map((tx: any) => ({
+              source: tx.merchant || tx.description,
+              amount: tx.amount,
+              date: tx.date,
+              frequency: primarySource.frequency || 'unknown',
+            })),
+            committedThisWeek,
+            discretionaryThisWeek: discThisWeek,
+            adaptiveBudget: Math.round(staticBudget * 100) / 100,
+            staticBudget: Math.round(staticBudget * 100) / 100,
+          };
+        }
+      }
+    } catch {}
+
     setContext(ctx);
 
     // ── Load persisted messages ──
@@ -544,6 +636,15 @@ export default function Chat() {
 
     if (chatData?.messages?.length) {
       setMessages(chatData.messages);
+    } else if (ctx.payday_context?.incomeArrivedThisWeek && ctx.payday_context.incomeEvents.length > 0) {
+      // No existing messages + income arrived = auto-send a payday nudge
+      const pc = ctx.payday_context;
+      const totalIncome = pc.incomeEvents.reduce((s: number, e: any) => s + e.amount, 0);
+      const nudgeMsg: ChatMessage = {
+        role: 'assistant',
+        content: `Payday! **\u00a3${Math.round(totalIncome).toLocaleString()}** just landed. Before you spend, let me walk you through where this needs to go. Tap below or just ask.`,
+      };
+      setMessages([nudgeMsg]);
     }
   };
 
@@ -920,7 +1021,8 @@ export default function Chat() {
     }
   };
 
-  const suggestedQuestions = getContextualQuestions(analysis, goals);
+  const paydayActive = !!context.payday_context?.incomeArrivedThisWeek;
+  const suggestedQuestions = getContextualQuestions(analysis, goals, paydayActive);
 
   // ── Free tier: count user messages for gate ──
   const userMessageCount = messages.filter((m) => m.role === 'user').length;
@@ -955,13 +1057,18 @@ export default function Chat() {
         contentContainerStyle={s.messagesContent}
         keyboardShouldPersistTaps="handled"
       >
-        {messages.length === 0 && (
+        {/* Show suggestions when empty OR when only the payday auto-nudge is present */}
+        {(messages.length === 0 || (messages.length === 1 && messages[0].role === 'assistant' && paydayActive)) && (
           <View style={s.suggestedContainer}>
-            <View style={s.chatBocyHero}>
-              <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
-            </View>
-            <Text style={s.suggestedTitle}>Ask Bocy</Text>
-            <Text style={s.suggestedSubtitle}>Your financial companion</Text>
+            {messages.length === 0 && (
+              <>
+                <View style={s.chatBocyHero}>
+                  <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
+                </View>
+                <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Ask Bocy'}</Text>
+                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'Your financial companion'}</Text>
+              </>
+            )}
             {suggestedQuestions.map((q, i) => (
               <TouchableOpacity
                 key={i}
