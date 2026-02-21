@@ -7,6 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
+import { Analytics } from '@/components/Analytics';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -158,6 +159,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <InnerLayout />
+      <Analytics />
     </ThemeProvider>
   );
 }
