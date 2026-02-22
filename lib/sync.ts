@@ -43,6 +43,8 @@ export interface SyncResult {
   latestTransactionDate: string | null;
   /** Non-empty if some bank connections have expired tokens. */
   connectionIssues: string[];
+  /** Names of banks with expired connections (e.g. ["Barclays", "HSBC"]). */
+  expiredBankNames: string[];
 }
 
 /**
@@ -153,6 +155,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   let csvData: string | null = null;
   let dataSource: 'truelayer' | 'fallback' = 'truelayer';
   const connectionIssues: string[] = [];
+  const expiredBankNames: string[] = [];
 
   try {
     const res = await fetch('/api/truelayer/sync', {
@@ -163,9 +166,12 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     const data = await res.json();
     if (data.success && data.csv_data) {
       csvData = data.csv_data;
-      // Track partially expired connections
+      // Track partially expired connections with bank names
       if (data.expired_connections?.length > 0) {
         connectionIssues.push('some_connections_expired');
+        for (const ec of data.expired_connections) {
+          if (ec.provider_name) expiredBankNames.push(ec.provider_name);
+        }
       }
     } else if (data.reason === 'token_expired') {
       connectionIssues.push('token_expired');
@@ -401,6 +407,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     dataSource,
     latestTransactionDate,
     connectionIssues,
+    expiredBankNames,
   };
 }
 

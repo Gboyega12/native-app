@@ -153,7 +153,7 @@ export default async function handler(req, res) {
     // Find ALL TrueLayer connections for this user
     const { data: bankRows, error: findErr } = await admin
       .from('bank_data')
-      .select('id, connection_id, refresh_token, updated_at')
+      .select('id, connection_id, refresh_token, updated_at, provider_name')
       .eq('user_id', userId)
       .eq('source', 'truelayer')
       .not('refresh_token', 'is', null)
@@ -176,7 +176,7 @@ export default async function handler(req, res) {
 
     for (const { row, result } of results) {
       if (!result) {
-        expiredConnections.push(row.connection_id);
+        expiredConnections.push({ connection_id: row.connection_id, provider_name: row.provider_name || null });
         continue;
       }
 
