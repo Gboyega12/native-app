@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { requestSync, onSyncComplete } from '@/lib/sync-coordinator';
+import type { WeeklyContext } from '@/lib/sync';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useSubscription } from '@/lib/subscription';
@@ -409,10 +411,16 @@ export default function Chat() {
   };
 
   // ── Load context + persisted messages on focus ──
+  // Also subscribe to sync completions from other screens so chat stays fresh.
 
   useFocusEffect(
     useCallback(() => {
       loadContext();
+      const unsub = onSyncComplete((result) => {
+        if (!result) return;
+        setAnalysis(result.analysis);
+      });
+      return () => unsub();
     }, []),
   );
 
@@ -556,70 +564,45 @@ export default function Chat() {
       }
     } catch {}
 
-    // Build payday context from latest sync's weekly context
-    // We detect income arrivals by scanning recent income transactions this week
+    // Build payday context from sync coordinator's weeklyContext
+    // This uses the same data as the home screen instead of duplicating the calculation
     try {
-      const now = new Date();
-      const day = now.getDay();
-      const diff = day === 0 ? 6 : day - 1;
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - diff);
-      weekStart.setHours(0, 0, 0, 0);
+      const syncResult = await requestSync(user.id);
+      if (syncResult) {
+        // Update analysis with fresh sync data
+        const freshA = syncResult.analysis;
+        setAnalysis(freshA);
 
-      // Check income sources from analysis
-      const incomeSources = a?.income_sources || [];
-      const primarySource = incomeSources.find((s: any) => s.isSalary) || incomeSources[0];
+        // Rebuild context fields that depend on analysis
+        ctx.monthly_income = freshA.monthly_income;
+        ctx.monthly_spending = freshA.monthly_spending;
+        ctx.surplus = freshA.surplus;
+        ctx.archetype = freshA.archetype;
+        ctx.decision_score = freshA.decision_score;
+        ctx.all_moves = freshA.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string }) => ({
+          action: m.action,
+          monthlyImpact: m.monthlyImpact,
+          effort: m.effort,
+        }));
+        ctx.top_move = freshA.top_move ? { action: freshA.top_move.action, monthlyImpact: freshA.top_move.monthlyImpact } : undefined;
+        ctx.behavioral_patterns = freshA.behavioral_patterns;
+        ctx.spending_by_category = buildSpendingBreakdown(freshA);
 
-      if (primarySource && a) {
-        // Check all non-discretionary + discretionary transactions for recent income
-        const allTxs: any[] = [];
-        for (const section of [a.non_discretionary, a.discretionary]) {
-          if (!section?.items) continue;
-          for (const item of section.items) {
-            allTxs.push(...(item.transactions || []));
-          }
-        }
-
-        // Look for credits this week that match known income sources
-        const recentIncome = allTxs.filter((tx: any) => {
-          if (!tx.date || tx.amount <= 0) return false;
-          const txDate = new Date(tx.date);
-          return txDate >= weekStart && tx.amount >= primarySource.avgAmount * 0.5;
-        });
-
-        // Committed (essential) spending this week
-        const essentialItems = a.non_discretionary?.items || [];
-        const committedThisWeek = essentialItems
-          .flatMap((item: any) => item.transactions || [])
-          .filter((tx: any) => tx.date && new Date(tx.date) >= weekStart && tx.amount < 0)
-          .reduce((sum: number, tx: any) => sum + Math.abs(tx.amount), 0);
-
-        // Discretionary spending this week
-        const discItems = a.discretionary?.items || [];
-        const discThisWeek = discItems
-          .flatMap((item: any) => item.transactions || [])
-          .filter((tx: any) => tx.date && new Date(tx.date) >= weekStart && tx.amount < 0)
-          .reduce((sum: number, tx: any) => sum + Math.abs(tx.amount), 0);
-
-        const income = a.monthly_income || 0;
-        const nonDiscTotal = a.non_discretionary?.total || 0;
-        const discTotal = a.discretionary?.total || 0;
-        const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
-        const staticBudget = leftToDecide / 4.33;
-
-        if (recentIncome.length > 0) {
+        // Use weeklyContext from sync (same source of truth as home screen)
+        const wc = syncResult.weeklyContext;
+        if (wc.incomeArrivedThisWeek && wc.recentIncomeEvents.length > 0) {
           ctx.payday_context = {
             incomeArrivedThisWeek: true,
-            incomeEvents: recentIncome.map((tx: any) => ({
-              source: tx.merchant || tx.description,
-              amount: tx.amount,
-              date: tx.date,
-              frequency: primarySource.frequency || 'unknown',
+            incomeEvents: wc.recentIncomeEvents.map((e) => ({
+              source: e.source,
+              amount: e.amount,
+              date: e.date,
+              frequency: e.frequency,
             })),
-            committedThisWeek,
-            discretionaryThisWeek: discThisWeek,
-            adaptiveBudget: Math.round(staticBudget * 100) / 100,
-            staticBudget: Math.round(staticBudget * 100) / 100,
+            committedThisWeek: wc.committedThisWeek,
+            discretionaryThisWeek: wc.discretionaryThisWeek,
+            adaptiveBudget: wc.adaptiveBudget,
+            staticBudget: wc.staticBudget,
           };
         }
       }

@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { syncBankData } from '@/lib/sync';
+import { requestSync, onSyncComplete } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useSubscription } from '@/lib/subscription';
@@ -284,6 +284,12 @@ export default function Plan() {
   useFocusEffect(
     useCallback(() => {
       loadData();
+      // Subscribe to sync completions from other screens
+      const unsub = onSyncComplete((result) => {
+        if (!result) return;
+        setAnalysis(result.analysis);
+      });
+      return () => unsub();
     }, [])
   );
 
@@ -342,7 +348,7 @@ export default function Plan() {
   const syncInBackground = async (userId: string, dismissedActions: Set<string>) => {
     try {
       setSyncing(true);
-      const result = await syncBankData(userId);
+      const result = await requestSync(userId);
       if (!result) { setSyncing(false); return; }
 
       // Apply dismissed-move filter

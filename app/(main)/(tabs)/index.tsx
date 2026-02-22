@@ -8,7 +8,8 @@ import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { getLastResult } from '@/app/(main)/processing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { syncBankData, type WeeklyContext } from '@/lib/sync';
+import { requestSync, onSyncComplete } from '@/lib/sync-coordinator';
+import type { WeeklyContext } from '@/lib/sync';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
@@ -644,6 +645,12 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       loadData();
+      // Subscribe to sync completions from other screens
+      const unsub = onSyncComplete((result) => {
+        if (!result) return;
+        if (result.weeklyContext) setWeeklyCtx(result.weeklyContext);
+      });
+      return () => unsub();
     }, [])
   );
 
@@ -754,14 +761,13 @@ export default function Home() {
         if (debtRes.data) setDebtAccounts(debtRes.data);
       } catch {}
 
-      // Use the latest in-memory result from processing if available.
+      // Always fetch the latest persisted analysis from Supabase.
+      // The in-memory result from processing is only used as an immediate
+      // display while we fetch, so data is never stale.
       const lastResult = getLastResult();
       if (lastResult) {
+        // Show immediately while Supabase fetch + sync run
         setAnalysis(mergeAdjustments(lastResult, adjustments));
-        setLoading(false);
-        // Still trigger background sync for fresh data
-        syncInBackground(user.id);
-        return;
       }
 
       const { data, error } = await supabase
@@ -776,10 +782,12 @@ export default function Home() {
         console.warn('[home] Failed to fetch analysis:', error.message);
       }
 
-      setAnalysis(data ? mergeAdjustments(data, adjustments) : null);
-
-      // Trigger background sync if user has an existing analysis
       if (data) {
+        setAnalysis(mergeAdjustments(data, adjustments));
+      }
+
+      // Trigger background sync if user has any analysis data
+      if (data || lastResult) {
         syncInBackground(user.id);
       }
     } catch (err: any) {
@@ -794,7 +802,7 @@ export default function Home() {
     try {
       setSyncing(true);
 
-      const result = await syncBankData(userId);
+      const result = await requestSync(userId);
       if (!result) { setSyncing(false); return; }
 
       // Update debt accounts: merge synced with any manual debts
