@@ -49,7 +49,7 @@ export async function registerPushToken(userId: string): Promise<string | null> 
   // 2. const { status } = await Notifications.requestPermissionsAsync();
   // 3. const token = await Notifications.getExpoPushTokenAsync();
   // 4. Save token to notification_preferences table
-  console.log(`[notifications] Push token registration skipped (web mode) for user ${userId}`);
+  // Web mode — no-op until native build
   return null;
 }
 
@@ -62,6 +62,6 @@ export async function sendPushNotification(
   // TODO: When building for iOS/Android:
   // POST to https://exp.host/--/api/v2/push/send
   // with { to: pushToken, title, body, data }
-  console.log(`[notifications] Push notification skipped (web mode): ${title}`);
+  // Web mode — no-op until native build
   return false;
 }

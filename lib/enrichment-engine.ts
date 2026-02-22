@@ -1203,9 +1203,6 @@ const EnrichmentEngine = {
       bySource,
     };
 
-    console.log(`[enrichment] Metrics: ${total} transactions — ${high} high (${total > 0 ? Math.round((high / total) * 100) : 0}%), ${medium} medium, ${low} low. Other rate: ${metrics.otherRate}%`);
-    console.log(`[enrichment] Sources: override=${bySource.userOverride}, merchant_db=${bySource.merchantDb}, fuzzy=${bySource.fuzzyMatch}, keyword=${bySource.keyword}, unresolved=${bySource.unresolved}`);
-
     return metrics;
   },
 };

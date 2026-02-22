@@ -535,7 +535,7 @@ function ProcessingInner() {
                   notified: false,
                 }, { onConflict: 'user_id,achievement_key' });
               }
-              console.log('[processing] New achievements:', newAchievements.join(', '));
+              // achievements unlocked silently
             }
           } catch (achErr: any) {
             console.warn('[processing] Non-critical: achievement check failed:', achErr?.message);
@@ -582,7 +582,7 @@ function ProcessingInner() {
                   last_updated: new Date().toISOString(),
                 }, { onConflict: 'user_id,account_name' }).then(() => {});
               }
-              console.log('[processing] Saved', bankRows.card_balances.length, 'debt account(s)');
+              // debt accounts synced
             }
           } catch (debtErr: any) {
             console.warn('[processing] Non-critical: debt accounts save failed:', debtErr?.message);
