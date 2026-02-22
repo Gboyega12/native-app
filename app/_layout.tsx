@@ -8,6 +8,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import UpdateBanner from '@/components/UpdateBanner';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -160,6 +161,7 @@ export default function RootLayout() {
     <ErrorBoundary>
       <ThemeProvider>
         <InnerLayout />
+        <UpdateBanner />
       </ThemeProvider>
     </ErrorBoundary>
   );

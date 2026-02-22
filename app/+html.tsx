@@ -43,7 +43,21 @@ export default function Root({ children }: PropsWithChildren) {
           #root { display: flex; height: 100%; flex: 1; }
         ` }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+
+        {/* ── Service worker registration ── */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+              navigator.serviceWorker.register('/sw.js').then(function(reg) {
+                // Check for updates every 60 seconds
+                setInterval(function() { reg.update(); }, 60000);
+              });
+            });
+          }
+        ` }} />
+      </body>
     </html>
   );
 }
