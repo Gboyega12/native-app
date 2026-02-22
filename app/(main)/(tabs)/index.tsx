@@ -104,6 +104,9 @@ export default function Home() {
   const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<number>(0);
+  const [connectionWarning, setConnectionWarning] = useState<{ message: string; banks: string[] } | null>(null);
+  const [connectionDismissed, setConnectionDismissed] = useState(false);
+  const [incomeDismissed, setIncomeDismissed] = useState(false);
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
@@ -827,6 +830,24 @@ export default function Home() {
       const result = await requestSync(userId, force);
       if (!result) { setSyncing(false); return; }
 
+      // Surface connection issues to the user
+      if (result.connectionIssues?.length > 0) {
+        const banks = result.expiredBankNames ?? [];
+        if (result.connectionIssues.includes('token_expired') || result.connectionIssues.includes('no_connection')) {
+          setConnectionWarning({ message: 'all_expired', banks });
+        } else if (result.connectionIssues.includes('some_connections_expired')) {
+          setConnectionWarning({ message: 'some_expired', banks });
+        }
+        setConnectionDismissed(false); // New issue detected — reset dismiss
+      } else if (result.dataSource === 'fallback') {
+        setConnectionWarning({ message: 'fallback', banks: [] });
+        setConnectionDismissed(false);
+      } else {
+        // All connections synced OK — clear warning
+        setConnectionWarning(null);
+        setConnectionDismissed(false);
+      }
+
       // Update debt accounts: merge synced with any manual debts
       try {
         const { data: allDebt } = await supabase
@@ -851,7 +872,22 @@ export default function Home() {
         if (freshAdj) budgetAdjustments = freshAdj;
       } catch {}
 
-      setAnalysis(mergeAdjustments(result.analysis, budgetAdjustments));
+      // Only update analysis if sync returned materially different data
+      // to avoid a visual flash when the numbers haven't changed
+      const fresh = mergeAdjustments(result.analysis, budgetAdjustments);
+      setAnalysis((prev) => {
+        if (
+          prev &&
+          prev.monthly_income === fresh.monthly_income &&
+          prev.monthly_spending === fresh.monthly_spending &&
+          prev.surplus === fresh.surplus &&
+          prev.decision_score === fresh.decision_score
+        ) {
+          return prev; // No material change — skip re-render
+        }
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        return fresh;
+      });
       setLastSynced(getLastSyncTime());
     } catch (err: any) {
       console.warn('[home] Background sync failed:', err?.message);
@@ -1013,6 +1049,33 @@ export default function Home() {
         </TouchableOpacity>
       </View>
 
+      {/* ── Connection warning banner ── */}
+      {connectionWarning && !connectionDismissed && (
+        <View style={s.connectionBanner}>
+          <TouchableOpacity
+            style={s.connectionBannerBody}
+            onPress={() => router.push('/(main)/connect')}
+            activeOpacity={0.8}
+          >
+            <Text style={s.connectionBannerText}>
+              {connectionWarning.banks.length > 0
+                ? `${connectionWarning.banks.join(', ')} ${connectionWarning.banks.length === 1 ? 'needs' : 'need'} reconnecting`
+                : connectionWarning.message === 'fallback'
+                  ? 'Using cached data — pull to refresh'
+                  : 'Bank connection expired'}
+            </Text>
+            <Text style={s.connectionBannerAction}>Reconnect</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.bannerDismiss}
+            onPress={() => setConnectionDismissed(true)}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={s.bannerDismissX}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {!analysis ? (
         /* ── Empty State ── */
         <View style={s.emptyState}>
@@ -1047,10 +1110,18 @@ export default function Home() {
           )}
 
           {/* ── Income arrival alert ── */}
-          {weeklyCtx?.incomeArrivedThisWeek && weeklyCtx.recentIncomeEvents.length > 0 && (
+          {weeklyCtx?.incomeArrivedThisWeek && weeklyCtx.recentIncomeEvents.length > 0 && !incomeDismissed && (
             <AnimGlyph delay={0}>
               <View style={s.incomeAlert}>
-                <Text style={s.incomeAlertTitle}>Income received</Text>
+                <View style={s.incomeAlertHeader}>
+                  <Text style={s.incomeAlertTitle}>Income received</Text>
+                  <TouchableOpacity
+                    onPress={() => setIncomeDismissed(true)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Text style={s.incomeAlertDismiss}>✕</Text>
+                  </TouchableOpacity>
+                </View>
                 <Text style={s.incomeAlertText}>
                   {weeklyCtx.recentIncomeEvents.map((e) =>
                     `\u00a3${Math.round(e.amount).toLocaleString()} from ${e.source}`
@@ -2155,6 +2226,49 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginTop: 6,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+
+  // ── Connection warning banner ──
+  connectionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingVertical: 10,
+    paddingLeft: 14,
+    paddingRight: 6,
+    backgroundColor: c.amberDim,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: c.amber + '30',
+  },
+  connectionBannerBody: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  connectionBannerText: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: c.amber,
+    flex: 1,
+  },
+  connectionBannerAction: {
+    fontFamily: fonts.semibold,
+    fontSize: 12,
+    color: c.amber,
+    marginLeft: spacing.sm,
+  },
+  bannerDismiss: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  bannerDismissX: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: c.amber,
+    opacity: 0.6,
   },
 
   // ── Empty State ──
@@ -3271,11 +3385,23 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.md,
   },
+  incomeAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
   incomeAlertTitle: {
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: c.green,
-    marginBottom: 4,
+  },
+  incomeAlertDismiss: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: c.green,
+    opacity: 0.5,
+    paddingLeft: 8,
   },
   incomeAlertText: {
     fontFamily: fonts.regular,

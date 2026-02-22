@@ -409,6 +409,9 @@ export default function Plan() {
     if (!uid) return;
 
     const key = `move-${index}`;
+    // Prevent double-tap: if already started, ignore
+    if (progress[key]?.approved) return;
+
     const row: ProgressRow = {
       move_key: key,
       move_action: move.action,
@@ -419,19 +422,6 @@ export default function Plan() {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setProgress((prev) => ({ ...prev, [key]: row }));
     saveProgress(key, row);
-
-    try {
-      const { data } = await supabase.from('user_plans').insert({
-        user_id: uid,
-        action: move.action,
-        target_amount: null,
-        monthly_saving: move.monthlyImpact || null,
-        timeline: null,
-        status: 'active',
-      }).select('*').single();
-
-      if (data) setUserPlans((prev) => [data, ...prev]);
-    } catch {}
   };
 
   const handleStopMove = async (index: number) => {
@@ -964,7 +954,7 @@ export default function Plan() {
           </View>
 
           {/* Individual opportunity cards */}
-          {(isPro ? opportunities : opportunities.slice(0, FREE_MOVE_LIMIT)).map(({ move, index: i }, seqIdx) => {
+          {(isPro ? opportunities : opportunities.slice(0, Math.max(0, FREE_MOVE_LIMIT - activeMoves.length))).map(({ move, index: i }, seqIdx) => {
             const isExpanded = expanded === i;
             const isHighlighted = highlightIdx === i;
             const moveKey = `move-${i}`;
@@ -1035,7 +1025,7 @@ export default function Plan() {
           })}
 
           {/* ── Upgrade CTA for free users ── */}
-          {!isPro && opportunities.length > FREE_MOVE_LIMIT && (
+          {!isPro && opportunities.length > Math.max(0, FREE_MOVE_LIMIT - activeMoves.length) && (
             <TouchableOpacity
               style={s.upgradeCard}
               onPress={() => setShowPaywall(true)}
@@ -1043,7 +1033,7 @@ export default function Plan() {
             >
               <Text style={s.upgradeBadge}>PRO</Text>
               <Text style={s.upgradeTitle}>
-                +{opportunities.length - FREE_MOVE_LIMIT} more moves locked
+                +{opportunities.length - Math.max(0, FREE_MOVE_LIMIT - activeMoves.length)} more moves locked
               </Text>
               <Text style={s.upgradeSubtitle}>
                 Unlock your full action plan with step-by-step guidance
