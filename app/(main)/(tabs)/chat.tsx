@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase';
 import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
@@ -327,6 +328,7 @@ export default function Chat() {
   const { prefill } = useLocalSearchParams<{ prefill?: string }>();
   const { isPro } = useSubscription();
   const { colors } = useTheme();
+  const { maxContentWidth, isTablet } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
   const [showPaywall, setShowPaywall] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -1139,7 +1141,7 @@ export default function Chat() {
     >
       {/* ── Header ── */}
       {messages.length > 0 && (
-        <View style={s.header}>
+        <View style={[s.header, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
           <View style={s.headerLeftChat}>
             <View style={s.chatBocyWrap}>
               <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
@@ -1157,7 +1159,10 @@ export default function Chat() {
       <ScrollView
         ref={scrollRef}
         style={s.messages}
-        contentContainerStyle={s.messagesContent}
+        contentContainerStyle={[
+          s.messagesContent,
+          isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         {/* Show suggestions when empty OR when only the payday auto-nudge is present */}
@@ -1172,11 +1177,11 @@ export default function Chat() {
                 <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'Your personal finance companion'}</Text>
               </>
             )}
-            <View style={s.suggestedGrid}>
+            <View style={[s.suggestedGrid, isTablet && { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 12 }]}>
               {suggestedQuestions.map((q, i) => (
                 <TouchableOpacity
                   key={i}
-                  style={s.suggestedButton}
+                  style={[s.suggestedButton, isTablet && { flexBasis: '48%' as any, flexGrow: 1 }]}
                   onPress={() => sendMessage(q)}
                   activeOpacity={0.7}
                 >
@@ -1246,7 +1251,7 @@ export default function Chat() {
       {/* ── Input / Gate ── */}
       <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
       {freeGateReached ? (
-        <View style={s.gateRow}>
+        <View style={[s.gateRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
           <Text style={s.gateText}>You've used your {FREE_MESSAGE_LIMIT} free messages</Text>
           <TouchableOpacity
             style={s.gateBtn}
@@ -1259,13 +1264,13 @@ export default function Chat() {
       ) : (
         <>
           {!isPro && userMessageCount > 0 && (
-            <View style={s.freeBadgeRow}>
+            <View style={[s.freeBadgeRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
               <Text style={s.freeBadgeText}>
                 {freeMessagesRemaining} of {FREE_MESSAGE_LIMIT} free {freeMessagesRemaining === 1 ? 'message' : 'messages'} left
               </Text>
             </View>
           )}
-          <View style={[s.inputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }]}>
+          <View style={[s.inputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
             <TextInput
               ref={inputRef}
               style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}

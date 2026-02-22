@@ -8,6 +8,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 
@@ -73,6 +74,7 @@ export default function Profile() {
   const { connected, upgraded } = useLocalSearchParams<{ connected?: string; upgraded?: string }>();
   const { tier, isPro, status, billingInterval, currentPeriodEnd, cancelAtPeriodEnd, refresh: refreshTier } = useSubscription();
   const { colors, isDark, toggleTheme } = useTheme();
+  const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
   const [showPaywall, setShowPaywall] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
@@ -391,7 +393,7 @@ export default function Profile() {
   const hasAccounts = allAccounts.length > 0 || debtAccounts.length > 0;
 
   return (
-    <ScrollView style={s.container} contentContainerStyle={s.scroll}>
+    <ScrollView style={s.container} contentContainerStyle={[s.scroll, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding }]}>
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(main)/(tabs)')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>

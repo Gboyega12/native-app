@@ -13,6 +13,7 @@ import { requestSync, onSyncComplete, getLastSyncTime, invalidateSyncCache } fro
 import type { WeeklyContext } from '@/lib/sync';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 
@@ -93,6 +94,7 @@ const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; 
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1041,7 +1043,10 @@ export default function Home() {
   return (
     <ScrollView
       style={s.container}
-      contentContainerStyle={s.scroll}
+      contentContainerStyle={[
+        s.scroll,
+        isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding },
+      ]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -1240,10 +1245,13 @@ export default function Home() {
             )}
           </View>
 
+          {/* ── Side-by-side card row on tablet/desktop ── */}
+          <View style={isTablet ? { flexDirection: 'row', gap: 16 } : undefined}>
+
           {/* ══════════════════════════════════════════════
               CARD 2 — YOUR INCOME
               ══════════════════════════════════════════════ */}
-          <View style={s.card} accessibilityRole="summary" accessibilityLabel={`Monthly income: ${Math.round(income)} pounds`}>
+          <View style={[s.card, isTablet && { flex: 1 }]} accessibilityRole="summary" accessibilityLabel={`Monthly income: ${Math.round(income)} pounds`}>
             <AnimGlyph delay={50}>
               <View style={s.cardTitleRow}>
                 <Text style={s.cardTitle}>Your income</Text>
@@ -1325,7 +1333,7 @@ export default function Home() {
           {/* ══════════════════════════════════════════════
               CARD 3 — SAFE TO SPEND
               ══════════════════════════════════════════════ */}
-          <View style={s.card}>
+          <View style={[s.card, isTablet && { flex: 1 }]}>
             <AnimGlyph delay={100}>
               <View style={s.cardTitleRow}>
                 <Text style={s.cardTitle}>Safe to spend</Text>
@@ -1492,6 +1500,8 @@ export default function Home() {
               </View>
             )}
           </View>
+
+          </View>{/* ── End side-by-side row ── */}
 
           {/* ══════════════════════════════════════════════
               CARD 4 — YOUR BUDGET REALITY
@@ -3458,6 +3468,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderWidth: 1,
     borderColor: c.border,
     maxHeight: '85%',
+    maxWidth: 560,
+    alignSelf: 'center' as const,
+    width: '100%',
     overflow: 'hidden',
   },
   catReviewHeader: {

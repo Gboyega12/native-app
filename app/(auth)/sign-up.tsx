@@ -188,6 +188,9 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     padding: spacing.xl,
+    maxWidth: 480,
+    alignSelf: 'center' as const,
+    width: '100%',
   },
   centerContent: {
     flex: 1,

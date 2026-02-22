@@ -732,6 +732,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     justifyContent: 'center',
     padding: spacing.xl,
+    maxWidth: 560,
+    alignSelf: 'center' as const,
+    width: '100%',
   },
 
   // ── Nothing-style dot matrix ──

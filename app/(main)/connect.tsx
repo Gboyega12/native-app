@@ -768,6 +768,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: spacing.xl,
+    maxWidth: 560,
+    alignSelf: 'center' as const,
+    width: '100%',
   },
 
   // ── Loading screen (redirect) ──

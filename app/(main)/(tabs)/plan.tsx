@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import type { Analysis, Move, GoalTrajectory } from '@/lib/types';
@@ -241,6 +242,7 @@ export default function Plan() {
   const { highlight } = useLocalSearchParams<{ highlight?: string }>();
   const { isPro } = useSubscription();
   const { colors } = useTheme();
+  const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
   const [showPaywall, setShowPaywall] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -563,7 +565,10 @@ export default function Plan() {
     <ScrollView
       ref={scrollRef}
       style={s.container}
-      contentContainerStyle={s.scroll}
+      contentContainerStyle={[
+        s.scroll,
+        isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding },
+      ]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
