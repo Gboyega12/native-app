@@ -1,11 +1,14 @@
-import React, { useMemo, createContext, useContext } from 'react';
-import { Text, View, StyleSheet } from 'react-native';
-import { fonts, spacing, type ThemeColors } from '@/theme';
+import React, { useMemo, useState, createContext, useContext } from 'react';
+import { Text, View, Image, StyleSheet, Platform } from 'react-native';
+import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 
 interface Props {
   children: string;
 }
+
+/** Matches `![alt](url)` on its own line */
+const GIF_LINE_RX = /^!\[.*?\]\((https?:\/\/[^\s)]+)\)\s*$/;
 
 // Internal context to pass styles down without prop drilling
 const MdStylesCtx = createContext<ReturnType<typeof createStyles> | null>(null);
@@ -13,7 +16,7 @@ const MdStylesCtx = createContext<ReturnType<typeof createStyles> | null>(null);
 /**
  * Lightweight markdown renderer for React Native.
  * Handles: **bold**, *italic*, `code`, bullet lists, numbered lists,
- * and paragraph breaks. No external dependencies.
+ * ![gif](url) images, and paragraph breaks. No external dependencies.
  */
 export default function Markdown({ children }: Props) {
   const { colors } = useTheme();
@@ -34,9 +37,88 @@ function useMdStyles() {
   return useContext(MdStylesCtx)!;
 }
 
+/** Renders GIF images — uses native <img> on web for reliable GIF playback.
+ *  Hides itself when the URL fails to load (e.g. fabricated/expired URLs). */
+function GifImage({ uri, style }: { uri: string; style: any }) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) return null;
+
+  if (Platform.OS === 'web') {
+    return React.createElement('img', {
+      src: uri,
+      alt: '',
+      onError: () => setFailed(true),
+      style: {
+        width: style.width ?? 200,
+        height: style.height ?? 150,
+        borderRadius: style.borderRadius ?? 0,
+        objectFit: 'cover',
+        display: 'block',
+      },
+    });
+  }
+  return (
+    <Image
+      source={{ uri }}
+      style={style}
+      resizeMode="cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
   const s = useMdStyles();
   const lines = text.split('\n');
+
+  // Detect GIF image: a single-line paragraph with ![...](url)
+  if (lines.length === 1) {
+    const gifMatch = lines[0].match(GIF_LINE_RX);
+    if (gifMatch) {
+      return (
+        <View style={[s.gifContainer, !isLast && s.paragraphGap]}>
+          <GifImage uri={gifMatch[1]} style={s.gif} />
+        </View>
+      );
+    }
+  }
+
+  // Mixed content: paragraph may contain text lines AND a gif line.
+  // Split into text chunks and gif chunks rendered sequentially.
+  const hasGif = lines.some((l) => GIF_LINE_RX.test(l));
+  if (hasGif) {
+    const elements: React.ReactNode[] = [];
+    let textBuffer: string[] = [];
+
+    const flushText = (key: string) => {
+      if (textBuffer.length === 0) return;
+      const joined = textBuffer.join('\n');
+      elements.push(
+        <Text key={key} style={s.paragraph}>
+          <Inline text={joined} />
+        </Text>,
+      );
+      textBuffer = [];
+    };
+
+    lines.forEach((line, j) => {
+      const gifMatch = line.match(GIF_LINE_RX);
+      if (gifMatch) {
+        flushText(`t-${j}`);
+        elements.push(
+          <View key={`g-${j}`} style={s.gifContainer}>
+            <GifImage uri={gifMatch[1]} style={s.gif} />
+          </View>,
+        );
+      } else {
+        textBuffer.push(line);
+      }
+    });
+    flushText('t-end');
+
+    return <View style={!isLast ? s.paragraphGap : undefined}>{elements}</View>;
+  }
 
   // Detect bullet list: every non-empty line starts with - or *
   const isBulletList = lines.every(
@@ -181,5 +263,18 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     color: c.text2,
+  },
+  // GIF images
+  gifContainer: {
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    alignSelf: 'flex-start',
+  },
+  gif: {
+    width: 200,
+    height: 150,
+    borderRadius: radius.md,
   },
 });

@@ -7,6 +7,16 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function formatRelativeDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.floor((today - d) / (1000 * 60 * 60 * 24));
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+}
+
 // ── Tool definitions ──
 
 const TOOLS = [
@@ -89,6 +99,21 @@ const TOOLS = [
         },
       },
       required: ['description', 'category', 'monthly_amount', 'is_essential'],
+    },
+  },
+  {
+    name: 'search_gif',
+    description:
+      'Search for a reaction GIF to include in your reply. Use this roughly 1 in 4 messages to keep the vibe fun and human. Call this tool BEFORE writing your text reply — the returned URL will be available for you to embed. Good moments: user hits a milestone, overspent hilariously, you deliver a harsh truth, user asks something simple. NEVER use when delivering serious bad news or when the user is stressed.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Short search query for the GIF mood. E.g. "money rain", "facepalm", "celebration", "shocked", "thumbs up", "deal with it". Keep it to 1-3 words.',
+        },
+      },
+      required: ['query'],
     },
   },
   {
@@ -338,7 +363,7 @@ async function handleStream(res, apiMessages, systemPrompt, userId) {
 async function callClaude(messages, systemPrompt, stream) {
   const body = {
     model: 'claude-sonnet-4-5-20250929',
-    max_tokens: 512,
+    max_tokens: 300,
     system: systemPrompt,
     messages,
     tools: TOOLS,
@@ -386,6 +411,9 @@ async function executeTool(name, input, userId) {
   }
   if (name === 'suggest_goal_update') {
     return executeGoalUpdate(input, userId);
+  }
+  if (name === 'search_gif') {
+    return executeGifSearch(input);
   }
   return { response: { error: 'Unknown tool' }, action: null };
 }
@@ -573,28 +601,81 @@ async function executeGoalUpdate(input, userId) {
   };
 }
 
+async function executeGifSearch(input) {
+  const apiKey = process.env.GIPHY_API_KEY;
+  if (!apiKey) {
+    return { response: { success: false, error: 'GIF search not configured' }, action: null };
+  }
+
+  try {
+    const q = encodeURIComponent(input.query || 'thumbs up');
+    const url = `https://api.giphy.com/v1/gifs/search?api_key=${apiKey}&q=${q}&limit=5&rating=pg`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      return { response: { success: false, error: 'GIPHY request failed' }, action: null };
+    }
+
+    const data = await res.json();
+    const gifs = data.data || [];
+    if (gifs.length === 0) {
+      return { response: { success: false, error: 'No GIFs found for that query' }, action: null };
+    }
+
+    // Pick a random one from top 5 for variety
+    const pick = gifs[Math.floor(Math.random() * gifs.length)];
+    const gifUrl = pick.images?.fixed_height?.url || pick.images?.original?.url;
+
+    if (!gifUrl) {
+      return { response: { success: false, error: 'No usable GIF URL' }, action: null };
+    }
+
+    return {
+      response: {
+        success: true,
+        gif_url: gifUrl,
+        instruction: `Include this GIF in your reply using: ![gif](${gifUrl}) on its own line, after your text.`,
+      },
+      action: null,
+    };
+  } catch (err) {
+    return { response: { success: false, error: err.message }, action: null };
+  }
+}
+
 // ── System prompt builder ──
 
 function buildSystemPrompt(ctx) {
   let prompt = `You are Bocy — the user's financial decisions platform. You're not an add-on or a third-party tool. You ARE their financial brain. You've already analysed their bank data, you track their spending, you manage their plans, and you hold them accountable.
 
 Voice:
-- Talk like a real person texting. Short sentences. Direct.
+- Talk like a sharp friend who's great with money. Punchy. Warm. Zero waffle.
 - Say "you" not "the user." Say "I'd do X" not "I recommend X."
-- Be warm but decisive. Confident, not corporate.
+- Confident, not corporate. Think WhatsApp message, not email.
 - Use the user's actual numbers — that's what makes you useful.
-- One clear point per message. If they need more, they'll ask.
-- Own the relationship: "I've analysed your spending" not "Based on the analysis." "I'll track this for you" not "You could track this."
+- One clear point per message. They'll ask if they want more.
+- Own it: "I've spotted X" not "Based on the analysis." "I'll track this" not "You could track this."
 
 Rules:
-- Keep replies to 2-4 short sentences when possible. Max 1-2 short paragraphs for complex questions.
-- **Bold** the key number or action in each reply — just one or two things, not everything.
+- BREVITY IS KING. Aim for 1-3 short sentences. Two short paragraphs max, only for genuinely complex topics.
+- **Bold** ONE key number or action per reply. Not two. One.
 - Use £ and British English.
-- Be specific: "Cut those 2 subs and you free up **£94/month**" not "look at your subscriptions."
-- Never recommend other apps, tools, or services. Everything happens here — you track, plan, and monitor for them.
-- For regulated financial guidance (e.g. specific investment products, tax), note that legally that requires a qualified financial planner — but frame it as a legal thing, not your limitation. You can still help them think it through.
+- Be razor-specific: "Cancel Now TV and Paramount+, that's **£94/month freed up**" not "look at your subscriptions."
+- NEVER use dashes (—, –, -), arrows (→, ->, =>), or any dash-like separators between thoughts. No human texts like that. Use commas, full stops, or just start a new sentence. Flow naturally like a WhatsApp message.
+- Never recommend other apps/tools. You do it all.
+- Regulated advice (specific investments, tax): note the legal requirement for a qualified planner, but help them think it through.
 - No bullet lists unless they ask for steps. Keep it conversational.
-- No filler, no preamble, no "Great question!" — just answer.
+- No filler. No preamble. No "Great question!" No "Absolutely!" No "Let me break this down." Just answer.
+- Don't repeat back what the user said. Don't summarise before answering. Jump straight to the point.
+
+GIFs:
+- Occasionally (roughly 1 in 4 replies), use the search_gif tool to fetch a reaction GIF.
+- Call search_gif FIRST with a short mood query (e.g. "money rain", "facepalm", "celebration"). You'll get back a real URL.
+- Then include it in your text reply using: ![gif](THE_URL) on its own line, AFTER your text.
+- NEVER fabricate or guess GIF URLs. ALWAYS use the URL returned by search_gif.
+- Match the emotion: celebratory for wins, empathetic for tough moments, cheeky for spending call-outs.
+- Good GIF moments: user hits a milestone, user overspent hilariously, you deliver a harsh truth, user asks something simple.
+- NEVER use a GIF when delivering serious bad news or when the user is stressed. Read the room.
+- Keep it to ONE gif per message max. Never two. If the tool fails, just skip the GIF — don't mention it.
 
 Tools:
 - When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction. For the match_description, use the EXACT bank description shown in the transfers list if available — partial matches work (e.g. "JOHN" will match "TFR TO JOHN SMITH"). Common cases: rent paid to partner/housemate, bill splits, debt repayments showing as transfers.
@@ -772,12 +853,63 @@ Tools:
     }
   }
 
+  // ── Recent transactions (last 7 days — enables daily/weekly spending questions) ──
+  if (ctx.recent_transactions?.length) {
+    // Group by date for readability
+    const byDate = {};
+    for (const tx of ctx.recent_transactions) {
+      const d = tx.date?.split('T')[0] || 'unknown';
+      if (!byDate[d]) byDate[d] = [];
+      byDate[d].push(tx);
+    }
+    prompt += `\n\nRecent transactions (last 7 days):`;
+    for (const [date, txs] of Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0]))) {
+      const dayTotal = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+      const dayLabel = formatRelativeDate(date);
+      prompt += `\n${dayLabel} (spent £${dayTotal.toFixed(2)}):`;
+      for (const tx of txs) {
+        const sign = tx.amount >= 0 ? '+' : '-';
+        prompt += `\n  ${sign}£${Math.abs(tx.amount).toFixed(2)} ${tx.description} [${tx.category}${tx.essential ? ', essential' : ''}]`;
+      }
+    }
+    prompt += `\nUse these to answer questions about daily or weekly spending. Be specific — reference actual merchants and amounts.`;
+  }
+
   // ── Behavioral patterns ──
   if (ctx.behavioral_patterns?.length) {
     prompt += `\n\nBehavioral patterns detected:`;
     for (const p of ctx.behavioral_patterns) {
       prompt += `\n- ${p}`;
     }
+  }
+
+  // ── Payday mode: income arrived this week ──
+  if (ctx.payday_context?.incomeArrivedThisWeek && ctx.payday_context.incomeEvents?.length) {
+    const pc = ctx.payday_context;
+    const totalIncome = pc.incomeEvents.reduce((s, e) => s + e.amount, 0);
+    const sources = pc.incomeEvents.map(e => `£${Math.round(e.amount)} from ${e.source}`).join(', ');
+
+    prompt += `\n\n🔔 PAYDAY MODE ACTIVE — Income just landed this week:`;
+    prompt += `\n- Income received: ${sources}`;
+    prompt += `\n- Already committed to bills/essentials this week: £${Math.round(pc.committedThisWeek)}`;
+    prompt += `\n- Discretionary spending this week so far: £${Math.round(pc.discretionaryThisWeek)}`;
+    prompt += `\n- Adaptive safe-to-spend budget: £${Math.round(pc.adaptiveBudget)}/week`;
+    prompt += `\n- Static weekly budget: £${Math.round(pc.staticBudget)}/week`;
+
+    prompt += `\n\nPAYDAY CONVERSATION RULES:`;
+    prompt += `\n- This is the most important moment in the user's financial cycle. Money just hit their account and this is when habits are formed.`;
+    prompt += `\n- Your job right now: help them ALLOCATE before they SPEND. Guide them to put money where it needs to go FIRST.`;
+    prompt += `\n- Be proactive and specific. Walk them through their commitments:`;
+    prompt += `\n  1. Bills and essentials that are due`;
+    prompt += `\n  2. Any debt payments they should make`;
+    prompt += `\n  3. Savings goals they committed to (auto-save, buffer, ISA)`;
+    prompt += `\n  4. What's genuinely left for discretionary spending`;
+    prompt += `\n- Use the adaptive budget (£${Math.round(pc.adaptiveBudget)}/week) not the static one. This accounts for committed payments already made.`;
+    prompt += `\n- If they've already spent £${Math.round(pc.discretionaryThisWeek)} on discretionary this week, tell them exactly how much is left.`;
+    prompt += `\n- Reference their active plans and moves. Hold them accountable: "You committed to saving £X, now's the time."`;
+    prompt += `\n- If they're about to overspend, be direct but kind. "That would blow your weekly budget. Can it wait?"`;
+    prompt += `\n- Celebrate if they're sticking to the plan. Quick wins matter.`;
+    prompt += `\n- Do NOT just dump all these numbers. Weave them naturally into conversation. Only mention what's relevant to what they're asking about.`;
   }
 
   return prompt;

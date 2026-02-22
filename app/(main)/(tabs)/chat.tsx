@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useSubscription } from '@/lib/subscription';
@@ -16,14 +17,40 @@ import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/li
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 
+/** Free users can send this many messages before the paywall gate kicks in */
+const FREE_MESSAGE_LIMIT = 2;
+
 // ── Suggested questions (contextual) ──
 
-function getContextualQuestions(analysis: Analysis | null, goals: Goals | null): string[] {
+function getContextualQuestions(analysis: Analysis | null, goals: Goals | null, paydayActive?: boolean): string[] {
   if (!analysis) {
     return [
       'What can Bocy help me with?',
       'How does the financial analysis work?',
     ];
+  }
+
+  // Payday mode: prioritise allocation-focused questions
+  if (paydayActive) {
+    const questions: string[] = [];
+    questions.push('I just got paid. Walk me through what to do first.');
+    questions.push('How much can I safely spend this week?');
+
+    const moves = analysis.all_moves || [];
+    if (moves.length > 0) {
+      questions.push('Am I on track with my plan?');
+    } else {
+      questions.push('Help me set up a budget for this pay period.');
+    }
+
+    if (goals?.one_year_goal) {
+      const goalName = goals.one_year_goal.replace(/_/g, ' ');
+      questions.push(`How does this pay cycle move me closer to ${goalName}?`);
+    } else {
+      questions.push('What should I do with any leftover money?');
+    }
+
+    return questions;
   }
 
   const questions: string[] = [];
@@ -383,10 +410,16 @@ export default function Chat() {
   };
 
   // ── Load context + persisted messages on focus ──
+  // Also subscribe to sync completions from other screens so chat stays fresh.
 
   useFocusEffect(
     useCallback(() => {
       loadContext();
+      const unsub = onSyncComplete((result) => {
+        if (!result) return;
+        setAnalysis(result.analysis);
+      });
+      return () => unsub();
     }, []),
   );
 
@@ -461,6 +494,38 @@ export default function Chat() {
       ctx.recent_transfers = transferItems.slice(0, 15);
     }
 
+    // Add recent transactions (last 7 days) so Claude can answer "how much did I spend today/this week?"
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+    const recentTxs: { description: string; amount: number; date: string; category: string; essential: boolean }[] = [];
+    for (const section of [
+      { data: a?.non_discretionary, essential: true },
+      { data: a?.discretionary, essential: false },
+    ]) {
+      if (!section.data?.items) continue;
+      for (const item of section.data.items) {
+        for (const tx of (item.transactions || [])) {
+          if (!tx.date) continue;
+          const txDate = new Date(tx.date);
+          if (txDate >= sevenDaysAgo) {
+            recentTxs.push({
+              description: tx.merchant || tx.description,
+              amount: tx.amount,
+              date: tx.date,
+              category: item.category,
+              essential: section.essential,
+            });
+          }
+        }
+      }
+    }
+    if (recentTxs.length > 0) {
+      // Sort by date descending (most recent first) and cap at 50
+      recentTxs.sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime());
+      ctx.recent_transactions = recentTxs.slice(0, 50);
+    }
+
     // Add debt account balances if available
     try {
       const { data: debtData } = await supabase
@@ -530,6 +595,127 @@ export default function Chat() {
       }
     } catch {}
 
+    // Build payday context from sync coordinator's weeklyContext
+    // This uses the same data as the home screen instead of duplicating the calculation
+    try {
+      // Force-sync to ensure chat always has the freshest transaction data
+      const syncResult = await requestSync(user.id, true);
+      if (syncResult) {
+        // Update analysis with fresh sync data
+        const freshA = syncResult.analysis;
+        setAnalysis(freshA);
+
+        // Rebuild context fields that depend on analysis
+        ctx.monthly_income = freshA.monthly_income;
+        ctx.monthly_spending = freshA.monthly_spending;
+        ctx.surplus = freshA.surplus;
+        ctx.archetype = freshA.archetype;
+        ctx.decision_score = freshA.decision_score;
+        ctx.all_moves = freshA.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string }) => ({
+          action: m.action,
+          monthlyImpact: m.monthlyImpact,
+          effort: m.effort,
+        }));
+        ctx.top_move = freshA.top_move ? { action: freshA.top_move.action, monthlyImpact: freshA.top_move.monthlyImpact } : undefined;
+        ctx.behavioral_patterns = freshA.behavioral_patterns;
+        ctx.spending_by_category = buildSpendingBreakdown(freshA);
+        ctx.goal_trajectory = freshA.goal_context ? {
+          goalLabel: freshA.goal_context.goalLabel,
+          currentMonths: freshA.goal_context.currentMonths,
+          newMonths: freshA.goal_context.newMonths,
+          insight: freshA.goal_context.insight,
+          confidence: freshA.goal_context.confidence,
+          bufferRecommendation: freshA.goal_context.bufferRecommendation,
+        } : null;
+
+        // Rebuild recent_transactions from fresh sync data (NOT the stale DB analysis)
+        const freshSevenDaysAgo = new Date();
+        freshSevenDaysAgo.setDate(freshSevenDaysAgo.getDate() - 7);
+        freshSevenDaysAgo.setHours(0, 0, 0, 0);
+        const freshRecentTxs: { description: string; amount: number; date: string; category: string; essential: boolean }[] = [];
+        for (const section of [
+          { data: freshA.non_discretionary, essential: true },
+          { data: freshA.discretionary, essential: false },
+        ]) {
+          if (!section.data?.items) continue;
+          for (const item of section.data.items) {
+            for (const tx of (item.transactions || [])) {
+              if (!tx.date) continue;
+              const txDate = new Date(tx.date);
+              if (txDate >= freshSevenDaysAgo) {
+                freshRecentTxs.push({
+                  description: tx.merchant || tx.description,
+                  amount: tx.amount,
+                  date: tx.date,
+                  category: item.category,
+                  essential: section.essential,
+                });
+              }
+            }
+          }
+        }
+        if (freshRecentTxs.length > 0) {
+          freshRecentTxs.sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime());
+          ctx.recent_transactions = freshRecentTxs.slice(0, 50);
+        }
+
+        // Rebuild recent_transfers from fresh sync data
+        const freshTransfers: { description: string; amount: number; date: string }[] = [];
+        for (const section of [freshA.non_discretionary, freshA.discretionary]) {
+          if (!section?.items) continue;
+          for (const item of section.items) {
+            if (item.category !== 'Transfers' && item.category !== 'Other') continue;
+            for (const tx of (item.transactions || []).slice(0, 10)) {
+              freshTransfers.push({ description: tx.merchant || tx.description, amount: tx.amount, date: tx.date });
+            }
+          }
+        }
+        if (freshTransfers.length > 0) {
+          ctx.recent_transfers = freshTransfers.slice(0, 15);
+        }
+
+        // Rebuild subscriptions from fresh sync data
+        if (freshA.discretionary?.items) {
+          const freshSubItems = freshA.discretionary.items.filter(
+            (item: { category: string }) => item.category === 'Subscriptions' || item.category === 'Streaming',
+          );
+          if (freshSubItems.length) {
+            const freshMerchantMap: Record<string, { total: number; count: number }> = {};
+            for (const item of freshSubItems) {
+              for (const tx of (item.transactions || [])) {
+                const key = (tx.merchant || tx.description).toLowerCase();
+                if (!freshMerchantMap[key]) freshMerchantMap[key] = { total: 0, count: 0 };
+                freshMerchantMap[key].total += Math.abs(tx.amount);
+                freshMerchantMap[key].count += 1;
+              }
+            }
+            ctx.subscriptions = Object.entries(freshMerchantMap).map(([merchant, data]) => ({
+              merchant,
+              amount: Math.round(data.total / data.count),
+            }));
+          }
+        }
+
+        // Use weeklyContext from sync (same source of truth as home screen)
+        const wc = syncResult.weeklyContext;
+        if (wc.incomeArrivedThisWeek && wc.recentIncomeEvents.length > 0) {
+          ctx.payday_context = {
+            incomeArrivedThisWeek: true,
+            incomeEvents: wc.recentIncomeEvents.map((e) => ({
+              source: e.source,
+              amount: e.amount,
+              date: e.date,
+              frequency: e.frequency,
+            })),
+            committedThisWeek: wc.committedThisWeek,
+            discretionaryThisWeek: wc.discretionaryThisWeek,
+            adaptiveBudget: wc.adaptiveBudget,
+            staticBudget: wc.staticBudget,
+          };
+        }
+      }
+    } catch {}
+
     setContext(ctx);
 
     // ── Load persisted messages ──
@@ -541,6 +727,15 @@ export default function Chat() {
 
     if (chatData?.messages?.length) {
       setMessages(chatData.messages);
+    } else if (ctx.payday_context?.incomeArrivedThisWeek && ctx.payday_context.incomeEvents.length > 0) {
+      // No existing messages + income arrived = auto-send a payday nudge
+      const pc = ctx.payday_context;
+      const totalIncome = pc.incomeEvents.reduce((s: number, e: any) => s + e.amount, 0);
+      const nudgeMsg: ChatMessage = {
+        role: 'assistant',
+        content: `Payday! **\u00a3${Math.round(totalIncome).toLocaleString()}** just landed. Before you spend, let me walk you through where this needs to go. Tap below or just ask.`,
+      };
+      setMessages([nudgeMsg]);
     }
   };
 
@@ -753,6 +948,12 @@ export default function Chat() {
   const sendMessage = async (text: string) => {
     if (!text.trim() || loading) return;
 
+    // Gate free users after they've used their teaser messages
+    if (!isPro && messages.filter((m) => m.role === 'user').length >= FREE_MESSAGE_LIMIT) {
+      setShowPaywall(true);
+      return;
+    }
+
     const userMsg: ChatMessage = { role: 'user', content: text.trim() };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
@@ -911,61 +1112,13 @@ export default function Chat() {
     }
   };
 
-  const suggestedQuestions = getContextualQuestions(analysis, goals);
+  const paydayActive = !!context.payday_context?.incomeArrivedThisWeek;
+  const suggestedQuestions = getContextualQuestions(analysis, goals, paydayActive);
 
-  // ── Free tier: show teaser chat preview ──
-  if (!isPro) {
-    // Build personalised teaser from user's actual data
-    const surplus = analysis?.surplus;
-    const topMove = analysis?.top_move;
-    const score = analysis?.decision_score;
-    const teaserMsg = topMove?.action
-      ? `Based on your spending, I found a way to save £${topMove.monthlyImpact || 'more'}/mo. Want me to walk you through "${stripMd(topMove.action)}" step by step?`
-      : surplus != null
-        ? `I've analysed your finances and found some opportunities. Your surplus is £${Math.round(surplus)}/mo — let's make it work harder for you.`
-        : `I've finished analysing your spending and have personalised recommendations ready. Want to explore them together?`;
-
-    return (
-      <View style={s.container}>
-        <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
-        <View style={s.teaserContainer}>
-          {/* Fake conversation preview */}
-          <View style={s.teaserChat}>
-            <View style={s.teaserBubbleAi}>
-              <Text style={s.teaserBubbleAiText}>{teaserMsg}</Text>
-            </View>
-            <View style={s.teaserBubbleUser}>
-              <Text style={s.teaserBubbleUserText}>
-                {topMove?.action ? 'Yes, show me how!' : 'What should I do first?'}
-              </Text>
-            </View>
-            <View style={s.teaserBubbleAi}>
-              <View style={s.teaserTypingRow}>
-                <View style={s.teaserDot} />
-                <View style={[s.teaserDot, { opacity: 0.6 }]} />
-                <View style={[s.teaserDot, { opacity: 0.3 }]} />
-              </View>
-            </View>
-          </View>
-
-          {/* Fade overlay + CTA */}
-          <View style={s.teaserOverlay}>
-            <Text style={s.teaserTitle}>Your assistant is ready</Text>
-            <Text style={s.teaserSubtitle}>
-              Unlock personalised guidance based on your{score ? ` ${score}/100 financial score` : ' analysis'}
-            </Text>
-            <TouchableOpacity
-              style={s.teaserBtn}
-              onPress={() => setShowPaywall(true)}
-              activeOpacity={0.8}
-            >
-              <Text style={s.teaserBtnText}>Continue conversation</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  }
+  // ── Free tier: count user messages for gate ──
+  const userMessageCount = messages.filter((m) => m.role === 'user').length;
+  const freeGateReached = !isPro && userMessageCount >= FREE_MESSAGE_LIMIT;
+  const freeMessagesRemaining = isPro ? Infinity : Math.max(0, FREE_MESSAGE_LIMIT - userMessageCount);
 
   return (
     <KeyboardAvoidingView
@@ -981,8 +1134,9 @@ export default function Chat() {
               <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
             </View>
             <Text style={s.headerTitle}>Bocy</Text>
+            {loading && <ActivityIndicator size="small" color={colors.dim} style={{ marginLeft: 6 }} />}
           </View>
-          <TouchableOpacity onPress={clearChat} style={s.clearButton}>
+          <TouchableOpacity onPress={clearChat} style={s.clearButton} activeOpacity={0.7}>
             <Text style={s.clearText}>New chat</Text>
           </TouchableOpacity>
         </View>
@@ -995,22 +1149,30 @@ export default function Chat() {
         contentContainerStyle={s.messagesContent}
         keyboardShouldPersistTaps="handled"
       >
-        {messages.length === 0 && (
+        {/* Show suggestions when empty OR when only the payday auto-nudge is present */}
+        {(messages.length === 0 || (messages.length === 1 && messages[0].role === 'assistant' && paydayActive)) && (
           <View style={s.suggestedContainer}>
-            <View style={s.chatBocyHero}>
-              <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
+            {messages.length === 0 && (
+              <>
+                <View style={s.chatBocyHero}>
+                  <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
+                </View>
+                <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Ask Bocy'}</Text>
+                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'Your personal finance companion'}</Text>
+              </>
+            )}
+            <View style={s.suggestedGrid}>
+              {suggestedQuestions.map((q, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={s.suggestedButton}
+                  onPress={() => sendMessage(q)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.suggestedText}>{q}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-            <Text style={s.suggestedTitle}>Ask Bocy</Text>
-            <Text style={s.suggestedSubtitle}>Your financial companion</Text>
-            {suggestedQuestions.map((q, i) => (
-              <TouchableOpacity
-                key={i}
-                style={s.suggestedButton}
-                onPress={() => sendMessage(q)}
-              >
-                <Text style={s.suggestedText}>{q}</Text>
-              </TouchableOpacity>
-            ))}
           </View>
         )}
 
@@ -1070,41 +1232,64 @@ export default function Chat() {
         )}
       </ScrollView>
 
-      {/* ── Input ── */}
-      <View style={s.inputRow}>
-        <TextInput
-          ref={inputRef}
-          style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
-          placeholder={listening ? 'Listening...' : 'Ask about your finances...'}
-          placeholderTextColor={listening ? colors.green : colors.muted}
-          value={input}
-          onChangeText={setInput}
-          onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
-          onSubmitEditing={() => sendMessage(input)}
-          returnKeyType="send"
-          multiline
-          maxLength={1000}
-          blurOnSubmit
-        />
-        {voiceSupported && (
+      {/* ── Input / Gate ── */}
+      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
+      {freeGateReached ? (
+        <View style={s.gateRow}>
+          <Text style={s.gateText}>You've used your {FREE_MESSAGE_LIMIT} free messages</Text>
           <TouchableOpacity
-            style={[s.voiceButton, listening && s.voiceButtonActive]}
-            onPress={toggleVoice}
-            activeOpacity={0.7}
+            style={s.gateBtn}
+            onPress={() => setShowPaywall(true)}
+            activeOpacity={0.8}
           >
-            <Text style={[s.voiceIcon, listening && s.voiceIconActive]}>
-              {listening ? '\u23F9' : '\u{1F3A4}'}
-            </Text>
+            <Text style={s.gateBtnText}>Unlock unlimited chat</Text>
           </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          style={[s.sendButton, (!input.trim() || loading) && s.sendDisabled]}
-          onPress={() => sendMessage(input)}
-          disabled={!input.trim() || loading}
-        >
-          <Text style={s.sendText}>{'\u2191'}</Text>
-        </TouchableOpacity>
-      </View>
+        </View>
+      ) : (
+        <>
+          {!isPro && userMessageCount > 0 && (
+            <View style={s.freeBadgeRow}>
+              <Text style={s.freeBadgeText}>
+                {freeMessagesRemaining} of {FREE_MESSAGE_LIMIT} free {freeMessagesRemaining === 1 ? 'message' : 'messages'} left
+              </Text>
+            </View>
+          )}
+          <View style={[s.inputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }]}>
+            <TextInput
+              ref={inputRef}
+              style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
+              placeholder={listening ? 'Listening...' : 'Ask about your finances...'}
+              placeholderTextColor={listening ? colors.green : colors.muted}
+              value={input}
+              onChangeText={setInput}
+              onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+              onSubmitEditing={() => sendMessage(input)}
+              returnKeyType="send"
+              multiline
+              maxLength={1000}
+              blurOnSubmit
+            />
+            {voiceSupported && (
+              <TouchableOpacity
+                style={[s.voiceButton, listening && s.voiceButtonActive]}
+                onPress={toggleVoice}
+                activeOpacity={0.7}
+              >
+                <Text style={[s.voiceIcon, listening && s.voiceIconActive]}>
+                  {listening ? '\u23F9' : '\u{1F3A4}'}
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={[s.sendButton, (!input.trim() || loading) && s.sendDisabled]}
+              onPress={() => sendMessage(input)}
+              disabled={!input.trim() || loading}
+            >
+              <Text style={s.sendText}>{'\u2191'}</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -1142,23 +1327,23 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xxl + spacing.sm,
-    paddingBottom: spacing.sm,
-    borderBottomWidth: 1,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
   },
   headerLeftChat: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   chatBocyWrap: {
-    width: 24,
-    height: 24,
+    width: 26,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
   chatBocyHero: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   headerTitle: {
     fontFamily: fonts.semibold,
@@ -1166,29 +1351,32 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.text,
   },
   clearButton: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 100,
+    backgroundColor: c.accentDim,
   },
   clearText: {
     fontFamily: fonts.medium,
-    fontSize: 13,
-    color: c.accent,
+    fontSize: 12,
+    color: c.text2,
   },
   messages: {
     flex: 1,
   },
   messagesContent: {
     padding: spacing.md,
-    paddingTop: spacing.xxl + spacing.lg,
-    paddingBottom: spacing.md,
+    paddingTop: spacing.xxl + spacing.md,
+    paddingBottom: spacing.sm,
   },
   suggestedContainer: {
-    marginTop: spacing.xxl,
+    marginTop: spacing.xl,
     alignItems: 'center',
+    paddingHorizontal: spacing.xs,
   },
   suggestedTitle: {
     fontFamily: fonts.heading,
-    fontSize: 20,
+    fontSize: 22,
     color: c.text,
   },
   suggestedSubtitle: {
@@ -1196,46 +1384,49 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 13,
     color: c.dim,
     marginBottom: spacing.lg,
-    marginTop: spacing.xs,
+    marginTop: 6,
+  },
+  suggestedGrid: {
+    width: '100%',
+    gap: spacing.sm,
   },
   suggestedButton: {
     backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: radius.md,
-    paddingVertical: 14,
+    borderRadius: radius.lg,
+    paddingVertical: 12,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-    width: '100%',
   },
   suggestedText: {
     fontFamily: fonts.medium,
-    fontSize: 14,
+    fontSize: 13,
     color: c.text2,
     textAlign: 'center',
   },
   bubble: {
-    maxWidth: '80%',
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    marginBottom: spacing.sm,
+    maxWidth: '82%',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    marginBottom: 6,
   },
   userBubble: {
     backgroundColor: c.accent,
     alignSelf: 'flex-end',
-    borderBottomRightRadius: radius.sm,
+    borderBottomRightRadius: 4,
   },
   assistantBubble: {
     backgroundColor: c.surface,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: c.border,
     alignSelf: 'flex-start',
-    borderBottomLeftRadius: radius.sm,
+    borderBottomLeftRadius: 4,
   },
   bubbleText: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    lineHeight: 22,
+    lineHeight: 21,
   },
   userText: {
     color: c.bg,
@@ -1244,21 +1435,21 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   dotsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
+    gap: 5,
+    paddingVertical: 2,
     paddingHorizontal: 2,
   },
   dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: c.accent,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: c.dim,
   },
   // ── Action cards ──
   actionCardWrapper: {
     alignSelf: 'flex-start',
     maxWidth: '85%',
-    marginBottom: spacing.sm,
+    marginBottom: 6,
   },
   errorCard: {
     backgroundColor: c.coralDim,
@@ -1447,8 +1638,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   retryBanner: {
     backgroundColor: c.coralDim,
     borderRadius: radius.md,
-    padding: spacing.md,
-    marginTop: spacing.xs,
+    padding: 12,
+    marginTop: 4,
     alignItems: 'center',
   },
   retryText: {
@@ -1466,29 +1657,30 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // ── Input row ──
   inputRow: {
     flexDirection: 'row',
-    padding: spacing.md,
-    borderTopWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
-    backgroundColor: c.surface,
-    gap: spacing.sm,
+    backgroundColor: c.bg,
+    gap: 8,
     alignItems: 'flex-end',
   },
   input: {
     flex: 1,
     fontFamily: fonts.regular,
-    backgroundColor: c.bg,
+    backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: radius.md,
+    borderRadius: 22,
     paddingVertical: 10,
     paddingHorizontal: spacing.md,
     fontSize: 14,
     color: c.text,
   },
   voiceButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: c.border,
     justifyContent: 'center',
@@ -1499,110 +1691,67 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     backgroundColor: c.greenDim,
   },
   voiceIcon: {
-    fontSize: 18,
+    fontSize: 16,
   },
   voiceIconActive: {
     color: c.green,
   },
   sendButton: {
     backgroundColor: c.accent,
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendDisabled: {
-    opacity: 0.4,
+    opacity: 0.3,
   },
   sendText: {
     fontFamily: fonts.semibold,
-    fontSize: 20,
+    fontSize: 18,
     color: c.bg,
   },
 
-  // ── Teaser chat preview (free tier) ──
-  teaserContainer: {
-    flex: 1,
-  },
-  teaserChat: {
-    flex: 1,
-    padding: spacing.lg,
-    paddingTop: 60,
-    gap: 12,
-  },
-  teaserBubbleAi: {
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radius.md,
-    padding: 14,
-    maxWidth: '85%',
-    alignSelf: 'flex-start',
-  },
-  teaserBubbleAiText: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: c.text2,
-    lineHeight: 21,
-  },
-  teaserBubbleUser: {
-    backgroundColor: c.accentDim,
-    borderRadius: radius.md,
-    padding: 14,
-    maxWidth: '75%',
-    alignSelf: 'flex-end',
-  },
-  teaserBubbleUserText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: c.text,
-    lineHeight: 21,
-  },
-  teaserTypingRow: {
-    flexDirection: 'row',
-    gap: 4,
-    paddingVertical: 4,
-  },
-  teaserDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: c.dim,
-  },
-  teaserOverlay: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: 40,
-    borderTopWidth: 1,
+  // ── Free tier gate (replaces input after limit reached) ──
+  gateRow: {
+    padding: spacing.md,
+    paddingBottom: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
-    alignItems: 'center',
     backgroundColor: c.bg,
+    alignItems: 'center',
+    gap: spacing.sm,
   },
-  teaserTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 18,
-    color: c.text,
-    marginBottom: spacing.xs,
-  },
-  teaserSubtitle: {
+  gateText: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: c.dim,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: spacing.lg,
-    maxWidth: 280,
   },
-  teaserBtn: {
+  gateBtn: {
     backgroundColor: c.accent,
     borderRadius: 100,
     paddingVertical: 14,
     paddingHorizontal: spacing.xl + spacing.md,
   },
-  teaserBtnText: {
+  gateBtnText: {
     fontFamily: fonts.semibold,
     fontSize: 15,
     color: c.bg,
+  },
+  // ── Free message counter badge ──
+  freeBadgeRow: {
+    alignItems: 'center',
+    paddingTop: spacing.xs,
+    paddingBottom: 2,
+    backgroundColor: c.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
+  },
+  freeBadgeText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.muted,
+    letterSpacing: 0.3,
   },
 });

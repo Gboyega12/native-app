@@ -2,10 +2,11 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
   Linking, Alert, LayoutAnimation, Platform, UIManager, Animated, Easing, Modal, Pressable,
+  RefreshControl,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { syncBankData } from '@/lib/sync';
+import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useSubscription } from '@/lib/subscription';
@@ -253,6 +254,7 @@ export default function Plan() {
   const scrollRef = useRef<ScrollView>(null);
   const [highlightIdx, setHighlightIdx] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const itemYPositions = useRef<Record<number, number>>({});
 
   // Handle deep-link highlight from home page "View" button
@@ -284,6 +286,12 @@ export default function Plan() {
   useFocusEffect(
     useCallback(() => {
       loadData();
+      // Subscribe to sync completions from other screens
+      const unsub = onSyncComplete((result) => {
+        if (!result) return;
+        setAnalysis(result.analysis);
+      });
+      return () => unsub();
     }, [])
   );
 
@@ -339,10 +347,10 @@ export default function Plan() {
   };
 
   // Background sync: re-fetch TrueLayer data and update moves
-  const syncInBackground = async (userId: string, dismissedActions: Set<string>) => {
+  const syncInBackground = async (userId: string, dismissedActions: Set<string> = new Set()) => {
     try {
       setSyncing(true);
-      const result = await syncBankData(userId);
+      const result = await requestSync(userId);
       if (!result) { setSyncing(false); return; }
 
       // Apply dismissed-move filter
@@ -357,6 +365,16 @@ export default function Plan() {
     }
     setSyncing(false);
   };
+
+  // Pull-to-refresh — force a fresh TrueLayer fetch
+  const onRefresh = useCallback(async () => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    setRefreshing(true);
+    invalidateSyncCache();
+    await syncInBackground(uid);
+    setRefreshing(false);
+  }, []);
 
   // ── Persist progress ──
 
@@ -552,7 +570,19 @@ export default function Plan() {
   // ── Render ──
 
   return (
-    <ScrollView ref={scrollRef} style={s.container} contentContainerStyle={s.scroll}>
+    <ScrollView
+      ref={scrollRef}
+      style={s.container}
+      contentContainerStyle={s.scroll}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+        />
+      }
+    >
       <AnimGlyph delay={0}>
         <View style={s.headingRow}>
           <View>
@@ -581,34 +611,19 @@ export default function Plan() {
             <ScrollView showsVerticalScrollIndicator={false} bounces={false} style={s.infoScroll} contentContainerStyle={s.infoScrollContent}>
               <Text style={s.infoTitle}>How your plan works</Text>
 
-              <Text style={s.infoHeading}>Goal trajectory</Text>
+              <Text style={s.infoHeading}>Recommendations</Text>
               <Text style={s.infoBody}>
-                Shows how many months to reach your goal if you follow the plan, compared to doing nothing.
-              </Text>
-
-              <Text style={s.infoHeading}>In progress</Text>
-              <Text style={s.infoBody}>
-                Moves you've started. Track steps with the checklist. Your monthly savings total is shown at the top.
-              </Text>
-
-              <Text style={s.infoHeading}>Recommended</Text>
-              <Text style={s.infoBody}>
-                Personalised opportunities ranked by annual impact. Tap to expand details, strategy, and action steps.
+                Personalised actions ranked by what matters most for your situation right now. Priorities shift automatically as your finances change.
               </Text>
 
               <Text style={s.infoHeading}>Effort levels</Text>
               <Text style={s.infoBody}>
-                Quick win = minimal effort.{'\n'}Some effort = takes a bit of time.{'\n'}Big move = significant change but highest reward.
+                Quick win = minimal effort.{'\n'}Some effort = takes a bit of time.{'\n'}Big move = significant change, highest reward.
               </Text>
 
-              <Text style={s.infoHeading}>Take action</Text>
+              <Text style={s.infoHeading}>Tracking</Text>
               <Text style={s.infoBody}>
-                Each move has direct links or buttons to help you act — compare rates, call providers, or ask Bocy for personalised guidance.
-              </Text>
-
-              <Text style={s.infoHeading}>Automatic tracking</Text>
-              <Text style={s.infoBody}>
-                Recommendations are automatically tracked when Bocy re-analyses your bank data. As your spending patterns change, new transactions come in, and debts are paid down, Bocy re-evaluates your recommendations and updates progress automatically — no manual input needed. Dismissed or completed recommendations won't reappear.
+                Start a move to track it with a checklist. Bocy re-evaluates automatically as new transactions come in — no manual input needed.
               </Text>
 
               <TouchableOpacity style={s.infoClose} onPress={() => setShowInfo(false)} activeOpacity={0.8}>
@@ -891,18 +906,6 @@ export default function Plan() {
                           <Text style={s.miniProgressText}>{doneSteps.length}/{steps.length}</Text>
                         </View>
                       )}
-
-                      {/* Emergency fund info hint on collapsed active card */}
-                      {!isExpanded && ((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.action || '').toLowerCase().includes('rainy') || (move.category || '') === 'buffer') && (
-                        <View style={s.emergencyHint}>
-                          <View style={s.emergencyHintIcon}>
-                            <Text style={s.emergencyHintIconText}>i</Text>
-                          </View>
-                          <Text style={s.emergencyHintText}>
-                            A safety net for unexpected costs — tap to learn more
-                          </Text>
-                        </View>
-                      )}
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -1009,18 +1012,6 @@ export default function Plan() {
                         <Text style={s.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                       </View>
 
-                      {/* Emergency fund info hint on collapsed card */}
-                      {!isExpanded && ((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.action || '').toLowerCase().includes('rainy') || (move.category || '') === 'buffer') && (
-                        <View style={s.emergencyHint}>
-                          <View style={s.emergencyHintIcon}>
-                            <Text style={s.emergencyHintIconText}>i</Text>
-                          </View>
-                          <Text style={s.emergencyHintText}>
-                            A safety net for unexpected costs — tap to learn more
-                          </Text>
-                        </View>
-                      )}
-
                       {/* Merchant chips preview */}
                       {!isExpanded && move.merchants && move.merchants.length > 0 && (
                         <View style={s.merchantChips}>
@@ -1085,23 +1076,6 @@ export default function Plan() {
     return (
       <View style={s.expandedSection}>
         <View style={s.separator} />
-
-        {/* Emergency fund info */}
-        {((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.category || '') === 'buffer') && (
-          <View style={s.emergencyInfoBox}>
-            <View style={s.emergencyInfoHeader}>
-              <Text style={s.emergencyInfoIcon}>i</Text>
-              <Text style={s.emergencyInfoTitle}>What is an emergency fund?</Text>
-            </View>
-            <Text style={s.emergencyInfoText}>
-              An emergency fund is 3–6 months of essential expenses kept in an easy-access savings account. It acts as your financial safety net for unexpected costs — car repairs, medical bills, or job loss — so you never have to fall back on credit cards or loans.
-            </Text>
-            <Text style={[s.emergencyInfoText, { marginTop: 8, color: colors.green }]}>
-              Target: 3–6 months of essentials ({move.monthlyImpact ? `aim for £${Math.round(move.monthlyImpact * 3).toLocaleString()}–£${Math.round(move.monthlyImpact * 6).toLocaleString()}` : 'based on your spending'}){'\n'}
-              Timeframe: {move.timeline ? stripMd(move.timeline) : 'Start with £1,000 in the first 2–3 months, then build up gradually'}
-            </Text>
-          </View>
-        )}
 
         {/* Strategy */}
         {move.strategy && (
@@ -1694,82 +1668,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     textAlign: 'right',
     marginTop: 2,
     letterSpacing: 0.3,
-  },
-
-  // ── Emergency fund info ──
-  emergencyInfoBox: {
-    backgroundColor: c.greenDim,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: c.greenDim,
-  },
-  emergencyInfoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  emergencyInfoIcon: {
-    fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.green,
-    width: 20,
-    height: 20,
-    lineHeight: 20,
-    textAlign: 'center',
-    borderWidth: 1,
-    borderColor: c.green,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  emergencyInfoTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-    color: c.green,
-    letterSpacing: 0.3,
-  },
-  emergencyInfoText: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: c.text2,
-    lineHeight: 18,
-  },
-
-  // ── Emergency hint on collapsed card ──
-  emergencyHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 10,
-    backgroundColor: c.greenDim,
-    borderRadius: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: c.greenDim,
-  },
-  emergencyHintIcon: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: c.green,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emergencyHintIconText: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: c.green,
-    lineHeight: 14,
-  },
-  emergencyHintText: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.green,
-    flex: 1,
   },
 
   // ── Expanded section ──

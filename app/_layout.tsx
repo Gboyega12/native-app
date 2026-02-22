@@ -91,35 +91,35 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         router.replace('/(main)/welcome');
       } else {
         // Check if user has completed identity discovery
-        supabase
-          .from('user_identity')
-          .select('user_id')
-          .eq('user_id', session.user.id)
-          .single()
-          .then(({ data }) => {
+        void (async () => {
+          try {
+            const { data } = await supabase
+              .from('user_identity')
+              .select('user_id')
+              .eq('user_id', session.user.id)
+              .single();
             if (data) {
               // Identity complete — check if they have an analysis
-              supabase
-                .from('analyses')
-                .select('id')
-                .eq('user_id', session.user.id)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .then(({ data: rows }) => {
-                  router.replace(rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect');
-                })
-                .catch(() => {
-                  router.replace('/(main)/connect');
-                });
+              try {
+                const { data: rows } = await supabase
+                  .from('analyses')
+                  .select('id')
+                  .eq('user_id', session.user.id)
+                  .order('created_at', { ascending: false })
+                  .limit(1);
+                router.replace(rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect');
+              } catch {
+                router.replace('/(main)/connect');
+              }
             } else {
               // No identity yet — start education flow
               router.replace('/(main)/education');
             }
-          })
-          .catch(() => {
+          } catch {
             // Query failed — fall back to education flow
             router.replace('/(main)/education');
-          });
+          }
+        })();
       }
     }
   }, [session, ready, segments]);

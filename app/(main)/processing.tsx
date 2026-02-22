@@ -304,7 +304,7 @@ function ProcessingInner() {
       // UKPF flowchart priority + goal-aware ranking + trajectories
       setCurrentStep(5);
       const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
-      const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData);
+      const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
       const topRanked = rankedMoves[0] || null;
       const goalTrajectory = topRanked ? topRanked.trajectory : null;
       await delay(400);

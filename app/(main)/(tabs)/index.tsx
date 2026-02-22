@@ -2,14 +2,15 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
   LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Animated, Easing, Pressable,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { getLastResult } from '@/app/(main)/processing';
-import { syncBankData } from '@/lib/sync';
-import EnrichmentEngine from '@/lib/enrichment-engine';
-import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { requestSync, onSyncComplete, getLastSyncTime, invalidateSyncCache } from '@/lib/sync-coordinator';
+import type { WeeklyContext } from '@/lib/sync';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
@@ -17,6 +18,18 @@ import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, G
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
+
+/** Human-friendly "X ago" label from epoch ms */
+function formatTimeAgo(epochMs: number): string {
+  const diffSec = Math.round((Date.now() - epochMs) / 1000);
+  if (diffSec < 10) return 'just now';
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -88,6 +101,9 @@ export default function Home() {
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
   const [budgetExpanded, setBudgetExpanded] = useState(false);
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
+  const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastSynced, setLastSynced] = useState<number>(0);
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
@@ -137,6 +153,19 @@ export default function Home() {
   const [addItemEssential, setAddItemEssential] = useState(true);
   const [addItemSaving, setAddItemSaving] = useState(false);
   const [addItemError, setAddItemError] = useState('');
+
+  // Custom weekly spending limit
+  const [customWeeklyLimit, setCustomWeeklyLimit] = useState<number | null>(null);
+  const [showLimitEditor, setShowLimitEditor] = useState(false);
+  const [limitInput, setLimitInput] = useState('');
+  const [breakdownExpanded, setBreakdownExpanded] = useState(false);
+
+  // Load custom weekly limit from storage
+  useEffect(() => {
+    AsyncStorage.getItem('custom_weekly_limit').then((val) => {
+      if (val) setCustomWeeklyLimit(parseFloat(val));
+    });
+  }, []);
 
   // Categorise review modal state
   const [showCatReview, setShowCatReview] = useState(false);
@@ -629,6 +658,12 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       loadData();
+      // Subscribe to sync completions from other screens
+      const unsub = onSyncComplete((result) => {
+        if (!result) return;
+        if (result.weeklyContext) setWeeklyCtx(result.weeklyContext);
+      });
+      return () => unsub();
     }, [])
   );
 
@@ -732,23 +767,17 @@ export default function Home() {
             .eq('user_id', user.id),
           supabase
             .from('debt_accounts')
-            .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated')
+            .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source')
             .eq('user_id', user.id),
         ]);
         if (adjRes.data) adjustments = adjRes.data;
         if (debtRes.data) setDebtAccounts(debtRes.data);
       } catch {}
 
-      // Use the latest in-memory result from processing if available.
-      const lastResult = getLastResult();
-      if (lastResult) {
-        setAnalysis(mergeAdjustments(lastResult, adjustments));
-        setLoading(false);
-        // Still trigger background sync for fresh data
-        syncInBackground(user.id);
-        return;
-      }
-
+      // Fetch the latest persisted analysis from Supabase.
+      // Only fall back to in-memory result if Supabase has nothing.
+      // This eliminates the visual "flash" of showing stale in-memory data
+      // before Supabase data arrives.
       const { data, error } = await supabase
         .from('analyses')
         .select('*')
@@ -761,10 +790,16 @@ export default function Home() {
         console.warn('[home] Failed to fetch analysis:', error.message);
       }
 
-      setAnalysis(data ? mergeAdjustments(data, adjustments) : null);
-
-      // Trigger background sync if user has an existing analysis
+      const lastResult = getLastResult();
       if (data) {
+        setAnalysis(mergeAdjustments(data, adjustments));
+      } else if (lastResult) {
+        // Fallback: use in-memory result only if Supabase has nothing yet
+        setAnalysis(mergeAdjustments(lastResult, adjustments));
+      }
+
+      // Trigger background sync if user has any analysis data
+      if (data || lastResult) {
         syncInBackground(user.id);
       }
     } catch (err: any) {
@@ -774,16 +809,37 @@ export default function Home() {
     setLoading(false);
   };
 
+  // Pull-to-refresh handler — force a fresh TrueLayer fetch
+  const onRefresh = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setRefreshing(true);
+    invalidateSyncCache();
+    await syncInBackground(user.id, true);
+    setRefreshing(false);
+  }, []);
+
   // Background sync: refresh bank data via TrueLayer and re-run analysis
-  const syncInBackground = async (userId: string) => {
+  const syncInBackground = async (userId: string, force: boolean = false) => {
     try {
       setSyncing(true);
 
-      const result = await syncBankData(userId);
+      const result = await requestSync(userId, force);
       if (!result) { setSyncing(false); return; }
 
-      // Update debt accounts
-      if (result.debtAccounts.length > 0) setDebtAccounts(result.debtAccounts);
+      // Update debt accounts: merge synced with any manual debts
+      try {
+        const { data: allDebt } = await supabase
+          .from('debt_accounts')
+          .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source')
+          .eq('user_id', userId);
+        if (allDebt) setDebtAccounts(allDebt);
+      } catch {
+        if (result.debtAccounts.length > 0) setDebtAccounts(result.debtAccounts);
+      }
+
+      // Update adaptive weekly context
+      if (result.weeklyContext) setWeeklyCtx(result.weeklyContext);
 
       // Re-fetch budget adjustments and apply for display
       let budgetAdjustments: any[] = [];
@@ -796,6 +852,7 @@ export default function Home() {
       } catch {}
 
       setAnalysis(mergeAdjustments(result.analysis, budgetAdjustments));
+      setLastSynced(getLastSyncTime());
     } catch (err: any) {
       console.warn('[home] Background sync failed:', err?.message);
     }
@@ -862,7 +919,13 @@ export default function Home() {
   })();
 
   // ── Safe-to-spend weekly calculation ──
-  const weeklyBudget = leftToDecide / 4.33;
+  // Static weekly budget is the baseline: unallocated monthly / 4.33 weeks
+  const staticWeeklyBudget = leftToDecide / 4.33;
+  // Adaptive budget from sync may use stale analysis data where leftToDecide
+  // was different, so always cap it at the current static weekly figure.
+  // The adaptive budget should only LOWER the weekly figure, never raise it.
+  const rawWeeklyBudget = weeklyCtx?.adaptiveBudget ?? staticWeeklyBudget;
+  const calculatedWeeklyBudget = Math.min(rawWeeklyBudget, staticWeeklyBudget);
 
   // Get start of current week (Monday)
   const getWeekStart = () => {
@@ -883,14 +946,46 @@ export default function Home() {
     .filter((tx) => new Date(tx.date) >= weekStart)
     .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
 
+  // Apply custom limit if set (capped at calculated budget — user can lower, not inflate)
+  const weeklyBudget = customWeeklyLimit !== null
+    ? Math.min(customWeeklyLimit, calculatedWeeklyBudget)
+    : calculatedWeeklyBudget;
+
   const weeklyRemaining = Math.max(0, weeklyBudget - spentThisWeek);
   const weeklyUsedPct = weeklyBudget > 0
     ? Math.min(100, Math.round((spentThisWeek / weeklyBudget) * 100))
     : 0;
   const weeklyHealthy = spentThisWeek <= weeklyBudget;
 
+  // Save / reset custom weekly limit
+  const saveCustomLimit = () => {
+    const val = parseFloat(limitInput);
+    if (!isNaN(val) && val > 0) {
+      setCustomWeeklyLimit(val);
+      AsyncStorage.setItem('custom_weekly_limit', String(val));
+      setShowLimitEditor(false);
+      setLimitInput('');
+    }
+  };
+  const resetCustomLimit = () => {
+    setCustomWeeklyLimit(null);
+    AsyncStorage.removeItem('custom_weekly_limit');
+    setShowLimitEditor(false);
+  };
+
   return (
-    <ScrollView style={s.container} contentContainerStyle={s.scroll}>
+    <ScrollView
+      style={s.container}
+      contentContainerStyle={s.scroll}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+        />
+      }
+    >
       {/* ── Header with Bocy ── */}
       <View style={s.headerRow}>
         <View style={s.headerLeft}>
@@ -901,9 +996,11 @@ export default function Home() {
             <Text style={s.greeting}>
               Hello, {userName || 'there'}
             </Text>
-            {syncing && (
+            {syncing ? (
               <Text style={s.syncText}>Syncing latest transactions...</Text>
-            )}
+            ) : lastSynced > 0 ? (
+              <Text style={s.syncText}>Updated {formatTimeAgo(lastSynced)}</Text>
+            ) : null}
           </View>
         </View>
         <TouchableOpacity
@@ -947,6 +1044,27 @@ export default function Home() {
                 <Text style={s.reviewBannerLink}>Tell me what they are</Text>
               </Text>
             </TouchableOpacity>
+          )}
+
+          {/* ── Income arrival alert ── */}
+          {weeklyCtx?.incomeArrivedThisWeek && weeklyCtx.recentIncomeEvents.length > 0 && (
+            <AnimGlyph delay={0}>
+              <View style={s.incomeAlert}>
+                <Text style={s.incomeAlertTitle}>Income received</Text>
+                <Text style={s.incomeAlertText}>
+                  {weeklyCtx.recentIncomeEvents.map((e) =>
+                    `\u00a3${Math.round(e.amount).toLocaleString()} from ${e.source}`
+                  ).join(', ')}
+                  {' '}landed this week.
+                  {weeklyCtx.committedThisWeek > 0
+                    ? ` \u00a3${Math.round(weeklyCtx.committedThisWeek).toLocaleString()} already committed to bills & essentials.`
+                    : ''}
+                </Text>
+                <Text style={s.incomeAlertBudget}>
+                  Safe to spend: {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}/week{customWeeklyLimit !== null ? ' (your limit)' : ''}
+                </Text>
+              </View>
+            </AnimGlyph>
           )}
 
           {/* ══════════════════════════════════════════════
@@ -1111,18 +1229,17 @@ export default function Home() {
             <AnimGlyph delay={100}>
               <View style={s.cardTitleRow}>
                 <Text style={s.cardTitle}>Safe to spend</Text>
-                <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'safe' ? null : 'safe')}>
-                  <Text style={s.infoIcon}>i</Text>
+                <TouchableOpacity
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  onPress={() => {
+                    LayoutAnimation.configureNext(SMOOTH_ANIM);
+                    setBreakdownExpanded(!breakdownExpanded);
+                  }}
+                >
+                  <Text style={s.infoIcon}>{breakdownExpanded ? '\u2715' : 'i'}</Text>
                 </TouchableOpacity>
               </View>
             </AnimGlyph>
-            {infoCard === 'safe' && (
-              <View style={s.infoBox}>
-                <Text style={s.infoBoxText}>
-                  This is your weekly lifestyle budget: (Monthly income - Essentials) / 4.33, minus what you've already spent on lifestyle this month. It tells you how much discretionary spending you can still afford this week.
-                </Text>
-              </View>
-            )}
             <Text style={s.cardSubtitle}>Your weekly lifestyle allowance</Text>
 
             {/* Big remaining number */}
@@ -1154,9 +1271,126 @@ export default function Home() {
               <View>
                 <Text style={s.safeToSpendMeta}>
                   {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()} budget
+                  {customWeeklyLimit !== null ? ' (custom)' : ''}
                 </Text>
               </View>
             </View>
+
+            {/* ── Detailed breakdown (expandable) ── */}
+            {breakdownExpanded && (
+              <View style={s.breakdownSection}>
+                <Text style={s.breakdownTitle}>How this is calculated</Text>
+
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>Monthly income</Text>
+                  <Text style={s.breakdownValue}>{'\u00a3'}{Math.round(income).toLocaleString()}</Text>
+                </View>
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>Essentials</Text>
+                  <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}</Text>
+                </View>
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>Lifestyle spending</Text>
+                  <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(discTotal).toLocaleString()}</Text>
+                </View>
+                <View style={[s.breakdownRow, s.breakdownDivider]}>
+                  <Text style={[s.breakdownLabel, s.breakdownBold]}>Unallocated</Text>
+                  <Text style={[s.breakdownValue, s.breakdownBold]}>{'\u00a3'}{Math.round(leftToDecide).toLocaleString()}/mo</Text>
+                </View>
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>{'\u00f7'} 4.33 weeks</Text>
+                  <Text style={s.breakdownValue}>{'\u00a3'}{Math.round(staticWeeklyBudget).toLocaleString()}/wk</Text>
+                </View>
+
+                {weeklyCtx?.incomeArrivedThisWeek && (
+                  <>
+                    <View style={s.breakdownAdaptive}>
+                      <Text style={s.breakdownAdaptiveLabel}>Adaptive adjustment</Text>
+                      {weeklyCtx.recentIncomeEvents.map((e, i) => (
+                        <View key={i} style={s.breakdownRow}>
+                          <Text style={s.breakdownLabel}>Income: {e.source}</Text>
+                          <Text style={[s.breakdownValue, { color: colors.green }]}>+{'\u00a3'}{Math.round(e.amount).toLocaleString()}</Text>
+                        </View>
+                      ))}
+                      {weeklyCtx.committedThisWeek > 0 && (
+                        <View style={s.breakdownRow}>
+                          <Text style={s.breakdownLabel}>Committed payments</Text>
+                          <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek).toLocaleString()}</Text>
+                        </View>
+                      )}
+                      <View style={s.breakdownRow}>
+                        <Text style={[s.breakdownLabel, s.breakdownBold]}>Adaptive budget</Text>
+                        <Text style={[s.breakdownValue, s.breakdownBold]}>{'\u00a3'}{Math.round(weeklyCtx.adaptiveBudget).toLocaleString()}/wk</Text>
+                      </View>
+                    </View>
+                  </>
+                )}
+
+                <View style={[s.breakdownRow, s.breakdownDivider]}>
+                  <Text style={s.breakdownLabel}>Spent this week</Text>
+                  <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(spentThisWeek).toLocaleString()}</Text>
+                </View>
+                <View style={s.breakdownRow}>
+                  <Text style={[s.breakdownLabel, s.breakdownBold]}>Safe to spend</Text>
+                  <Text style={[s.breakdownValue, s.breakdownBold, !weeklyHealthy && { color: colors.coral }]}>{'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}</Text>
+                </View>
+
+                {customWeeklyLimit !== null && (
+                  <View style={s.breakdownRow}>
+                    <Text style={[s.breakdownLabel, { color: colors.accent }]}>Your custom limit</Text>
+                    <Text style={[s.breakdownValue, { color: colors.accent }]}>{'\u00a3'}{Math.round(customWeeklyLimit).toLocaleString()}/wk</Text>
+                  </View>
+                )}
+
+                {/* Adjust button */}
+                <View style={s.breakdownActions}>
+                  <TouchableOpacity
+                    style={s.adjustBtn}
+                    onPress={() => {
+                      setLimitInput(String(Math.round(weeklyBudget)));
+                      setShowLimitEditor(true);
+                    }}
+                  >
+                    <Text style={s.adjustBtnText}>
+                      {customWeeklyLimit !== null ? 'Change limit' : 'Set my own limit'}
+                    </Text>
+                  </TouchableOpacity>
+                  {customWeeklyLimit !== null && (
+                    <TouchableOpacity style={s.resetBtn} onPress={resetCustomLimit}>
+                      <Text style={s.resetBtnText}>Reset</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Inline limit editor */}
+                {showLimitEditor && (
+                  <View style={s.limitEditor}>
+                    <Text style={s.limitEditorLabel}>Weekly spending limit</Text>
+                    <View style={s.limitEditorRow}>
+                      <Text style={s.limitEditorCurrency}>{'\u00a3'}</Text>
+                      <TextInput
+                        style={s.limitEditorInput}
+                        keyboardType="numeric"
+                        value={limitInput}
+                        onChangeText={setLimitInput}
+                        placeholder={String(Math.round(calculatedWeeklyBudget))}
+                        placeholderTextColor={colors.muted}
+                        autoFocus
+                      />
+                      <TouchableOpacity style={s.limitEditorSave} onPress={saveCustomLimit}>
+                        <Text style={s.limitEditorSaveText}>Save</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.limitEditorCancel} onPress={() => setShowLimitEditor(false)}>
+                        <Text style={s.limitEditorCancelText}>Cancel</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <Text style={s.limitEditorHint}>
+                      Max: {'\u00a3'}{Math.round(calculatedWeeklyBudget).toLocaleString()}/wk (based on your unallocated income)
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
           </View>
 
           {/* ══════════════════════════════════════════════
@@ -1481,7 +1715,7 @@ export default function Home() {
                 {infoCard === 'debt' && (
                   <View style={s.infoBox}>
                     <Text style={s.infoBoxText}>
-                      Debt balances are pulled from your connected credit cards via Open Banking (TrueLayer). Utilisation shows how much of your credit limit is currently used. Over 75% utilisation can affect your credit score.
+                      Debt balances are pulled from your connected accounts via Open Banking, or added manually in your profile. Utilisation shows how much of your credit limit is currently used. Over 75% utilisation can affect your credit score.
                     </Text>
                   </View>
                 )}
@@ -1509,6 +1743,10 @@ export default function Home() {
                   const typeLabel = d.account_type === 'credit_card' ? 'Credit card'
                     : d.account_type === 'overdraft' ? 'Overdraft'
                     : d.account_type === 'overdraft_facility' ? 'Overdraft facility'
+                    : d.account_type === 'personal_loan' ? 'Personal loan'
+                    : d.account_type === 'student_loan' ? 'Student loan'
+                    : d.account_type === 'car_finance' ? 'Car finance'
+                    : d.account_type === 'bnpl' ? 'BNPL'
                     : d.account_type || 'Account';
                   return (
                     <AnimGlyph key={i} delay={150 + i * 80}>
@@ -2028,48 +2266,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ── Emergency fund info ──
-  emergencyInfoBox: {
-    backgroundColor: c.greenDim,
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 10,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: c.green + '20',
-  },
-  emergencyInfoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  emergencyInfoIcon: {
-    fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.green,
-    width: 20,
-    height: 20,
-    lineHeight: 20,
-    textAlign: 'center',
-    borderWidth: 1,
-    borderColor: c.green + '40',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  emergencyInfoTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-    color: c.green,
-    letterSpacing: 0.3,
-  },
-  emergencyInfoText: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: c.dim,
-    lineHeight: 18,
-  },
-
   // ── Card 1: Move items ──
   moveItemFull: {
     paddingVertical: 20,
@@ -2338,6 +2534,157 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 12,
     color: c.text2,
     letterSpacing: 0.3,
+  },
+
+  // ── Breakdown section ──
+  breakdownSection: {
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: c.mintDim,
+  },
+  breakdownTitle: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.dim,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 14,
+  },
+  breakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  breakdownLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.text2,
+  },
+  breakdownValue: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: c.text2,
+    letterSpacing: 0.3,
+  },
+  breakdownBold: {
+    fontFamily: fonts.semibold,
+    color: c.text,
+  },
+  breakdownDivider: {
+    borderTopWidth: 1,
+    borderTopColor: c.mintDim,
+    marginTop: 6,
+    paddingTop: 10,
+  },
+  breakdownAdaptive: {
+    backgroundColor: c.greenDim,
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  breakdownAdaptiveLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.green,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  breakdownActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 18,
+  },
+  adjustBtn: {
+    flex: 1,
+    backgroundColor: c.accent,
+    paddingVertical: 12,
+    borderRadius: 100,
+    alignItems: 'center',
+  },
+  adjustBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: c.bg,
+    letterSpacing: 0.3,
+  },
+  resetBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 100,
+    borderWidth: 1,
+    borderColor: c.border,
+    alignItems: 'center',
+  },
+  resetBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.dim,
+    letterSpacing: 0.3,
+  },
+  limitEditor: {
+    marginTop: 14,
+    backgroundColor: c.mintDim,
+    borderRadius: 12,
+    padding: 14,
+  },
+  limitEditorLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.dim,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  limitEditorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  limitEditorCurrency: {
+    fontFamily: fonts.mono,
+    fontSize: 18,
+    color: c.text,
+  },
+  limitEditorInput: {
+    flex: 1,
+    fontFamily: fonts.mono,
+    fontSize: 18,
+    color: c.text,
+    borderBottomWidth: 1,
+    borderBottomColor: c.accent,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  limitEditorSave: {
+    backgroundColor: c.accent,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 100,
+  },
+  limitEditorSaveText: {
+    fontFamily: fonts.semibold,
+    fontSize: 12,
+    color: c.bg,
+  },
+  limitEditorCancel: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  limitEditorCancelText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.dim,
+  },
+  limitEditorHint: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: c.muted,
+    marginTop: 8,
+    lineHeight: 16,
   },
 
   // ── Card 4: Budget Reality ──
@@ -2913,6 +3260,34 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   reviewBannerLink: {
     color: c.green,
     fontFamily: fonts.semibold,
+  },
+
+  // ── Income arrival alert ──
+  incomeAlert: {
+    backgroundColor: c.greenDim,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,170,0.25)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  incomeAlertTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.green,
+    marginBottom: 4,
+  },
+  incomeAlertText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.text2,
+    lineHeight: 20,
+  },
+  incomeAlertBudget: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: c.green,
+    marginTop: 6,
   },
 
   // ── Categorise review modal ──
