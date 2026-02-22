@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { requestSync, onSyncComplete } from '@/lib/sync-coordinator';
+import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import type { WeeklyContext } from '@/lib/sync';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
@@ -599,7 +599,8 @@ export default function Chat() {
     // Build payday context from sync coordinator's weeklyContext
     // This uses the same data as the home screen instead of duplicating the calculation
     try {
-      const syncResult = await requestSync(user.id);
+      // Force-sync to ensure chat always has the freshest transaction data
+      const syncResult = await requestSync(user.id, true);
       if (syncResult) {
         // Update analysis with fresh sync data
         const freshA = syncResult.analysis;

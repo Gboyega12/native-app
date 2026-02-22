@@ -2,10 +2,11 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
   Linking, Alert, LayoutAnimation, Platform, UIManager, Animated, Easing, Modal, Pressable,
+  RefreshControl,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { requestSync, onSyncComplete } from '@/lib/sync-coordinator';
+import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useSubscription } from '@/lib/subscription';
@@ -127,6 +128,50 @@ function effortColor(effort: string, colors: ThemeColors) {
 
 function effortLabel(effort: string) {
   return effort === 'low' ? 'Quick win' : effort === 'medium' ? 'Some effort' : 'Big move';
+}
+
+/** Follow-through % from Monte Carlo — displayed alongside effort badge */
+function followThroughLabel(move: any): string | null {
+  const rate = move.consistencyScore != null
+    ? Math.round(move.consistencyScore * 100)
+    : null;
+  if (rate == null) return null;
+  return `${rate}% reliable`;
+}
+
+/** One-line insight explaining why this move is ranked where it is */
+function marginalInsight(move: any): string | null {
+  const m = move.marginalMultiplier;
+  const cat = move.category || 'spending';
+  if (m == null) return null;
+
+  if (cat === 'buffer') {
+    if (m >= 2.5) return 'High priority — your buffer is thin';
+    if (m >= 1.8) return 'Important — building your safety net';
+    if (m >= 1.2) return 'Buffer is growing — keep going';
+    return 'Buffer is on track';
+  }
+  if (cat === 'debt') {
+    if (m >= 2.5) return 'Urgent — high utilisation is costing you';
+    if (m >= 2.0) return 'Close to clearing — keep pushing';
+    if (m >= 1.5) return 'Reducing debt improves your score';
+    return 'Debt is manageable';
+  }
+  if (cat === 'invest') {
+    if (m < 0.7) return 'Build your buffer first — then invest';
+    if (m < 0.9) return 'Consider after strengthening reserves';
+    return 'Good position to start investing';
+  }
+  if (cat === 'break_even') return 'Top priority — closing the deficit';
+  return null;
+}
+
+/** Risk-adjusted impact label: "Realistically £X/mo" */
+function realisticImpact(move: any): string | null {
+  const adj = move.riskAdjustedImpact;
+  if (adj == null || adj === move.monthlyImpact) return null;
+  if (Math.abs(adj - move.monthlyImpact) < 2) return null;
+  return `Realistically \u00a3${Math.round(adj)}/mo`;
 }
 
 /** Generate actionable steps for user plans */
@@ -253,6 +298,7 @@ export default function Plan() {
   const scrollRef = useRef<ScrollView>(null);
   const [highlightIdx, setHighlightIdx] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const itemYPositions = useRef<Record<number, number>>({});
 
   // Handle deep-link highlight from home page "View" button
@@ -345,7 +391,7 @@ export default function Plan() {
   };
 
   // Background sync: re-fetch TrueLayer data and update moves
-  const syncInBackground = async (userId: string, dismissedActions: Set<string>) => {
+  const syncInBackground = async (userId: string, dismissedActions: Set<string> = new Set()) => {
     try {
       setSyncing(true);
       const result = await requestSync(userId);
@@ -363,6 +409,16 @@ export default function Plan() {
     }
     setSyncing(false);
   };
+
+  // Pull-to-refresh — force a fresh TrueLayer fetch
+  const onRefresh = useCallback(async () => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    setRefreshing(true);
+    invalidateSyncCache();
+    await syncInBackground(uid);
+    setRefreshing(false);
+  }, []);
 
   // ── Persist progress ──
 
@@ -558,7 +614,19 @@ export default function Plan() {
   // ── Render ──
 
   return (
-    <ScrollView ref={scrollRef} style={s.container} contentContainerStyle={s.scroll}>
+    <ScrollView
+      ref={scrollRef}
+      style={s.container}
+      contentContainerStyle={s.scroll}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+        />
+      }
+    >
       <AnimGlyph delay={0}>
         <View style={s.headingRow}>
           <View>
@@ -599,12 +667,17 @@ export default function Plan() {
 
               <Text style={s.infoHeading}>Recommended</Text>
               <Text style={s.infoBody}>
-                Personalised opportunities ranked by annual impact. Tap to expand details, strategy, and action steps.
+                Personalised opportunities ranked by marginal value — not just the biggest number. Moves that matter most for your current situation rank higher, even if the raw amount is smaller. As your position improves, priorities shift automatically.
               </Text>
 
-              <Text style={s.infoHeading}>Effort levels</Text>
+              <Text style={s.infoHeading}>Effort levels & reliability</Text>
               <Text style={s.infoBody}>
-                Quick win = minimal effort.{'\n'}Some effort = takes a bit of time.{'\n'}Big move = significant change but highest reward.
+                Quick win = minimal effort (88% follow-through).{'\n'}Some effort = takes a bit of time (65%).{'\n'}Big move = significant change but highest reward (42%).{'\n\n'}The "realistic" figure accounts for months you might not follow through — it's the amount you'll actually save on average.
+              </Text>
+
+              <Text style={s.infoHeading}>Priority insights</Text>
+              <Text style={s.infoBody}>
+                Each move shows why it's prioritised for you right now. Buffer moves rank higher when your savings are thin. Debt moves rank higher when utilisation is high. Investment moves are deprioritised until your safety net is solid.
               </Text>
 
               <Text style={s.infoHeading}>Take action</Text>
@@ -887,6 +960,9 @@ export default function Plan() {
                         <View style={[s.effortBadge, { backgroundColor: `${effortColor(move.effort, colors)}15` }]}>
                           <Text style={[s.effortText, { color: effortColor(move.effort, colors) }]}>{effortLabel(move.effort)}</Text>
                         </View>
+                        {followThroughLabel(move) && (
+                          <Text style={s.followThroughText}>{followThroughLabel(move)}</Text>
+                        )}
                         <Text style={s.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                       </View>
                       {!isExpanded && steps.length > 0 && (
@@ -1012,8 +1088,23 @@ export default function Plan() {
                         <View style={[s.effortBadge, { backgroundColor: `${effortColor(move.effort, colors)}15` }]}>
                           <Text style={[s.effortText, { color: effortColor(move.effort, colors) }]}>{effortLabel(move.effort)}</Text>
                         </View>
+                        {followThroughLabel(move) && (
+                          <Text style={s.followThroughText}>{followThroughLabel(move)}</Text>
+                        )}
                         <Text style={s.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                       </View>
+
+                      {/* Realistic impact + priority insight */}
+                      {!isExpanded && (realisticImpact(move) || marginalInsight(move)) && (
+                        <View style={s.insightRow}>
+                          {realisticImpact(move) && (
+                            <Text style={s.realisticText}>{realisticImpact(move)}</Text>
+                          )}
+                          {marginalInsight(move) && (
+                            <Text style={s.insightPill}>{marginalInsight(move)}</Text>
+                          )}
+                        </View>
+                      )}
 
                       {/* Emergency fund info hint on collapsed card */}
                       {!isExpanded && ((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.action || '').toLowerCase().includes('rainy') || (move.category || '') === 'buffer') && (
@@ -1091,6 +1182,18 @@ export default function Plan() {
     return (
       <View style={s.expandedSection}>
         <View style={s.separator} />
+
+        {/* Priority context — why this move is ranked here */}
+        {(marginalInsight(move) || realisticImpact(move)) && (
+          <View style={s.priorityContextBox}>
+            {marginalInsight(move) && (
+              <Text style={s.priorityContextText}>{marginalInsight(move)}</Text>
+            )}
+            {realisticImpact(move) && (
+              <Text style={s.priorityContextSub}>{realisticImpact(move)} after accounting for real-world consistency</Text>
+            )}
+          </View>
+        )}
 
         {/* Emergency fund info */}
         {((move.action || '').toLowerCase().includes('emergency') || (move.action || '').toLowerCase().includes('buffer') || (move.category || '') === 'buffer') && (
@@ -1199,6 +1302,12 @@ export default function Plan() {
               <Text style={s.impactValue}>{'\u00a3'}{move.annualImpact || ((move.monthlyImpact || 0) * 12)}</Text>
               <Text style={s.impactLabel}>per year</Text>
             </View>
+            {(move as any).riskAdjustedImpact != null && Math.abs((move as any).riskAdjustedImpact - (move.monthlyImpact || 0)) >= 2 && (
+              <View style={s.impactItem}>
+                <Text style={[s.impactValue, { fontSize: 16 }]}>{'\u00a3'}{Math.round((move as any).riskAdjustedImpact)}</Text>
+                <Text style={s.impactLabel}>realistic/mo</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -1592,6 +1701,54 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.mono,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+  followThroughText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 0.3,
+  },
+  insightRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+  },
+  realisticText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.dim,
+  },
+  insightPill: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: c.text2,
+    backgroundColor: c.mintDim,
+    borderRadius: 8,
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    overflow: 'hidden',
+  },
+  priorityContextBox: {
+    backgroundColor: c.mintDim,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: c.border,
+  },
+  priorityContextText: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: c.text,
+    lineHeight: 20,
+  },
+  priorityContextSub: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.dim,
+    marginTop: 4,
+    lineHeight: 18,
   },
   expandIcon: {
     fontSize: 10,

@@ -2,13 +2,14 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
   LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Animated, Easing, Pressable,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { getLastResult } from '@/app/(main)/processing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { requestSync, onSyncComplete } from '@/lib/sync-coordinator';
+import { requestSync, onSyncComplete, getLastSyncTime, invalidateSyncCache } from '@/lib/sync-coordinator';
 import type { WeeklyContext } from '@/lib/sync';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
@@ -19,6 +20,18 @@ import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, G
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
+
+/** Human-friendly "X ago" label from epoch ms */
+function formatTimeAgo(epochMs: number): string {
+  const diffSec = Math.round((Date.now() - epochMs) / 1000);
+  if (diffSec < 10) return 'just now';
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -91,6 +104,8 @@ export default function Home() {
   const [budgetExpanded, setBudgetExpanded] = useState(false);
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
   const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastSynced, setLastSynced] = useState<number>(0);
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
@@ -797,12 +812,22 @@ export default function Home() {
     setLoading(false);
   };
 
+  // Pull-to-refresh handler — force a fresh TrueLayer fetch
+  const onRefresh = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setRefreshing(true);
+    invalidateSyncCache();
+    await syncInBackground(user.id, true);
+    setRefreshing(false);
+  }, []);
+
   // Background sync: refresh bank data via TrueLayer and re-run analysis
-  const syncInBackground = async (userId: string) => {
+  const syncInBackground = async (userId: string, force: boolean = false) => {
     try {
       setSyncing(true);
 
-      const result = await requestSync(userId);
+      const result = await requestSync(userId, force);
       if (!result) { setSyncing(false); return; }
 
       // Update debt accounts: merge synced with any manual debts
@@ -830,6 +855,7 @@ export default function Home() {
       } catch {}
 
       setAnalysis(mergeAdjustments(result.analysis, budgetAdjustments));
+      setLastSynced(getLastSyncTime());
     } catch (err: any) {
       console.warn('[home] Background sync failed:', err?.message);
     }
@@ -951,7 +977,18 @@ export default function Home() {
   };
 
   return (
-    <ScrollView style={s.container} contentContainerStyle={s.scroll}>
+    <ScrollView
+      style={s.container}
+      contentContainerStyle={s.scroll}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.accent}
+          colors={[colors.accent]}
+        />
+      }
+    >
       {/* ── Header with Bocy ── */}
       <View style={s.headerRow}>
         <View style={s.headerLeft}>
@@ -962,9 +999,11 @@ export default function Home() {
             <Text style={s.greeting}>
               Hello, {userName || 'there'}
             </Text>
-            {syncing && (
+            {syncing ? (
               <Text style={s.syncText}>Syncing latest transactions...</Text>
-            )}
+            ) : lastSynced > 0 ? (
+              <Text style={s.syncText}>Updated {formatTimeAgo(lastSynced)}</Text>
+            ) : null}
           </View>
         </View>
         <TouchableOpacity
