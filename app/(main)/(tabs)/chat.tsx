@@ -6,7 +6,6 @@ import {
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
-import type { WeeklyContext } from '@/lib/sync';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useSubscription } from '@/lib/subscription';
@@ -620,6 +619,82 @@ export default function Chat() {
         ctx.top_move = freshA.top_move ? { action: freshA.top_move.action, monthlyImpact: freshA.top_move.monthlyImpact } : undefined;
         ctx.behavioral_patterns = freshA.behavioral_patterns;
         ctx.spending_by_category = buildSpendingBreakdown(freshA);
+        ctx.goal_trajectory = freshA.goal_context ? {
+          goalLabel: freshA.goal_context.goalLabel,
+          currentMonths: freshA.goal_context.currentMonths,
+          newMonths: freshA.goal_context.newMonths,
+          insight: freshA.goal_context.insight,
+          confidence: freshA.goal_context.confidence,
+          bufferRecommendation: freshA.goal_context.bufferRecommendation,
+        } : null;
+
+        // Rebuild recent_transactions from fresh sync data (NOT the stale DB analysis)
+        const freshSevenDaysAgo = new Date();
+        freshSevenDaysAgo.setDate(freshSevenDaysAgo.getDate() - 7);
+        freshSevenDaysAgo.setHours(0, 0, 0, 0);
+        const freshRecentTxs: { description: string; amount: number; date: string; category: string; essential: boolean }[] = [];
+        for (const section of [
+          { data: freshA.non_discretionary, essential: true },
+          { data: freshA.discretionary, essential: false },
+        ]) {
+          if (!section.data?.items) continue;
+          for (const item of section.data.items) {
+            for (const tx of (item.transactions || [])) {
+              if (!tx.date) continue;
+              const txDate = new Date(tx.date);
+              if (txDate >= freshSevenDaysAgo) {
+                freshRecentTxs.push({
+                  description: tx.merchant || tx.description,
+                  amount: tx.amount,
+                  date: tx.date,
+                  category: item.category,
+                  essential: section.essential,
+                });
+              }
+            }
+          }
+        }
+        if (freshRecentTxs.length > 0) {
+          freshRecentTxs.sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime());
+          ctx.recent_transactions = freshRecentTxs.slice(0, 50);
+        }
+
+        // Rebuild recent_transfers from fresh sync data
+        const freshTransfers: { description: string; amount: number; date: string }[] = [];
+        for (const section of [freshA.non_discretionary, freshA.discretionary]) {
+          if (!section?.items) continue;
+          for (const item of section.items) {
+            if (item.category !== 'Transfers' && item.category !== 'Other') continue;
+            for (const tx of (item.transactions || []).slice(0, 10)) {
+              freshTransfers.push({ description: tx.merchant || tx.description, amount: tx.amount, date: tx.date });
+            }
+          }
+        }
+        if (freshTransfers.length > 0) {
+          ctx.recent_transfers = freshTransfers.slice(0, 15);
+        }
+
+        // Rebuild subscriptions from fresh sync data
+        if (freshA.discretionary?.items) {
+          const freshSubItems = freshA.discretionary.items.filter(
+            (item: { category: string }) => item.category === 'Subscriptions' || item.category === 'Streaming',
+          );
+          if (freshSubItems.length) {
+            const freshMerchantMap: Record<string, { total: number; count: number }> = {};
+            for (const item of freshSubItems) {
+              for (const tx of (item.transactions || [])) {
+                const key = (tx.merchant || tx.description).toLowerCase();
+                if (!freshMerchantMap[key]) freshMerchantMap[key] = { total: 0, count: 0 };
+                freshMerchantMap[key].total += Math.abs(tx.amount);
+                freshMerchantMap[key].count += 1;
+              }
+            }
+            ctx.subscriptions = Object.entries(freshMerchantMap).map(([merchant, data]) => ({
+              merchant,
+              amount: Math.round(data.total / data.count),
+            }));
+          }
+        }
 
         // Use weeklyContext from sync (same source of truth as home screen)
         const wc = syncResult.weeklyContext;
@@ -1059,8 +1134,9 @@ export default function Chat() {
               <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
             </View>
             <Text style={s.headerTitle}>Bocy</Text>
+            {loading && <ActivityIndicator size="small" color={colors.dim} style={{ marginLeft: 6 }} />}
           </View>
-          <TouchableOpacity onPress={clearChat} style={s.clearButton}>
+          <TouchableOpacity onPress={clearChat} style={s.clearButton} activeOpacity={0.7}>
             <Text style={s.clearText}>New chat</Text>
           </TouchableOpacity>
         </View>
@@ -1082,18 +1158,21 @@ export default function Chat() {
                   <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
                 </View>
                 <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Ask Bocy'}</Text>
-                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'Your financial companion'}</Text>
+                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'Your personal finance companion'}</Text>
               </>
             )}
-            {suggestedQuestions.map((q, i) => (
-              <TouchableOpacity
-                key={i}
-                style={s.suggestedButton}
-                onPress={() => sendMessage(q)}
-              >
-                <Text style={s.suggestedText}>{q}</Text>
-              </TouchableOpacity>
-            ))}
+            <View style={s.suggestedGrid}>
+              {suggestedQuestions.map((q, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={s.suggestedButton}
+                  onPress={() => sendMessage(q)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.suggestedText}>{q}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
         )}
 
@@ -1248,23 +1327,23 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xxl + spacing.sm,
-    paddingBottom: spacing.sm,
-    borderBottomWidth: 1,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
   },
   headerLeftChat: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   chatBocyWrap: {
-    width: 24,
-    height: 24,
+    width: 26,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
   chatBocyHero: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   headerTitle: {
     fontFamily: fonts.semibold,
@@ -1272,29 +1351,32 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.text,
   },
   clearButton: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 100,
+    backgroundColor: c.accentDim,
   },
   clearText: {
     fontFamily: fonts.medium,
-    fontSize: 13,
-    color: c.accent,
+    fontSize: 12,
+    color: c.text2,
   },
   messages: {
     flex: 1,
   },
   messagesContent: {
     padding: spacing.md,
-    paddingTop: spacing.xxl + spacing.lg,
-    paddingBottom: spacing.md,
+    paddingTop: spacing.xxl + spacing.md,
+    paddingBottom: spacing.sm,
   },
   suggestedContainer: {
-    marginTop: spacing.xxl,
+    marginTop: spacing.xl,
     alignItems: 'center',
+    paddingHorizontal: spacing.xs,
   },
   suggestedTitle: {
     fontFamily: fonts.heading,
-    fontSize: 20,
+    fontSize: 22,
     color: c.text,
   },
   suggestedSubtitle: {
@@ -1302,46 +1384,49 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 13,
     color: c.dim,
     marginBottom: spacing.lg,
-    marginTop: spacing.xs,
+    marginTop: 6,
+  },
+  suggestedGrid: {
+    width: '100%',
+    gap: spacing.sm,
   },
   suggestedButton: {
     backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: radius.md,
-    paddingVertical: 14,
+    borderRadius: radius.lg,
+    paddingVertical: 12,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-    width: '100%',
   },
   suggestedText: {
     fontFamily: fonts.medium,
-    fontSize: 14,
+    fontSize: 13,
     color: c.text2,
     textAlign: 'center',
   },
   bubble: {
-    maxWidth: '80%',
-    padding: spacing.md,
-    borderRadius: radius.lg,
-    marginBottom: spacing.sm,
+    maxWidth: '82%',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    marginBottom: 6,
   },
   userBubble: {
     backgroundColor: c.accent,
     alignSelf: 'flex-end',
-    borderBottomRightRadius: radius.sm,
+    borderBottomRightRadius: 4,
   },
   assistantBubble: {
     backgroundColor: c.surface,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: c.border,
     alignSelf: 'flex-start',
-    borderBottomLeftRadius: radius.sm,
+    borderBottomLeftRadius: 4,
   },
   bubbleText: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    lineHeight: 22,
+    lineHeight: 21,
   },
   userText: {
     color: c.bg,
@@ -1350,21 +1435,21 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   dotsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
+    gap: 5,
+    paddingVertical: 2,
     paddingHorizontal: 2,
   },
   dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: c.accent,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: c.dim,
   },
   // ── Action cards ──
   actionCardWrapper: {
     alignSelf: 'flex-start',
     maxWidth: '85%',
-    marginBottom: spacing.sm,
+    marginBottom: 6,
   },
   errorCard: {
     backgroundColor: c.coralDim,
@@ -1553,8 +1638,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   retryBanner: {
     backgroundColor: c.coralDim,
     borderRadius: radius.md,
-    padding: spacing.md,
-    marginTop: spacing.xs,
+    padding: 12,
+    marginTop: 4,
     alignItems: 'center',
   },
   retryText: {
@@ -1572,29 +1657,30 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // ── Input row ──
   inputRow: {
     flexDirection: 'row',
-    padding: spacing.md,
-    borderTopWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
-    backgroundColor: c.surface,
-    gap: spacing.sm,
+    backgroundColor: c.bg,
+    gap: 8,
     alignItems: 'flex-end',
   },
   input: {
     flex: 1,
     fontFamily: fonts.regular,
-    backgroundColor: c.bg,
+    backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: radius.md,
+    borderRadius: 22,
     paddingVertical: 10,
     paddingHorizontal: spacing.md,
     fontSize: 14,
     color: c.text,
   },
   voiceButton: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: c.border,
     justifyContent: 'center',
@@ -1605,25 +1691,25 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     backgroundColor: c.greenDim,
   },
   voiceIcon: {
-    fontSize: 18,
+    fontSize: 16,
   },
   voiceIconActive: {
     color: c.green,
   },
   sendButton: {
     backgroundColor: c.accent,
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendDisabled: {
-    opacity: 0.4,
+    opacity: 0.3,
   },
   sendText: {
     fontFamily: fonts.semibold,
-    fontSize: 20,
+    fontSize: 18,
     color: c.bg,
   },
 
@@ -1631,9 +1717,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   gateRow: {
     padding: spacing.md,
     paddingBottom: spacing.lg,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
-    backgroundColor: c.surface,
+    backgroundColor: c.bg,
     alignItems: 'center',
     gap: spacing.sm,
   },
@@ -1658,8 +1744,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
     paddingTop: spacing.xs,
     paddingBottom: 2,
-    backgroundColor: c.surface,
-    borderTopWidth: 1,
+    backgroundColor: c.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
   },
   freeBadgeText: {

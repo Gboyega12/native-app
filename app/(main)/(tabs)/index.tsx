@@ -11,8 +11,6 @@ import { getLastResult } from '@/app/(main)/processing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { requestSync, onSyncComplete, getLastSyncTime, invalidateSyncCache } from '@/lib/sync-coordinator';
 import type { WeeklyContext } from '@/lib/sync';
-import EnrichmentEngine from '@/lib/enrichment-engine';
-import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
@@ -2262,48 +2260,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderColor: c.mintDim,
   },
   infoBoxText: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: c.dim,
-    lineHeight: 18,
-  },
-
-  // ── Emergency fund info ──
-  emergencyInfoBox: {
-    backgroundColor: c.greenDim,
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 10,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: c.green + '20',
-  },
-  emergencyInfoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  emergencyInfoIcon: {
-    fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.green,
-    width: 20,
-    height: 20,
-    lineHeight: 20,
-    textAlign: 'center',
-    borderWidth: 1,
-    borderColor: c.green + '40',
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  emergencyInfoTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-    color: c.green,
-    letterSpacing: 0.3,
-  },
-  emergencyInfoText: {
     fontFamily: fonts.regular,
     fontSize: 12,
     color: c.dim,
