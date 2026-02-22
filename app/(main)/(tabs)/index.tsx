@@ -108,6 +108,36 @@ export default function Home() {
   const [connectionDismissed, setConnectionDismissed] = useState(false);
   const [incomeDismissed, setIncomeDismissed] = useState(false);
 
+  // Persist banner dismiss across refreshes
+  const connectionDismissKey = connectionWarning
+    ? `dismiss:conn:${connectionWarning.message}:${connectionWarning.banks.sort().join(',')}`
+    : null;
+  const incomeWeekKey = (() => {
+    const d = new Date();
+    const jan1 = new Date(d.getFullYear(), 0, 1);
+    const week = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
+    return `dismiss:income:${d.getFullYear()}w${week}`;
+  })();
+
+  // Load persisted dismiss state when warning/income changes
+  useEffect(() => {
+    if (!connectionDismissKey) { setConnectionDismissed(false); return; }
+    AsyncStorage.getItem(connectionDismissKey).then((v) => setConnectionDismissed(v === '1'));
+  }, [connectionDismissKey]);
+
+  useEffect(() => {
+    AsyncStorage.getItem(incomeWeekKey).then((v) => setIncomeDismissed(v === '1'));
+  }, [incomeWeekKey]);
+
+  const dismissConnection = () => {
+    setConnectionDismissed(true);
+    if (connectionDismissKey) AsyncStorage.setItem(connectionDismissKey, '1');
+  };
+  const dismissIncome = () => {
+    setIncomeDismissed(true);
+    AsyncStorage.setItem(incomeWeekKey, '1');
+  };
+
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedCategories((prev) => {
@@ -831,6 +861,8 @@ export default function Home() {
       if (!result) { setSyncing(false); return; }
 
       // Surface connection issues to the user
+      // Dismiss state is managed via useEffect on connectionDismissKey —
+      // if the warning content changes, the key changes and dismiss resets automatically.
       if (result.connectionIssues?.length > 0) {
         const banks = result.expiredBankNames ?? [];
         if (result.connectionIssues.includes('token_expired') || result.connectionIssues.includes('no_connection')) {
@@ -838,14 +870,11 @@ export default function Home() {
         } else if (result.connectionIssues.includes('some_connections_expired')) {
           setConnectionWarning({ message: 'some_expired', banks });
         }
-        setConnectionDismissed(false); // New issue detected — reset dismiss
       } else if (result.dataSource === 'fallback') {
         setConnectionWarning({ message: 'fallback', banks: [] });
-        setConnectionDismissed(false);
       } else {
         // All connections synced OK — clear warning
         setConnectionWarning(null);
-        setConnectionDismissed(false);
       }
 
       // Update debt accounts: merge synced with any manual debts
@@ -1068,7 +1097,7 @@ export default function Home() {
           </TouchableOpacity>
           <TouchableOpacity
             style={s.bannerDismiss}
-            onPress={() => setConnectionDismissed(true)}
+            onPress={dismissConnection}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Text style={s.bannerDismissX}>✕</Text>
@@ -1116,7 +1145,7 @@ export default function Home() {
                 <View style={s.incomeAlertHeader}>
                   <Text style={s.incomeAlertTitle}>Income received</Text>
                   <TouchableOpacity
-                    onPress={() => setIncomeDismissed(true)}
+                    onPress={dismissIncome}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Text style={s.incomeAlertDismiss}>✕</Text>
