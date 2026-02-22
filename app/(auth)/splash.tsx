@@ -1,23 +1,13 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import {
-  View, StyleSheet, Animated, Easing, Dimensions,
+  View, Text, StyleSheet, Animated, Easing, Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { colors } from '@/theme';
+import { colors, fonts } from '@/theme';
 
-const { width: SW, height: SH } = Dimensions.get('window');
+const { width: SW } = Dimensions.get('window');
 
-// ── Full-screen tamagotchi pixel grid ──
-const PX = 6;
-const GAP = 6;
-const CELL = PX + GAP;
-const COLS = Math.floor(SW / CELL);
-const ROWS = Math.floor(SH / CELL);
-const CX = COLS / 2;
-const CY = ROWS / 2;
-const MAX_D = Math.sqrt(CX ** 2 + CY ** 2);
-
-// ── Bocy face — 7×7 pixel art ──
+// ── Bocy face — 7×7 pixel art (brand identity) ──
 const FACE: number[][] = [
   [0, 0, 0, 0, 0, 0, 0],
   [0, 0, 1, 0, 1, 0, 0],
@@ -27,50 +17,28 @@ const FACE: number[][] = [
   [0, 0, 1, 1, 1, 0, 0],
   [0, 0, 0, 0, 0, 0, 0],
 ];
-const FACE_PX = 10;
+const FACE_PX = 12;
 const FACE_GAP = 5;
+const FACE_SIZE = 7 * FACE_PX + 6 * FACE_GAP; // total face width/height
 
-// ── "BOCY" in 5×7 pixel font ──
-const LB = [[1,1,1,1,0],[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,0],[1,0,0,0,1],[1,0,0,0,1],[1,1,1,1,0]];
-const LO = [[0,1,1,1,0],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[1,0,0,0,1],[0,1,1,1,0]];
-const LC = [[0,1,1,1,0],[1,0,0,0,1],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,0],[1,0,0,0,1],[0,1,1,1,0]];
-const LY = [[1,0,0,0,1],[1,0,0,0,1],[0,1,0,1,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0],[0,0,1,0,0]];
-
-const BOCY_TEXT: number[][] = [];
-for (let r = 0; r < 7; r++) {
-  BOCY_TEXT.push([...LB[r], 0, ...LO[r], 0, ...LC[r], 0, ...LY[r]]);
-}
-const TEXT_PX = 5;
-const TEXT_GAP = 3;
-
-// Pre-compute background pixel opacities (radial brightness gradient)
-const GRID_OP: number[][] = [];
-for (let r = 0; r < ROWS; r++) {
-  const row: number[] = [];
-  for (let c = 0; c < COLS; c++) {
-    const d = Math.sqrt((r - CY) ** 2 + (c - CX) ** 2) / MAX_D;
-    // Brighter near center (0.12), dimmer at edges (0.03)
-    row.push(0.03 + 0.09 * Math.max(0, 1 - d));
-  }
-  GRID_OP.push(row);
-}
+// Ring dimensions — elegant containment
+const RING_RADIUS = Math.max(72, FACE_SIZE / 2 + 24);
+const RING_SIZE = RING_RADIUS * 2;
 
 export default function Splash() {
   const router = useRouter();
 
   // ── Animation values ──
-  const gridOpacity = useRef(new Animated.Value(0)).current;
-  const glowOpacity = useRef(new Animated.Value(0)).current;
-  const faceOpacity = useRef(new Animated.Value(0)).current;
-  const faceScale = useRef(new Animated.Value(0.5)).current;
-  const textOpacity = useRef(new Animated.Value(0)).current;
-  const textScale = useRef(new Animated.Value(0.3)).current;
-  const breathAnim = useRef(new Animated.Value(0)).current;
-  const exitOpacity = useRef(new Animated.Value(1)).current;
+  const ringOpacity   = useRef(new Animated.Value(0)).current;
+  const glowOpacity   = useRef(new Animated.Value(0)).current;
+  const faceOpacity   = useRef(new Animated.Value(0)).current;
+  const textOpacity   = useRef(new Animated.Value(0)).current;
+  const textTranslate = useRef(new Animated.Value(12)).current;
+  const breathAnim    = useRef(new Animated.Value(0)).current;
+  const exitOpacity   = useRef(new Animated.Value(1)).current;
 
   const [isBlinking, setIsBlinking] = useState(false);
 
-  // Face with blink applied (close eye rows)
   const face = useMemo(() => {
     if (!isBlinking) return FACE;
     return FACE.map((row, r) =>
@@ -79,73 +47,63 @@ export default function Splash() {
   }, [isBlinking]);
 
   useEffect(() => {
-    // ── Phase 1: Pixel grid powers on (0-800ms) ──
-    Animated.timing(gridOpacity, {
-      toValue: 1,
-      duration: 800,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-
-    // ── Phase 2: Centre glow (300ms) ──
-    setTimeout(() => {
+    // ── Phase 1: Ring + glow fade in (0-800ms) ──
+    Animated.parallel([
+      Animated.timing(ringOpacity, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
       Animated.timing(glowOpacity, {
+        toValue: 1,
+        duration: 1000,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // ── Phase 2: Bocy face materialises (600ms) ──
+    const faceTimer = setTimeout(() => {
+      Animated.timing(faceOpacity, {
         toValue: 1,
         duration: 600,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start();
-    }, 300);
+    }, 600);
 
-    // ── Phase 3: Bocy face materialises (600ms) ──
-    setTimeout(() => {
+    // ── Phase 3: "BOCY" text slides up (1100ms) ──
+    const textTimer = setTimeout(() => {
       Animated.parallel([
-        Animated.timing(faceOpacity, {
+        Animated.timing(textOpacity, {
           toValue: 1,
           duration: 500,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
-        Animated.spring(faceScale, {
-          toValue: 1,
-          tension: 60,
-          friction: 9,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }, 600);
-
-    // ── Phase 4: "BOCY" pixel text generates from centre (1200ms) ──
-    setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(textOpacity, {
-          toValue: 1,
-          duration: 400,
+        Animated.timing(textTranslate, {
+          toValue: 0,
+          duration: 600,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
-        Animated.spring(textScale, {
-          toValue: 1,
-          tension: 50,
-          friction: 8,
-          useNativeDriver: true,
-        }),
       ]).start();
-    }, 1200);
+    }, 1100);
 
-    // ── Glow breathing loop (1500ms) ──
-    setTimeout(() => {
+    // ── Breathing glow (1500ms) ──
+    const breathTimer = setTimeout(() => {
       Animated.loop(
         Animated.sequence([
           Animated.timing(breathAnim, {
             toValue: 1,
-            duration: 2500,
+            duration: 3000,
             easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
           Animated.timing(breathAnim, {
             toValue: 0,
-            duration: 2500,
+            duration: 3000,
             easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
@@ -153,7 +111,7 @@ export default function Splash() {
       ).start();
     }, 1500);
 
-    // ── Blink cycle (starts after face visible) ──
+    // ── Blink cycle ──
     let blinkTimer: ReturnType<typeof setTimeout>;
     const scheduleBlink = () => {
       blinkTimer = setTimeout(() => {
@@ -161,10 +119,10 @@ export default function Splash() {
         setTimeout(() => {
           setIsBlinking(false);
           scheduleBlink();
-        }, 150);
-      }, 2000 + Math.random() * 3000);
+        }, 130);
+      }, 2500 + Math.random() * 2500);
     };
-    setTimeout(scheduleBlink, 1500);
+    const blinkStart = setTimeout(scheduleBlink, 1800);
 
     // ── Exit + navigate (3500ms) ──
     const exitTimer = setTimeout(() => {
@@ -179,59 +137,55 @@ export default function Splash() {
     }, 3500);
 
     return () => {
-      clearTimeout(exitTimer);
+      clearTimeout(faceTimer);
+      clearTimeout(textTimer);
+      clearTimeout(breathTimer);
+      clearTimeout(blinkStart);
       clearTimeout(blinkTimer);
+      clearTimeout(exitTimer);
     };
   }, []);
 
-  // Breathing interpolations
+  // Breathing interpolation — very subtle
   const glowScale = breathAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [1, 1.08],
+    outputRange: [1, 1.06],
+  });
+  const glowBreathOpacity = breathAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.06, 0.10],
   });
 
   return (
     <Animated.View style={[s.container, { opacity: exitOpacity }]}>
-      {/* ── Full-screen tamagotchi pixel grid ── */}
-      <Animated.View style={[s.grid, { opacity: gridOpacity }]}>
-        {Array.from({ length: ROWS }).map((_, r) => (
-          <View key={r} style={s.gridRow}>
-            {Array.from({ length: COLS }).map((_, c) => (
-              <View
-                key={c}
-                style={[s.gridDot, { opacity: GRID_OP[r]?.[c] ?? 0.04 }]}
-              />
-            ))}
-          </View>
-        ))}
-      </Animated.View>
+      {/* ── Ambient radial glow ── */}
+      <Animated.View
+        style={[
+          s.glow,
+          {
+            opacity: Animated.multiply(glowOpacity, glowBreathOpacity),
+            transform: [{ scale: glowScale }],
+          },
+        ]}
+      />
 
       {/* ── Centre composition ── */}
       <View style={s.centre}>
-        {/* Radial glow behind face */}
+        {/* Thin circular ring */}
         <Animated.View
           style={[
-            s.glow,
+            s.ring,
             {
-              opacity: glowOpacity.interpolate({
+              opacity: ringOpacity.interpolate({
                 inputRange: [0, 1],
-                outputRange: [0, 0.10],
+                outputRange: [0, 0.18],
               }),
-              transform: [{ scale: glowScale }],
             },
           ]}
         />
 
-        {/* Bocy 7×7 face */}
-        <Animated.View
-          style={[
-            s.faceWrap,
-            {
-              opacity: faceOpacity,
-              transform: [{ scale: faceScale }],
-            },
-          ]}
-        >
+        {/* Bocy face — refined pixel art */}
+        <Animated.View style={[s.faceWrap, { opacity: faceOpacity }]}>
           {face.map((row, r) => (
             <View key={r} style={[s.faceRow, { gap: FACE_GAP }]}>
               {row.map((v, c) => (
@@ -243,7 +197,7 @@ export default function Splash() {
                     borderRadius: 2,
                     backgroundColor: v === 1
                       ? '#FFFFFF'
-                      : 'rgba(255,255,255,0.05)',
+                      : 'rgba(255,255,255,0.03)',
                   }}
                 />
               ))}
@@ -251,40 +205,20 @@ export default function Splash() {
           ))}
         </Animated.View>
 
-        {/* "BOCY" pixel text */}
+        {/* Brand name — clean typography */}
         <Animated.View
-          style={[
-            s.textWrap,
-            {
-              opacity: textOpacity,
-              transform: [{ scale: textScale }],
-            },
-          ]}
+          style={{
+            opacity: textOpacity,
+            transform: [{ translateY: textTranslate }],
+            marginTop: 32,
+          }}
         >
-          {BOCY_TEXT.map((row, r) => (
-            <View key={r} style={[s.textRow, { gap: TEXT_GAP }]}>
-              {row.map((v, c) => (
-                <View
-                  key={c}
-                  style={{
-                    width: TEXT_PX,
-                    height: TEXT_PX,
-                    borderRadius: 1,
-                    backgroundColor: v === 1
-                      ? '#FFFFFF'
-                      : 'transparent',
-                  }}
-                />
-              ))}
-            </View>
-          ))}
+          <Text style={s.brandName}>BOCY</Text>
         </Animated.View>
       </View>
     </Animated.View>
   );
 }
-
-// ── Styles ──
 
 const s = StyleSheet.create({
   container: {
@@ -294,54 +228,46 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  // Full-screen pixel grid
-  grid: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: GAP,
-  },
-  gridRow: {
-    flexDirection: 'row',
-    gap: GAP,
-  },
-  gridDot: {
-    width: PX,
-    height: PX,
-    borderRadius: 1,
+  // Soft ambient glow — barely visible
+  glow: {
+    position: 'absolute',
+    width: 280,
+    height: 280,
+    borderRadius: 140,
     backgroundColor: '#FFFFFF',
   },
 
-  // Centre composition
+  // Centre layout
   centre: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  glow: {
+
+  // Geometric containment ring
+  ring: {
     position: 'absolute',
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: '#FFFFFF',
+    width: RING_SIZE,
+    height: RING_SIZE,
+    borderRadius: RING_RADIUS,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
   },
 
   // Bocy face
   faceWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 28,
   },
   faceRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
 
-  // Pixel text
-  textWrap: {
-    alignItems: 'center',
-  },
-  textRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  // Typography
+  brandName: {
+    fontFamily: fonts.heading,
+    fontSize: 26,
+    letterSpacing: 10,
+    color: '#FFFFFF',
   },
 });
