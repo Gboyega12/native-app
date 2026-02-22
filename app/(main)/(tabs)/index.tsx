@@ -104,6 +104,7 @@ export default function Home() {
   const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<number>(0);
+  const [connectionWarning, setConnectionWarning] = useState<string | null>(null);
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
@@ -827,6 +828,19 @@ export default function Home() {
       const result = await requestSync(userId, force);
       if (!result) { setSyncing(false); return; }
 
+      // Surface connection issues to the user
+      if (result.connectionIssues?.length > 0) {
+        if (result.connectionIssues.includes('token_expired') || result.connectionIssues.includes('no_connection')) {
+          setConnectionWarning('Bank connection expired. Reconnect to see latest transactions.');
+        } else if (result.connectionIssues.includes('some_connections_expired')) {
+          setConnectionWarning('Some bank connections need reconnecting.');
+        }
+      } else if (result.dataSource === 'fallback') {
+        setConnectionWarning('Using cached data. Pull to refresh for latest.');
+      } else {
+        setConnectionWarning(null);
+      }
+
       // Update debt accounts: merge synced with any manual debts
       try {
         const { data: allDebt } = await supabase
@@ -1027,6 +1041,18 @@ export default function Home() {
           <View style={s.menuLine} />
         </TouchableOpacity>
       </View>
+
+      {/* ── Connection warning banner ── */}
+      {connectionWarning && (
+        <TouchableOpacity
+          style={s.connectionBanner}
+          onPress={() => router.push('/(main)/connect')}
+          activeOpacity={0.8}
+        >
+          <Text style={s.connectionBannerText}>{connectionWarning}</Text>
+          <Text style={s.connectionBannerAction}>Reconnect</Text>
+        </TouchableOpacity>
+      )}
 
       {!analysis ? (
         /* ── Empty State ── */
@@ -2170,6 +2196,33 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginTop: 6,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+
+  // ── Connection warning banner ──
+  connectionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: c.amberDim,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: c.amber + '30',
+  },
+  connectionBannerText: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: c.amber,
+    flex: 1,
+  },
+  connectionBannerAction: {
+    fontFamily: fonts.semibold,
+    fontSize: 12,
+    color: c.amber,
+    marginLeft: spacing.sm,
   },
 
   // ── Empty State ──

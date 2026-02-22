@@ -605,6 +605,17 @@ export default function Chat() {
         const freshA = syncResult.analysis;
         setAnalysis(freshA);
 
+        // Tell the AI model how fresh the data is
+        if (syncResult.latestTransactionDate) {
+          (ctx as any).data_freshness = {
+            latest_transaction_date: syncResult.latestTransactionDate,
+            data_source: syncResult.dataSource,
+            connection_issues: syncResult.connectionIssues.length > 0
+              ? syncResult.connectionIssues
+              : undefined,
+          };
+        }
+
         // Rebuild context fields that depend on analysis
         ctx.monthly_income = freshA.monthly_income;
         ctx.monthly_spending = freshA.monthly_spending;

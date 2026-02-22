@@ -37,6 +37,12 @@ export interface SyncResult {
   debtAccounts: any[];
   /** Real-time weekly budget context for adaptive spending guidance. */
   weeklyContext: WeeklyContext;
+  /** Where the transaction data came from. */
+  dataSource: 'truelayer' | 'fallback';
+  /** ISO date of the most recent transaction in the data. */
+  latestTransactionDate: string | null;
+  /** Non-empty if some bank connections have expired tokens. */
+  connectionIssues: string[];
 }
 
 /**
@@ -145,6 +151,9 @@ async function reconcileDebtPayments(
 export async function syncBankData(userId: string): Promise<SyncResult | null> {
   // ── 1. Fetch fresh CSV ──
   let csvData: string | null = null;
+  let dataSource: 'truelayer' | 'fallback' = 'truelayer';
+  const connectionIssues: string[] = [];
+
   try {
     const res = await fetch('/api/truelayer/sync', {
       method: 'POST',
@@ -154,11 +163,20 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     const data = await res.json();
     if (data.success && data.csv_data) {
       csvData = data.csv_data;
+      // Track partially expired connections
+      if (data.expired_connections?.length > 0) {
+        connectionIssues.push('some_connections_expired');
+      }
+    } else if (data.reason === 'token_expired') {
+      connectionIssues.push('token_expired');
+    } else if (data.reason === 'no_connection') {
+      connectionIssues.push('no_connection');
     }
   } catch {}
 
   // Fallback to existing CSV from all bank_data rows
   if (!csvData) {
+    dataSource = 'fallback';
     try {
       const { data: bankRows } = await supabase
         .from('bank_data')
@@ -330,10 +348,18 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     });
   } catch {}
 
-  // ── 8. Income arrival detection + adaptive weekly context ──
+  // ── 8. Compute latest transaction date for freshness tracking ──
+  let latestTransactionDate: string | null = null;
+  for (const tx of result.enrichedTransactions) {
+    if (tx.date && (!latestTransactionDate || tx.date > latestTransactionDate)) {
+      latestTransactionDate = tx.date;
+    }
+  }
+
+  // ── 9. Income arrival detection + adaptive weekly context ──
   const weeklyContext = buildWeeklyContext(result, rawAnalysis);
 
-  // ── 9. Sync debt accounts from card balances ──
+  // ── 10. Sync debt accounts from card balances ──
   const syncedDebt: any[] = [];
   try {
     const { data: bankRows } = await supabase
@@ -368,7 +394,14 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     }
   } catch {}
 
-  return { analysis: rawAnalysis, debtAccounts: syncedDebt, weeklyContext };
+  return {
+    analysis: rawAnalysis,
+    debtAccounts: syncedDebt,
+    weeklyContext,
+    dataSource,
+    latestTransactionDate,
+    connectionIssues,
+  };
 }
 
 /**
