@@ -776,15 +776,10 @@ export default function Home() {
         if (debtRes.data) setDebtAccounts(debtRes.data);
       } catch {}
 
-      // Always fetch the latest persisted analysis from Supabase.
-      // The in-memory result from processing is only used as an immediate
-      // display while we fetch, so data is never stale.
-      const lastResult = getLastResult();
-      if (lastResult) {
-        // Show immediately while Supabase fetch + sync run
-        setAnalysis(mergeAdjustments(lastResult, adjustments));
-      }
-
+      // Fetch the latest persisted analysis from Supabase.
+      // Only fall back to in-memory result if Supabase has nothing.
+      // This eliminates the visual "flash" of showing stale in-memory data
+      // before Supabase data arrives.
       const { data, error } = await supabase
         .from('analyses')
         .select('*')
@@ -797,8 +792,12 @@ export default function Home() {
         console.warn('[home] Failed to fetch analysis:', error.message);
       }
 
+      const lastResult = getLastResult();
       if (data) {
         setAnalysis(mergeAdjustments(data, adjustments));
+      } else if (lastResult) {
+        // Fallback: use in-memory result only if Supabase has nothing yet
+        setAnalysis(mergeAdjustments(lastResult, adjustments));
       }
 
       // Trigger background sync if user has any analysis data

@@ -6,7 +6,7 @@
 import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
-import type { Analysis, Goals } from '@/lib/types';
+import type { Analysis, Goals, EnrichedTransaction } from '@/lib/types';
 
 export interface IncomeEvent {
   source: string;
@@ -40,12 +40,105 @@ export interface SyncResult {
 }
 
 /**
+ * Deduplicate CSV lines that appear across multiple bank_data rows.
+ * Uses date + amount + normalised description as a composite key.
+ * Two transactions with the same date, amount, and description are
+ * treated as the same transaction regardless of which account they came from.
+ */
+function deduplicateCSVLines(csvLines: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const line of csvLines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Normalise: lowercase, collapse whitespace, strip quotes
+    const key = trimmed.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(trimmed);
+  }
+  return unique;
+}
+
+/**
+ * Reconcile enriched transactions against manual debt accounts.
+ * If a BNPL/debt payment is detected in transactions, reduce the matching
+ * manual debt account's outstanding balance by the payment amount.
+ *
+ * Only affects `source: 'manual'` debts — TrueLayer-synced debts get
+ * their balance directly from the bank API.
+ */
+async function reconcileDebtPayments(
+  userId: string,
+  enrichedTxs: EnrichedTransaction[],
+): Promise<void> {
+  // Fetch manual debt accounts
+  const { data: manualDebts } = await supabase
+    .from('debt_accounts')
+    .select('id, account_name, outstanding_balance, last_updated')
+    .eq('user_id', userId)
+    .eq('source', 'manual');
+
+  if (!manualDebts || manualDebts.length === 0) return;
+
+  // Build a map of debt account name (lowercase) → row
+  const debtMap = new Map<string, typeof manualDebts[0]>();
+  for (const d of manualDebts) {
+    debtMap.set(d.account_name.toLowerCase(), d);
+  }
+
+  // Scan recent transactions for BNPL/debt payments that match a manual debt
+  const now = new Date();
+  const recentCutoff = new Date(now);
+  recentCutoff.setDate(recentCutoff.getDate() - 30); // Look back 30 days
+
+  for (const tx of enrichedTxs) {
+    // Only consider outgoing payments that are flagged as BNPL or debt
+    if (tx.amount >= 0) continue;
+    if (!tx.isBNPL && !tx.isDebt) continue;
+    if (new Date(tx.date) < recentCutoff) continue;
+
+    const paymentAmount = Math.abs(tx.amount);
+    const merchant = (tx.merchant || tx.description || '').toLowerCase();
+
+    // Try to match against a manual debt account by name
+    for (const [debtName, debtRow] of debtMap) {
+      // Check if the transaction merchant contains the debt account name or vice versa
+      const nameNorm = debtName.replace(/[^a-z0-9]/g, '');
+      const merchantNorm = merchant.replace(/[^a-z0-9]/g, '');
+      if (!nameNorm || !merchantNorm) continue;
+
+      const isMatch = merchantNorm.includes(nameNorm) || nameNorm.includes(merchantNorm);
+      if (!isMatch) continue;
+
+      // Skip if this payment is older than the last manual update
+      // (user may have already accounted for it)
+      if (debtRow.last_updated && new Date(tx.date) <= new Date(debtRow.last_updated)) continue;
+
+      // Reduce the outstanding balance
+      const newBalance = Math.max(0, (debtRow.outstanding_balance || 0) - paymentAmount);
+      await supabase.from('debt_accounts').update({
+        outstanding_balance: newBalance,
+        last_updated: new Date().toISOString(),
+      }).eq('id', debtRow.id);
+
+      // Update local map so subsequent payments are cumulative
+      debtRow.outstanding_balance = newBalance;
+      debtRow.last_updated = new Date().toISOString();
+      break; // one match per transaction
+    }
+  }
+}
+
+/**
  * Sync bank data for a user and return the updated analysis.
  * 1. Calls TrueLayer /api/truelayer/sync for fresh CSV (falls back to stored CSV).
- * 2. Re-enriches transactions with overrides, debt accounts, identity.
- * 3. Ranks moves against the user's goals.
- * 4. Upserts the analysis row + score snapshot.
- * 5. Syncs debt accounts from card_balances.
+ * 2. Deduplicates transactions across multiple connected accounts.
+ * 3. Re-enriches transactions with overrides, debt accounts, identity.
+ * 4. Reconciles BNPL/debt payments against manual debt accounts.
+ * 5. Ranks moves against the user's goals.
+ * 6. Upserts the analysis row + score snapshot.
+ * 7. Syncs debt accounts from card_balances.
  *
  * Returns `null` if there's no CSV data to process.
  */
@@ -73,13 +166,15 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
       if (bankRows && bankRows.length > 0) {
-        const allLines: string[] = ['Date,Description,Amount'];
+        const rawLines: string[] = [];
         for (const row of bankRows) {
           if (!row.csv_data) continue;
           const lines = row.csv_data.split('\n');
-          allLines.push(...lines.slice(1).filter((l: string) => l.trim()));
+          rawLines.push(...lines.slice(1).filter((l: string) => l.trim()));
         }
-        csvData = allLines.join('\n');
+        // Deduplicate transactions that appear in multiple connected accounts
+        const uniqueLines = deduplicateCSVLines(rawLines);
+        csvData = ['Date,Description,Amount', ...uniqueLines].join('\n');
       }
     } catch {}
   }
@@ -125,6 +220,19 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   // ── 3. Enrich ──
   const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
   if (result.enrichedTransactions.length === 0) return null;
+
+  // ── 3b. Reconcile debt payments ──
+  // Match BNPL/debt payments in transactions against manual debt accounts
+  // and reduce outstanding balances accordingly.
+  try {
+    await reconcileDebtPayments(userId, result.enrichedTransactions);
+    // Re-fetch debt accounts so the rest of the pipeline uses updated balances
+    const { data: freshDebt } = await supabase
+      .from('debt_accounts')
+      .select('account_name, account_type, outstanding_balance, credit_limit')
+      .eq('user_id', userId);
+    if (freshDebt) debtAccountsData = freshDebt;
+  } catch {}
 
   // ── 4. Rank moves ──
   let goals: Goals | null = null;

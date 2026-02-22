@@ -203,8 +203,19 @@ export default async function handler(req, res) {
       return res.json({ success: false, reason: 'token_expired' });
     }
 
+    // Deduplicate transactions across connections (same date+amount+desc = same tx)
+    const seenKeys = new Set();
+    const uniqueLines = [];
+    for (const line of mergedCsvLines) {
+      const key = line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        uniqueLines.push(line);
+      }
+    }
+
     // Return merged CSV across all connections
-    const mergedCsv = ['Date,Description,Amount', ...mergedCsvLines].join('\n');
+    const mergedCsv = ['Date,Description,Amount', ...uniqueLines].join('\n');
 
     console.log(`[sync] Synced ${syncedCount}/${bankRows.length} connections, ${totalTx} transactions, ${mergedBalances.length} balance(s)`);
 
