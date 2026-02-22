@@ -491,6 +491,16 @@ export default function Profile() {
         </View>
       </View>
 
+      {/* ── Subscriptions shortcut ── */}
+      <TouchableOpacity
+        style={s.subsLink}
+        onPress={() => router.push('/(main)/subscriptions')}
+        activeOpacity={0.7}
+      >
+        <Text style={s.subsLinkText}>Manage subscriptions</Text>
+        <Text style={s.subsLinkArrow}>{'\u203A'}</Text>
+      </TouchableOpacity>
+
       {/* ── Accounts ── */}
       <View style={s.section}>
         <Text style={s.sectionTitle}>Accounts</Text>
@@ -1111,6 +1121,30 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.text,
     letterSpacing: -0.2,
     marginBottom: spacing.md,
+  },
+
+  // ── Subscription shortcut ──
+  subsLink: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.md,
+    marginBottom: spacing.lg,
+  },
+  subsLinkText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: c.green,
+  },
+  subsLinkArrow: {
+    fontFamily: fonts.regular,
+    fontSize: 18,
+    color: c.green,
   },
 
   // ── Account card ──

@@ -1828,6 +1828,16 @@ export default function Home() {
 
           </View>
 
+          {/* ── Subscription shortcut ── */}
+          <TouchableOpacity
+            style={s.subsLink}
+            onPress={() => router.push('/(main)/subscriptions')}
+            activeOpacity={0.7}
+          >
+            <Text style={s.subsLinkText}>Manage subscriptions</Text>
+            <Text style={s.subsLinkArrow}>{'\u203A'}</Text>
+          </TouchableOpacity>
+
           {/* ══════════════════════════════════════════════
               CARD 5 — DEBT ACCOUNTS
               ══════════════════════════════════════════════ */}
@@ -3104,6 +3114,30 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.green,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+
+  // ── Subscription shortcut ──
+  subsLink: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.md,
+    marginBottom: spacing.md,
+  },
+  subsLinkText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: c.green,
+  },
+  subsLinkArrow: {
+    fontFamily: fonts.regular,
+    fontSize: 18,
+    color: c.green,
   },
 
   // ── Card 5: Debt accounts ──
