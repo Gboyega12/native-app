@@ -138,7 +138,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   } catch {}
 
   const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
-  const rankedMoves = rankMoves(result.decisionStack, result.profile, goals);
+  const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
 
   // Filter dismissed moves
   const allMoves = [...rankedMoves];
