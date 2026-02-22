@@ -7,6 +7,16 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function formatRelativeDate(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.floor((today - d) / (1000 * 60 * 60 * 24));
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+}
+
 // ── Tool definitions ──
 
 const TOOLS = [
@@ -841,6 +851,28 @@ Tools:
       const b = gt.bufferRecommendation;
       prompt += `\n\nPersonalised buffer recommendation (Monte Carlo): £${b.amount.toLocaleString()} (${b.months} months of expenses) covers ${b.coverageRate}% of simulated income shock scenarios. Use this instead of generic "3-6 months" advice.`;
     }
+  }
+
+  // ── Recent transactions (last 7 days — enables daily/weekly spending questions) ──
+  if (ctx.recent_transactions?.length) {
+    // Group by date for readability
+    const byDate = {};
+    for (const tx of ctx.recent_transactions) {
+      const d = tx.date?.split('T')[0] || 'unknown';
+      if (!byDate[d]) byDate[d] = [];
+      byDate[d].push(tx);
+    }
+    prompt += `\n\nRecent transactions (last 7 days):`;
+    for (const [date, txs] of Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0]))) {
+      const dayTotal = txs.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+      const dayLabel = formatRelativeDate(date);
+      prompt += `\n${dayLabel} (spent £${dayTotal.toFixed(2)}):`;
+      for (const tx of txs) {
+        const sign = tx.amount >= 0 ? '+' : '-';
+        prompt += `\n  ${sign}£${Math.abs(tx.amount).toFixed(2)} ${tx.description} [${tx.category}${tx.essential ? ', essential' : ''}]`;
+      }
+    }
+    prompt += `\nUse these to answer questions about daily or weekly spending. Be specific — reference actual merchants and amounts.`;
   }
 
   // ── Behavioral patterns ──

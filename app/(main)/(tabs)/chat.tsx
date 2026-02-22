@@ -495,6 +495,38 @@ export default function Chat() {
       ctx.recent_transfers = transferItems.slice(0, 15);
     }
 
+    // Add recent transactions (last 7 days) so Claude can answer "how much did I spend today/this week?"
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
+    const recentTxs: { description: string; amount: number; date: string; category: string; essential: boolean }[] = [];
+    for (const section of [
+      { data: a?.non_discretionary, essential: true },
+      { data: a?.discretionary, essential: false },
+    ]) {
+      if (!section.data?.items) continue;
+      for (const item of section.data.items) {
+        for (const tx of (item.transactions || [])) {
+          if (!tx.date) continue;
+          const txDate = new Date(tx.date);
+          if (txDate >= sevenDaysAgo) {
+            recentTxs.push({
+              description: tx.merchant || tx.description,
+              amount: tx.amount,
+              date: tx.date,
+              category: item.category,
+              essential: section.essential,
+            });
+          }
+        }
+      }
+    }
+    if (recentTxs.length > 0) {
+      // Sort by date descending (most recent first) and cap at 50
+      recentTxs.sort((x, y) => new Date(y.date).getTime() - new Date(x.date).getTime());
+      ctx.recent_transactions = recentTxs.slice(0, 50);
+    }
+
     // Add debt account balances if available
     try {
       const { data: debtData } = await supabase

@@ -279,6 +279,7 @@ export interface ChatContext {
   subscriptions?: { merchant: string; amount: number }[];
   spending_by_category?: { category: string; monthly: number }[];
   recent_transfers?: { description: string; amount: number; date: string }[];
+  recent_transactions?: { description: string; amount: number; date: string; category: string; essential: boolean }[];
   debt_accounts?: { name: string; type: string; balance: number | null; limit: number | null }[];
   budget_adjustments?: { description: string; category: string; amount: number; essential: boolean }[];
   behavioral_patterns?: string[];
