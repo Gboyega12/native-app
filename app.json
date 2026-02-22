@@ -32,7 +32,12 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Bocy",
+      "shortName": "Bocy",
+      "description": "Your personal finance companion",
+      "backgroundColor": "#000000",
+      "themeColor": "#000000"
     },
     "plugins": ["expo-router", "expo-secure-store"],
     "experiments": {
