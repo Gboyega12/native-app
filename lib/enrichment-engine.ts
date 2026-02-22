@@ -171,7 +171,7 @@ const EnrichmentEngine = {
           category: override.category,
           isEssential: override.is_essential,
           isSubscription: false,
-          isBNPL: false,
+          isBNPL: override.category === 'BNPL',
           isDebt: override.category === 'Debt Payments',
           isIncome: tx.amount > 0,
           isTransfer: false,
@@ -315,14 +315,20 @@ const EnrichmentEngine = {
       }
     }
 
+    // Derive isBNPL / isDebt from the resolved category so that
+    // reconcileDebtPayments() can match these transactions to manual debts
+    // even when no merchant-DB entry exists.
+    const detectedBNPL = category === 'BNPL';
+    const detectedDebt = category === 'Debt Payments';
+
     return {
       ...tx,
       merchant: tx.description,
       category,
       isEssential,
       isSubscription: false,
-      isBNPL: false,
-      isDebt: false,
+      isBNPL: detectedBNPL,
+      isDebt: detectedDebt,
       isIncome,
       isTransfer: isPerson,
       isRefund,

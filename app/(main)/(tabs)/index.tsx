@@ -851,7 +851,22 @@ export default function Home() {
         if (freshAdj) budgetAdjustments = freshAdj;
       } catch {}
 
-      setAnalysis(mergeAdjustments(result.analysis, budgetAdjustments));
+      // Only update analysis if sync returned materially different data
+      // to avoid a visual flash when the numbers haven't changed
+      const fresh = mergeAdjustments(result.analysis, budgetAdjustments);
+      setAnalysis((prev) => {
+        if (
+          prev &&
+          prev.monthly_income === fresh.monthly_income &&
+          prev.monthly_spending === fresh.monthly_spending &&
+          prev.surplus === fresh.surplus &&
+          prev.decision_score === fresh.decision_score
+        ) {
+          return prev; // No material change — skip re-render
+        }
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        return fresh;
+      });
       setLastSynced(getLastSyncTime());
     } catch (err: any) {
       console.warn('[home] Background sync failed:', err?.message);
