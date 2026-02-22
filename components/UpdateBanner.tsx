@@ -3,7 +3,7 @@
 // prompting the user to reload for the latest version.
 // Only renders on web — returns null on native.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
@@ -12,6 +12,7 @@ export default function UpdateBanner() {
   const { colors } = useTheme();
   const [visible, setVisible] = useState(false);
   const [slideAnim] = useState(() => new Animated.Value(-80));
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof navigator === 'undefined') return;
@@ -26,27 +27,33 @@ export default function UpdateBanner() {
     // Listen for SW_UPDATED message from service worker
     navigator.serviceWorker.addEventListener('message', onMessage);
 
-    // Also detect when a new SW is waiting (covers the case where
-    // the page was already open when the deploy happened)
-    navigator.serviceWorker.ready.then((reg) => {
-      const check = () => {
-        if (reg.waiting) setVisible(true);
-      };
+    // Register the service worker from React (the +html.tsx template
+    // isn't used in static exports, so we register here instead).
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      // Poll for updates every 60 seconds
+      const interval = setInterval(() => { reg.update(); }, 60000);
+
+      // Check if a new SW is already waiting
+      if (reg.waiting) setVisible(true);
+
+      // Detect when a new SW is found and track its state
       reg.addEventListener('updatefound', () => {
         const newSW = reg.installing;
         if (!newSW) return;
         newSW.addEventListener('statechange', () => {
           if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
-            // New SW installed but waiting — there's an update available
             setVisible(true);
           }
         });
       });
-      check();
+
+      // Cleanup interval on unmount
+      cleanupRef.current = () => clearInterval(interval);
     });
 
     return () => {
       navigator.serviceWorker.removeEventListener('message', onMessage);
+      cleanupRef.current?.();
     };
   }, []);
 
