@@ -110,34 +110,59 @@ export default function Home() {
   const [connectionDismissed, setConnectionDismissed] = useState(false);
   const [incomeDismissed, setIncomeDismissed] = useState(false);
 
-  // Persist banner dismiss across refreshes
-  const connectionDismissKey = connectionWarning
-    ? `dismiss:conn:${connectionWarning.message}:${connectionWarning.banks.sort().join(',')}`
-    : null;
-  const incomeWeekKey = (() => {
-    const d = new Date();
-    const jan1 = new Date(d.getFullYear(), 0, 1);
-    const week = Math.ceil(((d.getTime() - jan1.getTime()) / 86400000 + jan1.getDay() + 1) / 7);
-    return `dismiss:income:${d.getFullYear()}w${week}`;
-  })();
-
-  // Load persisted dismiss state when warning/income changes
-  useEffect(() => {
-    if (!connectionDismissKey) { setConnectionDismissed(false); return; }
-    AsyncStorage.getItem(connectionDismissKey).then((v) => setConnectionDismissed(v === '1'));
-  }, [connectionDismissKey]);
+  // ── Connection banner dismiss ──
+  // Keyed by the sorted bank names. Dismissing stores these bank names.
+  // Banner only reappears if the set of expired banks actually changes
+  // (i.e. a new bank expires, or the user reconnects and a different one lapses).
+  // Cleared automatically when all connections sync OK (connectionWarning = null).
+  const CONN_DISMISS_KEY = 'dismiss:conn:banks';
 
   useEffect(() => {
-    AsyncStorage.getItem(incomeWeekKey).then((v) => setIncomeDismissed(v === '1'));
-  }, [incomeWeekKey]);
+    if (!connectionWarning) return; // Don't reset — keep dismissed state until warning arrives
+    AsyncStorage.getItem(CONN_DISMISS_KEY).then((stored) => {
+      if (!stored) { setConnectionDismissed(false); return; }
+      // Compare stored bank fingerprint with current warning
+      const currentFingerprint = connectionWarning.banks.sort().join(',');
+      setConnectionDismissed(stored === currentFingerprint);
+    });
+  }, [connectionWarning]);
+
+  // When connections are healthy, clear the stored dismiss so future warnings are fresh
+  useEffect(() => {
+    if (connectionWarning === null) {
+      AsyncStorage.removeItem(CONN_DISMISS_KEY);
+    }
+  }, [connectionWarning]);
+
+  // ── Income banner dismiss ──
+  // Keyed by a fingerprint of the actual income events (source + amount).
+  // Stays dismissed until genuinely different income arrives.
+  const INCOME_DISMISS_KEY = 'dismiss:income:events';
+
+  const incomeFingerprint = useMemo(() => {
+    const events = weeklyCtx?.recentIncomeEvents ?? [];
+    if (events.length === 0) return '';
+    return events.map((e) => `${e.source}:${Math.round(e.amount)}`).sort().join('|');
+  }, [weeklyCtx?.recentIncomeEvents]);
+
+  useEffect(() => {
+    if (!incomeFingerprint) return; // No income events yet — keep current state
+    AsyncStorage.getItem(INCOME_DISMISS_KEY).then((stored) => {
+      setIncomeDismissed(stored === incomeFingerprint);
+    });
+  }, [incomeFingerprint]);
 
   const dismissConnection = () => {
     setConnectionDismissed(true);
-    if (connectionDismissKey) AsyncStorage.setItem(connectionDismissKey, '1');
+    if (connectionWarning) {
+      AsyncStorage.setItem(CONN_DISMISS_KEY, connectionWarning.banks.sort().join(','));
+    }
   };
   const dismissIncome = () => {
     setIncomeDismissed(true);
-    AsyncStorage.setItem(incomeWeekKey, '1');
+    if (incomeFingerprint) {
+      AsyncStorage.setItem(INCOME_DISMISS_KEY, incomeFingerprint);
+    }
   };
 
   const toggleCategory = (key: string) => {
@@ -863,8 +888,6 @@ export default function Home() {
       if (!result) { setSyncing(false); return; }
 
       // Surface connection issues to the user
-      // Dismiss state is managed via useEffect on connectionDismissKey —
-      // if the warning content changes, the key changes and dismiss resets automatically.
       if (result.connectionIssues?.length > 0) {
         const banks = result.expiredBankNames ?? [];
         if (result.connectionIssues.includes('token_expired') || result.connectionIssues.includes('no_connection')) {
