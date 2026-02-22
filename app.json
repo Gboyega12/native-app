@@ -44,7 +44,12 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/your-project-id"
+      "url": "https://u.expo.dev/f8e22d4e-78f5-43b2-9369-4dfa3c00ff02"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f8e22d4e-78f5-43b2-9369-4dfa3c00ff02"
+      }
     },
     "experiments": {
       "typedRoutes": true
