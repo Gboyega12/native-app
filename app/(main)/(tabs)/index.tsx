@@ -1118,13 +1118,13 @@ export default function Home() {
               {connectionWarning.banks.length > 0 ? (
                 connectionWarning.banks.map((bank, idx) => (
                   <Text key={idx} style={s.connectionBannerText}>
-                    {bank} — needs reconnecting
+                    Reconnect {bank}
                   </Text>
                 ))
               ) : connectionWarning.message === 'fallback' ? (
-                <Text style={s.connectionBannerText}>Using cached data — pull to refresh</Text>
+                <Text style={s.connectionBannerText}>Using cached data {'\u2014'} pull to refresh</Text>
               ) : (
-                <Text style={s.connectionBannerText}>A bank connection has expired</Text>
+                <Text style={s.connectionBannerText}>A bank connection has expired {'\u2014'} tap to reconnect</Text>
               )}
             </View>
             <Text style={s.connectionBannerAction}>Fix</Text>
@@ -2074,7 +2074,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   scroll: {
     padding: 24,
     paddingTop: 68,
-    paddingBottom: 60,
+    paddingBottom: 80,
   },
   loadingContainer: {
     flex: 1,
@@ -2140,7 +2140,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.lg,
     paddingVertical: 10,
     paddingLeft: 14,
     paddingRight: 6,
@@ -2227,7 +2227,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     padding: 28,
     paddingTop: 32,
     paddingBottom: 32,
-    marginBottom: 24,
+    marginBottom: 32,
     overflow: 'hidden',
   },
   cardTitle: {
@@ -2296,7 +2296,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     padding: 28,
     paddingTop: 32,
     paddingBottom: 28,
-    marginBottom: 24,
+    marginBottom: 32,
     overflow: 'hidden',
   },
   heroLabel: {

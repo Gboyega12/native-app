@@ -691,11 +691,16 @@ const EnrichmentEngine = {
     const changingCareer = (id.upcoming_events || []).includes('career_change');
     const isAdvanced = id.financial_experience === 'confident' || id.financial_experience === 'advanced';
 
-    // Subscriptions — aggregate move + individual per-merchant moves
+    // Subscriptions — single consolidated recommendation (not per-merchant)
     if (m.subscriptionCount >= T.subscriptionMinCount) {
       const subNames = subs.map((s) => s.merchant).filter(Boolean);
       const cutCount = Math.max(2, Math.round(m.subscriptionCount * T.subscriptionCutPct));
       const saving = Math.round(p.subscriptions * T.subscriptionCutPct);
+      const topSubs = subs
+        .filter((s) => s.merchant && s.averageAmount >= 5)
+        .sort((a, b) => b.averageAmount - a.averageAmount)
+        .slice(0, 4);
+      const subBreakdown = topSubs.map((s) => `${s.merchant} \u00a3${Math.round(s.averageAmount)}/mo`).join(', ');
       moves.push({
         action: `Cancel or downgrade ${cutCount} subscriptions to free \u00a3${saving}/month`,
         annualImpact: saving * 12,
@@ -703,31 +708,10 @@ const EnrichmentEngine = {
         effort: 'low',
         category: 'spending',
         merchants: subNames,
-        strategy: `${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month total.`,
+        strategy: `${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month total. Biggest: ${subBreakdown}.`,
         steps: ['Review your subscriptions — I\'ve listed them below', 'Cancel the ones you haven\'t used in 30 days', 'Rotate streaming services monthly — I\'ll remind you'],
         effect: `Saves \u00a3${saving}/month (\u00a3${saving * 12}/year).`,
       });
-
-      // Individual per-merchant cancel moves for subscriptions >= £5/mo
-      for (const sub of subs) {
-        if (sub.averageAmount < 5 || !sub.merchant) continue;
-        const amt = Math.round(sub.averageAmount);
-        moves.push({
-          action: `Cancel ${sub.merchant} (\u00a3${amt}/mo)`,
-          annualImpact: amt * 12,
-          monthlyImpact: amt,
-          effort: 'low',
-          category: 'spending',
-          merchants: [sub.merchant],
-          strategy: `You\u2019re paying \u00a3${amt}/month for ${sub.merchant}. ${sub.frequency === 'monthly' ? 'This recurs every month.' : `This charges ${sub.frequency}.`}`,
-          steps: [
-            `Log into ${sub.merchant} and navigate to account settings`,
-            'Look for subscription or billing section',
-            'Cancel or switch to a free/cheaper plan',
-          ],
-          effect: `Saves \u00a3${amt}/month (\u00a3${amt * 12}/year).`,
-        });
-      }
     }
 
     // Food delivery

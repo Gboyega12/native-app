@@ -1174,7 +1174,7 @@ export default function Chat() {
                   <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
                 </View>
                 <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Ask Bocy'}</Text>
-                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'Your personal finance companion'}</Text>
+                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'I know your numbers. Ask me anything.'}</Text>
               </>
             )}
             <View style={[s.suggestedGrid, isTablet && { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 12 }]}>
@@ -1194,6 +1194,9 @@ export default function Chat() {
 
         {messages.map((msg, i) => (
           <View key={i}>
+            {msg.role === 'assistant' && (i === 0 || messages[i - 1]?.role !== 'assistant') && (
+              <Text style={s.bocyLabel}>bocy</Text>
+            )}
             <View
               style={[
                 s.bubble,
@@ -1245,6 +1248,24 @@ export default function Chat() {
             <Text style={s.retryText}>{error}</Text>
             <Text style={s.retryAction}>Tap to retry</Text>
           </TouchableOpacity>
+        )}
+
+        {/* Follow-up suggestion chips after last assistant response */}
+        {!loading && !error && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
+          <View style={s.followUpContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.followUpScroll}>
+              {suggestedQuestions.slice(0, 3).map((q, qi) => (
+                <TouchableOpacity
+                  key={qi}
+                  style={s.followUpChip}
+                  onPress={() => sendMessage(q)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.followUpChipText}>{q}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
         )}
       </ScrollView>
 
@@ -1769,5 +1790,39 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 11,
     color: c.muted,
     letterSpacing: 0.3,
+  },
+
+  // ── Bocy label on assistant messages ──
+  bocyLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+    marginTop: 8,
+  },
+
+  // ── Follow-up suggestion chips ──
+  followUpContainer: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  followUpScroll: {
+    gap: 8,
+    paddingVertical: 4,
+  },
+  followUpChip: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 100,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  followUpChipText: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: c.text2,
   },
 });

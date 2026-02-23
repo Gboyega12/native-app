@@ -700,6 +700,20 @@ export default function Plan() {
               </View>
             </TouchableOpacity>
 
+            <TouchableOpacity
+              style={s.incomeStripHint}
+              onPress={() => {
+                LayoutAnimation.configureNext(SMOOTH_ANIM);
+                setIncomeExpanded(!incomeExpanded);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={s.incomeStripHintText}>
+                {incomeExpanded ? 'Hide details' : `${incomeSources.length} source${incomeSources.length !== 1 ? 's' : ''} \u00B7 Review`}
+              </Text>
+              <Text style={s.incomeStripChevron}>{incomeExpanded ? '\u25B4' : '\u25BE'}</Text>
+            </TouchableOpacity>
+
             {incomeExpanded && (
               <View style={s.incomeDetail}>
                 <Text style={s.incomeDetailNote}>
@@ -1107,6 +1121,17 @@ export default function Plan() {
                   </View>
                 </TouchableOpacity>
 
+                {/* Quick-start CTA visible without expanding */}
+                {!isExpanded && (
+                  <TouchableOpacity
+                    style={s.quickStartBtn}
+                    onPress={() => handleStartMove(i, move)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.quickStartBtnText}>Start this move</Text>
+                  </TouchableOpacity>
+                )}
+
                 {isExpanded && renderExpandedMove(move, i, moveKey, steps, doneSteps, stepProgress, nextStepIdx, false)}
               </View>
             );
@@ -1161,6 +1186,17 @@ export default function Plan() {
             <Text style={s.detailLabel}>Strategy</Text>
             <Text style={s.detailText}>{stripMd(move.strategy)}</Text>
           </View>
+        )}
+
+        {/* Primary CTA — right after strategy so users don't have to scroll */}
+        {!isActive && (
+          <TouchableOpacity
+            style={s.startBtnProminent}
+            onPress={() => handleStartMove(i, move)}
+            activeOpacity={0.8}
+          >
+            <Text style={s.startBtnProminentText}>Start this move</Text>
+          </TouchableOpacity>
         )}
 
         {/* Merchants breakdown */}
@@ -1316,19 +1352,12 @@ export default function Plan() {
 
         {/* Action buttons */}
         <View style={s.actionButtons}>
-          {isActive ? (
+          {isActive && (
             <TouchableOpacity
               style={s.removeButton}
               onPress={() => handleStopMove(i)}
             >
               <Text style={s.removeText}>Remove from plan</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={s.startBtn}
-              onPress={() => handleStartMove(i, move)}
-            >
-              <Text style={s.startBtnText}>Start this move</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
@@ -2095,6 +2124,56 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingHorizontal: spacing.xl,
   },
   upgradeBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.bg,
+  },
+
+  // ── Income strip expand hint ──
+  incomeStripHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: c.mintDim,
+    gap: 6,
+  },
+  incomeStripHintText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  incomeStripChevron: {
+    fontSize: 10,
+    color: c.dim,
+  },
+
+  // ── Quick start on collapsed cards ──
+  quickStartBtn: {
+    backgroundColor: c.accent,
+    borderRadius: 100,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  quickStartBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.bg,
+  },
+
+  // ── Prominent start button in expanded view ──
+  startBtnProminent: {
+    backgroundColor: c.accent,
+    borderRadius: 100,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  startBtnProminentText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: c.bg,

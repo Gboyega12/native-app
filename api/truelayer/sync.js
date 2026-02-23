@@ -200,7 +200,11 @@ export default async function handler(req, res) {
     }
 
     if (syncedCount === 0) {
-      return res.json({ success: false, reason: 'token_expired' });
+      return res.json({
+        success: false,
+        reason: 'token_expired',
+        expired_connections: expiredConnections.length > 0 ? expiredConnections : undefined,
+      });
     }
 
     // Deduplicate transactions across connections (same date+amount+desc = same tx)
