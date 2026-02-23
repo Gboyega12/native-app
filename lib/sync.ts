@@ -45,6 +45,8 @@ export interface SyncResult {
   connectionIssues: string[];
   /** Names of banks with expired connections (e.g. ["Barclays", "HSBC"]). */
   expiredBankNames: string[];
+  /** Connections approaching 90-day consent expiry (within 14 days). */
+  expiringConnections: { name: string; daysLeft: number }[];
 }
 
 /**
@@ -156,6 +158,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   let dataSource: 'truelayer' | 'fallback' = 'truelayer';
   const connectionIssues: string[] = [];
   const expiredBankNames: string[] = [];
+  const expiringConnections: { name: string; daysLeft: number }[] = [];
 
   try {
     const res = await fetch('/api/truelayer/sync', {
@@ -183,6 +186,15 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       }
     } else if (data.reason === 'no_connection') {
       connectionIssues.push('no_connection');
+    }
+    // Extract connections approaching 90-day consent expiry
+    if (data.expiring_connections?.length > 0) {
+      for (const ec of data.expiring_connections) {
+        expiringConnections.push({
+          name: ec.provider_name || 'Bank',
+          daysLeft: ec.days_left,
+        });
+      }
     }
   } catch {}
 
@@ -430,6 +442,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     latestTransactionDate,
     connectionIssues,
     expiredBankNames,
+    expiringConnections,
   };
 }
 

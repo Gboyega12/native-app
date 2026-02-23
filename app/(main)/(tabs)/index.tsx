@@ -16,6 +16,9 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
+import { useSubscription } from '@/lib/subscription';
+import Paywall from '@/components/Paywall';
+import { getActiveMilestone, type MilestoneContent } from '@/lib/milestones';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -109,6 +112,27 @@ export default function Home() {
   const [connectionWarning, setConnectionWarning] = useState<{ message: string; banks: string[] } | null>(null);
   const [connectionDismissed, setConnectionDismissed] = useState(false);
   const [incomeDismissed, setIncomeDismissed] = useState(false);
+  const { isPro } = useSubscription();
+  const [showPaywall, setShowPaywall] = useState(false);
+
+  // ── Milestone value delivery ──
+  const [milestone, setMilestone] = useState<MilestoneContent | null>(null);
+  const [dismissedMilestones, setDismissedMilestones] = useState<Set<string>>(new Set());
+  const MILESTONE_DISMISS_KEY = 'bocy_dismissed_milestones';
+
+  useEffect(() => {
+    AsyncStorage.getItem(MILESTONE_DISMISS_KEY).then((raw) => {
+      if (raw) setDismissedMilestones(new Set(JSON.parse(raw)));
+    });
+  }, []);
+
+  const dismissMilestone = useCallback(async (id: string) => {
+    const next = new Set(dismissedMilestones);
+    next.add(id);
+    setDismissedMilestones(next);
+    setMilestone(null);
+    await AsyncStorage.setItem(MILESTONE_DISMISS_KEY, JSON.stringify([...next]));
+  }, [dismissedMilestones]);
 
   // ── Connection banner dismiss ──
   // Keyed by the sorted bank names. Dismissing stores these bank names.
@@ -862,6 +886,27 @@ export default function Home() {
       if (data || lastResult) {
         syncInBackground(user.id);
       }
+
+      // Calculate milestone value delivery based on user tenure
+      const activeAnalysis = data || lastResult;
+      if (activeAnalysis) {
+        try {
+          const { data: firstAnalysis } = await supabase
+            .from('analyses')
+            .select('created_at')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .single();
+
+          if (firstAnalysis?.created_at) {
+            const firstDate = new Date(firstAnalysis.created_at);
+            const daysSince = Math.floor((Date.now() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+            const m = getActiveMilestone(daysSince, activeAnalysis, isPro, dismissedMilestones);
+            setMilestone(m);
+          }
+        } catch {}
+      }
     } catch (err: any) {
       console.warn('[home] loadData error:', err?.message);
       setAnalysis(null);
@@ -897,6 +942,12 @@ export default function Home() {
         }
       } else if (result.dataSource === 'fallback') {
         setConnectionWarning({ message: 'fallback', banks: [] });
+      } else if (result.expiringConnections?.length > 0) {
+        // Proactive warning: connections approaching 90-day consent expiry
+        const expiringBanks = result.expiringConnections.map(
+          (c: { name: string; daysLeft: number }) => `${c.name} (${c.daysLeft}d left)`
+        );
+        setConnectionWarning({ message: 'expiring', banks: expiringBanks });
       } else {
         // All connections synced OK — clear warning
         setConnectionWarning(null);
@@ -1115,7 +1166,13 @@ export default function Home() {
             activeOpacity={0.8}
           >
             <View style={{ flex: 1 }}>
-              {connectionWarning.banks.length > 0 ? (
+              {connectionWarning.message === 'expiring' ? (
+                connectionWarning.banks.map((bank, idx) => (
+                  <Text key={idx} style={s.connectionBannerText}>
+                    {bank} {'\u2014'} reconnect soon
+                  </Text>
+                ))
+              ) : connectionWarning.banks.length > 0 ? (
                 connectionWarning.banks.map((bank, idx) => (
                   <Text key={idx} style={s.connectionBannerText}>
                     Reconnect {bank}
@@ -1127,7 +1184,7 @@ export default function Home() {
                 <Text style={s.connectionBannerText}>A bank connection has expired {'\u2014'} tap to reconnect</Text>
               )}
             </View>
-            <Text style={s.connectionBannerAction}>Fix</Text>
+            <Text style={s.connectionBannerAction}>{connectionWarning.message === 'expiring' ? 'Renew' : 'Fix'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={s.bannerDismiss}
@@ -1278,6 +1335,45 @@ export default function Home() {
                 No actionable insights yet. Connect your bank so Bocy can find your most impactful financial move.
               </Text>
             </View>
+          )}
+
+          {/* ══════════════════════════════════════════════
+              MILESTONE VALUE CARD (day 3 / 7 / 15)
+              ══════════════════════════════════════════════ */}
+          {milestone && (
+            <AnimGlyph delay={50}>
+              <View style={s.milestoneCard}>
+                <View style={s.milestoneHeader}>
+                  <Text style={s.milestoneLabel}>DAY {milestone.day}</Text>
+                  <TouchableOpacity
+                    onPress={() => dismissMilestone(milestone.id)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Text style={s.milestoneDismiss}>{'\u2715'}</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={s.milestoneTitle}>{milestone.title}</Text>
+                <Text style={s.milestoneInsight}>{milestone.insight}</Text>
+                {milestone.proDetail && (
+                  <Text style={s.milestoneProDetail}>{milestone.proDetail}</Text>
+                )}
+                <TouchableOpacity
+                  style={s.milestoneCta}
+                  onPress={() => {
+                    if (milestone.ctaRoute === 'paywall') {
+                      setShowPaywall(true);
+                    } else if (milestone.ctaRoute === 'plan') {
+                      router.push('/(main)/(tabs)/plan');
+                    } else {
+                      router.push('/(main)/(tabs)/chat');
+                    }
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={s.milestoneCtaText}>{milestone.cta}</Text>
+                </TouchableOpacity>
+              </View>
+            </AnimGlyph>
           )}
 
           {/* ══════════════════════════════════════════════
@@ -2060,6 +2156,9 @@ export default function Home() {
 
         </>
       )}
+
+      {/* Paywall modal for milestone CTA */}
+      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="milestones" />
     </ScrollView>
   );
 }
@@ -3537,4 +3636,68 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.green,
     letterSpacing: 0.3,
   },
+
+  // ── Milestone value card ──
+  milestoneCard: {
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: 32,
+    backgroundColor: c.bg,
+  } as any,
+  milestoneHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  } as any,
+  milestoneLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  } as any,
+  milestoneTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    color: c.text,
+    marginBottom: 8,
+  } as any,
+  milestoneInsight: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+    lineHeight: 20,
+    marginBottom: 8,
+  } as any,
+  milestoneProDetail: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.green,
+    lineHeight: 18,
+    marginBottom: 12,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: c.green + '40',
+  } as any,
+  milestoneCta: {
+    backgroundColor: c.text,
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 4,
+  } as any,
+  milestoneCtaText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.bg,
+  } as any,
+  milestoneDismiss: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: c.dim,
+    padding: 4,
+  } as any,
 });
