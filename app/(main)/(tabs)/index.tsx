@@ -1395,8 +1395,8 @@ export default function Home() {
 
                 {customWeeklyLimit !== null && (
                   <View style={s.breakdownRow}>
-                    <Text style={[s.breakdownLabel, { color: colors.accent }]}>Your custom limit</Text>
-                    <Text style={[s.breakdownValue, { color: colors.accent }]}>{'\u00a3'}{Math.round(customWeeklyLimit).toLocaleString()}/wk</Text>
+                    <Text style={[s.breakdownLabel, { color: colors.text2 }]}>Your custom limit</Text>
+                    <Text style={[s.breakdownValue, { color: colors.text2 }]}>{'\u00a3'}{Math.round(customWeeklyLimit).toLocaleString()}/wk</Text>
                   </View>
                 )}
 
@@ -1475,41 +1475,41 @@ export default function Home() {
               <Text style={s.cardTitle}>Your budget reality</Text>
             </View>
 
-            {/* 3-segment stacked bar — monochrome */}
+            {/* 3-segment stacked bar — monochrome tonal */}
             <View style={s.budgetBar}>
               {nonDiscFlex > 0 && (
-                <View style={[s.barSeg, { flex: nonDiscFlex, backgroundColor: colors.accent }]} />
+                <View style={[s.barSeg, { flex: nonDiscFlex, backgroundColor: colors.text2 }]} />
               )}
               {discFlex > 0 && (
-                <View style={[s.barSeg, { flex: discFlex, backgroundColor: colors.lavender }]} />
+                <View style={[s.barSeg, { flex: discFlex, backgroundColor: colors.dim }]} />
               )}
               {leftFlex > 0 && (
-                <View style={[s.barSeg, { flex: leftFlex, backgroundColor: colors.green + '30' }]} />
+                <View style={[s.barSeg, { flex: leftFlex, backgroundColor: colors.border }]} />
               )}
             </View>
 
-            {/* Summary row — always visible */}
+            {/* Summary row — always visible, monochrome hierarchy */}
             <View style={[s.summaryRow, !budgetExpanded && { marginBottom: 0 }]}>
               <AnimGlyph delay={80} style={s.summaryItem}>
-                <Text style={[s.summaryAmount, { color: colors.accent }]}>
+                <Text style={[s.summaryAmount, { color: colors.text }]}>
                   {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
                 </Text>
                 <Text style={s.summaryLabel}>Essentials</Text>
                 <Text style={s.summaryPct}>{nonDiscPct}%</Text>
               </AnimGlyph>
               <AnimGlyph delay={160} style={s.summaryItem}>
-                <Text style={[s.summaryAmount, { color: colors.lavender }]}>
+                <Text style={[s.summaryAmount, { color: colors.text2 }]}>
                   {'\u00a3'}{Math.round(discTotal).toLocaleString()}
                 </Text>
                 <Text style={s.summaryLabel}>Lifestyle</Text>
                 <Text style={s.summaryPct}>{discPct}%</Text>
               </AnimGlyph>
               <AnimGlyph delay={240} style={s.summaryItem}>
-                <Text style={[s.summaryAmount, { color: colors.green }]}>
+                <Text style={[s.summaryAmount, { color: colors.text2 }]}>
                   {'\u00a3'}{Math.round(leftToDecide).toLocaleString()}
                 </Text>
                 <Text style={s.summaryLabel}>Left to decide</Text>
-                <Text style={[s.summaryPct, { color: colors.green }]}>{leftPct}%</Text>
+                <Text style={s.summaryPct}>{leftPct}%</Text>
               </AnimGlyph>
             </View>
 
@@ -1530,8 +1530,8 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={[s.addItemLabel, { color: colors.green }]}>Add item</Text>
-                        <Text style={[s.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
+                        <Text style={[s.addItemLabel, { color: colors.dim }]}>Add item</Text>
+                        <Text style={[s.addItemIcon, { color: colors.dim, borderColor: colors.border }]}>+</Text>
                       </TouchableOpacity>
                     </View>
                     {nonDiscItems.length === 0 && (
@@ -1615,8 +1615,8 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={[s.addItemLabel, { color: colors.green }]}>Add item</Text>
-                        <Text style={[s.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
+                        <Text style={[s.addItemLabel, { color: colors.dim }]}>Add item</Text>
+                        <Text style={[s.addItemIcon, { color: colors.dim, borderColor: colors.border }]}>+</Text>
                       </TouchableOpacity>
                     </View>
                     {discItems.length === 0 && (
@@ -2222,7 +2222,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   card: {
     backgroundColor: c.card,
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     borderRadius: 24,
     padding: 28,
     paddingTop: 32,
@@ -2267,7 +2267,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 22,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     borderRadius: 11,
     overflow: 'hidden',
   },
@@ -2354,7 +2354,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     paddingVertical: 14,
     borderRadius: 100,
     alignItems: 'center',
@@ -2407,7 +2407,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 3,
     paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     backgroundColor: 'transparent',
   },
   effortPillText: {
@@ -2449,7 +2449,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -2463,7 +2463,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -2554,7 +2554,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 100,
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
   },
   primaryTagText: {
     fontFamily: fonts.mono,
@@ -2897,7 +2897,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 18,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     borderRadius: 10,
     overflow: 'hidden',
   },
@@ -3030,7 +3030,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   viewTransactionsText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: c.green,
+    color: c.text2,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
@@ -3137,19 +3137,19 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     gap: 6,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: c.green + '30',
+    borderColor: c.border,
     borderRadius: 12,
     borderStyle: 'dashed',
   },
   quickAddIcon: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    color: c.green,
+    color: c.dim,
   },
   quickAddText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: c.green,
+    color: c.dim,
     letterSpacing: 0.3,
     textTransform: 'uppercase',
   },
@@ -3167,7 +3167,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     width: '100%',
     maxWidth: 400,
   },
@@ -3176,7 +3176,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     width: '100%',
     maxWidth: 400,
     maxHeight: '80%',
@@ -3310,7 +3310,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
   },
   modalCancelText: {
     fontFamily: fonts.semibold,
@@ -3385,8 +3385,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 20,
   },
   reviewBannerLink: {
-    color: c.green,
+    color: c.text,
     fontFamily: fonts.semibold,
+    textDecorationLine: 'underline',
   },
 
   // ── Income arrival alert ──
