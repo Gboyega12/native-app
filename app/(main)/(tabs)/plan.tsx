@@ -559,6 +559,11 @@ export default function Plan() {
   const planMonthly = userPlans.reduce((s, p) => s + (p.monthly_saving || 0), 0);
   const goalCtx: GoalTrajectory | null = analysis?.goal_context || null;
 
+  // Income context
+  const monthlyIncome = analysis?.monthly_income ?? 0;
+  const monthlySpending = analysis?.monthly_spending ?? 0;
+  const surplus = analysis?.surplus ?? 0;
+
   // ── Render ──
 
   return (
@@ -585,7 +590,7 @@ export default function Plan() {
             <Text style={s.headingSub}>
               {syncing ? 'Syncing latest data...' : (
                 `${activeMoves.length + userPlans.length} in progress` +
-                (opportunities.length > 0 ? ` \u00B7 ${opportunities.length} recommended` : '')
+                (opportunities.length > 0 ? ` \u00B7 ${opportunities.length} move${opportunities.length !== 1 ? 's' : ''}` : '')
               )}
             </Text>
           </View>
@@ -631,6 +636,34 @@ export default function Plan() {
 
       {/* ── Paywall ── */}
       <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
+
+      {/* ── Income context strip ── */}
+      {monthlyIncome > 0 && (
+        <AnimGlyph delay={50}>
+          <View style={s.incomeStrip}>
+            <View style={s.incomeStripItem}>
+              <Text style={s.incomeStripValue}>
+                {'\u00a3'}{Math.round(monthlyIncome).toLocaleString()}
+              </Text>
+              <Text style={s.incomeStripLabel}>income</Text>
+            </View>
+            <View style={s.incomeStripDivider} />
+            <View style={s.incomeStripItem}>
+              <Text style={s.incomeStripValue}>
+                {'\u00a3'}{Math.round(monthlySpending).toLocaleString()}
+              </Text>
+              <Text style={s.incomeStripLabel}>spending</Text>
+            </View>
+            <View style={s.incomeStripDivider} />
+            <View style={s.incomeStripItem}>
+              <Text style={[s.incomeStripValue, { color: surplus >= 0 ? colors.green : colors.coral }]}>
+                {surplus >= 0 ? '+' : '-'}{'\u00a3'}{Math.abs(Math.round(surplus)).toLocaleString()}
+              </Text>
+              <Text style={s.incomeStripLabel}>surplus</Text>
+            </View>
+          </View>
+        </AnimGlyph>
+      )}
 
       {/* ══════════════════════════════════════════════
           SECTION 1 — YOUR GOAL
@@ -919,44 +952,12 @@ export default function Plan() {
         <>
           <AnimGlyph delay={100}>
             <View style={s.sectionHeader}>
-              <Text style={s.sectionLabel}>RECOMMENDED</Text>
+              <Text style={s.sectionLabel}>YOUR MOVES</Text>
               <Text style={[s.sectionMeta, { color: colors.green }]}>
                 {'\u00a3'}{Math.round(totalMonthlyImpact - activeMonthly)}/mo potential
               </Text>
             </View>
           </AnimGlyph>
-
-          {/* Impact comparison bar */}
-          <View style={s.impactCompare}>
-            {opportunities.map(({ move, index: i }) => {
-              const maxImpact = opportunities[0]?.move.annualImpact || 1;
-              const pct = Math.max(8, Math.round(((move.annualImpact || 0) / maxImpact) * 100));
-              const eColor = effortColor(move.effort, colors);
-              return (
-                <TouchableOpacity
-                  key={`bar-${i}`}
-                  style={s.impactBarRow}
-                  onPress={() => setExpanded(expanded === i ? null : i)}
-                  activeOpacity={0.7}
-                >
-                  <View style={s.impactBarLabel}>
-                    <Text style={s.impactBarAction} numberOfLines={1}>
-                      {stripMd(move.action)}
-                    </Text>
-                  </View>
-                  <View style={s.impactBarTrack}>
-                    <View
-                      style={[s.impactBarFill, { width: `${pct}%`, backgroundColor: eColor + '40' }]}
-                    />
-                  </View>
-                  <Text style={[s.impactBarValue, { color: eColor }]}>
-                    {'\u00a3'}{(move.annualImpact || 0).toLocaleString()}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-            <Text style={s.impactBarFootnote}>annual impact {'\u2192'} tap to expand</Text>
-          </View>
 
           {/* Individual opportunity cards */}
           {(isPro ? opportunities : opportunities.slice(0, Math.max(0, FREE_MOVE_LIMIT - activeMoves.length))).map(({ move, index: i }, seqIdx) => {
@@ -1296,6 +1297,44 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   infoClose: { backgroundColor: c.accent, borderRadius: 100, paddingVertical: 14, alignItems: 'center', marginTop: spacing.xl },
   infoCloseText: { fontFamily: fonts.semibold, fontSize: 14, color: c.bg },
 
+  // ── Income context strip ──
+  incomeStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: c.card,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginBottom: spacing.xl,
+  },
+  incomeStripItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  incomeStripValue: {
+    fontFamily: fonts.mono,
+    fontSize: 16,
+    fontWeight: '600',
+    color: c.text,
+    letterSpacing: -0.5,
+  },
+  incomeStripLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: c.dim,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: 4,
+  },
+  incomeStripDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: c.mintDim,
+  },
+
   // ── Goal trajectory ──
   trajectoryCard: {
     backgroundColor: c.card,
@@ -1613,56 +1652,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 10,
     color: c.muted,
-  },
-
-  // ── Impact comparison bars ──
-  impactCompare: {
-    backgroundColor: c.card,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 24,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  impactBarRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-    gap: spacing.sm,
-  },
-  impactBarLabel: {
-    width: 100,
-  },
-  impactBarAction: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.text2,
-  },
-  impactBarTrack: {
-    flex: 1,
-    height: 8,
-    backgroundColor: c.mintDim,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  impactBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  impactBarValue: {
-    fontFamily: fonts.mono,
-    fontSize: 11,
-    fontWeight: '400',
-    width: 54,
-    textAlign: 'right',
-  },
-  impactBarFootnote: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: c.muted,
-    textAlign: 'right',
-    marginTop: 2,
-    letterSpacing: 0.3,
   },
 
   // ── Expanded section ──
