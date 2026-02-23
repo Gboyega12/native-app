@@ -1,4 +1,4 @@
-import type { Analysis } from './types';
+import type { Analysis, BudgetCategory } from './types';
 
 // ── Milestone definitions ──
 
@@ -45,13 +45,22 @@ export function getActiveMilestone(
 // ── Day 3: "Your Money Snapshot" ──
 
 function buildDay3(a: Analysis, isPro: boolean): MilestoneContent {
+  const topMerchant = getTopMerchantSpend(a);
   const topCategory = getTopSpendingCategory(a);
   const subCount = countSubscriptions(a);
   const income = Math.round(a.monthly_income || 0);
 
-  const insight = topCategory
-    ? `Your biggest spend is ${topCategory.category} at \u00a3${topCategory.monthly}/mo.${subCount > 0 ? ` ${subCount} active subscriptions detected.` : ''}`
-    : `Bocy is tracking \u00a3${income.toLocaleString()}/mo income across your accounts.`;
+  // Prefer merchant-level insight (specific & accurate), fall back to category, then income
+  let insight: string;
+  if (topMerchant) {
+    insight = `Your biggest recurring spend is ${topMerchant.merchant} at \u00a3${topMerchant.monthly}/mo.`;
+    if (subCount > 0) insight += ` ${subCount} subscriptions detected.`;
+  } else if (topCategory) {
+    insight = `Your top spending category is ${topCategory.category} at \u00a3${topCategory.monthly}/mo.`;
+    if (subCount > 0) insight += ` ${subCount} subscriptions detected.`;
+  } else {
+    insight = `Bocy is tracking \u00a3${income.toLocaleString()}/mo income across your accounts.`;
+  }
 
   const proDetail = isPro
     ? `Your spending archetype is "${formatArchetype(a.archetype)}". ${a.behavioral_patterns?.[0] || ''}`
@@ -128,8 +137,12 @@ function buildDay15(a: Analysis, isPro: boolean): MilestoneContent {
 
 // ── Helpers ──
 
+/**
+ * Top spending CATEGORY (e.g. "Groceries at £420/mo").
+ * Uses the category-level aggregate — fine for high-level framing.
+ */
 function getTopSpendingCategory(a: Analysis): { category: string; monthly: number } | null {
-  const items = [
+  const items: BudgetCategory[] = [
     ...(a.non_discretionary?.items || []),
     ...(a.discretionary?.items || []),
   ];
@@ -138,13 +151,48 @@ function getTopSpendingCategory(a: Analysis): { category: string; monthly: numbe
   return { category: items[0].category, monthly: Math.round(items[0].monthly) };
 }
 
+/**
+ * Top spending MERCHANT by aggregating transaction amounts per merchant.
+ * Much more accurate than showing a whole category total.
+ */
+function getTopMerchantSpend(a: Analysis): { merchant: string; monthly: number } | null {
+  const allItems: BudgetCategory[] = [
+    ...(a.non_discretionary?.items || []),
+    ...(a.discretionary?.items || []),
+  ];
+  // Aggregate spend per merchant across all categories
+  const merchantTotals: Record<string, number> = {};
+  for (const item of allItems) {
+    for (const tx of item.transactions || []) {
+      const name = (tx.merchant || tx.description || '').trim();
+      if (!name) continue;
+      merchantTotals[name] = (merchantTotals[name] || 0) + Math.abs(tx.amount || 0);
+    }
+  }
+  const entries = Object.entries(merchantTotals);
+  if (entries.length === 0) return null;
+  entries.sort((a, b) => b[1] - a[1]);
+  return { merchant: entries[0][0], monthly: Math.round(entries[0][1]) };
+}
+
+/**
+ * Count distinct subscription merchants (not transaction count).
+ * Looks at unique merchant names within Subscriptions/Streaming categories.
+ */
 function countSubscriptions(a: Analysis): number {
-  const items = a.discretionary?.items || [];
+  const items: BudgetCategory[] = a.discretionary?.items || [];
   const subItems = items.filter(
-    (item: { category: string }) =>
-      item.category === 'Subscriptions' || item.category === 'Streaming',
+    (item) => item.category === 'Subscriptions' || item.category === 'Streaming',
   );
-  return subItems.reduce((n: number, item: { txs?: number }) => n + (item.txs || 1), 0);
+  // Count distinct merchants, NOT raw transaction count
+  const merchants = new Set<string>();
+  for (const item of subItems) {
+    for (const tx of item.transactions || []) {
+      const name = (tx.merchant || tx.description || '').trim().toLowerCase();
+      if (name) merchants.add(name);
+    }
+  }
+  return merchants.size;
 }
 
 function formatArchetype(archetype: string | undefined): string {
