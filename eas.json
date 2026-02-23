@@ -26,7 +26,8 @@
     "production": {
       "autoIncrement": true,
       "ios": {
-        "image": "latest"
+        "image": "latest",
+        "credentialsSource": "remote"
       },
       "android": {
         "buildType": "app-bundle"
