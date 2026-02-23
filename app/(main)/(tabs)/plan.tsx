@@ -12,7 +12,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
-import type { Analysis, Move, GoalTrajectory } from '@/lib/types';
+import type { Analysis, Move, GoalTrajectory, IncomeSource } from '@/lib/types';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -256,6 +256,7 @@ export default function Plan() {
   const scrollRef = useRef<ScrollView>(null);
   const [highlightIdx, setHighlightIdx] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [incomeExpanded, setIncomeExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const itemYPositions = useRef<Record<number, number>>({});
 
@@ -563,6 +564,7 @@ export default function Plan() {
   const monthlyIncome = analysis?.monthly_income ?? 0;
   const monthlySpending = analysis?.monthly_spending ?? 0;
   const surplus = analysis?.surplus ?? 0;
+  const incomeSources = analysis?.income_sources ?? [];
 
   // ── Render ──
 
@@ -641,26 +643,68 @@ export default function Plan() {
       {monthlyIncome > 0 && (
         <AnimGlyph delay={50}>
           <View style={s.incomeStrip}>
-            <View style={s.incomeStripItem}>
-              <Text style={s.incomeStripValue}>
-                {'\u00a3'}{Math.round(monthlyIncome).toLocaleString()}
-              </Text>
-              <Text style={s.incomeStripLabel}>income</Text>
-            </View>
-            <View style={s.incomeStripDivider} />
-            <View style={s.incomeStripItem}>
-              <Text style={s.incomeStripValue}>
-                {'\u00a3'}{Math.round(monthlySpending).toLocaleString()}
-              </Text>
-              <Text style={s.incomeStripLabel}>spending</Text>
-            </View>
-            <View style={s.incomeStripDivider} />
-            <View style={s.incomeStripItem}>
-              <Text style={[s.incomeStripValue, { color: surplus >= 0 ? colors.green : colors.coral }]}>
-                {surplus >= 0 ? '+' : '-'}{'\u00a3'}{Math.abs(Math.round(surplus)).toLocaleString()}
-              </Text>
-              <Text style={s.incomeStripLabel}>surplus</Text>
-            </View>
+            <TouchableOpacity
+              style={s.incomeStripRow}
+              onPress={() => {
+                LayoutAnimation.configureNext(SMOOTH_ANIM);
+                setIncomeExpanded(!incomeExpanded);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={s.incomeStripItem}>
+                <Text style={s.incomeStripValue}>
+                  {'\u00a3'}{Math.round(monthlyIncome).toLocaleString()}
+                </Text>
+                <Text style={s.incomeStripLabel}>income</Text>
+              </View>
+              <View style={s.incomeStripDivider} />
+              <View style={s.incomeStripItem}>
+                <Text style={s.incomeStripValue}>
+                  {'\u00a3'}{Math.round(monthlySpending).toLocaleString()}
+                </Text>
+                <Text style={s.incomeStripLabel}>spending</Text>
+              </View>
+              <View style={s.incomeStripDivider} />
+              <View style={s.incomeStripItem}>
+                <Text style={[s.incomeStripValue, { color: surplus >= 0 ? colors.green : colors.coral }]}>
+                  {surplus >= 0 ? '+' : '-'}{'\u00a3'}{Math.abs(Math.round(surplus)).toLocaleString()}
+                </Text>
+                <Text style={s.incomeStripLabel}>surplus</Text>
+              </View>
+            </TouchableOpacity>
+
+            {incomeExpanded && (
+              <View style={s.incomeDetail}>
+                <Text style={s.incomeDetailNote}>
+                  Detected from your bank transactions. Spending includes all outgoing transactions from the past month.
+                </Text>
+
+                {incomeSources.length > 0 && (
+                  <>
+                    <Text style={s.incomeDetailHeading}>Income sources</Text>
+                    {incomeSources.map((src, idx) => (
+                      <View key={idx} style={s.incomeSourceRow}>
+                        <Text style={s.incomeSourceName}>{src.source}</Text>
+                        <Text style={s.incomeSourceAmount}>
+                          {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}/{src.frequency === 'weekly' ? 'wk' : src.frequency === 'fortnightly' ? '2wk' : 'mo'}
+                        </Text>
+                      </View>
+                    ))}
+                  </>
+                )}
+
+                <TouchableOpacity
+                  style={s.incomeEditBtn}
+                  onPress={() => {
+                    const prompt = `My income is showing as \u00a3${Math.round(monthlyIncome).toLocaleString()}/month but that doesn't look right. Can you help me correct it?`;
+                    router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: prompt } });
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.incomeEditBtnText}>Something wrong? Tell Bocy</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </AnimGlyph>
       )}
@@ -1299,16 +1343,19 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Income context strip ──
   incomeStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     backgroundColor: c.card,
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 16,
+    marginBottom: spacing.xl,
+    overflow: 'hidden',
+  },
+  incomeStripRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 16,
     paddingHorizontal: 20,
-    marginBottom: spacing.xl,
   },
   incomeStripItem: {
     flex: 1,
@@ -1333,6 +1380,56 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     width: 1,
     height: 28,
     backgroundColor: c.mintDim,
+  },
+  incomeDetail: {
+    borderTopWidth: 1,
+    borderTopColor: c.mintDim,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  incomeDetailNote: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.dim,
+    lineHeight: 18,
+  },
+  incomeDetailHeading: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: c.dim,
+    textTransform: 'uppercase',
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  incomeSourceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  incomeSourceName: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.text,
+  },
+  incomeSourceAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: c.text2,
+  },
+  incomeEditBtn: {
+    marginTop: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: c.accentDim,
+    borderRadius: 100,
+  },
+  incomeEditBtnText: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: c.dim,
   },
 
   // ── Goal trajectory ──

@@ -394,24 +394,20 @@ export default function Profile() {
 
   return (
     <ScrollView style={s.container} contentContainerStyle={[s.scroll, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding }]}>
-      {/* Header */}
+      {/* ── Header ── */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(main)/(tabs)')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Text style={s.backBtn}>{'\u2190'}</Text>
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Profile</Text>
-        <View style={{ width: 24 }} />
       </View>
 
-      {/* Upgrade success banner */}
+      {/* ── Banners ── */}
       {showUpgradeSuccess && (
-        <TouchableOpacity style={s.upgradeBanner} onPress={() => setShowUpgradeSuccess(false)} activeOpacity={0.8}>
-          <Text style={s.upgradeText}>Welcome to Bocy Pro!</Text>
+        <TouchableOpacity style={s.successBanner} onPress={() => setShowUpgradeSuccess(false)} activeOpacity={0.8}>
+          <Text style={s.successText}>Welcome to Bocy Pro!</Text>
           <Text style={s.successDismiss}>{'\u2715'}</Text>
         </TouchableOpacity>
       )}
-
-      {/* Success banner */}
       {showSuccess && (
         <TouchableOpacity style={s.successBanner} onPress={() => setShowSuccess(false)} activeOpacity={0.8}>
           <Text style={s.successText}>Account connected successfully</Text>
@@ -419,394 +415,198 @@ export default function Profile() {
         </TouchableOpacity>
       )}
 
-      {/* Profile card */}
+      {/* ── User identity ── */}
       <AnimGlyph delay={0}>
-        <View style={s.profileCard}>
+        <View style={s.userSection}>
           <View style={s.avatar}>
             <Text style={s.avatarText}>{initials || '?'}</Text>
           </View>
-          <View style={s.profileInfo}>
-            <Text style={s.profileName}>{name || 'User'}</Text>
-            <Text style={s.profileEmail}>{email}</Text>
+          <Text style={s.userName}>{name || 'User'}</Text>
+          <Text style={s.userEmail}>{email}</Text>
+          <View style={s.tierRow}>
+            <View style={[s.tierBadge, isPro && s.tierBadgePro]}>
+              <Text style={[s.tierBadgeText, isPro && s.tierBadgeTextPro]}>
+                {isPro ? 'PRO' : 'FREE'}
+              </Text>
+            </View>
+            {isPro && currentPeriodEnd && !cancelAtPeriodEnd && (
+              <Text style={s.tierMeta}>
+                renews {currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+              </Text>
+            )}
+            {isPro && cancelAtPeriodEnd && (
+              <Text style={[s.tierMeta, { color: colors.amber }]}>
+                cancels {currentPeriodEnd ? currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'soon'}
+              </Text>
+            )}
           </View>
         </View>
       </AnimGlyph>
 
-      {/* ── Paywall ── */}
       <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} />
 
-      {/* ── Subscription ── */}
-      <View style={s.section}>
-        <Text style={s.sectionTitle}>Subscription</Text>
-        <View style={s.subCard}>
-          <View style={s.subCardHeader}>
-            <View style={[s.subBadge, isPro && s.subBadgePro]}>
-              <Text style={[s.subBadgeText, isPro && s.subBadgeTextPro]}>
-                {isPro ? 'PRO' : 'FREE'}
-              </Text>
-            </View>
-            <Text style={s.subTierLabel}>
-              {isPro ? 'Bocy Pro' : 'Free plan'}
-            </Text>
-          </View>
-          {!isPro && (
-            <>
-              <Text style={s.subDesc}>
-                Upgrade to unlock all moves, AI chat, weekly digests, and smart check-ins.
-              </Text>
-              <TouchableOpacity
-                style={s.subUpgradeBtn}
-                onPress={() => setShowPaywall(true)}
-                activeOpacity={0.8}
-              >
-                <Text style={s.subUpgradeBtnText}>Upgrade to Pro</Text>
-              </TouchableOpacity>
-            </>
-          )}
-          {isPro && (
-            <>
-              <Text style={s.subDesc}>
-                {cancelAtPeriodEnd
-                  ? `Cancels ${currentPeriodEnd ? currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'at end of period'}. You keep Pro access until then.`
-                  : status === 'past_due'
-                  ? 'Your last payment failed. Please update your payment method to keep Pro access.'
-                  : `${billingInterval === 'year' ? 'Yearly' : 'Monthly'} plan${currentPeriodEnd ? ` · renews ${currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}`}
-              </Text>
-              <TouchableOpacity
-                style={s.manageSubBtn}
-                onPress={handleManageSubscription}
-                activeOpacity={0.7}
-                disabled={portalLoading}
-              >
-                {portalLoading ? (
-                  <ActivityIndicator size="small" color={colors.accent} />
-                ) : (
-                  <Text style={s.manageSubBtnText}>
-                    {status === 'past_due' ? 'Update payment method' : 'Manage subscription'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-      </View>
+      {/* ── Connected accounts ── */}
+      <Text style={s.sectionLabel}>ACCOUNTS</Text>
 
-      {/* ── Subscriptions shortcut ── */}
-      <TouchableOpacity
-        style={s.subsLink}
-        onPress={() => router.push('/(main)/subscriptions')}
-        activeOpacity={0.7}
-      >
-        <Text style={s.subsLinkText}>Manage subscriptions</Text>
-        <Text style={s.subsLinkArrow}>{'\u203A'}</Text>
-      </TouchableOpacity>
+      {allAccounts.map((bank, i) => {
+        const displayName = bank.provider_name || (bank.account_type === 'credit' ? `Credit card ${i + 1}` : `Bank account ${i + 1}`);
+        const isBank = bank.account_type !== 'credit';
+        const { daysLeft, expired, expiring } = getConsentStatus(bank.created_at);
+        const statusColor = expired ? colors.coral : expiring ? colors.amber : colors.green;
 
-      {/* ── Accounts ── */}
-      <View style={s.section}>
-        <Text style={s.sectionTitle}>Accounts</Text>
-
-        {allAccounts.map((bank, i) => {
-          const displayName = bank.provider_name || (bank.account_type === 'credit' ? `Credit card ${i + 1}` : `Bank account ${i + 1}`);
-          const isBank = bank.account_type !== 'credit';
-          const typeLabel = isBank ? 'Bank' : 'Credit';
-          const { daysLeft, expired, expiring } = getConsentStatus(bank.created_at);
-          const lastSync = bank.updated_at ? new Date(bank.updated_at) : null;
-
-          return (
-            <AnimGlyph key={bank.id} delay={100 + i * 80}>
-              <View style={[s.accountCard, expired && s.accountCardExpired, isBank && !expired && s.accountCardBank]}>
-                <View style={s.accountRow}>
-                  {/* Icon */}
-                  <View style={[s.accountIcon, expired && s.accountIconExpired, isBank && !expired && s.accountIconBank]}>
-                    <Text style={[s.accountIconText, expired && s.accountIconTextExpired, isBank && !expired && s.accountIconTextBank]}>
-                      {getProviderInitial(displayName)}
-                    </Text>
-                  </View>
-
-                  {/* Info */}
-                  <View style={s.accountInfo}>
-                    <View style={s.accountNameRow}>
-                      <Text style={s.accountName}>{displayName}</Text>
-                      <View style={[s.typeBadge, bank.account_type === 'credit' && s.typeBadgeCredit, isBank && s.typeBadgeBank]}>
-                        <Text style={[s.typeBadgeText, bank.account_type === 'credit' && s.typeBadgeTextCredit, isBank && s.typeBadgeTextBank]}>{typeLabel}</Text>
-                      </View>
-                      {isBank && !expired && (
-                        <View style={s.connectedBadge}>
-                          <View style={s.connectedDot} />
-                          <Text style={s.connectedText}>Connected</Text>
-                        </View>
-                      )}
-                    </View>
-                  <Text style={s.accountMeta}>
-                    {lastSync ? `Synced ${lastSync.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : `Connected ${new Date(bank.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`}
-                    {!expired && !expiring ? ` · ${daysLeft}d remaining` : ''}
-                  </Text>
-
-                  {/* Consent bar */}
-                  <View style={s.consentBar}>
-                    <View
-                      style={[
-                        s.consentFill,
-                        {
-                          flex: Math.max(0, Math.min(CONSENT_DAYS, CONSENT_DAYS - daysLeft)),
-                          backgroundColor: expired ? colors.coral : expiring ? colors.amber : isBank ? colors.green : colors.accent,
-                        },
-                      ]}
-                    />
-                    <View style={{ flex: Math.max(0, Math.min(CONSENT_DAYS, daysLeft)) }} />
-                  </View>
-                </View>
-
-                {/* Status */}
-                {expired ? (
-                  <View style={[s.statusDot, { backgroundColor: colors.coral }]} />
-                ) : expiring ? (
-                  <View style={[s.statusDot, { backgroundColor: colors.amber }]} />
-                ) : (
-                  <View style={[s.statusDot, { backgroundColor: isBank ? colors.green : colors.accent }]} />
-                )}
+        return (
+          <AnimGlyph key={bank.id} delay={80 + i * 60}>
+            <View style={s.accountRow}>
+              <View style={[s.accountDot, { backgroundColor: statusColor }]} />
+              <View style={s.accountInfo}>
+                <Text style={s.accountName}>{displayName}</Text>
+                <Text style={s.accountMeta}>
+                  {isBank ? 'Bank' : 'Credit'}
+                  {expired ? ' — expired' : expiring ? ` — ${daysLeft}d left` : ` — ${daysLeft}d remaining`}
+                </Text>
               </View>
-
-              {/* Actions */}
-              <View style={s.accountActions}>
-                {expired ? (
-                  <TouchableOpacity style={s.reconnectBtn} onPress={handleAddAccount}>
-                    <Text style={s.reconnectBtnText}>Reconnect</Text>
-                  </TouchableOpacity>
-                ) : expiring ? (
-                  <TouchableOpacity style={s.renewBtn} onPress={handleAddAccount}>
-                    <Text style={s.renewBtnText}>Renew</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <View />
-                )}
+              {expired ? (
+                <TouchableOpacity style={s.accountAction} onPress={handleAddAccount} activeOpacity={0.7}>
+                  <Text style={[s.accountActionText, { color: colors.coral }]}>Reconnect</Text>
+                </TouchableOpacity>
+              ) : (
                 <TouchableOpacity
                   onPress={() => handleRemoveBank(bank.id, displayName)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Text style={s.removeLink}>Remove</Text>
+                  <Text style={s.accountRemove}>Remove</Text>
                 </TouchableOpacity>
+              )}
+            </View>
+          </AnimGlyph>
+        );
+      })}
+
+      {/* Debt accounts — compact rows */}
+      {debtAccounts.map((d, idx) => {
+        const bal = d.outstanding_balance || 0;
+        const lim = d.credit_limit || 0;
+        const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
+        const isHigh = util != null && util > 75;
+
+        return (
+          <AnimGlyph key={d.id} delay={160 + idx * 60}>
+            <View style={s.accountRow}>
+              <View style={[s.accountDot, { backgroundColor: isHigh ? colors.coral : colors.dim }]} />
+              <View style={s.accountInfo}>
+                <Text style={s.accountName}>{d.account_name}</Text>
+                <Text style={s.accountMeta}>
+                  {'\u00a3'}{Math.round(bal).toLocaleString()}
+                  {lim > 0 ? ` / \u00a3${Math.round(lim).toLocaleString()} (${util}%)` : ''}
+                  {' — '}
+                  {d.account_type === 'credit_card' ? 'Credit card'
+                    : d.account_type === 'personal_loan' ? 'Loan'
+                    : d.account_type === 'overdraft' ? 'Overdraft'
+                    : d.account_type === 'student_loan' ? 'Student loan'
+                    : d.account_type === 'car_finance' ? 'Car finance'
+                    : d.account_type === 'bnpl' ? 'BNPL'
+                    : d.account_type || 'Debt'}
+                </Text>
               </View>
-              </View>
-            </AnimGlyph>
-          );
-        })}
-
-        {/* Debt / balance accounts */}
-        {debtAccounts.map((d, idx) => {
-          const bal = d.outstanding_balance || 0;
-          const lim = d.credit_limit || 0;
-          const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
-          const isHigh = util != null && util > 75;
-
-          return (
-            <AnimGlyph key={d.id} delay={200 + idx * 80}>
-              <View style={s.accountCard}>
-              <View style={s.accountRow}>
-                <View style={[s.accountIcon, isHigh && { backgroundColor: colors.coralDim }]}>
-                  <Text style={[s.accountIconText, isHigh && { color: colors.coral }]}>
-                    {(d.account_name || 'C')[0].toUpperCase()}
-                  </Text>
-                </View>
-                <View style={s.accountInfo}>
-                  <View style={s.accountNameRow}>
-                    <Text style={s.accountName}>{d.account_name}</Text>
-                    <View style={[s.typeBadge, s.typeBadgeCredit]}>
-                      <Text style={[s.typeBadgeText, s.typeBadgeTextCredit]}>
-                        {d.account_type === 'credit_card' ? 'Credit'
-                          : d.account_type === 'personal_loan' ? 'Loan'
-                          : d.account_type === 'overdraft' ? 'Overdraft'
-                          : d.account_type === 'student_loan' ? 'Student'
-                          : d.account_type === 'car_finance' ? 'Car'
-                          : d.account_type === 'bnpl' ? 'BNPL'
-                          : d.account_type || 'Debt'}
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={s.balanceRow}>
-                    <Text style={[s.balanceAmount, isHigh && { color: colors.coral }]}>
-                      {'\u00a3'}{Math.round(bal).toLocaleString()}
-                    </Text>
-                    {lim > 0 && (
-                      <Text style={[s.balanceLimit, isHigh && { color: colors.coral }]}>
-                        / {'\u00a3'}{Math.round(lim).toLocaleString()} ({util}%)
-                      </Text>
-                    )}
-                  </View>
-                  {lim > 0 && (
-                    <View style={s.utilBar}>
-                      <View
-                        style={[
-                          s.utilFill,
-                          {
-                            width: `${Math.min(100, util || 0)}%`,
-                            backgroundColor: isHigh ? colors.coral : (util || 0) > 50 ? colors.amber : colors.accent,
-                          },
-                        ]}
-                      />
-                    </View>
-                  )}
-                  {d.last_updated && (
-                    <Text style={s.accountMeta}>
-                      {d.source === 'manual' ? 'Added manually' : 'Updated'} {new Date(d.last_updated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-                    </Text>
-                  )}
-                </View>
-              </View>
-              <View style={s.accountActions}>
-                <View />
-                <TouchableOpacity
-                  onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={s.removeLink}>Remove</Text>
-                </TouchableOpacity>
-              </View>
-              </View>
-            </AnimGlyph>
-          );
-        })}
-
-        {/* Empty state */}
-        {!hasAccounts && (
-          <View style={s.emptyCard}>
-            <Text style={s.emptyText}>No accounts connected yet</Text>
-            <Text style={s.emptyHint}>Connect your bank or credit card to get started</Text>
-          </View>
-        )}
-
-        {/* Add account / Add debt buttons */}
-        <View style={s.addButtonsRow}>
-          <TouchableOpacity style={[s.addAccountBtn, { flex: 1 }]} onPress={handleAddAccount} activeOpacity={0.7}>
-            <Text style={s.addAccountText}>+ Add account</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.addAccountBtn, { flex: 1, borderColor: colors.skyDim }]}
-            onPress={() => setShowAddDebt(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={[s.addAccountText, { color: colors.sky }]}>+ Add debt</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Add debt modal */}
-        <Modal visible={showAddDebt} transparent animationType="fade" onRequestClose={() => { setAddDebtError(''); setShowAddDebt(false); }}>
-          <Pressable style={s.modalOverlay} onPress={() => { setAddDebtError(''); setShowAddDebt(false); }}>
-            <Pressable style={s.modalContent} onPress={() => {}}>
-              <View style={s.modalHeader}>
-                <Text style={s.modalTitle}>Add debt</Text>
-                <TouchableOpacity style={s.modalCloseIcon} onPress={() => { setAddDebtError(''); setShowAddDebt(false); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                  <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={s.modalDesc}>Track debts that aren't connected via Open Banking.</Text>
-
-              {/* Account name */}
-              <Text style={s.modalLabel}>Account name</Text>
-              <TextInput
-                style={s.modalInput}
-                value={addDebtName}
-                onChangeText={setAddDebtName}
-                placeholder="e.g. Barclaycard, Klarna, Car loan"
-                placeholderTextColor={colors.muted}
-              />
-
-              {/* Debt type */}
-              <Text style={s.modalLabel}>Type</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.debtTypeScroll}>
-                {DEBT_TYPES.map((t) => (
-                  <TouchableOpacity
-                    key={t.value}
-                    style={[s.debtTypeChip, addDebtType === t.value && s.debtTypeChipActive]}
-                    onPress={() => setAddDebtType(t.value)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[s.debtTypeChipText, addDebtType === t.value && s.debtTypeChipTextActive]}>
-                      {t.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              {/* Outstanding balance */}
-              <Text style={s.modalLabel}>Outstanding balance</Text>
-              <TextInput
-                style={s.modalInput}
-                value={addDebtBalance}
-                onChangeText={setAddDebtBalance}
-                placeholder="\u00a3 0.00"
-                placeholderTextColor={colors.muted}
-                keyboardType="decimal-pad"
-              />
-
-              {/* Credit limit (optional) */}
-              <Text style={s.modalLabel}>Credit limit <Text style={s.modalOptional}>(optional)</Text></Text>
-              <TextInput
-                style={s.modalInput}
-                value={addDebtLimit}
-                onChangeText={setAddDebtLimit}
-                placeholder="\u00a3 0.00"
-                placeholderTextColor={colors.muted}
-                keyboardType="decimal-pad"
-              />
-
-              {/* Interest rate (optional) */}
-              <Text style={s.modalLabel}>Interest rate <Text style={s.modalOptional}>(optional)</Text></Text>
-              <TextInput
-                style={s.modalInput}
-                value={addDebtRate}
-                onChangeText={setAddDebtRate}
-                placeholder="e.g. 22.9"
-                placeholderTextColor={colors.muted}
-                keyboardType="decimal-pad"
-              />
-
-              {/* Minimum payment (optional) */}
-              <Text style={s.modalLabel}>Minimum payment <Text style={s.modalOptional}>(optional)</Text></Text>
-              <TextInput
-                style={s.modalInput}
-                value={addDebtMinPayment}
-                onChangeText={setAddDebtMinPayment}
-                placeholder="\u00a3 0.00"
-                placeholderTextColor={colors.muted}
-                keyboardType="decimal-pad"
-              />
-
-              {addDebtError ? <Text style={s.modalError}>{addDebtError}</Text> : null}
-
-              <TouchableOpacity style={s.modalSaveBtn} onPress={handleSaveDebt} disabled={addDebtSaving} activeOpacity={0.8}>
-                {addDebtSaving ? (
-                  <ActivityIndicator color={colors.bg} size="small" />
-                ) : (
-                  <Text style={s.modalSaveBtnText}>Save debt</Text>
-                )}
+              <TouchableOpacity
+                onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={s.accountRemove}>Remove</Text>
               </TouchableOpacity>
-            </Pressable>
-          </Pressable>
-        </Modal>
+            </View>
+          </AnimGlyph>
+        );
+      })}
 
-        {/* Consent info */}
-        {connectedBanks.length > 0 && (
-          <Text style={s.consentNote}>
-            Open Banking connections expire every 90 days. Renew before expiry to keep data flowing.
-          </Text>
-        )}
+      {!hasAccounts && (
+        <Text style={s.emptyHint}>No accounts connected yet</Text>
+      )}
+
+      <View style={s.addButtonsRow}>
+        <TouchableOpacity style={s.addBtn} onPress={handleAddAccount} activeOpacity={0.7}>
+          <Text style={s.addBtnText}>+ Add account</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.addBtn, { borderColor: colors.accentDim }]}
+          onPress={() => setShowAddDebt(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={[s.addBtnText, { color: colors.dim }]}>+ Add debt</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* ── Preferences ── */}
-      <View style={s.section}>
-        <Text style={s.sectionTitle}>Preferences</Text>
+      {connectedBanks.length > 0 && (
+        <Text style={s.footnote}>
+          Open Banking connections expire every 90 days.
+        </Text>
+      )}
 
-        <TouchableOpacity style={[s.menuRow, s.menuRowFirst]} onPress={() => router.push('/(main)/identity')} activeOpacity={0.7}>
-          <Text style={s.menuLabel}>Goals</Text>
-          <Text style={s.menuChevron}>{'\u203A'}</Text>
+      {/* ── Add debt modal ── */}
+      <Modal visible={showAddDebt} transparent animationType="fade" onRequestClose={() => { setAddDebtError(''); setShowAddDebt(false); }}>
+        <Pressable style={s.modalOverlay} onPress={() => { setAddDebtError(''); setShowAddDebt(false); }}>
+          <Pressable style={s.modalContent} onPress={() => {}}>
+            <View style={s.modalHeader}>
+              <Text style={s.modalTitle}>Add debt</Text>
+              <TouchableOpacity style={s.modalCloseIcon} onPress={() => { setAddDebtError(''); setShowAddDebt(false); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={s.modalDesc}>Track debts not connected via Open Banking.</Text>
+
+            <Text style={s.modalLabel}>Account name</Text>
+            <TextInput style={s.modalInput} value={addDebtName} onChangeText={setAddDebtName} placeholder="e.g. Barclaycard, Klarna" placeholderTextColor={colors.muted} />
+
+            <Text style={s.modalLabel}>Type</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.debtTypeScroll}>
+              {DEBT_TYPES.map((t) => (
+                <TouchableOpacity key={t.value} style={[s.debtTypeChip, addDebtType === t.value && s.debtTypeChipActive]} onPress={() => setAddDebtType(t.value)} activeOpacity={0.7}>
+                  <Text style={[s.debtTypeChipText, addDebtType === t.value && s.debtTypeChipTextActive]}>{t.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <Text style={s.modalLabel}>Outstanding balance</Text>
+            <TextInput style={s.modalInput} value={addDebtBalance} onChangeText={setAddDebtBalance} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+
+            <Text style={s.modalLabel}>Credit limit <Text style={s.modalOptional}>(optional)</Text></Text>
+            <TextInput style={s.modalInput} value={addDebtLimit} onChangeText={setAddDebtLimit} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+
+            <Text style={s.modalLabel}>Interest rate <Text style={s.modalOptional}>(optional)</Text></Text>
+            <TextInput style={s.modalInput} value={addDebtRate} onChangeText={setAddDebtRate} placeholder="e.g. 22.9" placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+
+            <Text style={s.modalLabel}>Minimum payment <Text style={s.modalOptional}>(optional)</Text></Text>
+            <TextInput style={s.modalInput} value={addDebtMinPayment} onChangeText={setAddDebtMinPayment} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+
+            {addDebtError ? <Text style={s.modalError}>{addDebtError}</Text> : null}
+
+            <TouchableOpacity style={s.modalSaveBtn} onPress={handleSaveDebt} disabled={addDebtSaving} activeOpacity={0.8}>
+              {addDebtSaving ? <ActivityIndicator color={colors.bg} size="small" /> : <Text style={s.modalSaveBtnText}>Save</Text>}
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Settings ── */}
+      <Text style={s.sectionLabel}>SETTINGS</Text>
+
+      <View style={s.groupCard}>
+        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/identity')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Goals</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
-        <View style={s.menuRow}>
-          <View>
-            <Text style={s.menuLabel}>Appearance</Text>
-            <Text style={s.themeHint}>{isDark ? 'Dark mode' : 'Light mode'}</Text>
-          </View>
+        <View style={s.groupDivider} />
+
+        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/subscriptions')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Manage subscriptions</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
+
+        <View style={s.groupDivider} />
+
+        <View style={s.groupRow}>
+          <Text style={s.groupRowLabel}>{isDark ? 'Dark mode' : 'Light mode'}</Text>
           <Switch
             value={!isDark}
             onValueChange={toggleTheme}
@@ -815,811 +615,241 @@ export default function Profile() {
           />
         </View>
 
-        <TouchableOpacity style={s.menuRow} onPress={() => Linking.openURL('mailto:hello@bocy.io?subject=Feedback')} activeOpacity={0.7}>
-          <Text style={s.menuLabel}>Give feedback</Text>
-          <Text style={s.menuChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
+        <View style={s.groupDivider} />
 
         <TouchableOpacity
-          style={[s.menuRow, !notifExpanded && s.menuRowLast]}
+          style={s.groupRow}
           onPress={() => {
             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
             setNotifExpanded(!notifExpanded);
           }}
           activeOpacity={0.7}
         >
-          <Text style={s.menuLabel}>Notifications</Text>
-          <Text style={s.menuChevron}>{notifExpanded ? '\u2039' : '\u203A'}</Text>
+          <Text style={s.groupRowLabel}>Notifications</Text>
+          <Text style={s.groupRowChevron}>{notifExpanded ? '\u2039' : '\u203A'}</Text>
         </TouchableOpacity>
 
         {notifExpanded && (
-          <View style={s.notifSection}>
-            <View style={s.notifRow}>
-              <View style={s.notifInfo}>
-                <View style={s.notifLabelRow}>
-                  <Text style={[s.notifLabel, !isPro && s.notifLabelLocked]}>Weekly digest</Text>
-                  {!isPro && <Text style={s.proBadge}>PRO</Text>}
+          <>
+            <View style={s.groupDivider} />
+            {([
+              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Score & spending recap every Monday', pro: true },
+              { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Bocy flags things that need attention', pro: true },
+              { key: 'achievement_alerts' as const, label: 'Achievements', desc: 'Celebrate milestones', pro: true },
+              { key: 'milestone_alerts' as const, label: 'Score changes', desc: 'Alert on significant shifts', pro: false },
+            ]).map((item, idx) => (
+              <View key={item.key}>
+                {idx > 0 && <View style={s.groupDivider} />}
+                <View style={s.notifRow}>
+                  <View style={s.notifInfo}>
+                    <View style={s.notifLabelRow}>
+                      <Text style={[s.notifLabel, item.pro && !isPro && s.notifLabelLocked]}>{item.label}</Text>
+                      {item.pro && !isPro && <Text style={s.proBadge}>PRO</Text>}
+                    </View>
+                    <Text style={s.notifDesc}>{item.desc}</Text>
+                  </View>
+                  <Switch
+                    value={item.pro && !isPro ? false : notifPrefs[item.key]}
+                    onValueChange={() => toggleNotifPref(item.key)}
+                    trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+                    thumbColor={(item.pro && !isPro) ? colors.thumbOff : (notifPrefs[item.key] ? colors.green : colors.thumbOff)}
+                    disabled={item.pro && !isPro}
+                  />
                 </View>
-                <Text style={s.notifDesc}>Score, spending & moves recap every Monday</Text>
               </View>
-              <Switch
-                value={isPro ? notifPrefs.weekly_digest : false}
-                onValueChange={() => toggleNotifPref('weekly_digest')}
-                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-                thumbColor={isPro && notifPrefs.weekly_digest ? colors.green : colors.thumbOff}
-                disabled={!isPro}
-              />
-            </View>
-            <View style={s.notifRow}>
-              <View style={s.notifInfo}>
-                <View style={s.notifLabelRow}>
-                  <Text style={[s.notifLabel, !isPro && s.notifLabelLocked]}>Check-in prompts</Text>
-                  {!isPro && <Text style={s.proBadge}>PRO</Text>}
-                </View>
-                <Text style={s.notifDesc}>Bocy reaches out when something needs attention</Text>
-              </View>
-              <Switch
-                value={isPro ? notifPrefs.checkin_prompts : false}
-                onValueChange={() => toggleNotifPref('checkin_prompts')}
-                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-                thumbColor={isPro && notifPrefs.checkin_prompts ? colors.green : colors.thumbOff}
-                disabled={!isPro}
-              />
-            </View>
-            <View style={s.notifRow}>
-              <View style={s.notifInfo}>
-                <View style={s.notifLabelRow}>
-                  <Text style={[s.notifLabel, !isPro && s.notifLabelLocked]}>Achievements</Text>
-                  {!isPro && <Text style={s.proBadge}>PRO</Text>}
-                </View>
-                <Text style={s.notifDesc}>Celebrate milestones and progress</Text>
-              </View>
-              <Switch
-                value={isPro ? notifPrefs.achievement_alerts : false}
-                onValueChange={() => toggleNotifPref('achievement_alerts')}
-                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-                thumbColor={isPro && notifPrefs.achievement_alerts ? colors.green : colors.thumbOff}
-                disabled={!isPro}
-              />
-            </View>
-            <View style={[s.notifRow, s.notifRowLast]}>
-              <View style={s.notifInfo}>
-                <Text style={s.notifLabel}>Score changes</Text>
-                <Text style={s.notifDesc}>Alert when your decision score shifts significantly</Text>
-              </View>
-              <Switch
-                value={notifPrefs.milestone_alerts}
-                onValueChange={() => toggleNotifPref('milestone_alerts')}
-                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-                thumbColor={notifPrefs.milestone_alerts ? colors.green : colors.thumbOff}
-              />
-            </View>
+            ))}
             {!isPro && (
-              <TouchableOpacity
-                style={s.notifUpgradeHint}
-                onPress={() => setShowPaywall(true)}
-                activeOpacity={0.7}
-              >
-                <Text style={s.notifUpgradeText}>Upgrade to Pro to unlock all notifications</Text>
+              <TouchableOpacity style={s.notifUpgrade} onPress={() => setShowPaywall(true)} activeOpacity={0.7}>
+                <Text style={s.notifUpgradeText}>Unlock all with Pro</Text>
               </TouchableOpacity>
             )}
-            {Platform.OS === 'web' && (
-              <Text style={s.notifNote}>
-                Notifications are sent via email. Push notifications will be available when the app launches on iOS and Android.
-              </Text>
-            )}
-          </View>
+          </>
         )}
       </View>
 
-      {/* ── Account ── */}
-      <View style={[s.section, { marginBottom: spacing.xxl }]}>
-        <Text style={s.sectionTitle}>Account</Text>
+      {/* ── Subscription management ── */}
+      {!isPro && (
+        <TouchableOpacity style={s.upgradeBtn} onPress={() => setShowPaywall(true)} activeOpacity={0.8}>
+          <Text style={s.upgradeBtnText}>Upgrade to Pro</Text>
+        </TouchableOpacity>
+      )}
+      {isPro && (
+        <TouchableOpacity style={s.manageSubBtn} onPress={handleManageSubscription} disabled={portalLoading} activeOpacity={0.7}>
+          {portalLoading ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : (
+            <Text style={s.manageSubBtnText}>
+              {status === 'past_due' ? 'Update payment method' : 'Manage subscription'}
+            </Text>
+          )}
+        </TouchableOpacity>
+      )}
 
-        <TouchableOpacity style={[s.menuRow, s.menuRowFirst]} onPress={handleSignOut} activeOpacity={0.7}>
-          <Text style={s.menuLabel}>Sign out</Text>
-          <Text style={s.menuChevron}>{'\u203A'}</Text>
+      {/* ── Feedback + account ── */}
+      <Text style={s.sectionLabel}>SUPPORT</Text>
+
+      <View style={s.groupCard}>
+        <TouchableOpacity style={s.groupRow} onPress={() => Linking.openURL('mailto:hello@bocy.io?subject=Feedback')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Send feedback</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[s.menuRow, s.menuRowLast, s.menuRowDanger]} onPress={handleDeleteAccount} activeOpacity={0.7}>
-          <Text style={[s.menuLabel, { color: colors.coral }]}>Delete account</Text>
-          <Text style={[s.menuChevron, { color: colors.coral }]}>{'\u203A'}</Text>
+        <View style={s.groupDivider} />
+
+        <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Sign out</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
+
+        <View style={s.groupDivider} />
+
+        <TouchableOpacity style={s.groupRow} onPress={handleDeleteAccount} activeOpacity={0.7}>
+          <Text style={[s.groupRowLabel, { color: colors.coral }]}>Delete account</Text>
+          <Text style={[s.groupRowChevron, { color: colors.coral }]}>{'\u203A'}</Text>
         </TouchableOpacity>
       </View>
+
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
 
 const createStyles = (c: ThemeColors) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: c.bg,
-  },
-  scroll: {
-    padding: spacing.lg,
-    paddingTop: spacing.xxl + spacing.sm,
-    paddingBottom: spacing.xxl,
-  },
+  container: { flex: 1, backgroundColor: c.bg },
+  scroll: { padding: 24, paddingTop: 60, paddingBottom: 40 },
 
   // ── Header ──
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.xl,
-  },
-  backBtn: {
-    fontFamily: fonts.regular,
-    fontSize: 22,
-    color: c.accent,
-  },
-  headerTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    color: c.text,
-    letterSpacing: -0.2,
-  },
+  header: { marginBottom: 32 },
+  backBtn: { fontFamily: fonts.regular, fontSize: 22, color: c.accent },
 
-  // ── Upgrade banner ──
-  upgradeBanner: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: c.greenDim,
-    borderWidth: 1,
-    borderColor: 'rgba(0,212,170,0.25)',
-    borderRadius: radius.sm,
-    padding: 12,
-    marginBottom: spacing.md,
-  },
-  upgradeText: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: c.green,
-  },
-
-  // ── Success banner ──
+  // ── Banners ──
   successBanner: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: c.accentDim,
-    borderRadius: radius.sm,
-    padding: 12,
-    marginBottom: spacing.md,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: c.greenDim, borderRadius: 12, padding: 12, marginBottom: 16,
   },
-  successText: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: c.accent,
-  },
-  successDismiss: {
-    fontSize: 12,
-    color: c.accent,
-    padding: 4,
-  },
+  successText: { fontFamily: fonts.medium, fontSize: 13, color: c.green },
+  successDismiss: { fontSize: 12, color: c.green, padding: 4 },
 
-  // ── Profile card ──
-  profileCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.xl,
-  },
+  // ── User identity ──
+  userSection: { alignItems: 'center', marginBottom: 40 },
   avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: c.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
+    width: 64, height: 64, borderRadius: 32, backgroundColor: c.accent,
+    justifyContent: 'center', alignItems: 'center', marginBottom: 16,
   },
-  avatarText: {
-    fontFamily: fonts.semibold,
-    fontSize: 20,
-    color: c.bg,
+  avatarText: { fontFamily: fonts.semibold, fontSize: 22, color: c.bg },
+  userName: { fontFamily: fonts.semibold, fontSize: 20, color: c.text, marginBottom: 4 },
+  userEmail: { fontFamily: fonts.regular, fontSize: 13, color: c.dim, marginBottom: 12 },
+  tierRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tierBadge: {
+    backgroundColor: c.accentDim, borderWidth: 1, borderColor: c.border,
+    borderRadius: 100, paddingVertical: 3, paddingHorizontal: 10,
   },
-  profileInfo: {
-    flex: 1,
-  },
-  profileName: {
-    fontFamily: fonts.semibold,
-    fontSize: 18,
-    color: c.text,
-    marginBottom: 2,
-  },
-  profileEmail: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: c.dim,
+  tierBadgePro: { backgroundColor: c.greenDim, borderColor: c.green + '40' },
+  tierBadgeText: { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: c.dim },
+  tierBadgeTextPro: { color: c.green },
+  tierMeta: { fontFamily: fonts.regular, fontSize: 12, color: c.dim },
+
+  // ── Section labels ──
+  sectionLabel: {
+    fontFamily: fonts.mono, fontSize: 11, letterSpacing: 2, color: c.dim,
+    textTransform: 'uppercase', marginBottom: 12, marginTop: 8,
   },
 
-  // ── Subscription card ──
-  subCard: {
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  subCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: spacing.sm,
-  },
-  subBadge: {
-    backgroundColor: c.accentDim,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 100,
-    paddingVertical: 3,
-    paddingHorizontal: 10,
-  },
-  subBadgePro: {
-    backgroundColor: c.greenDim,
-    borderColor: 'rgba(0,212,170,0.25)',
-  },
-  subBadgeText: {
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    letterSpacing: 2,
-    color: c.dim,
-  },
-  subBadgeTextPro: {
-    color: c.green,
-  },
-  subTierLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: c.text,
-  },
-  subDesc: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: c.dim,
-    lineHeight: 20,
-    marginBottom: spacing.sm,
-  },
-  subUpgradeBtn: {
-    backgroundColor: c.accent,
-    borderRadius: 100,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  subUpgradeBtnText: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: c.bg,
-  },
-  manageSubBtn: {
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 100,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  manageSubBtnText: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: c.accent,
-  },
-
-  // ── Section ──
-  section: {
-    marginBottom: spacing.lg,
-  },
-  sectionTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: c.text,
-    letterSpacing: -0.2,
-    marginBottom: spacing.md,
-  },
-
-  // ── Subscription shortcut ──
-  subsLink: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: spacing.md,
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radius.md,
-    marginBottom: spacing.lg,
-  },
-  subsLinkText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: c.green,
-  },
-  subsLinkArrow: {
-    fontFamily: fonts.regular,
-    fontSize: 18,
-    color: c.green,
-  },
-
-  // ── Account card ──
-  accountCard: {
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  accountCardExpired: {
-    borderColor: 'rgba(232,114,114,0.25)',
-  },
-  accountCardBank: {
-    borderColor: 'rgba(0,212,170,0.20)',
-  },
+  // ── Account rows ──
   accountRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: c.mintDim,
   },
-  accountIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: c.accentDim,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  accountIconExpired: {
-    backgroundColor: c.coralDim,
-  },
-  accountIconBank: {
-    backgroundColor: c.greenDim,
-  },
-  accountIconText: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    color: c.accent,
-  },
-  accountIconTextExpired: {
-    color: c.coral,
-  },
-  accountIconTextBank: {
-    color: c.green,
-  },
-  accountInfo: {
-    flex: 1,
-  },
-  accountNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 2,
-  },
-  accountName: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: c.text,
-  },
-  typeBadge: {
-    backgroundColor: c.accentDim,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  typeBadgeCredit: {
-    backgroundColor: c.skyDim,
-  },
-  typeBadgeBank: {
-    backgroundColor: c.greenDim,
-  },
-  typeBadgeText: {
-    fontFamily: fonts.medium,
-    fontSize: 9,
-    color: c.accent,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  typeBadgeTextCredit: {
-    color: c.sky,
-  },
-  typeBadgeTextBank: {
-    color: c.green,
-  },
-  connectedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  connectedDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: c.green,
-  },
-  connectedText: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: c.green,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  accountMeta: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.dim,
-    marginTop: 2,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginTop: 6,
-    marginLeft: 8,
-  },
+  accountDot: { width: 8, height: 8, borderRadius: 4, marginRight: 12 },
+  accountInfo: { flex: 1 },
+  accountName: { fontFamily: fonts.medium, fontSize: 15, color: c.text },
+  accountMeta: { fontFamily: fonts.regular, fontSize: 12, color: c.dim, marginTop: 2 },
+  accountAction: { paddingVertical: 4, paddingHorizontal: 10 },
+  accountActionText: { fontFamily: fonts.semibold, fontSize: 12 },
+  accountRemove: { fontFamily: fonts.regular, fontSize: 12, color: c.muted },
 
-  // ── Consent bar ──
-  consentBar: {
-    flexDirection: 'row',
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: c.mintDim,
-    marginTop: 8,
-    overflow: 'hidden',
-  },
-  consentFill: {
-    borderRadius: 2,
-  },
-
-  // ── Balance display ──
-  balanceRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 4,
-    marginTop: 2,
-  },
-  balanceAmount: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    color: c.text,
-  },
-  balanceLimit: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.dim,
-  },
-  utilBar: {
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: c.mintDim,
-    marginTop: 8,
-    overflow: 'hidden',
-  },
-  utilFill: {
-    height: '100%',
-    borderRadius: 2,
-  },
-
-  // ── Account actions ──
-  accountActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
-  },
-  reconnectBtn: {
-    backgroundColor: c.coralDim,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  reconnectBtnText: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-    color: c.coral,
-  },
-  renewBtn: {
-    backgroundColor: c.amberDim,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  renewBtnText: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
-    color: c.amber,
-  },
-  removeLink: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: c.dim,
-  },
-
-  // ── Add account ──
-  addAccountBtn: {
-    borderWidth: 1,
-    borderColor: c.accentDim,
-    borderStyle: 'dashed',
-    borderRadius: radius.md,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: spacing.xs,
-  },
-  addAccountText: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: c.accent,
-  },
-  addButtonsRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-
-  // ── Add debt modal ──
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  modalContent: {
-    backgroundColor: c.surface,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
-    maxHeight: '90%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  modalTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 18,
-    color: c.text,
-  },
-  modalCloseIcon: {
-    padding: 4,
-  },
-  modalCloseIconText: {
-    fontSize: 14,
-    color: c.muted,
-  },
-  modalDesc: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: c.dim,
-    marginBottom: spacing.md,
-    lineHeight: 18,
-  },
-  modalLabel: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
-    color: c.text,
-    marginBottom: 6,
-    marginTop: spacing.sm,
-  },
-  modalOptional: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.muted,
-  },
-  modalInput: {
-    backgroundColor: c.bg,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radius.sm,
-    padding: 12,
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: c.text,
-  },
-  modalError: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: c.coral,
-    marginTop: spacing.sm,
-  },
-  modalSaveBtn: {
-    backgroundColor: c.accent,
-    borderRadius: 100,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: spacing.lg,
-  },
-  modalSaveBtnText: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: c.bg,
-  },
-  debtTypeScroll: {
-    flexGrow: 0,
-    marginBottom: 4,
-  },
-  debtTypeChip: {
-    backgroundColor: c.bg,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 100,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginRight: 8,
-  },
-  debtTypeChipActive: {
-    backgroundColor: c.skyDim,
-    borderColor: c.sky,
-  },
-  debtTypeChipText: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: c.dim,
-  },
-  debtTypeChipTextActive: {
-    color: c.sky,
-  },
-
-  // ── Empty state ──
-  emptyCard: {
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radius.md,
-    padding: spacing.xl,
-    alignItems: 'center',
-    marginBottom: spacing.sm,
-  },
-  emptyText: {
-    fontFamily: fonts.semibold,
-    fontSize: 14,
-    color: c.text2,
-    marginBottom: 4,
-  },
+  // ── Empty + add ──
   emptyHint: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: c.muted,
+    fontFamily: fonts.regular, fontSize: 13, color: c.muted,
+    textAlign: 'center', paddingVertical: 20,
+  },
+  addButtonsRow: { flexDirection: 'row', gap: 10, marginTop: 12, marginBottom: 8 },
+  addBtn: {
+    flex: 1, borderWidth: 1, borderColor: c.accentDim, borderStyle: 'dashed',
+    borderRadius: 12, paddingVertical: 12, alignItems: 'center',
+  },
+  addBtnText: { fontFamily: fonts.semibold, fontSize: 13, color: c.accent },
+  footnote: {
+    fontFamily: fonts.regular, fontSize: 11, color: c.muted,
+    textAlign: 'center', marginTop: 8, marginBottom: 24,
   },
 
-  // ── Consent note ──
-  consentNote: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.muted,
-    lineHeight: 16,
-    textAlign: 'center',
-    marginTop: spacing.md,
+  // ── Grouped card (Settings) ──
+  groupCard: {
+    backgroundColor: c.card, borderWidth: 1, borderColor: c.border,
+    borderRadius: 24, overflow: 'hidden', marginBottom: 16,
   },
+  groupRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 16,
+  },
+  groupRowLabel: { fontFamily: fonts.regular, fontSize: 15, color: c.text },
+  groupRowChevron: { fontFamily: fonts.regular, fontSize: 18, color: c.muted },
+  groupDivider: { height: 1, backgroundColor: c.mintDim, marginHorizontal: 20 },
 
-  // ── Menu rows ──
-  menuRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    borderBottomWidth: 0,
-    padding: spacing.md,
-  },
-  menuRowFirst: {
-    borderTopLeftRadius: radius.md,
-    borderTopRightRadius: radius.md,
-  },
-  menuRowLast: {
-    borderBottomWidth: 1,
-    borderBottomLeftRadius: radius.md,
-    borderBottomRightRadius: radius.md,
-  },
-  menuRowDanger: {
-    borderColor: 'rgba(232,114,114,0.15)',
-  },
-  menuLabel: {
-    fontFamily: fonts.regular,
-    fontSize: 15,
-    color: c.text,
-  },
-  menuChevron: {
-    fontFamily: fonts.regular,
-    fontSize: 18,
-    color: c.muted,
-  },
-
-  // ── Theme toggle ──
-  themeHint: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.dim,
-    marginTop: 2,
-  },
-
-  // ── Notification settings ──
-  notifSection: {
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radius.md,
-    marginBottom: 1,
-    overflow: 'hidden',
-  },
+  // ── Notifications (inside group card) ──
   notifRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: c.border,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 14,
   },
-  notifRowLast: {
-    borderBottomWidth: 0,
-  },
-  notifInfo: {
-    flex: 1,
-    marginRight: 12,
-  },
-  notifLabel: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: c.text,
-    letterSpacing: -0.1,
-  },
-  notifDesc: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.muted,
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  notifLabelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  notifLabelLocked: {
-    color: c.dim,
-  },
+  notifInfo: { flex: 1, marginRight: 12 },
+  notifLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  notifLabel: { fontFamily: fonts.medium, fontSize: 14, color: c.text },
+  notifLabelLocked: { color: c.dim },
+  notifDesc: { fontFamily: fonts.regular, fontSize: 11, color: c.muted, marginTop: 2, lineHeight: 16 },
   proBadge: {
-    fontFamily: fonts.mono,
-    fontSize: 8,
-    letterSpacing: 1.5,
-    color: c.green,
-    backgroundColor: c.greenDim,
-    borderWidth: 1,
-    borderColor: 'rgba(0,212,170,0.25)',
-    borderRadius: 100,
-    paddingVertical: 1,
-    paddingHorizontal: 6,
-    overflow: 'hidden',
+    fontFamily: fonts.mono, fontSize: 8, letterSpacing: 1.5, color: c.green,
+    backgroundColor: c.greenDim, borderWidth: 1, borderColor: c.green + '40',
+    borderRadius: 100, paddingVertical: 1, paddingHorizontal: 6, overflow: 'hidden',
   },
-  notifUpgradeHint: {
-    padding: 12,
-    alignItems: 'center',
+  notifUpgrade: { paddingVertical: 12, alignItems: 'center' },
+  notifUpgradeText: { fontFamily: fonts.medium, fontSize: 12, color: c.green },
+
+  // ── Subscription buttons ──
+  upgradeBtn: {
+    backgroundColor: c.accent, borderRadius: 100, paddingVertical: 14,
+    alignItems: 'center', marginBottom: 24,
   },
-  notifUpgradeText: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: c.green,
+  upgradeBtnText: { fontFamily: fonts.semibold, fontSize: 15, color: c.bg },
+  manageSubBtn: {
+    borderWidth: 1, borderColor: c.border, borderRadius: 100,
+    paddingVertical: 12, alignItems: 'center', marginBottom: 24,
   },
-  notifNote: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.muted,
-    padding: 12,
-    lineHeight: 16,
-    textAlign: 'center',
+  manageSubBtnText: { fontFamily: fonts.medium, fontSize: 13, color: c.accent },
+
+  // ── Modal ──
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },
+  modalContent: { backgroundColor: c.surface, borderRadius: 24, padding: 24, maxHeight: '90%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  modalTitle: { fontFamily: fonts.semibold, fontSize: 18, color: c.text },
+  modalCloseIcon: { padding: 4 },
+  modalCloseIconText: { fontSize: 14, color: c.muted },
+  modalDesc: { fontFamily: fonts.regular, fontSize: 13, color: c.dim, marginBottom: 16, lineHeight: 18 },
+  modalLabel: { fontFamily: fonts.medium, fontSize: 13, color: c.text, marginBottom: 6, marginTop: 12 },
+  modalOptional: { fontFamily: fonts.regular, fontSize: 11, color: c.muted },
+  modalInput: {
+    backgroundColor: c.bg, borderWidth: 1, borderColor: c.border,
+    borderRadius: 12, padding: 12, fontFamily: fonts.regular, fontSize: 14, color: c.text,
   },
+  modalError: { fontFamily: fonts.regular, fontSize: 12, color: c.coral, marginTop: 8 },
+  modalSaveBtn: { backgroundColor: c.accent, borderRadius: 100, paddingVertical: 14, alignItems: 'center', marginTop: 20 },
+  modalSaveBtnText: { fontFamily: fonts.semibold, fontSize: 14, color: c.bg },
+  debtTypeScroll: { flexGrow: 0, marginBottom: 4 },
+  debtTypeChip: {
+    backgroundColor: c.bg, borderWidth: 1, borderColor: c.border,
+    borderRadius: 100, paddingHorizontal: 12, paddingVertical: 6, marginRight: 8,
+  },
+  debtTypeChipActive: { backgroundColor: c.accentDim, borderColor: c.accent },
+  debtTypeChipText: { fontFamily: fonts.medium, fontSize: 12, color: c.dim },
+  debtTypeChipTextActive: { color: c.accent },
 });

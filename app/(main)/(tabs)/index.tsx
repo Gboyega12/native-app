@@ -1114,21 +1114,27 @@ export default function Home() {
             onPress={() => router.push('/(main)/connect')}
             activeOpacity={0.8}
           >
-            <Text style={s.connectionBannerText}>
-              {connectionWarning.banks.length > 0
-                ? `${connectionWarning.banks.join(', ')} ${connectionWarning.banks.length === 1 ? 'needs' : 'need'} reconnecting`
-                : connectionWarning.message === 'fallback'
-                  ? 'Using cached data — pull to refresh'
-                  : 'Bank connection expired'}
-            </Text>
-            <Text style={s.connectionBannerAction}>Reconnect</Text>
+            <View style={{ flex: 1 }}>
+              {connectionWarning.banks.length > 0 ? (
+                connectionWarning.banks.map((bank, idx) => (
+                  <Text key={idx} style={s.connectionBannerText}>
+                    {bank} — needs reconnecting
+                  </Text>
+                ))
+              ) : connectionWarning.message === 'fallback' ? (
+                <Text style={s.connectionBannerText}>Using cached data — pull to refresh</Text>
+              ) : (
+                <Text style={s.connectionBannerText}>A bank connection has expired</Text>
+              )}
+            </View>
+            <Text style={s.connectionBannerAction}>Fix</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={s.bannerDismiss}
             onPress={dismissConnection}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Text style={s.bannerDismissX}>✕</Text>
+            <Text style={s.bannerDismissX}>{'\u2715'}</Text>
           </TouchableOpacity>
         </View>
       )}
