@@ -312,7 +312,7 @@ export default function Profile() {
     setPortalLoading(false);
   };
 
-  const PRO_ONLY_NOTIFS: (keyof typeof notifPrefs)[] = ['weekly_digest', 'checkin_prompts', 'achievement_alerts'];
+  const PRO_ONLY_NOTIFS: (keyof typeof notifPrefs)[] = ['checkin_prompts', 'achievement_alerts'];
 
   const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
     if (!isPro && PRO_ONLY_NOTIFS.includes(key)) {
@@ -633,7 +633,7 @@ export default function Profile() {
           <>
             <View style={s.groupDivider} />
             {([
-              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Score & spending recap every Monday', pro: true },
+              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Score & spending recap every Monday', pro: false },
               { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Bocy flags things that need attention', pro: true },
               { key: 'achievement_alerts' as const, label: 'Achievements', desc: 'Celebrate milestones', pro: true },
               { key: 'milestone_alerts' as const, label: 'Score changes', desc: 'Alert on significant shifts', pro: false },

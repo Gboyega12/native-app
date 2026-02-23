@@ -1,6 +1,6 @@
 // ── Subscription tier hook ──
 // Checks user_subscriptions table. No row = free tier.
-// Pro users get: all moves, AI chat, weekly digest, check-ins, achievements, overrides.
+// Pro users get: all moves, AI chat, check-ins, achievements, overrides. Weekly digest is free for all.
 // Subscribes to Supabase Realtime so UI auto-updates when Stripe webhook fires.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
