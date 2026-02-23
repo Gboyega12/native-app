@@ -118,6 +118,9 @@ async function syncConnection(bankRow, clientId, clientSecret) {
   }
 }
 
+const CONSENT_DAYS = 90;
+const WARN_DAYS = 14;
+
 /**
  * POST /api/truelayer/sync
  * Body: { user_id }
@@ -176,7 +179,15 @@ export default async function handler(req, res) {
 
     for (const { row, result } of results) {
       if (!result) {
-        expiredConnections.push({ connection_id: row.connection_id, provider_name: row.provider_name || null });
+        // Only flag as expired if the 90-day consent window has actually lapsed.
+        // Transient failures (network errors, TrueLayer outages) within the
+        // consent window should NOT trigger the reconnect banner.
+        const created = new Date(row.created_at || row.updated_at);
+        const expiry = new Date(created);
+        expiry.setDate(expiry.getDate() + CONSENT_DAYS);
+        if (Date.now() >= expiry.getTime()) {
+          expiredConnections.push({ connection_id: row.connection_id, provider_name: row.provider_name || null });
+        }
         continue;
       }
 
@@ -200,9 +211,12 @@ export default async function handler(req, res) {
     }
 
     if (syncedCount === 0) {
+      // If no connections are genuinely expired (past 90 days), this is a
+      // transient failure — don't tell the client to show "Reconnect".
+      const reason = expiredConnections.length > 0 ? 'token_expired' : 'sync_failed';
       return res.json({
         success: false,
-        reason: 'token_expired',
+        reason,
         expired_connections: expiredConnections.length > 0 ? expiredConnections : undefined,
       });
     }
@@ -222,8 +236,6 @@ export default async function handler(req, res) {
     const mergedCsv = ['Date,Description,Amount', ...uniqueLines].join('\n');
 
     // Check for connections approaching 90-day consent expiry (warn at 14 days)
-    const CONSENT_DAYS = 90;
-    const WARN_DAYS = 14;
     const expiringConnections = [];
     for (const row of bankRows) {
       const created = new Date(row.created_at || row.updated_at);

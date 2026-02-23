@@ -184,6 +184,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
           if (ec.provider_name) expiredBankNames.push(ec.provider_name);
         }
       }
+    } else if (data.reason === 'sync_failed') {
+      // Transient failure (all connections still within 90-day consent window).
+      // Don't flag as a connection issue — fall through to cached data silently.
     } else if (data.reason === 'no_connection') {
       connectionIssues.push('no_connection');
     }
