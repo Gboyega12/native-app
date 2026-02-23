@@ -1344,7 +1344,7 @@ export default function Home() {
             <AnimGlyph delay={50}>
               <View style={s.milestoneCard}>
                 <View style={s.milestoneHeader}>
-                  <Text style={s.milestoneLabel}>DAY {milestone.day}</Text>
+                  <Text style={s.milestoneTitle}>{milestone.title}</Text>
                   <TouchableOpacity
                     onPress={() => dismissMilestone(milestone.id)}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -1352,7 +1352,6 @@ export default function Home() {
                     <Text style={s.milestoneDismiss}>{'\u2715'}</Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={s.milestoneTitle}>{milestone.title}</Text>
                 <Text style={s.milestoneInsight}>{milestone.insight}</Text>
                 {milestone.proDetail && (
                   <Text style={s.milestoneProDetail}>{milestone.proDetail}</Text>
@@ -3650,20 +3649,13 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
-  } as any,
-  milestoneLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.text2,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
+    marginBottom: 10,
   } as any,
   milestoneTitle: {
     fontFamily: fonts.semibold,
     fontSize: 18,
     color: c.text,
-    marginBottom: 8,
+    flex: 1,
   } as any,
   milestoneInsight: {
     fontFamily: fonts.regular,
