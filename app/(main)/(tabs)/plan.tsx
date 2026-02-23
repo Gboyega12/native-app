@@ -239,7 +239,7 @@ const FREE_MOVE_LIMIT = 2;
 
 export default function Plan() {
   const router = useRouter();
-  const { highlight } = useLocalSearchParams<{ highlight?: string }>();
+  const { highlight, highlightAction } = useLocalSearchParams<{ highlight?: string; highlightAction?: string }>();
   const { isPro } = useSubscription();
   const { colors } = useTheme();
   const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
@@ -255,26 +255,53 @@ export default function Plan() {
   const userIdRef = useRef<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const [highlightIdx, setHighlightIdx] = useState<number | null>(null);
+  const [pendingHighlightAction, setPendingHighlightAction] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [incomeExpanded, setIncomeExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const itemYPositions = useRef<Record<number, number>>({});
 
-  // Handle deep-link highlight from home page "View" button
+  // Handle deep-link: store target action for resolution after data loads
   useEffect(() => {
-    if (highlight != null) {
+    if (highlightAction) {
+      setPendingHighlightAction(highlightAction);
+    } else if (highlight != null) {
+      // Legacy numeric index fallback
       const idx = parseInt(highlight, 10);
       if (!isNaN(idx)) {
         setHighlightIdx(idx);
         setExpanded(idx);
-        // Clear highlight glow after animation
         const timer = setTimeout(() => setHighlightIdx(null), 2500);
         return () => clearTimeout(timer);
       }
     }
-  }, [highlight]);
+  }, [highlight, highlightAction]);
 
-  // Scroll to highlighted card once data is loaded and layout is ready
+  // Resolve pendingHighlightAction → actual index once data is loaded
+  useEffect(() => {
+    if (!pendingHighlightAction || loading || !analysis) return;
+
+    // Build the same sorted moves array used for rendering
+    const effortOrd: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    const sortedMoves = [...(analysis.all_moves || [])].sort(
+      (a, b) => (effortOrd[a.effort] ?? 2) - (effortOrd[b.effort] ?? 2),
+    );
+
+    const idx = sortedMoves.findIndex(
+      (m) => m.action === pendingHighlightAction,
+    );
+
+    if (idx !== -1) {
+      setHighlightIdx(idx);
+      setExpanded(idx);
+      const timer = setTimeout(() => setHighlightIdx(null), 2500);
+      setPendingHighlightAction(null);
+      return () => clearTimeout(timer);
+    }
+    setPendingHighlightAction(null);
+  }, [pendingHighlightAction, loading, analysis]);
+
+  // Scroll to highlighted card once layout is ready
   useEffect(() => {
     if (highlightIdx == null || loading) return;
     const timer = setTimeout(() => {
@@ -948,7 +975,18 @@ export default function Plan() {
             const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.includes(idx));
 
             return (
-              <View key={`active-${i}`} style={[s.card, s.activeCard]}>
+              <View
+                key={`active-${i}`}
+                onLayout={(e) => {
+                  itemYPositions.current[i] = e.nativeEvent.layout.y;
+                  if (highlightIdx === i) {
+                    setTimeout(() => {
+                      scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - 80), animated: true });
+                    }, 150);
+                  }
+                }}
+                style={[s.card, s.activeCard, highlightIdx === i && s.cardHighlight]}
+              >
                 <TouchableOpacity
                   onPress={() => setExpanded(isExpanded ? null : i)}
                   activeOpacity={0.8}
@@ -1364,7 +1402,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   incomeStripValue: {
     fontFamily: fonts.mono,
     fontSize: 16,
-    fontWeight: '600',
     color: c.text,
     letterSpacing: -0.5,
   },
@@ -1460,7 +1497,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   trajHeroNumber: {
     fontFamily: fonts.mono,
     fontSize: 48,
-    fontWeight: '300',
     color: c.text,
     letterSpacing: -2,
   },
@@ -1553,7 +1589,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   hitRateValue: {
     fontFamily: fonts.mono,
     fontSize: 20,
-    fontWeight: '300',
     color: c.green,
   },
   hitRateLabel: {
@@ -1578,7 +1613,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   bufferValue: {
     fontFamily: fonts.mono,
     fontSize: 18,
-    fontWeight: '300',
     color: c.text,
   },
   bufferNote: {
@@ -1879,7 +1913,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   impactValue: {
     fontFamily: fonts.mono,
     fontSize: 18,
-    fontWeight: '300',
     color: c.green,
   },
   impactLabel: {

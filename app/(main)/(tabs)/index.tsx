@@ -1206,8 +1206,6 @@ export default function Home() {
               ══════════════════════════════════════════════ */}
           {dashboardMoves.length > 0 ? (() => {
             const heroMove = dashboardMoves[0];
-            const heroEffortClr = heroMove.effort === 'high' ? colors.green
-              : heroMove.effort === 'medium' ? colors.dim : colors.lavender;
             return (
               <AnimGlyph delay={0}>
                 <View
@@ -1227,8 +1225,8 @@ export default function Home() {
                       +{'\u00a3'}{(heroMove.annualImpact || 0).toLocaleString()}/yr
                     </Text>
                     {heroMove.effort && (
-                      <View style={[s.effortPill, { borderColor: heroEffortClr + '40' }]}>
-                        <Text style={[s.effortPillText, { color: heroEffortClr }]}>
+                      <View style={s.effortPill}>
+                        <Text style={s.effortPillText}>
                           {heroMove.effort}
                         </Text>
                       </View>
@@ -1246,7 +1244,7 @@ export default function Home() {
                   <View style={s.heroActions}>
                     <TouchableOpacity
                       style={s.heroCta}
-                      onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlight: '0' } })}
+                      onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlightAction: heroMove.action } })}
                     >
                       <Text style={s.heroCtaText}>Take action</Text>
                     </TouchableOpacity>
@@ -2292,7 +2290,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // ── Hero Insight Card ──
   heroCard: {
     backgroundColor: c.card,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: c.green + '40',
     borderRadius: 24,
     padding: 28,
@@ -2325,14 +2323,13 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   heroImpact: {
     fontFamily: fonts.mono,
     fontSize: 18,
-    fontWeight: '700',
     color: c.green,
   },
   heroStrategy: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 13,
     color: c.dim,
-    lineHeight: 22,
+    lineHeight: 20,
     marginTop: 16,
   },
   heroActions: {
@@ -2403,7 +2400,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   moveImpact: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    fontWeight: '700',
     color: c.green,
   },
   effortPill: {
@@ -2417,7 +2413,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   effortPillText: {
     fontFamily: fonts.mono,
     fontSize: 9,
-    fontWeight: '600',
+    color: c.dim,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
@@ -2501,7 +2497,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   bigNumber: {
     fontFamily: fonts.mono,
     fontSize: 52,
-    fontWeight: '300',
     color: c.text,
     letterSpacing: -2,
   },
@@ -2564,7 +2559,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   primaryTagText: {
     fontFamily: fonts.mono,
     fontSize: 9,
-    fontWeight: '600',
     color: c.text,
     letterSpacing: 1,
   },
@@ -2574,7 +2568,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   sourceAmount: {
     fontFamily: fonts.mono,
     fontSize: 20,
-    fontWeight: '300',
     color: c.text,
   },
   sourceAmountPer: {
@@ -2618,7 +2611,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   safeToSpendAmount: {
     fontFamily: fonts.mono,
     fontSize: 48,
-    fontWeight: '300',
     color: c.text,
     letterSpacing: -2,
   },
@@ -2857,7 +2849,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   summaryAmount: {
     fontFamily: fonts.mono,
     fontSize: 20,
-    fontWeight: '300',
   },
   summaryLabel: {
     fontFamily: fonts.regular,
@@ -2955,7 +2946,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   dataValue: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    fontWeight: '400',
   },
 
   // ── Transaction dropdown ──
@@ -2998,7 +2988,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   txAmount: {
     fontFamily: fonts.mono,
     fontSize: 13,
-    fontWeight: '400',
   },
   txRightCol: {
     alignItems: 'flex-end',
@@ -3079,7 +3068,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   debtHeroAmount: {
     fontFamily: fonts.mono,
     fontSize: 44,
-    fontWeight: '300',
     color: c.coral,
     letterSpacing: -2,
   },
@@ -3125,7 +3113,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   debtBalance: {
     fontFamily: fonts.mono,
     fontSize: 16,
-    fontWeight: '400',
     color: c.text,
   },
   debtUtil: {
