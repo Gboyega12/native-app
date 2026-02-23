@@ -1196,167 +1196,90 @@ export default function Home() {
           )}
 
           {/* ══════════════════════════════════════════════
-              CARD 1 — YOUR INSIGHTS
+              HERO — YOUR #1 MOVE
               ══════════════════════════════════════════════ */}
-          <View style={s.card}>
-            <AnimGlyph delay={0}>
-              <Text style={s.cardTitle}>Your Insights</Text>
-            </AnimGlyph>
+          {dashboardMoves.length > 0 ? (() => {
+            const heroMove = dashboardMoves[0];
+            const heroEffortClr = heroMove.effort === 'high' ? colors.green
+              : heroMove.effort === 'medium' ? colors.dim : colors.lavender;
+            return (
+              <AnimGlyph delay={0}>
+                <View
+                  style={s.heroCard}
+                  accessibilityRole="summary"
+                  accessibilityLabel={`Your number one move: ${heroMove.action}, saves ${heroMove.annualImpact} pounds per year`}
+                >
+                  <Text style={s.heroLabel}>Your #1 move</Text>
 
-            {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
-              const effortClr = move.effort === 'high' ? colors.green
-                : move.effort === 'medium' ? colors.dim : colors.lavender;
-              return (
-                <AnimGlyph key={i} delay={i * 120}>
-                  <View
-                    accessibilityRole="summary"
-                    accessibilityLabel={`Insight: ${move.action}, saves ${move.annualImpact} pounds per year`}
-                    style={s.moveItemFull}
-                  >
-                    <Text style={s.moveTitle}>
-                      {stripMd(move.action)}
+                  <Text style={s.heroAction}>
+                    {stripMd(heroMove.action)}
+                  </Text>
+
+                  {/* Impact + effort */}
+                  <View style={s.heroMeta}>
+                    <Text style={s.heroImpact}>
+                      +{'\u00a3'}{(heroMove.annualImpact || 0).toLocaleString()}/yr
                     </Text>
-
-                    {/* Impact + effort on one line */}
-                    <View style={s.moveMeta}>
-                      <Text style={s.moveImpact}>
-                        +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
-                      </Text>
-                      {move.effort && (
-                        <View style={[s.effortPill, { borderColor: effortClr + '40' }]}>
-                          <Text style={[s.effortPillText, { color: effortClr }]}>
-                            {move.effort}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-
-                    {/* Action buttons */}
-                    <View style={s.moveActions}>
-                      <TouchableOpacity
-                        style={s.moveApproveBtn}
-                        onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlight: String(i) } })}
-                      >
-                        <Text style={s.moveApproveBtnText}>View</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={s.moveDeleteBtn}
-                        onPress={() => handleDeleteMove(move)}
-                      >
-                        <Text style={s.moveDeleteBtnText}>Delete</Text>
-                      </TouchableOpacity>
-                    </View>
+                    {heroMove.effort && (
+                      <View style={[s.effortPill, { borderColor: heroEffortClr + '40' }]}>
+                        <Text style={[s.effortPillText, { color: heroEffortClr }]}>
+                          {heroMove.effort}
+                        </Text>
+                      </View>
+                    )}
                   </View>
-                </AnimGlyph>
-              );
-            }) : (
-              <Text style={s.noDataText}>
-                No actionable insights yet. Upload a statement to get started.
-              </Text>
-            )}
 
-            {dashboardMoves.length > 2 && (
-              <TouchableOpacity
-                style={s.viewAllBtn}
-                onPress={() => router.push('/(main)/(tabs)/plan')}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.viewAllText, { color: colors.green }]}>
-                  View plan {'\u203A'}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
+                  {/* Strategy — the WHY */}
+                  {heroMove.strategy ? (
+                    <Text style={s.heroStrategy}>
+                      {stripMd(heroMove.strategy)}
+                    </Text>
+                  ) : null}
 
-          {/* ── Side-by-side card row on tablet/desktop ── */}
-          <View style={isTablet ? { flexDirection: 'row', gap: 16 } : undefined}>
-
-          {/* ══════════════════════════════════════════════
-              CARD 2 — YOUR INCOME
-              ══════════════════════════════════════════════ */}
-          <View style={[s.card, isTablet && { flex: 1 }]} accessibilityRole="summary" accessibilityLabel={`Monthly income: ${Math.round(income)} pounds`}>
-            <AnimGlyph delay={50}>
-              <View style={s.cardTitleRow}>
-                <Text style={s.cardTitle}>Your income</Text>
-                <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'income' ? null : 'income')}>
-                  <Text style={s.infoIcon}>i</Text>
-                </TouchableOpacity>
-              </View>
-            </AnimGlyph>
-            {infoCard === 'income' && (
-              <View style={s.infoBox}>
-                <Text style={s.infoBoxText}>
-                  Income is detected from your bank account transactions only (not credit cards). Regular credits matching salary, benefit, or employer patterns are identified. Remove any that aren't real income.
-                </Text>
-              </View>
-            )}
-
-            <AnimGlyph delay={100}>
-              <View style={s.bigNumberWrap}>
-                <Text style={s.bigNumber} accessibilityRole="text">
-                  {'\u00a3'}{Math.round(income).toLocaleString()}
-                </Text>
-                <Text style={s.bigNumberLabel}>monthly</Text>
-              </View>
-            </AnimGlyph>
-
-            {incomeSources.length > 0 ? (
-              <>
-                <View style={s.divider} />
-                <Text style={s.incomeSourcesHeader}>
-                  {incomeSources.length} source{incomeSources.length !== 1 ? 's' : ''}
-                </Text>
-                {incomeSources.map((src: IncomeSource, i: number) => (
-                  <AnimGlyph key={i} delay={150 + i * 80}>
-                    <View style={s.sourceCard}>
-                      <View style={s.sourceRow}>
-                        <View style={s.sourceInfo}>
-                          <Text style={s.sourceName}>{src.source}</Text>
-                          <View style={s.sourceTagRow}>
-                            <Text style={s.sourceFreq}>
-                              {src.frequency.charAt(0).toUpperCase() + src.frequency.slice(1)}
-                            </Text>
-                            {src.isSalary && (
-                              <View style={[s.primaryTag, { backgroundColor: colors.greenDim, borderColor: colors.green + '30' }]}>
-                                <Text style={[s.primaryTagText, { color: colors.green }]}>PRIMARY</Text>
-                              </View>
-                            )}
-                        </View>
-                      </View>
-                      <View style={s.sourceAmountWrap}>
-                        <Text style={s.sourceAmount}>
-                          {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
-                        </Text>
-                        <Text style={s.sourceAmountPer}>
-                          per {src.frequency === 'weekly' ? 'week' : src.frequency === 'fortnightly' ? 'fortnight' : 'month'}
-                        </Text>
-                      </View>
-                    </View>
-                    {/* Remove non-income */}
+                  {/* CTA */}
+                  <View style={s.heroActions}>
                     <TouchableOpacity
-                      style={s.removeSourceBtn}
-                      onPress={() => handleRemoveIncomeSource(src.source)}
-                      disabled={removingSource === src.source}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      activeOpacity={0.6}
+                      style={s.heroCta}
+                      onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlight: '0' } })}
                     >
-                      <Text style={s.removeSourceText}>
-                        {removingSource === src.source ? 'Removing...' : 'Not income? Remove'}
+                      <Text style={s.heroCtaText}>Take action</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={s.heroSecondary}
+                      onPress={() => setVerifyMove(heroMove)}
+                    >
+                      <Text style={s.heroSecondaryText}>Details</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* More insights teaser */}
+                  {dashboardMoves.length > 1 && (
+                    <TouchableOpacity
+                      style={s.heroMore}
+                      onPress={() => router.push('/(main)/(tabs)/plan')}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.heroMoreText}>
+                        +{dashboardMoves.length - 1} more insight{dashboardMoves.length - 1 !== 1 ? 's' : ''} {'\u203A'}
                       </Text>
                     </TouchableOpacity>
-                    </View>
-                  </AnimGlyph>
-                ))}
-              </>
-            ) : (
-              <Text style={s.noDataText}>No income sources detected from bank accounts.</Text>
-            )}
-          </View>
+                  )}
+                </View>
+              </AnimGlyph>
+            );
+          })() : (
+            <View style={s.heroCard}>
+              <Text style={s.heroLabel}>Your #1 move</Text>
+              <Text style={s.noDataText}>
+                No actionable insights yet. Connect your bank so Bocy can find your most impactful financial move.
+              </Text>
+            </View>
+          )}
 
           {/* ══════════════════════════════════════════════
-              CARD 3 — SAFE TO SPEND
+              CARD — SAFE TO SPEND (compact)
               ══════════════════════════════════════════════ */}
-          <View style={[s.card, isTablet && { flex: 1 }]}>
+          <View style={s.card}>
             <AnimGlyph delay={100}>
               <View style={s.cardTitleRow}>
                 <Text style={s.cardTitle}>Safe to spend</Text>
@@ -1524,10 +1447,8 @@ export default function Home() {
             )}
           </View>
 
-          </View>{/* ── End side-by-side row ── */}
-
           {/* ══════════════════════════════════════════════
-              CARD 4 — YOUR BUDGET REALITY
+              CARD — YOUR BUDGET REALITY (summary only)
               ══════════════════════════════════════════════ */}
           <View style={s.card}>
             {/* Info icon for budget card */}
@@ -1827,96 +1748,6 @@ export default function Home() {
             )}
 
           </View>
-
-          {/* ── Subscription shortcut ── */}
-          <TouchableOpacity
-            style={s.subsLink}
-            onPress={() => router.push('/(main)/subscriptions')}
-            activeOpacity={0.7}
-          >
-            <Text style={s.subsLinkText}>Manage subscriptions</Text>
-            <Text style={s.subsLinkArrow}>{'\u203A'}</Text>
-          </TouchableOpacity>
-
-          {/* ══════════════════════════════════════════════
-              CARD 5 — DEBT ACCOUNTS
-              ══════════════════════════════════════════════ */}
-          {debtAccounts.length > 0 && (() => {
-            const totalDebt = debtAccounts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
-            const totalLimit = debtAccounts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
-            const overallUtil = totalLimit > 0 ? Math.round((totalDebt / totalLimit) * 100) : null;
-            return (
-              <View style={s.card}>
-                <AnimGlyph delay={50}>
-                  <View style={s.cardTitleRow}>
-                    <Text style={s.cardTitle}>Your debt</Text>
-                    <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'debt' ? null : 'debt')}>
-                      <Text style={s.infoIcon}>i</Text>
-                    </TouchableOpacity>
-                  </View>
-                </AnimGlyph>
-                {infoCard === 'debt' && (
-                  <View style={s.infoBox}>
-                    <Text style={s.infoBoxText}>
-                      Debt balances are pulled from your connected accounts via Open Banking, or added manually in your profile. Utilisation shows how much of your credit limit is currently used. Over 75% utilisation can affect your credit score.
-                    </Text>
-                  </View>
-                )}
-                <Text style={s.cardSubtitle}>
-                  {debtAccounts.length} account{debtAccounts.length !== 1 ? 's' : ''}
-                  {overallUtil != null ? ` · ${overallUtil}% utilised` : ''}
-                </Text>
-
-                {/* Total debt hero */}
-                <AnimGlyph delay={100}>
-                  <View style={s.debtHero}>
-                    <Text style={s.debtHeroAmount}>
-                      {'\u00a3'}{Math.round(totalDebt).toLocaleString()}
-                    </Text>
-                    <Text style={s.debtHeroLabel}>total outstanding</Text>
-                  </View>
-                </AnimGlyph>
-
-                {/* Individual accounts */}
-                {debtAccounts.map((d: any, i: number) => {
-                  const bal = d.outstanding_balance || 0;
-                  const lim = d.credit_limit || 0;
-                  const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
-                  const isHigh = util != null && util > 75;
-                  const typeLabel = d.account_type === 'credit_card' ? 'Credit card'
-                    : d.account_type === 'overdraft' ? 'Overdraft'
-                    : d.account_type === 'overdraft_facility' ? 'Overdraft facility'
-                    : d.account_type === 'personal_loan' ? 'Personal loan'
-                    : d.account_type === 'student_loan' ? 'Student loan'
-                    : d.account_type === 'car_finance' ? 'Car finance'
-                    : d.account_type === 'bnpl' ? 'BNPL'
-                    : d.account_type || 'Account';
-                  return (
-                    <AnimGlyph key={i} delay={150 + i * 80}>
-                      <View
-                        style={[s.debtRow, i === debtAccounts.length - 1 && s.debtRowLast]}
-                      >
-                      <View style={s.debtRowLeft}>
-                        <Text style={s.debtName}>{d.account_name}</Text>
-                        <Text style={s.debtType}>{typeLabel}</Text>
-                      </View>
-                      <View style={s.debtRowRight}>
-                        <Text style={[s.debtBalance, isHigh && { color: colors.coral }]}>
-                          {'\u00a3'}{Math.round(bal).toLocaleString()}
-                        </Text>
-                        {lim > 0 && (
-                          <Text style={[s.debtUtil, isHigh && { color: colors.coral }]}>
-                            / {'\u00a3'}{Math.round(lim).toLocaleString()} ({util}%)
-                          </Text>
-                        )}
-                      </View>
-                      </View>
-                    </AnimGlyph>
-                  );
-                })}
-              </View>
-            );
-          })()}
 
           {/* Add budget item modal */}
           <Modal visible={showAddItem} transparent animationType="fade" onRequestClose={() => { setAddItemError(''); setShowAddItem(false); }}>
@@ -2452,7 +2283,100 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ── Card 1: Move items ──
+  // ── Hero Insight Card ──
+  heroCard: {
+    backgroundColor: c.card,
+    borderWidth: 1.5,
+    borderColor: c.green + '40',
+    borderRadius: 24,
+    padding: 28,
+    paddingTop: 32,
+    paddingBottom: 28,
+    marginBottom: 24,
+    overflow: 'hidden',
+  },
+  heroLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.green,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 16,
+  },
+  heroAction: {
+    fontFamily: fonts.semibold,
+    fontSize: 22,
+    color: c.text,
+    lineHeight: 30,
+    letterSpacing: -0.3,
+  },
+  heroMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
+  heroImpact: {
+    fontFamily: fonts.mono,
+    fontSize: 18,
+    fontWeight: '700',
+    color: c.green,
+  },
+  heroStrategy: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.dim,
+    lineHeight: 22,
+    marginTop: 16,
+  },
+  heroActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 24,
+  },
+  heroCta: {
+    flex: 2,
+    backgroundColor: c.accent,
+    paddingVertical: 14,
+    borderRadius: 100,
+    alignItems: 'center',
+  },
+  heroCtaText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: c.bg,
+    letterSpacing: 0.3,
+  },
+  heroSecondary: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: c.accentDim,
+    paddingVertical: 14,
+    borderRadius: 100,
+    alignItems: 'center',
+  },
+  heroSecondaryText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.dim,
+  },
+  heroMore: {
+    alignItems: 'center',
+    paddingTop: 20,
+    marginTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: c.mintDim,
+  },
+  heroMoreText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.green,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+
+  // ── Card 1: Move items (kept for modals) ──
   moveItemFull: {
     paddingVertical: 20,
     borderBottomWidth: 1,
