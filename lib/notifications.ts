@@ -1,11 +1,14 @@
 // ── Notification Service ──
-// Abstraction layer for sending notifications. Currently email-only via Resend.
-// When building for iOS/Android, swap in expo-notifications for push delivery.
+// Handles push token registration (via expo-notifications) and email delivery (Resend).
 //
 // Architecture:
-//   1. Email (now)     — Resend API for weekly digests, milestones, check-ins
-//   2. Push (future)   — expo-notifications for real-time alerts on mobile
-//   3. In-app (now)    — Proactive chat messages from Bocy
+//   1. Email        — Resend API for weekly digests, milestones, check-ins
+//   2. Push         — expo-notifications for real-time alerts on mobile
+//   3. In-app       — Proactive chat messages from Bocy
+
+import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
+import { supabase } from '@/lib/supabase';
 
 export type NotificationType =
   | 'weekly_digest'
@@ -39,19 +42,42 @@ export interface NotificationPayload {
   data?: Record<string, any>;
 }
 
-// ── Push notification scaffolding ──
-// Ready for expo-notifications when building for app stores.
-// For now, these are no-ops that log intent.
+// ── Push notification registration ──
 
 export async function registerPushToken(userId: string): Promise<string | null> {
-  // TODO: When building for iOS/Android:
-  // 1. import * as Notifications from 'expo-notifications';
-  // 2. const { status } = await Notifications.requestPermissionsAsync();
-  // 3. const token = await Notifications.getExpoPushTokenAsync();
-  // 4. Save token to notification_preferences table
-  // Web mode — no-op until native build
-  return null;
+  // Push notifications are only available on native platforms
+  if (Platform.OS === 'web') return null;
+
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let finalStatus = existing;
+
+    if (existing !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+
+    if (finalStatus !== 'granted') return null;
+
+    const tokenData = await Notifications.getExpoPushTokenAsync({
+      projectId: 'f8e22d4e-78f5-43b2-9369-4dfa3c00ff02',
+    });
+    const token = tokenData.data;
+
+    // Persist to notification_preferences
+    await supabase
+      .from('notification_preferences')
+      .update({ push_token: token, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+
+    return token;
+  } catch (err) {
+    console.warn('[notifications] Push registration failed:', err);
+    return null;
+  }
 }
+
+// ── Push notification delivery ──
 
 export async function sendPushNotification(
   pushToken: string,
@@ -59,9 +85,29 @@ export async function sendPushNotification(
   body: string,
   data?: Record<string, any>,
 ): Promise<boolean> {
-  // TODO: When building for iOS/Android:
-  // POST to https://exp.host/--/api/v2/push/send
-  // with { to: pushToken, title, body, data }
-  // Web mode — no-op until native build
-  return false;
+  try {
+    const res = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: pushToken, title, body, data }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// ── iOS notification channel setup ──
+
+export function configureNotificationChannels(): void {
+  if (Platform.OS === 'web') return;
+
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowInForeground: true,
+    }),
+  });
 }
