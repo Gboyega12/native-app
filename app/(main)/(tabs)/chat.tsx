@@ -481,6 +481,27 @@ export default function Chat() {
       } : null,
     };
 
+    // Fetch previous month snapshot for budget line month-over-month comparison
+    let prevSnapshot: { monthly_spending: number; monthly_income: number } | null = null;
+    try {
+      const now = new Date();
+      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+      const { data: prevData } = await supabase
+        .from('score_history')
+        .select('monthly_spending, monthly_income')
+        .eq('user_id', user.id)
+        .gte('created_at', prevMonth.toISOString())
+        .lte('created_at', prevMonthEnd.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      prevSnapshot = prevData ?? null;
+    } catch {}
+
+    // Add budget line data (real income, trade-offs, month-over-month)
+    ctx.budget_line = buildBudgetLine(a, prevSnapshot);
+
     // Add recent person-to-person transfers so Claude can spot miscategorised rent/bills
     const transferItems: { description: string; amount: number; date: string }[] = [];
     for (const section of [a?.non_discretionary, a?.discretionary]) {
@@ -640,6 +661,9 @@ export default function Chat() {
           confidence: freshA.goal_context.confidence,
           bufferRecommendation: freshA.goal_context.bufferRecommendation,
         } : null;
+
+        // Rebuild budget line from fresh sync data
+        ctx.budget_line = buildBudgetLine(freshA, prevSnapshot);
 
         // Rebuild recent_transactions from fresh sync data (NOT the stale DB analysis)
         const freshSevenDaysAgo = new Date();
@@ -1349,6 +1373,44 @@ function buildSpendingBreakdown(a: Analysis | null): { category: string; monthly
   // Sort by spend descending
   items.sort((a, b) => b.monthly - a.monthly);
   return items;
+}
+
+function buildBudgetLine(
+  a: Analysis | null,
+  prevSnapshot: { monthly_spending: number; monthly_income: number } | null,
+): ChatContext['budget_line'] {
+  if (!a || !a.monthly_income) return undefined;
+  const income = a.monthly_income;
+  const essentials = a.non_discretionary?.total ?? 0;
+  const lifestyle = a.discretionary?.total ?? 0;
+  const totalSpend = essentials + lifestyle;
+  const leftToDecide = Math.max(0, income - totalSpend);
+  const essentialsPct = income > 0 ? Math.round((essentials / income) * 100) : 0;
+  const overBudget = totalSpend > income;
+  const overAmount = Math.round(Math.max(0, totalSpend - income));
+
+  const prevSpending = prevSnapshot?.monthly_spending ?? null;
+  const essentialsChangePct = prevSpending !== null && prevSpending > 0
+    ? Math.round(((essentials - prevSpending) / prevSpending) * 100)
+    : null;
+
+  const discItems = a.discretionary?.items ?? [];
+  const topLifestyle = discItems.length > 0
+    ? discItems.reduce((a, b) => a.monthly > b.monthly ? a : b)
+    : null;
+
+  return {
+    real_spending_power: Math.round(income - essentials),
+    essentials_total: Math.round(essentials),
+    lifestyle_total: Math.round(lifestyle),
+    left_to_decide: Math.round(leftToDecide),
+    essentials_pct: essentialsPct,
+    over_budget: overBudget,
+    over_amount: overAmount,
+    essentials_change_pct: essentialsChangePct,
+    top_lifestyle_category: topLifestyle?.category ?? null,
+    top_lifestyle_amount: topLifestyle ? Math.round(topLifestyle.monthly) : null,
+  };
 }
 
 // ── Styles ──

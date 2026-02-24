@@ -291,6 +291,18 @@ export interface ChatContext {
     adaptiveBudget: number;
     staticBudget: number;
   };
+  budget_line?: {
+    real_spending_power: number;
+    essentials_total: number;
+    lifestyle_total: number;
+    left_to_decide: number;
+    essentials_pct: number;
+    over_budget: boolean;
+    over_amount: number;
+    essentials_change_pct: number | null;
+    top_lifestyle_category: string | null;
+    top_lifestyle_amount: number | null;
+  };
   goal_trajectory?: {
     goalLabel: string;
     currentMonths: number;

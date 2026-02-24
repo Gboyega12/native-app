@@ -713,6 +713,33 @@ Tools:
   if (ctx.decision_score != null) prompt += `\n- Financial health score: ${ctx.decision_score}/100`;
   if (ctx.archetype) prompt += `\n- Financial profile: ${ctx.archetype}`;
 
+  // ── Budget line (real spending power & trade-offs) ──
+  if (ctx.budget_line) {
+    const bl = ctx.budget_line;
+    prompt += `\n\nBudget line (pre-calculated — use these numbers directly):`;
+    prompt += `\n- Real spending power: £${bl.real_spending_power}/month (income minus fixed costs — this is what they can actually allocate)`;
+    prompt += `\n- Essentials: £${bl.essentials_total}/month (${bl.essentials_pct}% of income)`;
+    prompt += `\n- Lifestyle: £${bl.lifestyle_total}/month`;
+    prompt += `\n- Left to decide: £${bl.left_to_decide}/month`;
+    if (bl.over_budget) {
+      prompt += `\n- STATUS: OVER BUDGET by £${bl.over_amount} — spending £${bl.over_amount} more than income. They need to cut £${bl.over_amount} from essentials or lifestyle to break even.`;
+    } else if (bl.left_to_decide === 0) {
+      prompt += `\n- STATUS: ON THE BUDGET LINE — every pound is allocated. Any new expense needs a trade-off from somewhere else.`;
+    } else if (bl.left_to_decide / (ctx.monthly_income || 1) < 0.1) {
+      prompt += `\n- STATUS: TIGHT BUDGET — only £${bl.left_to_decide} unallocated. Every pound spent on lifestyle is a pound less for savings or debt.`;
+    }
+    if (bl.essentials_change_pct != null && bl.essentials_change_pct !== 0) {
+      prompt += bl.essentials_change_pct > 0
+        ? `\n- Essentials rose ${bl.essentials_change_pct}% vs last month — real spending power has dropped.`
+        : `\n- Essentials fell ${Math.abs(bl.essentials_change_pct)}% vs last month — they freed up money.`;
+    }
+    if (bl.top_lifestyle_category && bl.top_lifestyle_amount) {
+      const tradeOff = Math.min(50, Math.round(bl.top_lifestyle_amount * 0.3));
+      prompt += `\n- Trade-off example: cutting £${tradeOff} from ${bl.top_lifestyle_category.toLowerCase()} = £${tradeOff} more toward savings or debt.`;
+    }
+    prompt += `\nIMPORTANT: When discussing budgets, trade-offs, or "can I afford X", use these budget line numbers. Say things like "You earn £X but £Y goes to fixed costs, so you actually have £Z to work with" — make it tangible, not abstract.`;
+  }
+
   // ── Spending breakdown ──
   if (ctx.spending_by_category?.length) {
     prompt += `\n\nSpending by category (MONTHLY AVERAGES — these are per-month figures, not totals):`;
