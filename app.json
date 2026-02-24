@@ -73,6 +73,7 @@
     },
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "privacyUrl": "https://www.bocy.io/privacy.html"
   }
 }
