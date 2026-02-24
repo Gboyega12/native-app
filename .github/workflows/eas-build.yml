@@ -13,7 +13,7 @@ on:
       platform:
         description: "Platform to build"
         required: true
-        default: "all"
+        default: "ios"
         type: choice
         options:
           - all
@@ -33,6 +33,11 @@ on:
         required: false
         default: false
         type: boolean
+
+# Only one build at a time per branch to avoid version conflicts
+concurrency:
+  group: eas-build-${{ github.ref }}
+  cancel-in-progress: false
 
 # ── OTA Update (push to main) ──
 # Ships JS/asset changes instantly — no App Store / Play Store review.
@@ -68,11 +73,13 @@ jobs:
 
   # ── Native Build (manual dispatch) ──
   # Builds iOS, Android, or both. Optionally submits to stores.
+  # --wait blocks until build finishes on EAS so the submit step has an artifact.
 
   build-ios:
     name: Build iOS
     if: github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'ios')
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout code
@@ -94,16 +101,17 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build iOS app
-        run: eas build --platform ios --profile ${{ inputs.profile }} --non-interactive
+        run: eas build --platform ios --profile ${{ inputs.profile }} --non-interactive --wait
 
       - name: Submit to App Store
-        if: inputs.submit == true && inputs.profile == 'production'
-        run: eas submit --platform ios --profile production --non-interactive
+        if: inputs.submit && inputs.profile == 'production'
+        run: eas submit --platform ios --profile production --latest --non-interactive
 
   build-android:
     name: Build Android
     if: github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'android')
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout code
@@ -125,8 +133,8 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build Android app
-        run: eas build --platform android --profile ${{ inputs.profile }} --non-interactive
+        run: eas build --platform android --profile ${{ inputs.profile }} --non-interactive --wait
 
       - name: Submit to Play Store
-        if: inputs.submit == true && inputs.profile == 'production'
-        run: eas submit --platform android --profile production --non-interactive
+        if: inputs.submit && inputs.profile == 'production'
+        run: eas submit --platform android --profile production --latest --non-interactive
