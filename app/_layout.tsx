@@ -8,6 +8,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { registerPushToken, configureNotificationChannels } from '@/lib/notifications';
+import { initRevenueCat } from '@/lib/revenuecat';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
 
@@ -51,11 +52,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Register push token once session is available
+  // Register push token + init RevenueCat once session is available
   useEffect(() => {
     if (session?.user?.id) {
       configureNotificationChannels();
       registerPushToken(session.user.id);
+      initRevenueCat(session.user.id);
     }
   }, [session?.user?.id]);
 

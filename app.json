@@ -58,6 +58,14 @@
             "useFrameworks": "static"
           }
         }
+      ],
+      [
+        "react-native-purchases",
+        {
+          "ios": {
+            "useStoreKit2": true
+          }
+        }
       ]
     ],
     "runtimeVersion": {

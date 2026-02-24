@@ -1,12 +1,16 @@
 // ── Paywall modal ──
 // Shown when free users try to access Pro features.
 // Matches the Nothing Phone OS design language.
+// On iOS/Android: uses RevenueCat native IAP.
+// On web: uses Stripe Checkout redirect.
 
 import { useState, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, Platform, ActivityIndicator, Alert, Linking } from 'react-native';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
+import { purchasePackage, getOffering, restorePurchases } from '@/lib/revenuecat';
+import { useSubscription } from '@/lib/subscription';
 
 const FEATURES = [
   { label: 'All moves unlocked', desc: 'Full step-by-step execution plans for every recommendation' },
@@ -26,14 +30,35 @@ interface PaywallProps {
 export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   const { colors } = useTheme();
   const s = useMemo(() => createStyles(colors), [colors]);
+  const { refresh: refreshTier } = useSubscription();
   const [loading, setLoading] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPrice, setSelectedPrice] = useState<'monthly' | 'yearly'>('monthly');
+
+  const isNative = Platform.OS === 'ios' || Platform.OS === 'android';
+
+  // Fetch native prices on open (override hardcoded £ values with store prices)
+  const [nativeMonthlyPrice, setNativeMonthlyPrice] = useState<string | null>(null);
+  const [nativeYearlyPrice, setNativeYearlyPrice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!visible || !isNative) return;
+    (async () => {
+      const offering = await getOffering();
+      if (!offering) return;
+      const monthly = offering.availablePackages.find((p) => p.identifier === '$rc_monthly');
+      const yearly = offering.availablePackages.find((p) => p.identifier === '$rc_annual');
+      if (monthly) setNativeMonthlyPrice(monthly.product.priceString);
+      if (yearly) setNativeYearlyPrice(yearly.product.priceString);
+    })();
+  }, [visible, isNative]);
 
   // Reset state whenever modal opens so stale loading/error don't stick
   useEffect(() => {
     if (visible) {
       setLoading(false);
+      setRestoring(false);
       setError(null);
     }
   }, [visible]);
@@ -60,12 +85,31 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     setLoading(false);
   };
 
-  const handleSubscribe = async () => {
+  // ── Native IAP via RevenueCat ──
+  const handleNativePurchase = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Refresh the session so the access token is fresh (it may have
-      // expired while the user was on the Stripe Checkout page).
+      const customerInfo = await purchasePackage(selectedPrice);
+      if (customerInfo) {
+        // Purchase succeeded — RC webhook will upsert the DB row,
+        // but also refresh locally for instant UI update
+        await refreshTier();
+        onClose();
+      }
+      // null = user cancelled, just stop loading
+    } catch (err: any) {
+      console.warn('[Paywall] Native purchase error:', err);
+      showError(err?.message || 'Purchase failed. Please try again.');
+    }
+    setLoading(false);
+  };
+
+  // ── Web: Stripe Checkout redirect ──
+  const handleStripeCheckout = async () => {
+    setLoading(true);
+    setError(null);
+    try {
       const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
       const session = refreshed?.session;
       if (refreshErr || !session) {
@@ -103,12 +147,8 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
         return;
       }
 
-      if (Platform.OS === 'web') {
-        window.location.href = data.url;
-        return; // page is navigating away; don't touch state
-      } else {
-        await Linking.openURL(data.url);
-      }
+      window.location.href = data.url;
+      return; // page is navigating away; don't touch state
     } catch (err: any) {
       console.warn('[Paywall] Checkout error:', err);
       const msg = err?.name === 'AbortError'
@@ -117,6 +157,26 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       showError(msg);
     }
     setLoading(false);
+  };
+
+  const handleSubscribe = isNative ? handleNativePurchase : handleStripeCheckout;
+
+  // ── Restore purchases (native only) ──
+  const handleRestore = async () => {
+    setRestoring(true);
+    setError(null);
+    try {
+      const restored = await restorePurchases();
+      if (restored) {
+        await refreshTier();
+        onClose();
+      } else {
+        showError('No active subscription found. If you subscribed recently, it may take a moment to sync.');
+      }
+    } catch (err: any) {
+      showError('Could not restore purchases. Please try again.');
+    }
+    setRestoring(false);
   };
 
   return (
@@ -156,7 +216,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
                 activeOpacity={0.7}
               >
                 <Text style={[s.priceAmount, selectedPrice !== 'monthly' && s.priceAmountInactive]}>
-                  {'\u00a3'}9.99
+                  {nativeMonthlyPrice || `${'\u00a3'}9.99`}
                 </Text>
                 <Text style={[s.pricePeriod, selectedPrice !== 'monthly' && s.pricePeriodInactive]}>
                   /month
@@ -168,7 +228,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
                 activeOpacity={0.7}
               >
                 <Text style={[s.priceAmount, selectedPrice !== 'yearly' && s.priceAmountInactive]}>
-                  {'\u00a3'}79.99
+                  {nativeYearlyPrice || `${'\u00a3'}79.99`}
                 </Text>
                 <Text style={[s.pricePeriod, selectedPrice !== 'yearly' && s.pricePeriodInactive]}>
                   /year
@@ -215,6 +275,22 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               </View>
             )}
             <Text style={s.trialNote}>Cancel anytime</Text>
+
+            {/* Restore purchases (native only) */}
+            {isNative && (
+              <TouchableOpacity
+                style={s.restoreBtn}
+                onPress={handleRestore}
+                disabled={restoring}
+                activeOpacity={0.7}
+              >
+                {restoring ? (
+                  <ActivityIndicator size="small" color={colors.dim} />
+                ) : (
+                  <Text style={s.restoreBtnText}>Restore purchases</Text>
+                )}
+              </TouchableOpacity>
+            )}
 
             {/* Dismiss */}
             <TouchableOpacity style={s.closeBtn} onPress={onClose} activeOpacity={0.7}>
@@ -440,6 +516,19 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.muted,
     textAlign: 'center',
     marginTop: spacing.sm,
+  },
+
+  // Restore
+  restoreBtn: {
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    marginTop: spacing.md,
+  },
+  restoreBtnText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.dim,
+    textDecorationLine: 'underline',
   },
 
   // Close

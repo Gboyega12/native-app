@@ -11,6 +11,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
+import { restorePurchases } from '@/lib/revenuecat';
 
 // ── Glyph micro-animation: fade+scale on mount ──
 const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
@@ -78,6 +79,7 @@ export default function Profile() {
   const s = useMemo(() => createStyles(colors), [colors]);
   const [showPaywall, setShowPaywall] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [restoringPurchases, setRestoringPurchases] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
@@ -310,6 +312,22 @@ export default function Profile() {
       console.warn('[Profile] Portal error:', err);
     }
     setPortalLoading(false);
+  };
+
+  const handleRestorePurchases = async () => {
+    setRestoringPurchases(true);
+    try {
+      const restored = await restorePurchases();
+      if (restored) {
+        await refreshTier();
+        Alert.alert('Restored', 'Your Pro subscription has been restored.');
+      } else {
+        Alert.alert('No subscription found', 'We couldn\u2019t find an active subscription linked to this account.');
+      }
+    } catch {
+      Alert.alert('Error', 'Could not restore purchases. Please try again.');
+    }
+    setRestoringPurchases(false);
   };
 
   const PRO_ONLY_NOTIFS: (keyof typeof notifPrefs)[] = ['checkin_prompts', 'achievement_alerts'];
@@ -669,9 +687,25 @@ export default function Profile() {
 
       {/* ── Subscription management ── */}
       {!isPro && (
-        <TouchableOpacity style={s.upgradeBtn} onPress={() => setShowPaywall(true)} activeOpacity={0.8}>
-          <Text style={s.upgradeBtnText}>Upgrade to Pro</Text>
-        </TouchableOpacity>
+        <>
+          <TouchableOpacity style={s.upgradeBtn} onPress={() => setShowPaywall(true)} activeOpacity={0.8}>
+            <Text style={s.upgradeBtnText}>Upgrade to Pro</Text>
+          </TouchableOpacity>
+          {(Platform.OS === 'ios' || Platform.OS === 'android') && (
+            <TouchableOpacity
+              style={s.restorePurchasesBtn}
+              onPress={handleRestorePurchases}
+              disabled={restoringPurchases}
+              activeOpacity={0.7}
+            >
+              {restoringPurchases ? (
+                <ActivityIndicator size="small" color={colors.dim} />
+              ) : (
+                <Text style={s.restorePurchasesBtnText}>Restore purchases</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </>
       )}
       {isPro && (
         <TouchableOpacity style={s.manageSubBtn} onPress={handleManageSubscription} disabled={portalLoading} activeOpacity={0.7}>
@@ -828,6 +862,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center', marginBottom: 24,
   },
   upgradeBtnText: { fontFamily: fonts.semibold, fontSize: 15, color: c.bg },
+  restorePurchasesBtn: {
+    alignItems: 'center', paddingVertical: 10, marginTop: -16, marginBottom: 24,
+  },
+  restorePurchasesBtnText: { fontFamily: fonts.regular, fontSize: 13, color: c.dim, textDecorationLine: 'underline' as const },
   manageSubBtn: {
     borderWidth: 1, borderColor: c.border, borderRadius: 100,
     paddingVertical: 12, alignItems: 'center', marginBottom: 24,
