@@ -722,11 +722,11 @@ Tools:
     prompt += `\n- Lifestyle: £${bl.lifestyle_total}/month`;
     prompt += `\n- Left to decide: £${bl.left_to_decide}/month`;
     if (bl.over_budget) {
-      prompt += `\n- STATUS: OVER BUDGET by £${bl.over_amount} — spending £${bl.over_amount} more than income. They need to cut £${bl.over_amount} from essentials or lifestyle to break even.`;
+      prompt += `\n- STATUS: £${bl.over_amount} OFF BALANCE. Total spending exceeds income by £${bl.over_amount}. Frame this as fixable, not alarming. Use "spending gap" or "off balance", never "over budget." Point them to their plan and moves.`;
     } else if (bl.left_to_decide === 0) {
-      prompt += `\n- STATUS: ON THE BUDGET LINE — every pound is allocated. Any new expense needs a trade-off from somewhere else.`;
+      prompt += `\n- STATUS: FULLY ALLOCATED. Every pound has a job. Any new expense needs a trade-off from somewhere else.`;
     } else if (bl.left_to_decide / (ctx.monthly_income || 1) < 0.1) {
-      prompt += `\n- STATUS: TIGHT BUDGET — only £${bl.left_to_decide} unallocated. Every pound spent on lifestyle is a pound less for savings or debt.`;
+      prompt += `\n- STATUS: TIGHT. Only £${bl.left_to_decide} unallocated. Validate their discipline rather than warning them.`;
     }
     if (bl.essentials_change_pct != null && bl.essentials_change_pct !== 0) {
       prompt += bl.essentials_change_pct > 0

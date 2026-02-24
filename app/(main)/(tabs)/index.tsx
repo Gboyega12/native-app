@@ -1523,17 +1523,20 @@ export default function Home() {
                     : null;
                   const tradeOffAmount = topLifestyle ? Math.min(50, Math.round(topLifestyle.monthly * 0.3)) : 50;
 
+                  // Moves count for action CTA
+                  const movesCount = moves.length;
+
                   return (
                     <>
                       {/* ── Title row with info icon ── */}
                       <View style={s.blTitleRow}>
                         <View style={s.blStatusRow}>
                           <View style={[s.blStatusDot, {
-                            backgroundColor: overBudget ? colors.coral : surplusRatio < 0.1 ? colors.amber : colors.green,
+                            backgroundColor: overBudget ? colors.amber : surplusRatio < 0.1 ? colors.amber : colors.green,
                           }]} />
                           <Text style={s.blStatusText}>
                             {overBudget
-                              ? `\u00a3${overAmount.toLocaleString()} over budget`
+                              ? `\u00a3${overAmount.toLocaleString()} off balance`
                               : surplusAmount === 0
                                 ? 'Every pound is allocated'
                                 : `\u00a3${surplusAmount.toLocaleString()} left this month`
@@ -1555,7 +1558,7 @@ export default function Home() {
                       {infoCard === 'budgetLine' && (
                         <View style={s.infoBox}>
                           <Text style={s.infoBoxText}>
-                            This card shows where every pound of your income goes. Essentials are fixed costs like rent, bills and groceries. Lifestyle is everything else you choose to spend on. The bar shows how much of your income each takes up, and "real spending power" is what{'\u2019'}s left after essentials.
+                            This card shows where every pound of your income goes. Essentials are fixed costs like rent, bills and groceries. Lifestyle is everything else you choose to spend on. "Real spending power" is what{'\u2019'}s left after essentials.
                           </Text>
                           <View style={s.infoBoxCalc}>
                             <View style={s.infoBoxCalcRow}>
@@ -1572,7 +1575,7 @@ export default function Home() {
                             </View>
                             <View style={[s.infoBoxCalcRow, s.infoBoxCalcTotal]}>
                               <Text style={[s.infoBoxCalcLabel, { fontFamily: fonts.medium }]}>
-                                {overBudget ? 'Over budget' : 'Left over'}
+                                {overBudget ? 'Spending gap' : 'Left over'}
                               </Text>
                               <Text style={[s.infoBoxCalcValue, { fontFamily: fonts.medium, color: overBudget ? colors.coral : colors.accent }]}>
                                 {overBudget ? '-' : ''}{'\u00a3'}{overBudget ? overAmount.toLocaleString() : surplusAmount.toLocaleString()}
@@ -1581,7 +1584,7 @@ export default function Home() {
                           </View>
                           {overBudget && (
                             <Text style={[s.infoBoxText, { marginTop: 8 }]}>
-                              Your total spending ({'\u00a3'}{Math.round(totalSpend).toLocaleString()}) exceeds your income ({'\u00a3'}{Math.round(income).toLocaleString()}) by {'\u00a3'}{overAmount.toLocaleString()}. This means you{'\u2019'}re drawing from savings or going into debt each month.
+                              Your total spending ({'\u00a3'}{Math.round(totalSpend).toLocaleString()}) is {'\u00a3'}{overAmount.toLocaleString()} above your income ({'\u00a3'}{Math.round(income).toLocaleString()}). This gap means you{'\u2019'}re drawing from savings or taking on debt. The moves on your Plan page will close it.
                             </Text>
                           )}
                         </View>
@@ -1671,25 +1674,37 @@ export default function Home() {
                         </Text>
                       )}
 
-                      {/* ── Trade-off insight ── */}
-                      {leftToDecide > 0 && topLifestyle && (
+                      {/* ── Trade-off / action section ── */}
+                      {overBudget ? (
+                        <>
+                          <View style={s.blDivider} />
+                          <View style={s.blActionSection}>
+                            <Text style={s.blActionLabel}>Fixable this month</Text>
+                            <Text style={s.blActionText}>
+                              {movesCount > 0
+                                ? `We found ${movesCount} move${movesCount !== 1 ? 's' : ''} to close the \u00a3${overAmount.toLocaleString()} gap.`
+                                : `Let\u2019s close the \u00a3${overAmount.toLocaleString()} gap together.`
+                              }
+                            </Text>
+                            <TouchableOpacity
+                              style={s.blActionBtn}
+                              onPress={() => router.push('/(main)/(tabs)/plan')}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={s.blActionBtnText}>
+                                {movesCount > 0 ? 'See the plan' : 'Build a plan'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </>
+                      ) : leftToDecide > 0 && topLifestyle ? (
                         <>
                           <View style={s.blDivider} />
                           <Text style={s.blTradeOff}>
                             Cutting {'\u00a3'}{tradeOffAmount} from {topLifestyle.category.toLowerCase()} puts {'\u00a3'}{tradeOffAmount} more toward savings or debt.
                           </Text>
                         </>
-                      )}
-
-                      {/* Over budget warning */}
-                      {overBudget && (
-                        <>
-                          <View style={s.blDivider} />
-                          <Text style={[s.blTradeOff, { color: colors.coral }]}>
-                            You{'\u2019'}re spending {'\u00a3'}{overAmount.toLocaleString()} more than you earn. Cut {'\u00a3'}{overAmount.toLocaleString()} from essentials or lifestyle to break even.
-                          </Text>
-                        </>
-                      )}
+                      ) : null}
                     </>
                   );
                 })()}
@@ -3212,6 +3227,36 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 13,
     color: c.text2,
     lineHeight: 19,
+  },
+  blActionSection: {
+    gap: 8,
+  },
+  blActionLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: c.green,
+  },
+  blActionText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+    lineHeight: 20,
+  },
+  blActionBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: c.accent,
+    marginTop: 4,
+  },
+  blActionBtnText: {
+    fontFamily: fonts.medium,
+    fontSize: 13,
+    color: c.accent,
   },
   breakdownHeaderRow: {
     flexDirection: 'row',
