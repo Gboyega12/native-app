@@ -1555,8 +1555,35 @@ export default function Home() {
                       {infoCard === 'budgetLine' && (
                         <View style={s.infoBox}>
                           <Text style={s.infoBoxText}>
-                            This card shows where every pound of your income goes. Essentials are fixed costs like rent, bills and groceries. Lifestyle is everything else you choose to spend on. The bar shows how much of your income each takes up, and "real spending power" is what{'\u2019'}s left after essentials. If that number is low, your fixed costs are eating into your freedom.
+                            This card shows where every pound of your income goes. Essentials are fixed costs like rent, bills and groceries. Lifestyle is everything else you choose to spend on. The bar shows how much of your income each takes up, and "real spending power" is what{'\u2019'}s left after essentials.
                           </Text>
+                          <View style={s.infoBoxCalc}>
+                            <View style={s.infoBoxCalcRow}>
+                              <Text style={s.infoBoxCalcLabel}>Income</Text>
+                              <Text style={s.infoBoxCalcValue}>{'\u00a3'}{Math.round(income).toLocaleString()}</Text>
+                            </View>
+                            <View style={s.infoBoxCalcRow}>
+                              <Text style={s.infoBoxCalcLabel}>Essentials</Text>
+                              <Text style={[s.infoBoxCalcValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}</Text>
+                            </View>
+                            <View style={s.infoBoxCalcRow}>
+                              <Text style={s.infoBoxCalcLabel}>Lifestyle</Text>
+                              <Text style={[s.infoBoxCalcValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(discTotal).toLocaleString()}</Text>
+                            </View>
+                            <View style={[s.infoBoxCalcRow, s.infoBoxCalcTotal]}>
+                              <Text style={[s.infoBoxCalcLabel, { fontFamily: fonts.medium }]}>
+                                {overBudget ? 'Over budget' : 'Left over'}
+                              </Text>
+                              <Text style={[s.infoBoxCalcValue, { fontFamily: fonts.medium, color: overBudget ? colors.coral : colors.accent }]}>
+                                {overBudget ? '-' : ''}{'\u00a3'}{overBudget ? overAmount.toLocaleString() : surplusAmount.toLocaleString()}
+                              </Text>
+                            </View>
+                          </View>
+                          {overBudget && (
+                            <Text style={[s.infoBoxText, { marginTop: 8 }]}>
+                              Your total spending ({'\u00a3'}{Math.round(totalSpend).toLocaleString()}) exceeds your income ({'\u00a3'}{Math.round(income).toLocaleString()}) by {'\u00a3'}{overAmount.toLocaleString()}. This means you{'\u2019'}re drawing from savings or going into debt each month.
+                            </Text>
+                          )}
                         </View>
                       )}
 
@@ -2466,6 +2493,31 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 12,
     color: c.dim,
     lineHeight: 18,
+  },
+  infoBoxCalc: {
+    marginTop: 12,
+    gap: 6,
+  },
+  infoBoxCalcRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  infoBoxCalcTotal: {
+    borderTopWidth: 1,
+    borderTopColor: c.border,
+    marginTop: 4,
+    paddingTop: 8,
+  },
+  infoBoxCalcLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.dim,
+  },
+  infoBoxCalcValue: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.text2,
   },
 
   // ── Hero Insight Card ──
