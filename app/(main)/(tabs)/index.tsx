@@ -214,6 +214,9 @@ export default function Home() {
   const [addItemSaving, setAddItemSaving] = useState(false);
   const [addItemError, setAddItemError] = useState('');
 
+  // Previous month snapshot for real income comparison
+  const [prevSnapshot, setPrevSnapshot] = useState<{ monthly_spending: number; monthly_income: number } | null>(null);
+
   // Custom weekly spending limit
   const [customWeeklyLimit, setCustomWeeklyLimit] = useState<number | null>(null);
   const [showLimitEditor, setShowLimitEditor] = useState(false);
@@ -858,6 +861,25 @@ export default function Home() {
         setAnalysis(mergeAdjustments(lastResult, adjustments));
       }
 
+      // Fetch previous month's snapshot for real income comparison
+      try {
+        const now = new Date();
+        const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+        const { data: prevData } = await supabase
+          .from('score_history')
+          .select('monthly_spending, monthly_income')
+          .eq('user_id', user.id)
+          .gte('created_at', prevMonth.toISOString())
+          .lte('created_at', prevMonthEnd.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        setPrevSnapshot(prevData ?? null);
+      } catch {
+        setPrevSnapshot(null);
+      }
+
       // Trigger background sync if user has any analysis data
       if (data || lastResult) {
         syncInBackground(user.id);
@@ -1013,6 +1035,20 @@ export default function Home() {
     }
     return floored as [number, number, number];
   })();
+
+  // ── Real income & budget line insights ──
+  // Real income = income minus essentials (what you can actually allocate)
+  const realIncome = income - nonDiscTotal;
+  const essentialsPct = income > 0 ? Math.round((nonDiscTotal / income) * 100) : 0;
+
+  // Compare essentials spend to previous month
+  const prevEssentialsSpending = prevSnapshot?.monthly_spending ?? null;
+  const essentialsChange = prevEssentialsSpending !== null && prevEssentialsSpending > 0
+    ? Math.round(((nonDiscTotal - prevEssentialsSpending) / prevEssentialsSpending) * 100)
+    : null;
+
+  // Budget line insight: how tight is the constraint?
+  const surplusRatio = income > 0 ? leftToDecide / income : 0;
 
   // ── Safe-to-spend weekly calculation ──
   // Static weekly budget is the baseline: unallocated monthly / 4.33 weeks
@@ -1524,6 +1560,38 @@ export default function Home() {
                 <Text style={s.summaryPct}>{leftPct}%</Text>
               </AnimGlyph>
             </View>
+
+            {/* ── Real income & budget line insights ── */}
+            {income > 0 && (
+              <AnimGlyph delay={320}>
+                <View style={s.budgetInsightBox}>
+                  <View style={s.budgetInsightRow}>
+                    <Text style={s.budgetInsightLabel}>Real spending power</Text>
+                    <Text style={s.budgetInsightValue}>
+                      {'\u00a3'}{Math.round(realIncome).toLocaleString()}/mo
+                    </Text>
+                  </View>
+                  <Text style={s.budgetInsightDesc}>
+                    Your income after essentials {'\u2014'} {essentialsPct}% goes to fixed costs
+                    {essentialsChange !== null && essentialsChange !== 0
+                      ? essentialsChange > 0
+                        ? `, up ${essentialsChange}% vs last month`
+                        : `, down ${Math.abs(essentialsChange)}% vs last month`
+                      : ''}
+                  </Text>
+                  {surplusRatio < 0.1 && leftToDecide > 0 && (
+                    <Text style={[s.budgetInsightDesc, { color: colors.amber, marginTop: 4 }]}>
+                      Your budget is tight {'\u2014'} every pound spent on lifestyle is a pound less for savings
+                    </Text>
+                  )}
+                  {leftToDecide === 0 && (
+                    <Text style={[s.budgetInsightDesc, { color: colors.coral, marginTop: 4 }]}>
+                      You're on the budget line {'\u2014'} any new expense needs a trade-off from somewhere else
+                    </Text>
+                  )}
+                </View>
+              </AnimGlyph>
+            )}
 
             {/* Collapsible breakdown sections */}
             {budgetExpanded && (
@@ -2836,6 +2904,38 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.dim,
     marginTop: 4,
     letterSpacing: 0.5,
+  },
+  budgetInsightBox: {
+    backgroundColor: c.surface,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: c.border,
+  },
+  budgetInsightRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  budgetInsightLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.dim,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  budgetInsightValue: {
+    fontFamily: fonts.mono,
+    fontSize: 16,
+    color: c.accent,
+  },
+  budgetInsightDesc: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.text2,
+    lineHeight: 17,
   },
   breakdownHeaderRow: {
     flexDirection: 'row',
