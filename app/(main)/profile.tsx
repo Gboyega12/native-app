@@ -689,6 +689,13 @@ export default function Profile() {
       <Text style={s.sectionLabel}>SUPPORT</Text>
 
       <View style={s.groupCard}>
+        <TouchableOpacity style={s.groupRow} onPress={() => Linking.openURL('https://www.bocy.io/privacy.html')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Privacy policy</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
+
+        <View style={s.groupDivider} />
+
         <TouchableOpacity style={s.groupRow} onPress={() => Linking.openURL('mailto:hello@bocy.io?subject=Feedback')} activeOpacity={0.7}>
           <Text style={s.groupRowLabel}>Send feedback</Text>
           <Text style={s.groupRowChevron}>{'\u203A'}</Text>
