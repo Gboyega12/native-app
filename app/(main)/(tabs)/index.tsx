@@ -1525,20 +1525,40 @@ export default function Home() {
 
                   return (
                     <>
-                      {/* ── Status headline ── */}
-                      <View style={s.blStatusRow}>
-                        <View style={[s.blStatusDot, {
-                          backgroundColor: overBudget ? colors.coral : surplusRatio < 0.1 ? colors.amber : colors.green,
-                        }]} />
-                        <Text style={s.blStatusText}>
-                          {overBudget
-                            ? `You\u2019re £${overAmount.toLocaleString()} over budget`
-                            : surplusAmount === 0
-                              ? 'You\u2019ve used every pound'
-                              : `£${surplusAmount.toLocaleString()} left to use this month`
-                          }
-                        </Text>
+                      {/* ── Title row with info icon ── */}
+                      <View style={s.blTitleRow}>
+                        <View style={s.blStatusRow}>
+                          <View style={[s.blStatusDot, {
+                            backgroundColor: overBudget ? colors.coral : surplusRatio < 0.1 ? colors.amber : colors.green,
+                          }]} />
+                          <Text style={s.blStatusText}>
+                            {overBudget
+                              ? `\u00a3${overAmount.toLocaleString()} over budget`
+                              : surplusAmount === 0
+                                ? 'Every pound is allocated'
+                                : `\u00a3${surplusAmount.toLocaleString()} left this month`
+                            }
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          onPress={() => {
+                            LayoutAnimation.configureNext(SMOOTH_ANIM);
+                            setInfoCard(infoCard === 'budgetLine' ? null : 'budgetLine');
+                          }}
+                        >
+                          <Text style={s.infoIcon}>{infoCard === 'budgetLine' ? '\u2715' : 'i'}</Text>
+                        </TouchableOpacity>
                       </View>
+
+                      {/* ── Info explainer ── */}
+                      {infoCard === 'budgetLine' && (
+                        <View style={s.infoBox}>
+                          <Text style={s.infoBoxText}>
+                            This card shows where every pound of your income goes. Essentials are fixed costs like rent, bills and groceries. Lifestyle is everything else you choose to spend on. The bar shows how much of your income each takes up, and "real spending power" is what{'\u2019'}s left after essentials. If that number is low, your fixed costs are eating into your freedom.
+                          </Text>
+                        </View>
+                      )}
 
                       {/* ── Budget bar ── */}
                       <View style={s.blBarOuter}>
@@ -1591,7 +1611,7 @@ export default function Home() {
                       <View style={s.blDivider} />
 
                       {/* ── Real spending power ── */}
-                      <Text style={s.blInsightTitle}>What your money actually buys</Text>
+                      <Text style={s.blInsightTitle}>Real spending power</Text>
 
                       <View style={s.blStatRow}>
                         <Text style={s.blStatLabel}>You earn</Text>
@@ -1600,7 +1620,7 @@ export default function Home() {
                         </Text>
                       </View>
                       <View style={s.blStatRow}>
-                        <Text style={s.blStatLabel}>Fixed costs take</Text>
+                        <Text style={s.blStatLabel}>Fixed costs</Text>
                         <Text style={[s.blStatValue, { color: colors.text2 }]}>
                           -{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
                         </Text>
@@ -1618,8 +1638,8 @@ export default function Home() {
                           color: essentialsChange > 0 ? colors.coral : colors.green,
                         }]}>
                           {essentialsChange > 0
-                            ? `Your essentials cost ${essentialsChange}% more than last month — your real spending power dropped to \u00a3${Math.round(realIncome).toLocaleString()}`
-                            : `Your essentials cost ${Math.abs(essentialsChange)}% less than last month — you freed up \u00a3${Math.round(Math.abs(nonDiscTotal - (prevEssentialsSpending ?? 0))).toLocaleString()}`
+                            ? `Essentials cost ${essentialsChange}% more than last month. Your real spending power dropped to \u00a3${Math.round(realIncome).toLocaleString()}.`
+                            : `Essentials cost ${Math.abs(essentialsChange)}% less than last month. You freed up \u00a3${Math.round(Math.abs(nonDiscTotal - (prevEssentialsSpending ?? 0))).toLocaleString()}.`
                           }
                         </Text>
                       )}
@@ -1629,7 +1649,7 @@ export default function Home() {
                         <>
                           <View style={s.blDivider} />
                           <Text style={s.blTradeOff}>
-                            If you cut {'\u00a3'}{tradeOffAmount} from {topLifestyle.category.toLowerCase()}, that{'\u2019'}s {'\u00a3'}{tradeOffAmount} more toward savings or debt
+                            Cutting {'\u00a3'}{tradeOffAmount} from {topLifestyle.category.toLowerCase()} puts {'\u00a3'}{tradeOffAmount} more toward savings or debt.
                           </Text>
                         </>
                       )}
@@ -1639,7 +1659,7 @@ export default function Home() {
                         <>
                           <View style={s.blDivider} />
                           <Text style={[s.blTradeOff, { color: colors.coral }]}>
-                            You{'\u2019'}re spending {'\u00a3'}{overAmount.toLocaleString()} more than you earn — you need to cut {'\u00a3'}{overAmount.toLocaleString()} from essentials or lifestyle to break even
+                            You{'\u2019'}re spending {'\u00a3'}{overAmount.toLocaleString()} more than you earn. Cut {'\u00a3'}{overAmount.toLocaleString()} from essentials or lifestyle to break even.
                           </Text>
                         </>
                       )}
@@ -3025,11 +3045,16 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     letterSpacing: 0.5,
   },
   // ── Budget line card ──
+  blTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
   blStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 24,
   },
   blStatusDot: {
     width: 8,
