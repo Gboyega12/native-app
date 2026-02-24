@@ -16,6 +16,8 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
+import { useSubscription } from '@/lib/subscription';
+import Paywall from '@/components/Paywall';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -196,6 +198,8 @@ export default function Home() {
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   };
 
+  const { isPro } = useSubscription();
+  const [showPaywall, setShowPaywall] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [verifyMove, setVerifyMove] = useState<Move | null>(null);
   const [infoCard, setInfoCard] = useState<string | null>(null);
@@ -1688,7 +1692,18 @@ export default function Home() {
                             </Text>
                             <TouchableOpacity
                               style={s.blActionBtn}
-                              onPress={() => router.push('/(main)/(tabs)/plan')}
+                              onPress={() => {
+                                if (!isPro) {
+                                  setShowPaywall(true);
+                                  return;
+                                }
+                                const topMove = moves[0];
+                                if (topMove) {
+                                  router.push({ pathname: '/(main)/(tabs)/plan', params: { highlightAction: topMove.action } });
+                                } else {
+                                  router.push('/(main)/(tabs)/plan');
+                                }
+                              }}
                               activeOpacity={0.7}
                             >
                               <Text style={s.blActionBtnText}>
@@ -2283,6 +2298,8 @@ export default function Home() {
 
         </>
       )}
+
+      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
     </ScrollView>
   );
 }
@@ -3246,17 +3263,17 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   blActionBtn: {
     alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: c.accent,
+    backgroundColor: c.accent,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 100,
     marginTop: 4,
   },
   blActionBtnText: {
-    fontFamily: fonts.medium,
+    fontFamily: fonts.semibold,
     fontSize: 13,
-    color: c.accent,
+    color: c.bg,
+    letterSpacing: 0.3,
   },
   breakdownHeaderRow: {
     flexDirection: 'row',
