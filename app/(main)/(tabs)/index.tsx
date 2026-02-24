@@ -1505,166 +1505,147 @@ export default function Home() {
           {income > 0 && (
             <AnimGlyph delay={80}>
               <View style={s.card}>
-                <Text style={s.cardTitle}>Your budget line</Text>
-
-                {/* ── Chart area ── */}
                 {(() => {
-                  const CHART_SIZE = 200;
                   const totalSpend = nonDiscTotal + discTotal;
                   const overBudget = totalSpend > income;
-                  // Scale so the chart fits all data — use income or total spend, whichever is larger
-                  const scale = Math.max(income, totalSpend) * 1.15;
+                  const overAmount = Math.round(totalSpend - income);
+                  const surplusAmount = Math.round(leftToDecide);
 
-                  // Budget line endpoints (diagonal from top-left to bottom-right)
-                  // X = lifestyle, Y = essentials (inverted Y for RN)
-                  const lineStartX = 0;
-                  const lineStartY = (1 - income / scale) * CHART_SIZE;
-                  const lineEndX = (income / scale) * CHART_SIZE;
-                  const lineEndY = CHART_SIZE;
+                  // Bar proportions (capped at 100% for visual, overflow shown separately)
+                  const barMax = Math.max(income, totalSpend);
+                  const essentialWidth = income > 0 ? Math.round((nonDiscTotal / barMax) * 100) : 0;
+                  const lifestyleWidth = income > 0 ? Math.round((discTotal / barMax) * 100) : 0;
+                  const surplusWidth = Math.max(0, 100 - essentialWidth - lifestyleWidth);
 
-                  // Current position dot
-                  const dotX = (discTotal / scale) * CHART_SIZE;
-                  const dotY = (1 - nonDiscTotal / scale) * CHART_SIZE;
-
-                  // Category dots — essentials along Y axis area, lifestyle along X axis area
-                  const essentialDots = nonDiscItems.slice(0, 5).map((item: BudgetCategory, i: number) => {
-                    const cumulative = nonDiscItems.slice(0, i + 1).reduce((s, it) => s + it.monthly, 0);
-                    return {
-                      x: (discTotal / scale) * CHART_SIZE * 0.15,
-                      y: (1 - cumulative / scale) * CHART_SIZE,
-                      label: item.category,
-                      amount: item.monthly,
-                      inside: cumulative + discTotal <= income,
-                    };
-                  });
-                  const lifestyleDots = discItems.slice(0, 5).map((item: BudgetCategory, i: number) => {
-                    const cumulative = discItems.slice(0, i + 1).reduce((s, it) => s + it.monthly, 0);
-                    return {
-                      x: (cumulative / scale) * CHART_SIZE,
-                      y: (1 - nonDiscTotal / scale) * CHART_SIZE * 0.97,
-                      label: item.category,
-                      amount: item.monthly,
-                      inside: nonDiscTotal + cumulative <= income,
-                    };
-                  });
-
-                  // Diagonal line angle for the View-based line
-                  const lineLength = Math.sqrt(
-                    Math.pow(lineEndX - lineStartX, 2) + Math.pow(lineEndY - lineStartY, 2)
-                  );
-                  const lineAngle = Math.atan2(lineEndY - lineStartY, lineEndX - lineStartX) * (180 / Math.PI);
+                  // Biggest lifestyle category for the trade-off example
+                  const topLifestyle = discItems.length > 0
+                    ? discItems.reduce((a, b) => a.monthly > b.monthly ? a : b)
+                    : null;
+                  const tradeOffAmount = topLifestyle ? Math.min(50, Math.round(topLifestyle.monthly * 0.3)) : 50;
 
                   return (
-                    <View style={s.blChartWrap}>
-                      {/* Axis labels */}
-                      <Text style={s.blAxisY}>Essentials</Text>
-                      <Text style={s.blAxisX}>Lifestyle</Text>
-
-                      <View style={[s.blChart, {
-                        width: CHART_SIZE,
-                        height: CHART_SIZE,
-                        backgroundColor: overBudget ? colors.coralDim : colors.greenDim,
-                      }]}>
-
-                        {/* Budget line — diagonal */}
-                        <View style={[s.blLine, {
-                          width: lineLength,
-                          left: lineStartX,
-                          top: lineStartY,
-                          transform: [{ rotate: `${lineAngle}deg` }],
-                          transformOrigin: 'left center',
-                          backgroundColor: colors.dim,
+                    <>
+                      {/* ── Status headline ── */}
+                      <View style={s.blStatusRow}>
+                        <View style={[s.blStatusDot, {
+                          backgroundColor: overBudget ? colors.coral : surplusRatio < 0.1 ? colors.amber : colors.green,
                         }]} />
+                        <Text style={s.blStatusText}>
+                          {overBudget
+                            ? `You\u2019re £${overAmount.toLocaleString()} over budget`
+                            : surplusAmount === 0
+                              ? 'You\u2019ve used every pound'
+                              : `£${surplusAmount.toLocaleString()} left to use this month`
+                          }
+                        </Text>
+                      </View>
 
-                        {/* Income label on line */}
-                        <View style={[s.blIncomeLabel, { top: lineStartY - 18, left: 2 }]}>
-                          <Text style={s.blIncomeLabelText}>
-                            {'\u00a3'}{Math.round(income).toLocaleString()}
+                      {/* ── Budget bar ── */}
+                      <View style={s.blBarOuter}>
+                        {/* Income limit marker */}
+                        {overBudget && (
+                          <View style={[s.blBarLimitLine, {
+                            left: `${Math.round((income / barMax) * 100)}%`,
+                          }]} />
+                        )}
+                        <View style={[s.blBarSeg, {
+                          width: `${essentialWidth}%`,
+                          backgroundColor: colors.text,
+                        }]} />
+                        <View style={[s.blBarSeg, {
+                          width: `${lifestyleWidth}%`,
+                          backgroundColor: overBudget ? colors.coral : colors.dim,
+                        }]} />
+                        {surplusWidth > 0 && (
+                          <View style={[s.blBarSeg, {
+                            width: `${surplusWidth}%`,
+                            backgroundColor: colors.border,
+                          }]} />
+                        )}
+                      </View>
+
+                      {/* ── Bar labels ── */}
+                      <View style={s.blBarLabels}>
+                        <Text style={s.blBarLabel}>
+                          {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()} essentials
+                        </Text>
+                        <Text style={s.blBarLabel}>
+                          {'\u00a3'}{Math.round(discTotal).toLocaleString()} lifestyle
+                        </Text>
+                        {!overBudget && surplusAmount > 0 && (
+                          <Text style={[s.blBarLabel, { color: colors.accent }]}>
+                            {'\u00a3'}{surplusAmount.toLocaleString()} free
                           </Text>
-                        </View>
+                        )}
+                      </View>
 
-                        {/* Essential category dots */}
-                        {essentialDots.map((d, i) => (
-                          <View key={`e-${i}`} style={[s.blDotSmall, {
-                            left: d.x - 3,
-                            top: d.y - 3,
-                            backgroundColor: d.inside ? colors.green : colors.coral,
-                          }]} />
-                        ))}
+                      {/* ── Income line ── */}
+                      <View style={s.blIncomeLine}>
+                        <View style={s.blIncomeLineBar} />
+                        <Text style={s.blIncomeLineLabel}>
+                          {'\u00a3'}{Math.round(income).toLocaleString()} income
+                        </Text>
+                      </View>
 
-                        {/* Lifestyle category dots */}
-                        {lifestyleDots.map((d, i) => (
-                          <View key={`l-${i}`} style={[s.blDotSmall, {
-                            left: d.x - 3,
-                            top: d.y - 3,
-                            backgroundColor: d.inside ? colors.green : colors.coral,
-                          }]} />
-                        ))}
+                      {/* ── Divider ── */}
+                      <View style={s.blDivider} />
 
-                        {/* Current total position — main dot */}
-                        <View style={[s.blDotMain, {
-                          left: dotX - 7,
-                          top: dotY - 7,
-                          backgroundColor: overBudget ? colors.coral : colors.accent,
-                          borderColor: overBudget ? colors.coralDim : colors.accentDim,
-                        }]} />
+                      {/* ── Real spending power ── */}
+                      <Text style={s.blInsightTitle}>What your money actually buys</Text>
 
-                        {/* Dot label */}
-                        <View style={[s.blDotLabel, {
-                          left: dotX + 10,
-                          top: dotY - 10,
+                      <View style={s.blStatRow}>
+                        <Text style={s.blStatLabel}>You earn</Text>
+                        <Text style={s.blStatValue}>
+                          {'\u00a3'}{Math.round(income).toLocaleString()}/mo
+                        </Text>
+                      </View>
+                      <View style={s.blStatRow}>
+                        <Text style={s.blStatLabel}>Fixed costs take</Text>
+                        <Text style={[s.blStatValue, { color: colors.text2 }]}>
+                          -{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
+                        </Text>
+                      </View>
+                      <View style={[s.blStatRow, s.blStatRowHighlight]}>
+                        <Text style={s.blStatLabel}>You can actually spend</Text>
+                        <Text style={[s.blStatValue, { color: colors.accent }]}>
+                          {'\u00a3'}{Math.round(realIncome).toLocaleString()}/mo
+                        </Text>
+                      </View>
+
+                      {/* Month-over-month essentials change */}
+                      {essentialsChange !== null && essentialsChange !== 0 && (
+                        <Text style={[s.blNote, {
+                          color: essentialsChange > 0 ? colors.coral : colors.green,
                         }]}>
-                          <Text style={[s.blDotLabelText, { color: overBudget ? colors.coral : colors.accent }]}>
-                            {'\u00a3'}{Math.round(totalSpend).toLocaleString()}
-                          </Text>
-                          <Text style={s.blDotLabelSub}>
-                            {overBudget ? 'over budget' : 'total spend'}
-                          </Text>
-                        </View>
-                      </View>
+                          {essentialsChange > 0
+                            ? `Your essentials cost ${essentialsChange}% more than last month — your real spending power dropped to \u00a3${Math.round(realIncome).toLocaleString()}`
+                            : `Your essentials cost ${Math.abs(essentialsChange)}% less than last month — you freed up \u00a3${Math.round(Math.abs(nonDiscTotal - (prevEssentialsSpending ?? 0))).toLocaleString()}`
+                          }
+                        </Text>
+                      )}
 
-                      {/* Legend */}
-                      <View style={s.blLegend}>
-                        <View style={s.blLegendItem}>
-                          <View style={[s.blLegendDot, { backgroundColor: colors.green }]} />
-                          <Text style={s.blLegendText}>Within budget</Text>
-                        </View>
-                        <View style={s.blLegendItem}>
-                          <View style={[s.blLegendDot, { backgroundColor: colors.coral }]} />
-                          <Text style={s.blLegendText}>Over budget</Text>
-                        </View>
-                      </View>
-                    </View>
+                      {/* ── Trade-off insight ── */}
+                      {leftToDecide > 0 && topLifestyle && (
+                        <>
+                          <View style={s.blDivider} />
+                          <Text style={s.blTradeOff}>
+                            If you cut {'\u00a3'}{tradeOffAmount} from {topLifestyle.category.toLowerCase()}, that{'\u2019'}s {'\u00a3'}{tradeOffAmount} more toward savings or debt
+                          </Text>
+                        </>
+                      )}
+
+                      {/* Over budget warning */}
+                      {overBudget && (
+                        <>
+                          <View style={s.blDivider} />
+                          <Text style={[s.blTradeOff, { color: colors.coral }]}>
+                            You{'\u2019'}re spending {'\u00a3'}{overAmount.toLocaleString()} more than you earn — you need to cut {'\u00a3'}{overAmount.toLocaleString()} from essentials or lifestyle to break even
+                          </Text>
+                        </>
+                      )}
+                    </>
                   );
                 })()}
-
-                {/* ── Real spending power ── */}
-                <View style={s.blInsightSection}>
-                  <View style={s.blInsightRow}>
-                    <Text style={s.blInsightLabel}>Real spending power</Text>
-                    <Text style={s.blInsightValue}>
-                      {'\u00a3'}{Math.round(realIncome).toLocaleString()}/mo
-                    </Text>
-                  </View>
-                  <Text style={s.blInsightDesc}>
-                    Your income after essentials {'\u2014'} {essentialsPct}% is fixed costs
-                    {essentialsChange !== null && essentialsChange !== 0
-                      ? essentialsChange > 0
-                        ? `, up ${essentialsChange}% vs last month`
-                        : `, down ${Math.abs(essentialsChange)}% vs last month`
-                      : ''}
-                  </Text>
-                  {surplusRatio < 0.1 && leftToDecide > 0 && (
-                    <Text style={[s.blInsightDesc, { color: colors.amber, marginTop: 4 }]}>
-                      Budget is tight {'\u2014'} every pound on lifestyle is a pound less for savings
-                    </Text>
-                  )}
-                  {leftToDecide === 0 && (
-                    <Text style={[s.blInsightDesc, { color: colors.coral, marginTop: 4 }]}>
-                      On the budget line {'\u2014'} any new expense needs a trade-off elsewhere
-                    </Text>
-                  )}
-                </View>
               </View>
             </AnimGlyph>
           )}
@@ -3044,126 +3025,116 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     letterSpacing: 0.5,
   },
   // ── Budget line card ──
-  blChartWrap: {
+  blStatusRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 20,
-    position: 'relative',
+    gap: 10,
+    marginBottom: 24,
   },
-  blAxisY: {
-    position: 'absolute',
-    left: -2,
-    top: 80,
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: c.dim,
-    letterSpacing: 0.5,
-    transform: [{ rotate: '-90deg' }],
+  blStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  blAxisX: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: c.dim,
-    letterSpacing: 0.5,
-    marginTop: 6,
+  blStatusText: {
+    fontFamily: fonts.medium,
+    fontSize: 16,
+    color: c.text,
   },
-  blChart: {
-    position: 'relative',
+  blBarOuter: {
+    flexDirection: 'row',
+    height: 8,
+    borderRadius: 4,
     overflow: 'hidden',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.bg,
+    backgroundColor: c.border,
+    position: 'relative',
   },
-  blLine: {
+  blBarSeg: {
+    height: 8,
+  },
+  blBarLimitLine: {
     position: 'absolute',
-    height: 1.5,
+    top: -4,
+    width: 2,
+    height: 16,
+    backgroundColor: c.accent,
+    zIndex: 2,
     borderRadius: 1,
   },
-  blIncomeLabel: {
-    position: 'absolute',
-  },
-  blIncomeLabelText: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: c.dim,
-  },
-  blDotSmall: {
-    position: 'absolute',
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    opacity: 0.7,
-  },
-  blDotMain: {
-    position: 'absolute',
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 3,
-  },
-  blDotLabel: {
-    position: 'absolute',
-  },
-  blDotLabelText: {
-    fontFamily: fonts.mono,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  blDotLabelSub: {
-    fontFamily: fonts.regular,
-    fontSize: 9,
-    color: c.dim,
-    marginTop: 1,
-  },
-  blLegend: {
-    flexDirection: 'row',
-    gap: 16,
-    marginTop: 12,
-  },
-  blLegendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  blLegendDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  blLegendText: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.dim,
-  },
-  blInsightSection: {
-    borderTopWidth: 1,
-    borderTopColor: c.border,
-    paddingTop: 16,
-  },
-  blInsightRow: {
+  blBarLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
+    marginTop: 8,
   },
-  blInsightLabel: {
+  blBarLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 0.3,
+  },
+  blIncomeLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  blIncomeLineBar: {
+    flex: 1,
+    height: 1,
+    backgroundColor: c.border,
+  },
+  blIncomeLineLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 0.3,
+  },
+  blDivider: {
+    height: 1,
+    backgroundColor: c.border,
+    marginVertical: 16,
+  },
+  blInsightTitle: {
     fontFamily: fonts.mono,
     fontSize: 11,
     color: c.dim,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+    marginBottom: 12,
   },
-  blInsightValue: {
+  blStatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  blStatRowHighlight: {
+    borderTopWidth: 1,
+    borderTopColor: c.border,
+    marginTop: 4,
+    paddingTop: 10,
+  },
+  blStatLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+  },
+  blStatValue: {
     fontFamily: fonts.mono,
-    fontSize: 16,
-    color: c.accent,
+    fontSize: 15,
+    color: c.text,
   },
-  blInsightDesc: {
+  blNote: {
     fontFamily: fonts.regular,
     fontSize: 12,
-    color: c.text2,
     lineHeight: 17,
+    marginTop: 10,
+  },
+  blTradeOff: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.text2,
+    lineHeight: 19,
   },
   breakdownHeaderRow: {
     flexDirection: 'row',
