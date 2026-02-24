@@ -1542,8 +1542,8 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={[s.addItemLabel, { color: colors.dim }]}>Add item</Text>
-                        <Text style={[s.addItemIcon, { color: colors.dim, borderColor: colors.border }]}>+</Text>
+                        <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
+                        <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
                       </TouchableOpacity>
                     </View>
                     {nonDiscItems.length === 0 && (
@@ -1627,8 +1627,8 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={[s.addItemLabel, { color: colors.dim }]}>Add item</Text>
-                        <Text style={[s.addItemIcon, { color: colors.dim, borderColor: colors.border }]}>+</Text>
+                        <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
+                        <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
                       </TouchableOpacity>
                     </View>
                     {discItems.length === 0 && (
@@ -1710,44 +1710,6 @@ export default function Home() {
                   <Text style={s.viewTransactionsText}>Hide transactions</Text>
                 </TouchableOpacity>
               </>
-            )}
-
-            {/* Quick add buttons — always visible when collapsed */}
-            {!budgetExpanded && (
-              <View style={s.quickAddRow}>
-                <TouchableOpacity
-                  style={s.quickAddBtn}
-                  onPress={() => {
-                    LayoutAnimation.configureNext(SMOOTH_ANIM);
-                    setAddItemEssential(true);
-                    setAddItemError('');
-                    setAddItemDesc('');
-                    setAddItemAmount('');
-                    setAddItemCategory('');
-                    setShowAddItem(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.quickAddIcon}>+</Text>
-                  <Text style={s.quickAddText}>Add essential</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={s.quickAddBtn}
-                  onPress={() => {
-                    LayoutAnimation.configureNext(SMOOTH_ANIM);
-                    setAddItemEssential(false);
-                    setAddItemError('');
-                    setAddItemDesc('');
-                    setAddItemAmount('');
-                    setAddItemCategory('');
-                    setShowAddItem(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.quickAddIcon}>+</Text>
-                  <Text style={s.quickAddText}>Add lifestyle</Text>
-                </TouchableOpacity>
-              </View>
             )}
 
             {/* View transactions button */}
@@ -3042,7 +3004,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   viewTransactionsText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: c.text2,
+    color: c.accent,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
