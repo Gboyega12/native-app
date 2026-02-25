@@ -51,6 +51,7 @@ export default function Home() {
   const [userName, setUserName] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
+  const [txCardExpanded, setTxCardExpanded] = useState(false);
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
   const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -1633,28 +1634,35 @@ export default function Home() {
                   {'\u00a3'}{Math.round(periodRemaining).toLocaleString()}
                 </Text>
               </View>
-              {moveAllocations.length > 0 && (
-                <View style={s.allocationList}>
-                  <Text style={s.allocationHeading}>Based on your plan</Text>
-                  {moveAllocations.map((alloc, idx) => (
-                    <View key={idx} style={s.allocationItem}>
-                      <View style={s.allocationItemTop}>
-                        <Text style={s.allocationRank}>#{alloc.priority}</Text>
-                        <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(alloc.amount).toLocaleString()}{budgetPeriod === 'week' ? '/wk' : '/mo'}</Text>
+              {isPro ? (<>
+                {moveAllocations.length > 0 && (
+                  <View style={s.allocationList}>
+                    <Text style={s.allocationHeading}>Based on your plan</Text>
+                    {moveAllocations.map((alloc, idx) => (
+                      <View key={idx} style={s.allocationItem}>
+                        <View style={s.allocationItemTop}>
+                          <Text style={s.allocationRank}>#{alloc.priority}</Text>
+                          <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(alloc.amount).toLocaleString()}{budgetPeriod === 'week' ? '/wk' : '/mo'}</Text>
+                        </View>
+                        <Text style={s.allocationLabel}>{alloc.label}</Text>
                       </View>
-                      <Text style={s.allocationLabel}>{alloc.label}</Text>
-                    </View>
-                  ))}
+                    ))}
+                  </View>
+                )}
+                <View style={s.allocationUnallocated}>
+                  <Text style={s.allocationUnallocatedLabel}>Unallocated</Text>
+                  <Text style={[s.allocationUnallocatedAmount, { color: freeToSpend > 0 ? colors.text : colors.muted }]}>
+                    {'\u00a3'}{Math.round(freeToSpend).toLocaleString()}
+                  </Text>
                 </View>
-              )}
-              <View style={s.allocationUnallocated}>
-                <Text style={s.allocationUnallocatedLabel}>Unallocated</Text>
-                <Text style={[s.allocationUnallocatedAmount, { color: freeToSpend > 0 ? colors.text : colors.muted }]}>
-                  {'\u00a3'}{Math.round(freeToSpend).toLocaleString()}
-                </Text>
-              </View>
-              {moveAllocations.length === 0 && periodRemaining > 0 && (
-                <Text style={s.allocationHint}>Check your Plan tab to see where this could go.</Text>
+                {moveAllocations.length === 0 && periodRemaining > 0 && (
+                  <Text style={s.allocationHint}>Check your Plan tab to see where this could go.</Text>
+                )}
+              </>) : (
+                <TouchableOpacity onPress={() => setShowPaywall(true)} style={s.allocationUpgrade}>
+                  <Text style={s.allocationUpgradeText}>Upgrade to see where your remaining money should go based on your plan</Text>
+                  <Text style={[s.allocationUpgradeBtn, { color: colors.accent }]}>See my plan {'\u2192'}</Text>
+                </TouchableOpacity>
               )}
             </View>
 
@@ -1662,10 +1670,19 @@ export default function Home() {
 
           {/* ── Transactions card ── */}
           <Card style={{ marginTop: spacing.md }}>
-            <CardTitleRow>
-              <CardTitle>Transactions</CardTitle>
-            </CardTitleRow>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => {
+                LayoutAnimation.configureNext(SMOOTH_ANIM);
+                setTxCardExpanded(prev => !prev);
+              }}
+              style={s.txCardHeader}
+            >
+              <Text style={s.txCardTitle}>Transactions</Text>
+              <Text style={s.txCardChevron}>{txCardExpanded ? '\u25B2' : '\u25BC'}</Text>
+            </TouchableOpacity>
 
+            {txCardExpanded && (<>
             {/* Essentials breakdown */}
             <View style={s.breakdownHeaderRow}>
               <Text style={s.breakdownHeader}>ESSENTIALS</Text>
@@ -1833,6 +1850,7 @@ export default function Home() {
             })}
 
             <Text style={s.cardFooter}>Tap any category to expand · Hold a transaction to re-categorize</Text>
+            </>)}
           </Card>
 
           {/* Add budget item modal */}
@@ -3068,6 +3086,37 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   allocationUnallocatedAmount: {
     fontFamily: fonts.mono,
     fontSize: 14,
+  },
+  allocationUpgrade: {
+    marginTop: 10,
+    paddingVertical: 10,
+  },
+  allocationUpgradeText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.muted,
+    lineHeight: 18,
+  },
+  allocationUpgradeBtn: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    marginTop: 6,
+  },
+  txCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 4,
+  },
+  txCardTitle: {
+    fontFamily: fonts.semibold,
+    fontSize: 17,
+    color: c.text,
+  },
+  txCardChevron: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.muted,
   },
   budgetBar: {
     flexDirection: 'row',
