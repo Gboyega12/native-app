@@ -366,7 +366,7 @@ Response: { success: boolean }
 ```
 EXPO_PUBLIC_SUPABASE_URL=https://imofcovytgqykwbgiujq.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imltb2Zjb3Z5dGdxeWt3YmdpdWpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExODE3MzAsImV4cCI6MjA4Njc1NzczMH0.RFsiyptebEYzzGHRYPfqUHRyu94Gik_-vFP57VlccaE
-EXPO_PUBLIC_TRUELAYER_REDIRECT_URI=https://native-app.vercel.app/api/truelayer/callback
+EXPO_PUBLIC_TRUELAYER_REDIRECT_URI=https://app.bocy.io/api/truelayer/callback
 ```
 
 ### Vercel Dashboard (serverless functions)
@@ -421,7 +421,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=<same as app .env>
 - [ ] Auth > Providers: Enable Google and/or Apple (optional)
 
 ### TrueLayer Console
-- [ ] Register redirect URI: `https://native-app.vercel.app/api/truelayer/callback`
+- [ ] Register redirect URI: `https://app.bocy.io/api/truelayer/callback`
 
 ### Vercel Dashboard
 - [ ] Set all 5 environment variables listed above

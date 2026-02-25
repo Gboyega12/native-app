@@ -47,7 +47,7 @@ export default async function handler(req, res) {
   const redirectUri =
     process.env.TRUELAYER_REDIRECT_URI ||
     process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
-    'https://native-app-ashy.vercel.app/api/truelayer/callback';
+    'https://app.bocy.io/api/truelayer/callback';
 
   const clientId = process.env.TRUELAYER_CLIENT_ID;
   const clientSecret = process.env.TRUELAYER_CLIENT_SECRET;

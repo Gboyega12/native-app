@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-APP_URL="${APP_URL:-https://native-app-ashy.vercel.app}"
+APP_URL="${APP_URL:-https://app.bocy.io}"
 
 if [ -z "${CRON_SECRET:-}" ]; then
   echo "Error: CRON_SECRET is required."

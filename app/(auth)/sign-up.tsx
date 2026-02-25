@@ -32,7 +32,7 @@ export default function SignUp() {
       email: email.trim(),
       password,
       options: {
-        emailRedirectTo: 'https://native-app-ashy.vercel.app/',
+        emailRedirectTo: 'https://app.bocy.io/',
       },
     });
     setLoading(false);
@@ -51,7 +51,7 @@ export default function SignUp() {
       options: {
         redirectTo: Platform.OS === 'web'
           ? window.location.origin
-          : 'https://native-app-ashy.vercel.app/',
+          : 'https://app.bocy.io/',
       },
     });
     if (oauthError) {

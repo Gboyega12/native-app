@@ -52,7 +52,7 @@ export default function SignIn() {
       options: {
         redirectTo: Platform.OS === 'web'
           ? window.location.origin
-          : 'https://native-app-ashy.vercel.app/',
+          : 'https://app.bocy.io/',
       },
     });
     if (oauthError) {

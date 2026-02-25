@@ -14,7 +14,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const appUrl = process.env.APP_URL || 'https://native-app-ashy.vercel.app';
+const appUrl = process.env.APP_URL || 'https://app.bocy.io';
 
 export default async function handler(req, res) {
   // Verify cron secret

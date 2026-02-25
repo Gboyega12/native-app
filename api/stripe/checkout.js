@@ -25,7 +25,7 @@ export default async function handler(req, res) {
   const stripeKey = process.env.STRIPE_SECRET_KEY;
   const priceMonthly = process.env.STRIPE_PRICE_MONTHLY;
   const priceYearly = process.env.STRIPE_PRICE_YEARLY;
-  const appUrl = process.env.APP_URL || 'https://native-app-ashy.vercel.app';
+  const appUrl = process.env.APP_URL || 'https://app.bocy.io';
   const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
