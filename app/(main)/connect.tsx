@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform,
-  LayoutAnimation, Animated, Easing, Linking,
+  Linking,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
@@ -62,25 +62,8 @@ export default function Connect() {
   const [errorMsg, setErrorMsg] = useState('');
   const [accumulatedCSV, setAccumulatedCSV] = useState(params.csvData || '');
   const [connectedCount, setConnectedCount] = useState(params.csvData ? 1 : 0);
-  const [lastConnectedName, setLastConnectedName] = useState('');
 
   const isFromProfile = params.from === 'profile';
-
-  // Must declare all hooks before any conditional returns (Rules of Hooks)
-  const primaryConnected = connectedCount > 0 && !isFromProfile;
-  const fadeIn = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (primaryConnected) {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      Animated.timing(fadeIn, {
-        toValue: 1,
-        duration: 600,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [primaryConnected]);
 
   // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
@@ -239,19 +222,10 @@ export default function Connect() {
     }
   };
 
-  const handleConnectionSuccess = (csvData: string, label: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    const combined = accumulatedCSV
-      ? accumulatedCSV + '\n' + csvData.split('\n').slice(1).join('\n')
-      : csvData;
-    setAccumulatedCSV(combined);
-    setConnectedCount((c) => {
-      const next = c + 1;
-      // Persist state for web redirect survival
-      saveConnectState(combined, next);
-      return next;
-    });
-    setLastConnectedName(label);
+  const handleConnectionSuccess = (csvData: string, _label: string) => {
+    // Onboarding: single account connect → proceed straight to analysis
+    clearConnectState();
+    router.push({ pathname: '/(main)/processing', params: { csvData } });
   };
 
   const handleTrueLayer = async () => {
@@ -397,55 +371,6 @@ export default function Connect() {
     }
   };
 
-  const handleContinue = async () => {
-    // Merge ALL bank_data CSVs from Supabase + any locally accumulated data
-    let mergedCSV = accumulatedCSV;
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: bankRows } = await supabase
-          .from('bank_data')
-          .select('csv_data')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
-
-        if (bankRows && bankRows.length > 0) {
-          const allLines: string[] = ['Date,Description,Amount'];
-          for (const row of bankRows) {
-            if (!row.csv_data) continue;
-            const lines = row.csv_data.split('\n');
-            allLines.push(...lines.slice(1).filter((l: string) => l.trim()));
-          }
-          const dbCSV = allLines.join('\n');
-
-          // Merge with any locally accumulated CSV (from manual uploads)
-          if (mergedCSV) {
-            const localLines = mergedCSV.split('\n').slice(1).filter((l: string) => l.trim());
-            // Deduplicate by checking if lines already exist in DB CSV
-            const dbLineSet = new Set(allLines);
-            const uniqueLocal = localLines.filter((l: string) => !dbLineSet.has(l));
-            if (uniqueLocal.length > 0) {
-              mergedCSV = dbCSV + '\n' + uniqueLocal.join('\n');
-            } else {
-              mergedCSV = dbCSV;
-            }
-          } else {
-            mergedCSV = dbCSV;
-          }
-        }
-      }
-    } catch {}
-
-    if (!mergedCSV || mergedCSV.trim().split('\n').length < 2) {
-      Alert.alert('No data', 'No transaction data found. Please connect at least one account.');
-      return;
-    }
-
-    clearConnectState();
-    // Skip goals — identity flow already auto-generates them
-    router.push({ pathname: '/(main)/processing', params: { csvData: mergedCSV } });
-  };
-
   const anyLoading = loading || loadingCSV || loadingPDF;
 
   // Show full-screen loading when returning from TrueLayer redirect
@@ -547,127 +472,68 @@ export default function Connect() {
   return (
     <View style={styles.container}>
       <View style={styles.content}>
-        {/* ── State: Primary account connected ── */}
-        {primaryConnected ? (
-          <Animated.View style={{ opacity: fadeIn, transform: [{ translateY: fadeIn.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-            {/* Success indicator */}
-            <View style={styles.successGlyph}>
-              <Text style={styles.successGlyphText}>{'\u2713'}</Text>
-            </View>
+        <Text style={styles.stepLabel}>STEP 1 OF 3</Text>
 
-            <Text style={styles.successTitle}>Account connected</Text>
-            <Text style={styles.successSubtitle}>
-              {lastConnectedName ? `${lastConnectedName} is linked. ` : ''}
-              Bocy has what it needs to start. Add more accounts now for a fuller picture, or do it later in your profile.
-            </Text>
+        <Text style={styles.title}>Connect your{'\n'}main bank account</Text>
+        <Text style={styles.subtitle}>
+          Start with the account you use most — where your salary arrives and bills go out. You can add more accounts later from your profile.
+        </Text>
 
-            {/* Continue CTA */}
-            <TouchableOpacity style={styles.continueButton} onPress={handleContinue}>
-              <Text style={styles.continueText}>
-                Start analysis
-              </Text>
-            </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.primaryButton, loading && styles.buttonDisabled]}
+          onPress={handleTrueLayer}
+          disabled={anyLoading}
+        >
+          {loading ? (
+            <ActivityIndicator color={colors.bg} />
+          ) : (
+            <Text style={styles.primaryButtonText}>Connect via Open Banking</Text>
+          )}
+        </TouchableOpacity>
 
-            {/* Secondary: add more */}
-            <View style={styles.addMoreSection}>
-              <View style={styles.addMoreDivider}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>want a fuller picture?</Text>
-                <View style={styles.dividerLine} />
-              </View>
+        <TrustSection />
 
-              <Text style={styles.addMoreHint}>
-                Credit cards, savings accounts, or a second current account — the more Bocy sees, the smarter your plan. You can always add more from your profile too.
-              </Text>
+        <View style={styles.divider}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>or upload a statement</Text>
+          <View style={styles.dividerLine} />
+        </View>
 
-              <View style={styles.addMoreRow}>
-                <TouchableOpacity
-                  style={[styles.addMoreBtn, loading && styles.buttonDisabled]}
-                  onPress={handleTrueLayer}
-                  disabled={anyLoading}
-                >
-                  {loading ? (
-                    <ActivityIndicator color={colors.text} size="small" />
-                  ) : (
-                    <Text style={styles.addMoreBtnText}>+ Add another account</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
+        <View style={styles.uploadRow}>
+          <TouchableOpacity
+            style={[styles.uploadButton, loadingPDF && styles.buttonDisabled]}
+            onPress={handlePDFUpload}
+            disabled={anyLoading}
+          >
+            {loadingPDF ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <>
+                <Text style={styles.uploadIcon}>PDF</Text>
+                <Text style={styles.uploadButtonText}>PDF statement</Text>
+              </>
+            )}
+          </TouchableOpacity>
 
-              {connectedCount > 1 && (
-                <Text style={styles.addMoreCount}>
-                  {connectedCount} accounts connected
-                </Text>
-              )}
-            </View>
-          </Animated.View>
-        ) : (
-          /* ── State: No account connected yet ── */
-          <>
-            <Text style={styles.stepLabel}>STEP 1 OF 3</Text>
+          <TouchableOpacity
+            style={[styles.uploadButton, loadingCSV && styles.buttonDisabled]}
+            onPress={handleCSVUpload}
+            disabled={anyLoading}
+          >
+            {loadingCSV ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <>
+                <Text style={styles.uploadIcon}>CSV</Text>
+                <Text style={styles.uploadButtonText}>CSV export</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
 
-            <Text style={styles.title}>Connect your{'\n'}main bank account</Text>
-            <Text style={styles.subtitle}>
-              Start with the account you use most — where your salary arrives and bills go out. You can add other accounts too, or connect them later in your profile.
-            </Text>
-
-            <TouchableOpacity
-              style={[styles.primaryButton, loading && styles.buttonDisabled]}
-              onPress={handleTrueLayer}
-              disabled={anyLoading}
-            >
-              {loading ? (
-                <ActivityIndicator color={colors.bg} />
-              ) : (
-                <Text style={styles.primaryButtonText}>Connect via Open Banking</Text>
-              )}
-            </TouchableOpacity>
-
-            <TrustSection />
-
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or upload a statement</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            <View style={styles.uploadRow}>
-              <TouchableOpacity
-                style={[styles.uploadButton, loadingPDF && styles.buttonDisabled]}
-                onPress={handlePDFUpload}
-                disabled={anyLoading}
-              >
-                {loadingPDF ? (
-                  <ActivityIndicator color={colors.text} />
-                ) : (
-                  <>
-                    <Text style={styles.uploadIcon}>PDF</Text>
-                    <Text style={styles.uploadButtonText}>PDF statement</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.uploadButton, loadingCSV && styles.buttonDisabled]}
-                onPress={handleCSVUpload}
-                disabled={anyLoading}
-              >
-                {loadingCSV ? (
-                  <ActivityIndicator color={colors.text} />
-                ) : (
-                  <>
-                    <Text style={styles.uploadIcon}>CSV</Text>
-                    <Text style={styles.uploadButtonText}>CSV export</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.hint}>
-              Download your statement from your banking app as PDF or CSV
-            </Text>
-          </>
-        )}
+        <Text style={styles.hint}>
+          Download your statement from your banking app as PDF or CSV
+        </Text>
 
         {statusMsg ? <Text style={styles.statusText}>{statusMsg}</Text> : null}
         {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
@@ -806,74 +672,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
 
-  // ── Success (primary connected) ──
-  successGlyph: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.green,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  successGlyphText: {
-    fontFamily: fonts.heading,
-    fontSize: 24,
-    color: colors.bg,
-  },
-  successTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 22,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  successSubtitle: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: colors.text2,
-    lineHeight: 22,
-    marginBottom: spacing.xl,
-  },
-
-  // ── Add more section (after primary connected) ──
-  addMoreSection: {
-    marginTop: spacing.xl,
-  },
-  addMoreDivider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  addMoreHint: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: colors.dim,
-    lineHeight: 20,
-    marginBottom: spacing.md,
-  },
-  addMoreRow: {
-    flexDirection: 'row',
-  },
-  addMoreBtn: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: radius.md,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.lg,
-    alignItems: 'center',
-  },
-  addMoreBtnText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: colors.text2,
-  },
-  addMoreCount: {
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    color: colors.green,
-    marginTop: spacing.sm,
-  },
-
   title: {
     fontFamily: fonts.heading,
     fontSize: 22,
@@ -1003,18 +801,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.muted,
     textAlign: 'center',
-  },
-  continueButton: {
-    backgroundColor: colors.accent,
-    paddingVertical: 14,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    marginTop: spacing.lg,
-  },
-  continueText: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
-    color: colors.bg,
   },
   statusText: {
     fontFamily: fonts.regular,
