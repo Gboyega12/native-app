@@ -2,9 +2,11 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { useResponsive } from '@/lib/responsive';
 
 export default function TabsLayout() {
   const { colors } = useTheme();
+  const { isTablet, maxContentWidth } = useResponsive();
 
   return (
     <Tabs
@@ -18,15 +20,26 @@ export default function TabsLayout() {
           elevation: 0,
           paddingTop: 4,
           height: 64,
+          // Center the tab items on wide screens
+          ...(isTablet && {
+            maxWidth: maxContentWidth,
+            alignSelf: 'center' as const,
+            width: '100%',
+            borderLeftWidth: 1,
+            borderRightWidth: 1,
+            borderLeftColor: colors.border,
+            borderRightColor: colors.border,
+          }),
         },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.muted,
         tabBarLabelStyle: {
           fontFamily: fonts.mono,
-          fontSize: 10,
+          fontSize: isTablet ? 11 : 10,
           letterSpacing: 0.8,
           textTransform: 'uppercase',
         },
+        tabBarIconStyle: isTablet ? { marginBottom: 2 } : undefined,
       }}
     >
       <Tabs.Screen

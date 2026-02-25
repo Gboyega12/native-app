@@ -11,32 +11,71 @@
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#050505"
+      "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.bocy.app",
       "buildNumber": "1",
+      "associatedDomains": [
+        "applinks:bocy.app",
+        "webcredentials:bocy.app"
+      ],
       "infoPlist": {
         "NSCameraUsageDescription": "Bocy needs camera access to scan documents.",
-        "NSPhotoLibraryUsageDescription": "Bocy needs photo library access to upload documents."
+        "NSPhotoLibraryUsageDescription": "Bocy needs photo library access to upload documents.",
+        "NSFaceIDUsageDescription": "Bocy uses Face ID to protect your financial data.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["fetch", "remote-notification"]
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#050505"
+        "backgroundColor": "#000000"
       },
       "package": "com.bocy.app"
     },
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Bocy",
+      "shortName": "Bocy",
+      "description": "Your personal finance companion",
+      "backgroundColor": "#000000",
+      "themeColor": "#000000"
     },
-    "plugins": ["expo-router", "expo-secure-store"],
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-notifications",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.0",
+            "useFrameworks": "static"
+          }
+        }
+      ],
+      "./plugins/withIAP.js"
+    ],
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f8e22d4e-78f5-43b2-9369-4dfa3c00ff02"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f8e22d4e-78f5-43b2-9369-4dfa3c00ff02"
+      }
+    },
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "privacyUrl": "https://www.bocy.io/privacy.html",
+    "termsUrl": "https://www.bocy.io/terms.html"
   }
 }

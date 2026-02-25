@@ -1,7 +1,7 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Animated, Easing, Pressable,
+  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Pressable,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -13,8 +13,13 @@ import { requestSync, onSyncComplete, getLastSyncTime, invalidateSyncCache } fro
 import type { WeeklyContext } from '@/lib/sync';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
+import { useSubscription } from '@/lib/subscription';
+import Paywall from '@/components/Paywall';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
+import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -35,64 +40,11 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// Smooth layout animation config for micro-interactions
-const SMOOTH_ANIM = {
-  duration: 280,
-  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-  update: { type: LayoutAnimation.Types.easeInEaseOut },
-  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-};
-
-
-// ── Breathing bar: subtle pulse on progress indicators ──
-const BreathingBar = ({ color, width: barWidth, style }: { color: string; width: string; style?: any }) => {
-  const breathAnim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(breathAnim, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-        Animated.timing(breathAnim, { toValue: 0, duration: 2000, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-      ]),
-    ).start();
-  }, []);
-  const opacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
-  return (
-    <Animated.View style={[style, { width: barWidth, backgroundColor: color, opacity }]} />
-  );
-};
-
-// ── Glyph micro-animation: fade+scale on mount ──
-const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 500,
-      delay,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, []);
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          opacity: anim,
-          transform: [{
-            scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
-          }],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
-};
 
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,6 +59,62 @@ export default function Home() {
   const [connectionWarning, setConnectionWarning] = useState<{ message: string; banks: string[] } | null>(null);
   const [connectionDismissed, setConnectionDismissed] = useState(false);
   const [incomeDismissed, setIncomeDismissed] = useState(false);
+  const { showWalkthrough, dismissWalkthrough } = useWalkthrough();
+
+  // ── Connection banner dismiss ──
+  // Keyed by the sorted bank names. Dismissing stores these bank names.
+  // Banner only reappears if the set of expired banks actually changes
+  // (i.e. a new bank expires, or the user reconnects and a different one lapses).
+  // Cleared automatically when all connections sync OK (connectionWarning = null).
+  const CONN_DISMISS_KEY = 'dismiss:conn:banks';
+
+  useEffect(() => {
+    if (!connectionWarning) return; // Don't reset — keep dismissed state until warning arrives
+    AsyncStorage.getItem(CONN_DISMISS_KEY).then((stored) => {
+      if (!stored) { setConnectionDismissed(false); return; }
+      // Compare stored bank fingerprint with current warning
+      const currentFingerprint = connectionWarning.banks.sort().join(',');
+      setConnectionDismissed(stored === currentFingerprint);
+    });
+  }, [connectionWarning]);
+
+  // When connections are healthy, clear the stored dismiss so future warnings are fresh
+  useEffect(() => {
+    if (connectionWarning === null) {
+      AsyncStorage.removeItem(CONN_DISMISS_KEY);
+    }
+  }, [connectionWarning]);
+
+  // ── Income banner dismiss ──
+  // Keyed by a fingerprint of the actual income events (source + amount).
+  // Stays dismissed until genuinely different income arrives.
+  const INCOME_DISMISS_KEY = 'dismiss:income:events';
+
+  const incomeFingerprint = useMemo(() => {
+    const events = weeklyCtx?.recentIncomeEvents ?? [];
+    if (events.length === 0) return '';
+    return events.map((e) => `${e.source}:${Math.round(e.amount)}`).sort().join('|');
+  }, [weeklyCtx?.recentIncomeEvents]);
+
+  useEffect(() => {
+    if (!incomeFingerprint) return; // No income events yet — keep current state
+    AsyncStorage.getItem(INCOME_DISMISS_KEY).then((stored) => {
+      setIncomeDismissed(stored === incomeFingerprint);
+    });
+  }, [incomeFingerprint]);
+
+  const dismissConnection = () => {
+    setConnectionDismissed(true);
+    if (connectionWarning) {
+      AsyncStorage.setItem(CONN_DISMISS_KEY, connectionWarning.banks.sort().join(','));
+    }
+  };
+  const dismissIncome = () => {
+    setIncomeDismissed(true);
+    if (incomeFingerprint) {
+      AsyncStorage.setItem(INCOME_DISMISS_KEY, incomeFingerprint);
+    }
+  };
 
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
@@ -139,6 +147,8 @@ export default function Home() {
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   };
 
+  const { isPro } = useSubscription();
+  const [showPaywall, setShowPaywall] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [verifyMove, setVerifyMove] = useState<Move | null>(null);
   const [infoCard, setInfoCard] = useState<string | null>(null);
@@ -156,6 +166,9 @@ export default function Home() {
   const [addItemEssential, setAddItemEssential] = useState(true);
   const [addItemSaving, setAddItemSaving] = useState(false);
   const [addItemError, setAddItemError] = useState('');
+
+  // Previous month snapshot for real income comparison
+  const [prevSnapshot, setPrevSnapshot] = useState<{ monthly_spending: number; monthly_income: number } | null>(null);
 
   // Custom weekly spending limit
   const [customWeeklyLimit, setCustomWeeklyLimit] = useState<number | null>(null);
@@ -801,6 +814,25 @@ export default function Home() {
         setAnalysis(mergeAdjustments(lastResult, adjustments));
       }
 
+      // Fetch previous month's snapshot for real income comparison
+      try {
+        const now = new Date();
+        const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+        const { data: prevData } = await supabase
+          .from('score_history')
+          .select('monthly_spending, monthly_income')
+          .eq('user_id', user.id)
+          .gte('created_at', prevMonth.toISOString())
+          .lte('created_at', prevMonthEnd.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        setPrevSnapshot(prevData ?? null);
+      } catch {
+        setPrevSnapshot(null);
+      }
+
       // Trigger background sync if user has any analysis data
       if (data || lastResult) {
         syncInBackground(user.id);
@@ -838,14 +870,17 @@ export default function Home() {
         } else if (result.connectionIssues.includes('some_connections_expired')) {
           setConnectionWarning({ message: 'some_expired', banks });
         }
-        setConnectionDismissed(false); // New issue detected — reset dismiss
       } else if (result.dataSource === 'fallback') {
         setConnectionWarning({ message: 'fallback', banks: [] });
-        setConnectionDismissed(false);
+      } else if (result.expiringConnections?.length > 0) {
+        // Proactive warning: connections approaching 90-day consent expiry
+        const expiringBanks = result.expiringConnections.map(
+          (c: { name: string; daysLeft: number }) => `${c.name} (${c.daysLeft}d left)`
+        );
+        setConnectionWarning({ message: 'expiring', banks: expiringBanks });
       } else {
         // All connections synced OK — clear warning
         setConnectionWarning(null);
-        setConnectionDismissed(false);
       }
 
       // Update debt accounts: merge synced with any manual debts
@@ -954,6 +989,20 @@ export default function Home() {
     return floored as [number, number, number];
   })();
 
+  // ── Real income & budget line insights ──
+  // Real income = income minus essentials (what you can actually allocate)
+  const realIncome = income - nonDiscTotal;
+  const essentialsPct = income > 0 ? Math.round((nonDiscTotal / income) * 100) : 0;
+
+  // Compare essentials spend to previous month
+  const prevEssentialsSpending = prevSnapshot?.monthly_spending ?? null;
+  const essentialsChange = prevEssentialsSpending !== null && prevEssentialsSpending > 0
+    ? Math.round(((nonDiscTotal - prevEssentialsSpending) / prevEssentialsSpending) * 100)
+    : null;
+
+  // Budget line insight: how tight is the constraint?
+  const surplusRatio = income > 0 ? leftToDecide / income : 0;
+
   // ── Safe-to-spend weekly calculation ──
   // Static weekly budget is the baseline: unallocated monthly / 4.33 weeks
   const staticWeeklyBudget = leftToDecide / 4.33;
@@ -1012,7 +1061,10 @@ export default function Home() {
   return (
     <ScrollView
       style={s.container}
-      contentContainerStyle={s.scroll}
+      contentContainerStyle={[
+        s.scroll,
+        isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding },
+      ]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -1057,21 +1109,33 @@ export default function Home() {
             onPress={() => router.push('/(main)/connect')}
             activeOpacity={0.8}
           >
-            <Text style={s.connectionBannerText}>
-              {connectionWarning.banks.length > 0
-                ? `${connectionWarning.banks.join(', ')} ${connectionWarning.banks.length === 1 ? 'needs' : 'need'} reconnecting`
-                : connectionWarning.message === 'fallback'
-                  ? 'Using cached data — pull to refresh'
-                  : 'Bank connection expired'}
-            </Text>
-            <Text style={s.connectionBannerAction}>Reconnect</Text>
+            <View style={{ flex: 1 }}>
+              {connectionWarning.message === 'expiring' ? (
+                connectionWarning.banks.map((bank, idx) => (
+                  <Text key={idx} style={s.connectionBannerText}>
+                    {bank} {'\u2014'} reconnect soon
+                  </Text>
+                ))
+              ) : connectionWarning.banks.length > 0 ? (
+                connectionWarning.banks.map((bank, idx) => (
+                  <Text key={idx} style={s.connectionBannerText}>
+                    Reconnect {bank}
+                  </Text>
+                ))
+              ) : connectionWarning.message === 'fallback' ? (
+                <Text style={s.connectionBannerText}>Using cached data {'\u2014'} pull to refresh</Text>
+              ) : (
+                <Text style={s.connectionBannerText}>A bank connection has expired {'\u2014'} tap to reconnect</Text>
+              )}
+            </View>
+            <Text style={s.connectionBannerAction}>{connectionWarning.message === 'expiring' ? 'Renew' : 'Fix'}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={s.bannerDismiss}
-            onPress={() => setConnectionDismissed(true)}
+            onPress={dismissConnection}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Text style={s.bannerDismissX}>✕</Text>
+            <Text style={s.bannerDismissX}>{'\u2715'}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -1116,7 +1180,7 @@ export default function Home() {
                 <View style={s.incomeAlertHeader}>
                   <Text style={s.incomeAlertTitle}>Income received</Text>
                   <TouchableOpacity
-                    onPress={() => setIncomeDismissed(true)}
+                    onPress={dismissIncome}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Text style={s.incomeAlertDismiss}>✕</Text>
@@ -1139,164 +1203,87 @@ export default function Home() {
           )}
 
           {/* ══════════════════════════════════════════════
-              CARD 1 — YOUR INSIGHTS
+              HERO — YOUR #1 MOVE
               ══════════════════════════════════════════════ */}
-          <View style={s.card}>
-            <AnimGlyph delay={0}>
-              <Text style={s.cardTitle}>Your Insights</Text>
-            </AnimGlyph>
+          {dashboardMoves.length > 0 ? (() => {
+            const heroMove = dashboardMoves[0];
+            return (
+              <AnimGlyph delay={0}>
+                <Card
+                  variant="hero"
+                  accessibilityLabel={`Your number one move: ${heroMove.action}, saves ${heroMove.annualImpact} pounds per year`}
+                >
+                  <Text style={s.heroLabel}>Your #1 move</Text>
 
-            {dashboardMoves.length > 0 ? dashboardMoves.slice(0, 2).map((move: Move, i: number) => {
-              const effortClr = move.effort === 'high' ? colors.green
-                : move.effort === 'medium' ? colors.dim : colors.lavender;
-              return (
-                <AnimGlyph key={i} delay={i * 120}>
-                  <View
-                    accessibilityRole="summary"
-                    accessibilityLabel={`Insight: ${move.action}, saves ${move.annualImpact} pounds per year`}
-                    style={s.moveItemFull}
-                  >
-                    <Text style={s.moveTitle}>
-                      {stripMd(move.action)}
+                  <Text style={s.heroAction}>
+                    {stripMd(heroMove.action)}
+                  </Text>
+
+                  {/* Impact + effort */}
+                  <View style={s.heroMeta}>
+                    <Text style={s.heroImpact}>
+                      +{'\u00a3'}{(heroMove.annualImpact || 0).toLocaleString()}/yr
                     </Text>
-
-                    {/* Impact + effort on one line */}
-                    <View style={s.moveMeta}>
-                      <Text style={s.moveImpact}>
-                        +{'\u00a3'}{(move.annualImpact || 0).toLocaleString()}/yr
-                      </Text>
-                      {move.effort && (
-                        <View style={[s.effortPill, { borderColor: effortClr + '40' }]}>
-                          <Text style={[s.effortPillText, { color: effortClr }]}>
-                            {move.effort}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-
-                    {/* Action buttons */}
-                    <View style={s.moveActions}>
-                      <TouchableOpacity
-                        style={s.moveApproveBtn}
-                        onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlight: String(i) } })}
-                      >
-                        <Text style={s.moveApproveBtnText}>View</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={s.moveDeleteBtn}
-                        onPress={() => handleDeleteMove(move)}
-                      >
-                        <Text style={s.moveDeleteBtnText}>Delete</Text>
-                      </TouchableOpacity>
-                    </View>
+                    {heroMove.effort && (
+                      <View style={s.effortPill}>
+                        <Text style={s.effortPillText}>
+                          {heroMove.effort}
+                        </Text>
+                      </View>
+                    )}
                   </View>
-                </AnimGlyph>
-              );
-            }) : (
-              <Text style={s.noDataText}>
-                No actionable insights yet. Upload a statement to get started.
-              </Text>
-            )}
 
-            {dashboardMoves.length > 2 && (
-              <TouchableOpacity
-                style={s.viewAllBtn}
-                onPress={() => router.push('/(main)/(tabs)/plan')}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.viewAllText, { color: colors.green }]}>
-                  View plan {'\u203A'}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
+                  {/* Strategy — the WHY */}
+                  {heroMove.strategy ? (
+                    <Text style={s.heroStrategy}>
+                      {stripMd(heroMove.strategy)}
+                    </Text>
+                  ) : null}
 
-          {/* ══════════════════════════════════════════════
-              CARD 2 — YOUR INCOME
-              ══════════════════════════════════════════════ */}
-          <View style={s.card} accessibilityRole="summary" accessibilityLabel={`Monthly income: ${Math.round(income)} pounds`}>
-            <AnimGlyph delay={50}>
-              <View style={s.cardTitleRow}>
-                <Text style={s.cardTitle}>Your income</Text>
-                <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'income' ? null : 'income')}>
-                  <Text style={s.infoIcon}>i</Text>
-                </TouchableOpacity>
-              </View>
-            </AnimGlyph>
-            {infoCard === 'income' && (
-              <View style={s.infoBox}>
-                <Text style={s.infoBoxText}>
-                  Income is detected from your bank account transactions only (not credit cards). Regular credits matching salary, benefit, or employer patterns are identified. Remove any that aren't real income.
-                </Text>
-              </View>
-            )}
-
-            <AnimGlyph delay={100}>
-              <View style={s.bigNumberWrap}>
-                <Text style={s.bigNumber} accessibilityRole="text">
-                  {'\u00a3'}{Math.round(income).toLocaleString()}
-                </Text>
-                <Text style={s.bigNumberLabel}>monthly</Text>
-              </View>
-            </AnimGlyph>
-
-            {incomeSources.length > 0 ? (
-              <>
-                <View style={s.divider} />
-                <Text style={s.incomeSourcesHeader}>
-                  {incomeSources.length} source{incomeSources.length !== 1 ? 's' : ''}
-                </Text>
-                {incomeSources.map((src: IncomeSource, i: number) => (
-                  <AnimGlyph key={i} delay={150 + i * 80}>
-                    <View style={s.sourceCard}>
-                      <View style={s.sourceRow}>
-                        <View style={s.sourceInfo}>
-                          <Text style={s.sourceName}>{src.source}</Text>
-                          <View style={s.sourceTagRow}>
-                            <Text style={s.sourceFreq}>
-                              {src.frequency.charAt(0).toUpperCase() + src.frequency.slice(1)}
-                            </Text>
-                            {src.isSalary && (
-                              <View style={[s.primaryTag, { backgroundColor: colors.greenDim, borderColor: colors.green + '30' }]}>
-                                <Text style={[s.primaryTagText, { color: colors.green }]}>PRIMARY</Text>
-                              </View>
-                            )}
-                        </View>
-                      </View>
-                      <View style={s.sourceAmountWrap}>
-                        <Text style={s.sourceAmount}>
-                          {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
-                        </Text>
-                        <Text style={s.sourceAmountPer}>
-                          per {src.frequency === 'weekly' ? 'week' : src.frequency === 'fortnightly' ? 'fortnight' : 'month'}
-                        </Text>
-                      </View>
-                    </View>
-                    {/* Remove non-income */}
+                  {/* CTA */}
+                  <View style={s.heroActions}>
                     <TouchableOpacity
-                      style={s.removeSourceBtn}
-                      onPress={() => handleRemoveIncomeSource(src.source)}
-                      disabled={removingSource === src.source}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      activeOpacity={0.6}
+                      style={s.heroCta}
+                      onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlightAction: heroMove.action } })}
                     >
-                      <Text style={s.removeSourceText}>
-                        {removingSource === src.source ? 'Removing...' : 'Not income? Remove'}
+                      <Text style={s.heroCtaText}>Take action</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={s.heroSecondary}
+                      onPress={() => setVerifyMove(heroMove)}
+                    >
+                      <Text style={s.heroSecondaryText}>Details</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* More insights teaser */}
+                  {dashboardMoves.length > 1 && (
+                    <TouchableOpacity
+                      style={s.heroMore}
+                      onPress={() => router.push('/(main)/(tabs)/plan')}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.heroMoreText}>
+                        +{dashboardMoves.length - 1} more insight{dashboardMoves.length - 1 !== 1 ? 's' : ''} {'\u203A'}
                       </Text>
                     </TouchableOpacity>
-                    </View>
-                  </AnimGlyph>
-                ))}
-              </>
-            ) : (
-              <Text style={s.noDataText}>No income sources detected from bank accounts.</Text>
-            )}
-          </View>
+                  )}
+                </Card>
+              </AnimGlyph>
+            );
+          })() : (
+            <Card variant="hero">
+              <Text style={s.heroLabel}>Your #1 move</Text>
+              <Text style={s.noDataText}>
+                No actionable insights yet. Connect your bank so Bocy can find your most impactful financial move.
+              </Text>
+            </Card>
+          )}
 
           {/* ══════════════════════════════════════════════
-              CARD 3 — SAFE TO SPEND
+              CARD — SAFE TO SPEND (compact)
               ══════════════════════════════════════════════ */}
-          <View style={s.card}>
+          <Card>
             <AnimGlyph delay={100}>
               <View style={s.cardTitleRow}>
                 <Text style={s.cardTitle}>Safe to spend</Text>
@@ -1408,8 +1395,8 @@ export default function Home() {
 
                 {customWeeklyLimit !== null && (
                   <View style={s.breakdownRow}>
-                    <Text style={[s.breakdownLabel, { color: colors.accent }]}>Your custom limit</Text>
-                    <Text style={[s.breakdownValue, { color: colors.accent }]}>{'\u00a3'}{Math.round(customWeeklyLimit).toLocaleString()}/wk</Text>
+                    <Text style={[s.breakdownLabel, { color: colors.text2 }]}>Your custom limit</Text>
+                    <Text style={[s.breakdownValue, { color: colors.text2 }]}>{'\u00a3'}{Math.round(customWeeklyLimit).toLocaleString()}/wk</Text>
                   </View>
                 )}
 
@@ -1462,12 +1449,236 @@ export default function Home() {
                 )}
               </View>
             )}
-          </View>
+          </Card>
 
           {/* ══════════════════════════════════════════════
-              CARD 4 — YOUR BUDGET REALITY
+              CARD — YOUR BUDGET LINE
               ══════════════════════════════════════════════ */}
-          <View style={s.card}>
+          {income > 0 && (
+            <AnimGlyph delay={80}>
+              <Card>
+                {(() => {
+                  const totalSpend = nonDiscTotal + discTotal;
+                  const overBudget = totalSpend > income;
+                  const overAmount = Math.round(totalSpend - income);
+                  const surplusAmount = Math.round(leftToDecide);
+
+                  // Bar proportions (capped at 100% for visual, overflow shown separately)
+                  const barMax = Math.max(income, totalSpend);
+                  const essentialWidth = income > 0 ? Math.round((nonDiscTotal / barMax) * 100) : 0;
+                  const lifestyleWidth = income > 0 ? Math.round((discTotal / barMax) * 100) : 0;
+                  const surplusWidth = Math.max(0, 100 - essentialWidth - lifestyleWidth);
+
+                  // Biggest lifestyle category for the trade-off example
+                  const topLifestyle = discItems.length > 0
+                    ? discItems.reduce((a, b) => a.monthly > b.monthly ? a : b)
+                    : null;
+                  const tradeOffAmount = topLifestyle ? Math.min(50, Math.round(topLifestyle.monthly * 0.3)) : 50;
+
+                  // Moves count for action CTA
+                  const movesCount = moves.length;
+
+                  return (
+                    <>
+                      {/* ── Title row with info icon ── */}
+                      <View style={s.blTitleRow}>
+                        <View style={s.blStatusRow}>
+                          <View style={[s.blStatusDot, {
+                            backgroundColor: overBudget ? colors.amber : surplusRatio < 0.1 ? colors.amber : colors.green,
+                          }]} />
+                          <Text style={s.blStatusText}>
+                            {overBudget
+                              ? `\u00a3${overAmount.toLocaleString()} off balance`
+                              : surplusAmount === 0
+                                ? 'Every pound is allocated'
+                                : `\u00a3${surplusAmount.toLocaleString()} left this month`
+                            }
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          onPress={() => {
+                            LayoutAnimation.configureNext(SMOOTH_ANIM);
+                            setInfoCard(infoCard === 'budgetLine' ? null : 'budgetLine');
+                          }}
+                        >
+                          <Text style={s.infoIcon}>{infoCard === 'budgetLine' ? '\u2715' : 'i'}</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* ── Info explainer ── */}
+                      {infoCard === 'budgetLine' && (
+                        <View style={s.infoBox}>
+                          <Text style={s.infoBoxText}>
+                            This card shows where every pound of your income goes. Essentials are fixed costs like rent, bills and groceries. Lifestyle is everything else you choose to spend on. "Real spending power" is what{'\u2019'}s left after essentials.
+                          </Text>
+                          <View style={s.infoBoxCalc}>
+                            <View style={s.infoBoxCalcRow}>
+                              <Text style={s.infoBoxCalcLabel}>Income</Text>
+                              <Text style={s.infoBoxCalcValue}>{'\u00a3'}{Math.round(income).toLocaleString()}</Text>
+                            </View>
+                            <View style={s.infoBoxCalcRow}>
+                              <Text style={s.infoBoxCalcLabel}>Essentials</Text>
+                              <Text style={[s.infoBoxCalcValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}</Text>
+                            </View>
+                            <View style={s.infoBoxCalcRow}>
+                              <Text style={s.infoBoxCalcLabel}>Lifestyle</Text>
+                              <Text style={[s.infoBoxCalcValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(discTotal).toLocaleString()}</Text>
+                            </View>
+                            <View style={[s.infoBoxCalcRow, s.infoBoxCalcTotal]}>
+                              <Text style={[s.infoBoxCalcLabel, { fontFamily: fonts.medium }]}>
+                                {overBudget ? 'Spending gap' : 'Left over'}
+                              </Text>
+                              <Text style={[s.infoBoxCalcValue, { fontFamily: fonts.medium, color: overBudget ? colors.coral : colors.accent }]}>
+                                {overBudget ? '-' : ''}{'\u00a3'}{overBudget ? overAmount.toLocaleString() : surplusAmount.toLocaleString()}
+                              </Text>
+                            </View>
+                          </View>
+                          {overBudget && (
+                            <Text style={[s.infoBoxText, { marginTop: 8 }]}>
+                              Your total spending ({'\u00a3'}{Math.round(totalSpend).toLocaleString()}) is {'\u00a3'}{overAmount.toLocaleString()} above your income ({'\u00a3'}{Math.round(income).toLocaleString()}). This gap means you{'\u2019'}re drawing from savings or taking on debt. The moves on your Plan page will close it.
+                            </Text>
+                          )}
+                        </View>
+                      )}
+
+                      {/* ── Budget bar ── */}
+                      <View style={s.blBarOuter}>
+                        {/* Income limit marker */}
+                        {overBudget && (
+                          <View style={[s.blBarLimitLine, {
+                            left: `${Math.round((income / barMax) * 100)}%`,
+                          }]} />
+                        )}
+                        <View style={[s.blBarSeg, {
+                          width: `${essentialWidth}%`,
+                          backgroundColor: colors.text,
+                        }]} />
+                        <View style={[s.blBarSeg, {
+                          width: `${lifestyleWidth}%`,
+                          backgroundColor: overBudget ? colors.coral : colors.dim,
+                        }]} />
+                        {surplusWidth > 0 && (
+                          <View style={[s.blBarSeg, {
+                            width: `${surplusWidth}%`,
+                            backgroundColor: colors.border,
+                          }]} />
+                        )}
+                      </View>
+
+                      {/* ── Bar labels ── */}
+                      <View style={s.blBarLabels}>
+                        <Text style={s.blBarLabel}>
+                          {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()} essentials
+                        </Text>
+                        <Text style={s.blBarLabel}>
+                          {'\u00a3'}{Math.round(discTotal).toLocaleString()} lifestyle
+                        </Text>
+                        {!overBudget && surplusAmount > 0 && (
+                          <Text style={[s.blBarLabel, { color: colors.accent }]}>
+                            {'\u00a3'}{surplusAmount.toLocaleString()} free
+                          </Text>
+                        )}
+                      </View>
+
+                      {/* ── Income line ── */}
+                      <View style={s.blIncomeLine}>
+                        <View style={s.blIncomeLineBar} />
+                        <Text style={s.blIncomeLineLabel}>
+                          {'\u00a3'}{Math.round(income).toLocaleString()} income
+                        </Text>
+                      </View>
+
+                      {/* ── Divider ── */}
+                      <View style={s.blDivider} />
+
+                      {/* ── Real spending power ── */}
+                      <Text style={s.blInsightTitle}>Real spending power</Text>
+
+                      <View style={s.blStatRow}>
+                        <Text style={s.blStatLabel}>You earn</Text>
+                        <Text style={s.blStatValue}>
+                          {'\u00a3'}{Math.round(income).toLocaleString()}/mo
+                        </Text>
+                      </View>
+                      <View style={s.blStatRow}>
+                        <Text style={s.blStatLabel}>Fixed costs</Text>
+                        <Text style={[s.blStatValue, { color: colors.text2 }]}>
+                          -{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
+                        </Text>
+                      </View>
+                      <View style={[s.blStatRow, s.blStatRowHighlight]}>
+                        <Text style={s.blStatLabel}>You can actually spend</Text>
+                        <Text style={[s.blStatValue, { color: colors.accent }]}>
+                          {'\u00a3'}{Math.round(realIncome).toLocaleString()}/mo
+                        </Text>
+                      </View>
+
+                      {/* Month-over-month essentials change */}
+                      {essentialsChange !== null && essentialsChange !== 0 && (
+                        <Text style={[s.blNote, {
+                          color: essentialsChange > 0 ? colors.coral : colors.green,
+                        }]}>
+                          {essentialsChange > 0
+                            ? `Essentials cost ${essentialsChange}% more than last month. Your real spending power dropped to \u00a3${Math.round(realIncome).toLocaleString()}.`
+                            : `Essentials cost ${Math.abs(essentialsChange)}% less than last month. You freed up \u00a3${Math.round(Math.abs(nonDiscTotal - (prevEssentialsSpending ?? 0))).toLocaleString()}.`
+                          }
+                        </Text>
+                      )}
+
+                      {/* ── Trade-off / action section ── */}
+                      {overBudget ? (
+                        <>
+                          <View style={s.blDivider} />
+                          <View style={s.blActionSection}>
+                            <Text style={s.blActionLabel}>Fixable this month</Text>
+                            <Text style={s.blActionText}>
+                              {movesCount > 0
+                                ? `We found ${movesCount} move${movesCount !== 1 ? 's' : ''} to close the \u00a3${overAmount.toLocaleString()} gap.`
+                                : `Let\u2019s close the \u00a3${overAmount.toLocaleString()} gap together.`
+                              }
+                            </Text>
+                            <TouchableOpacity
+                              style={s.blActionBtn}
+                              onPress={() => {
+                                if (!isPro) {
+                                  setShowPaywall(true);
+                                  return;
+                                }
+                                const topMove = moves[0];
+                                if (topMove) {
+                                  router.push({ pathname: '/(main)/(tabs)/plan', params: { highlightAction: topMove.action } });
+                                } else {
+                                  router.push('/(main)/(tabs)/plan');
+                                }
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Text style={s.blActionBtnText}>
+                                {movesCount > 0 ? 'See the plan' : 'Build a plan'}
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </>
+                      ) : leftToDecide > 0 && topLifestyle ? (
+                        <>
+                          <View style={s.blDivider} />
+                          <Text style={s.blTradeOff}>
+                            Cutting {'\u00a3'}{tradeOffAmount} from {topLifestyle.category.toLowerCase()} puts {'\u00a3'}{tradeOffAmount} more toward savings or debt.
+                          </Text>
+                        </>
+                      ) : null}
+                    </>
+                  );
+                })()}
+              </Card>
+            </AnimGlyph>
+          )}
+
+          {/* ══════════════════════════════════════════════
+              CARD — YOUR BUDGET REALITY (summary only)
+              ══════════════════════════════════════════════ */}
+          <Card>
             {/* Info icon for budget card */}
             <View style={s.cardTitleRow}>
               <View style={{ flex: 1 }} />
@@ -1488,41 +1699,41 @@ export default function Home() {
               <Text style={s.cardTitle}>Your budget reality</Text>
             </View>
 
-            {/* 3-segment stacked bar — monochrome */}
+            {/* 3-segment stacked bar — monochrome tonal */}
             <View style={s.budgetBar}>
               {nonDiscFlex > 0 && (
-                <View style={[s.barSeg, { flex: nonDiscFlex, backgroundColor: colors.accent }]} />
+                <View style={[s.barSeg, { flex: nonDiscFlex, backgroundColor: colors.text2 }]} />
               )}
               {discFlex > 0 && (
-                <View style={[s.barSeg, { flex: discFlex, backgroundColor: colors.lavender }]} />
+                <View style={[s.barSeg, { flex: discFlex, backgroundColor: colors.dim }]} />
               )}
               {leftFlex > 0 && (
-                <View style={[s.barSeg, { flex: leftFlex, backgroundColor: colors.green + '30' }]} />
+                <View style={[s.barSeg, { flex: leftFlex, backgroundColor: colors.border }]} />
               )}
             </View>
 
-            {/* Summary row — always visible */}
+            {/* Summary row — always visible, monochrome hierarchy */}
             <View style={[s.summaryRow, !budgetExpanded && { marginBottom: 0 }]}>
               <AnimGlyph delay={80} style={s.summaryItem}>
-                <Text style={[s.summaryAmount, { color: colors.accent }]}>
+                <Text style={[s.summaryAmount, { color: colors.text }]}>
                   {'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}
                 </Text>
                 <Text style={s.summaryLabel}>Essentials</Text>
                 <Text style={s.summaryPct}>{nonDiscPct}%</Text>
               </AnimGlyph>
               <AnimGlyph delay={160} style={s.summaryItem}>
-                <Text style={[s.summaryAmount, { color: colors.lavender }]}>
+                <Text style={[s.summaryAmount, { color: colors.text2 }]}>
                   {'\u00a3'}{Math.round(discTotal).toLocaleString()}
                 </Text>
                 <Text style={s.summaryLabel}>Lifestyle</Text>
                 <Text style={s.summaryPct}>{discPct}%</Text>
               </AnimGlyph>
               <AnimGlyph delay={240} style={s.summaryItem}>
-                <Text style={[s.summaryAmount, { color: colors.green }]}>
+                <Text style={[s.summaryAmount, { color: colors.text2 }]}>
                   {'\u00a3'}{Math.round(leftToDecide).toLocaleString()}
                 </Text>
                 <Text style={s.summaryLabel}>Left to decide</Text>
-                <Text style={[s.summaryPct, { color: colors.green }]}>{leftPct}%</Text>
+                <Text style={s.summaryPct}>{leftPct}%</Text>
               </AnimGlyph>
             </View>
 
@@ -1543,8 +1754,8 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={[s.addItemLabel, { color: colors.green }]}>Add item</Text>
-                        <Text style={[s.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
+                        <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
+                        <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
                       </TouchableOpacity>
                     </View>
                     {nonDiscItems.length === 0 && (
@@ -1628,8 +1839,8 @@ export default function Home() {
                         }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <Text style={[s.addItemLabel, { color: colors.green }]}>Add item</Text>
-                        <Text style={[s.addItemIcon, { color: colors.green, borderColor: colors.green + '40' }]}>+</Text>
+                        <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
+                        <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
                       </TouchableOpacity>
                     </View>
                     {discItems.length === 0 && (
@@ -1713,44 +1924,6 @@ export default function Home() {
               </>
             )}
 
-            {/* Quick add buttons — always visible when collapsed */}
-            {!budgetExpanded && (
-              <View style={s.quickAddRow}>
-                <TouchableOpacity
-                  style={s.quickAddBtn}
-                  onPress={() => {
-                    LayoutAnimation.configureNext(SMOOTH_ANIM);
-                    setAddItemEssential(true);
-                    setAddItemError('');
-                    setAddItemDesc('');
-                    setAddItemAmount('');
-                    setAddItemCategory('');
-                    setShowAddItem(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.quickAddIcon}>+</Text>
-                  <Text style={s.quickAddText}>Add essential</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={s.quickAddBtn}
-                  onPress={() => {
-                    LayoutAnimation.configureNext(SMOOTH_ANIM);
-                    setAddItemEssential(false);
-                    setAddItemError('');
-                    setAddItemDesc('');
-                    setAddItemAmount('');
-                    setAddItemCategory('');
-                    setShowAddItem(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.quickAddIcon}>+</Text>
-                  <Text style={s.quickAddText}>Add lifestyle</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
             {/* View transactions button */}
             {!budgetExpanded && (
               <TouchableOpacity
@@ -1764,87 +1937,7 @@ export default function Home() {
               </TouchableOpacity>
             )}
 
-          </View>
-
-          {/* ══════════════════════════════════════════════
-              CARD 5 — DEBT ACCOUNTS
-              ══════════════════════════════════════════════ */}
-          {debtAccounts.length > 0 && (() => {
-            const totalDebt = debtAccounts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
-            const totalLimit = debtAccounts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
-            const overallUtil = totalLimit > 0 ? Math.round((totalDebt / totalLimit) * 100) : null;
-            return (
-              <View style={s.card}>
-                <AnimGlyph delay={50}>
-                  <View style={s.cardTitleRow}>
-                    <Text style={s.cardTitle}>Your debt</Text>
-                    <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'debt' ? null : 'debt')}>
-                      <Text style={s.infoIcon}>i</Text>
-                    </TouchableOpacity>
-                  </View>
-                </AnimGlyph>
-                {infoCard === 'debt' && (
-                  <View style={s.infoBox}>
-                    <Text style={s.infoBoxText}>
-                      Debt balances are pulled from your connected accounts via Open Banking, or added manually in your profile. Utilisation shows how much of your credit limit is currently used. Over 75% utilisation can affect your credit score.
-                    </Text>
-                  </View>
-                )}
-                <Text style={s.cardSubtitle}>
-                  {debtAccounts.length} account{debtAccounts.length !== 1 ? 's' : ''}
-                  {overallUtil != null ? ` · ${overallUtil}% utilised` : ''}
-                </Text>
-
-                {/* Total debt hero */}
-                <AnimGlyph delay={100}>
-                  <View style={s.debtHero}>
-                    <Text style={s.debtHeroAmount}>
-                      {'\u00a3'}{Math.round(totalDebt).toLocaleString()}
-                    </Text>
-                    <Text style={s.debtHeroLabel}>total outstanding</Text>
-                  </View>
-                </AnimGlyph>
-
-                {/* Individual accounts */}
-                {debtAccounts.map((d: any, i: number) => {
-                  const bal = d.outstanding_balance || 0;
-                  const lim = d.credit_limit || 0;
-                  const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
-                  const isHigh = util != null && util > 75;
-                  const typeLabel = d.account_type === 'credit_card' ? 'Credit card'
-                    : d.account_type === 'overdraft' ? 'Overdraft'
-                    : d.account_type === 'overdraft_facility' ? 'Overdraft facility'
-                    : d.account_type === 'personal_loan' ? 'Personal loan'
-                    : d.account_type === 'student_loan' ? 'Student loan'
-                    : d.account_type === 'car_finance' ? 'Car finance'
-                    : d.account_type === 'bnpl' ? 'BNPL'
-                    : d.account_type || 'Account';
-                  return (
-                    <AnimGlyph key={i} delay={150 + i * 80}>
-                      <View
-                        style={[s.debtRow, i === debtAccounts.length - 1 && s.debtRowLast]}
-                      >
-                      <View style={s.debtRowLeft}>
-                        <Text style={s.debtName}>{d.account_name}</Text>
-                        <Text style={s.debtType}>{typeLabel}</Text>
-                      </View>
-                      <View style={s.debtRowRight}>
-                        <Text style={[s.debtBalance, isHigh && { color: colors.coral }]}>
-                          {'\u00a3'}{Math.round(bal).toLocaleString()}
-                        </Text>
-                        {lim > 0 && (
-                          <Text style={[s.debtUtil, isHigh && { color: colors.coral }]}>
-                            / {'\u00a3'}{Math.round(lim).toLocaleString()} ({util}%)
-                          </Text>
-                        )}
-                      </View>
-                      </View>
-                    </AnimGlyph>
-                  );
-                })}
-              </View>
-            );
-          })()}
+          </Card>
 
           {/* Add budget item modal */}
           <Modal visible={showAddItem} transparent animationType="fade" onRequestClose={() => { setAddItemError(''); setShowAddItem(false); }}>
@@ -2153,6 +2246,9 @@ export default function Home() {
 
         </>
       )}
+
+      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
+      {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} />}
     </ScrollView>
   );
 }
@@ -2167,7 +2263,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   scroll: {
     padding: 24,
     paddingTop: 68,
-    paddingBottom: 60,
+    paddingBottom: 80,
   },
   loadingContainer: {
     flex: 1,
@@ -2233,7 +2329,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.lg,
     paddingVertical: 10,
     paddingLeft: 14,
     paddingRight: 6,
@@ -2311,18 +2407,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // ── Shared Card — Nothing OS: border-defined, card surface fill ──
-  card: {
-    backgroundColor: c.card,
-    borderWidth: 1,
-    borderColor: c.accentDim,
-    borderRadius: 24,
-    padding: 28,
-    paddingTop: 32,
-    paddingBottom: 32,
-    marginBottom: 24,
-    overflow: 'hidden',
-  },
   cardTitle: {
     fontFamily: fonts.mono,
     fontSize: 13,
@@ -2360,7 +2444,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 22,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     borderRadius: 11,
     overflow: 'hidden',
   },
@@ -2379,8 +2463,113 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.dim,
     lineHeight: 18,
   },
+  infoBoxCalc: {
+    marginTop: 12,
+    gap: 6,
+  },
+  infoBoxCalcRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  infoBoxCalcTotal: {
+    borderTopWidth: 1,
+    borderTopColor: c.border,
+    marginTop: 4,
+    paddingTop: 8,
+  },
+  infoBoxCalcLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.dim,
+  },
+  infoBoxCalcValue: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.text2,
+  },
 
-  // ── Card 1: Move items ──
+  heroLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.green,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    marginBottom: 16,
+  },
+  heroAction: {
+    fontFamily: fonts.semibold,
+    fontSize: 22,
+    color: c.text,
+    lineHeight: 30,
+    letterSpacing: -0.3,
+  },
+  heroMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
+  heroImpact: {
+    fontFamily: fonts.mono,
+    fontSize: 18,
+    color: c.green,
+  },
+  heroStrategy: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.dim,
+    lineHeight: 20,
+    marginTop: 16,
+  },
+  heroActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 24,
+  },
+  heroCta: {
+    flex: 2,
+    backgroundColor: c.accent,
+    paddingVertical: 14,
+    borderRadius: 100,
+    alignItems: 'center',
+  },
+  heroCtaText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: c.bg,
+    letterSpacing: 0.3,
+  },
+  heroSecondary: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: c.border,
+    paddingVertical: 14,
+    borderRadius: 100,
+    alignItems: 'center',
+  },
+  heroSecondaryText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.dim,
+  },
+  heroMore: {
+    alignItems: 'center',
+    paddingTop: 20,
+    marginTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: c.mintDim,
+  },
+  heroMoreText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.green,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+
+  // ── Card 1: Move items (kept for modals) ──
   moveItemFull: {
     paddingVertical: 20,
     borderBottomWidth: 1,
@@ -2401,7 +2590,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   moveImpact: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    fontWeight: '700',
     color: c.green,
   },
   effortPill: {
@@ -2409,13 +2597,13 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 3,
     paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     backgroundColor: 'transparent',
   },
   effortPillText: {
     fontFamily: fonts.mono,
     fontSize: 9,
-    fontWeight: '600',
+    color: c.dim,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
@@ -2451,7 +2639,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -2465,7 +2653,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flex: 1,
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     paddingVertical: 10,
     borderRadius: 100,
     alignItems: 'center',
@@ -2499,7 +2687,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   bigNumber: {
     fontFamily: fonts.mono,
     fontSize: 52,
-    fontWeight: '300',
     color: c.text,
     letterSpacing: -2,
   },
@@ -2557,12 +2744,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 100,
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
   },
   primaryTagText: {
     fontFamily: fonts.mono,
     fontSize: 9,
-    fontWeight: '600',
     color: c.text,
     letterSpacing: 1,
   },
@@ -2572,7 +2758,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   sourceAmount: {
     fontFamily: fonts.mono,
     fontSize: 20,
-    fontWeight: '300',
     color: c.text,
   },
   sourceAmountPer: {
@@ -2616,7 +2801,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   safeToSpendAmount: {
     fontFamily: fonts.mono,
     fontSize: 48,
-    fontWeight: '300',
     color: c.text,
     letterSpacing: -2,
   },
@@ -2855,7 +3039,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   summaryAmount: {
     fontFamily: fonts.mono,
     fontSize: 20,
-    fontWeight: '300',
   },
   summaryLabel: {
     fontFamily: fonts.regular,
@@ -2869,6 +3052,153 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.dim,
     marginTop: 4,
     letterSpacing: 0.5,
+  },
+  // ── Budget line card ──
+  blTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  blStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  blStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  blStatusText: {
+    fontFamily: fonts.medium,
+    fontSize: 16,
+    color: c.text,
+  },
+  blBarOuter: {
+    flexDirection: 'row',
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+    backgroundColor: c.border,
+    position: 'relative',
+  },
+  blBarSeg: {
+    height: 8,
+  },
+  blBarLimitLine: {
+    position: 'absolute',
+    top: -4,
+    width: 2,
+    height: 16,
+    backgroundColor: c.accent,
+    zIndex: 2,
+    borderRadius: 1,
+  },
+  blBarLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  blBarLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 0.3,
+  },
+  blIncomeLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+  },
+  blIncomeLineBar: {
+    flex: 1,
+    height: 1,
+    backgroundColor: c.border,
+  },
+  blIncomeLineLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 0.3,
+  },
+  blDivider: {
+    height: 1,
+    backgroundColor: c.border,
+    marginVertical: 16,
+  },
+  blInsightTitle: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.dim,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  blStatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  blStatRowHighlight: {
+    borderTopWidth: 1,
+    borderTopColor: c.border,
+    marginTop: 4,
+    paddingTop: 10,
+  },
+  blStatLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+  },
+  blStatValue: {
+    fontFamily: fonts.mono,
+    fontSize: 15,
+    color: c.text,
+  },
+  blNote: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 10,
+  },
+  blTradeOff: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.text2,
+    lineHeight: 19,
+  },
+  blActionSection: {
+    gap: 8,
+  },
+  blActionLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: c.green,
+  },
+  blActionText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+    lineHeight: 20,
+  },
+  blActionBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: c.accent,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 100,
+    marginTop: 4,
+  },
+  blActionBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: c.bg,
+    letterSpacing: 0.3,
   },
   breakdownHeaderRow: {
     flexDirection: 'row',
@@ -2904,7 +3234,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 18,
     textAlign: 'center',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     borderRadius: 10,
     overflow: 'hidden',
   },
@@ -2953,7 +3283,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   dataValue: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    fontWeight: '400',
   },
 
   // ── Transaction dropdown ──
@@ -2996,7 +3325,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   txAmount: {
     fontFamily: fonts.mono,
     fontSize: 13,
-    fontWeight: '400',
   },
   txRightCol: {
     alignItems: 'flex-end',
@@ -3039,9 +3367,33 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   viewTransactionsText: {
     fontFamily: fonts.mono,
     fontSize: 12,
-    color: c.green,
+    color: c.accent,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+
+  // ── Subscription shortcut ──
+  subsLink: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.md,
+    marginBottom: spacing.md,
+  },
+  subsLinkText: {
+    fontFamily: fonts.medium,
+    fontSize: 14,
+    color: c.green,
+  },
+  subsLinkArrow: {
+    fontFamily: fonts.regular,
+    fontSize: 18,
+    color: c.green,
   },
 
   // ── Card 5: Debt accounts ──
@@ -3053,7 +3405,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   debtHeroAmount: {
     fontFamily: fonts.mono,
     fontSize: 44,
-    fontWeight: '300',
     color: c.coral,
     letterSpacing: -2,
   },
@@ -3099,7 +3450,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   debtBalance: {
     fontFamily: fonts.mono,
     fontSize: 16,
-    fontWeight: '400',
     color: c.text,
   },
   debtUtil: {
@@ -3124,19 +3474,19 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     gap: 6,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: c.green + '30',
+    borderColor: c.border,
     borderRadius: 12,
     borderStyle: 'dashed',
   },
   quickAddIcon: {
     fontFamily: fonts.mono,
     fontSize: 14,
-    color: c.green,
+    color: c.dim,
   },
   quickAddText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: c.green,
+    color: c.dim,
     letterSpacing: 0.3,
     textTransform: 'uppercase',
   },
@@ -3154,7 +3504,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     width: '100%',
     maxWidth: 400,
   },
@@ -3163,7 +3513,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     width: '100%',
     maxWidth: 400,
     maxHeight: '80%',
@@ -3297,7 +3647,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
   },
   modalCancelText: {
     fontFamily: fonts.semibold,
@@ -3372,8 +3722,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 20,
   },
   reviewBannerLink: {
-    color: c.green,
+    color: c.text,
     fontFamily: fonts.semibold,
+    textDecorationLine: 'underline',
   },
 
   // ── Income arrival alert ──
@@ -3429,6 +3780,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderWidth: 1,
     borderColor: c.border,
     maxHeight: '85%',
+    maxWidth: 560,
+    alignSelf: 'center' as const,
+    width: '100%',
     overflow: 'hidden',
   },
   catReviewHeader: {

@@ -45,6 +45,8 @@ export interface SyncResult {
   connectionIssues: string[];
   /** Names of banks with expired connections (e.g. ["Barclays", "HSBC"]). */
   expiredBankNames: string[];
+  /** Connections approaching 90-day consent expiry (within 14 days). */
+  expiringConnections: { name: string; daysLeft: number }[];
 }
 
 /**
@@ -156,6 +158,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   let dataSource: 'truelayer' | 'fallback' = 'truelayer';
   const connectionIssues: string[] = [];
   const expiredBankNames: string[] = [];
+  const expiringConnections: { name: string; daysLeft: number }[] = [];
 
   try {
     const res = await fetch('/api/truelayer/sync', {
@@ -175,10 +178,44 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       }
     } else if (data.reason === 'token_expired') {
       connectionIssues.push('token_expired');
+      // Extract bank names from the all-expired response
+      if (data.expired_connections?.length > 0) {
+        for (const ec of data.expired_connections) {
+          if (ec.provider_name) expiredBankNames.push(ec.provider_name);
+        }
+      }
+    } else if (data.reason === 'sync_failed') {
+      // Transient failure (all connections still within 90-day consent window).
+      // Don't flag as a connection issue — fall through to cached data silently.
     } else if (data.reason === 'no_connection') {
       connectionIssues.push('no_connection');
     }
+    // Extract connections approaching 90-day consent expiry
+    if (data.expiring_connections?.length > 0) {
+      for (const ec of data.expiring_connections) {
+        expiringConnections.push({
+          name: ec.provider_name || 'Bank',
+          daysLeft: ec.days_left,
+        });
+      }
+    }
   } catch {}
+
+  // If connections have issues but we still don't have bank names, query DB as fallback
+  if (connectionIssues.length > 0 && expiredBankNames.length === 0) {
+    try {
+      const { data: nameRows } = await supabase
+        .from('bank_data')
+        .select('provider_name')
+        .eq('user_id', userId)
+        .not('provider_name', 'is', null);
+      if (nameRows) {
+        for (const row of nameRows) {
+          if (row.provider_name) expiredBankNames.push(row.provider_name);
+        }
+      }
+    } catch {}
+  }
 
   // Fallback to existing CSV from all bank_data rows
   if (!csvData) {
@@ -408,6 +445,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     latestTransactionDate,
     connectionIssues,
     expiredBankNames,
+    expiringConnections,
   };
 }
 

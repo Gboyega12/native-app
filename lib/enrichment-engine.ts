@@ -691,11 +691,16 @@ const EnrichmentEngine = {
     const changingCareer = (id.upcoming_events || []).includes('career_change');
     const isAdvanced = id.financial_experience === 'confident' || id.financial_experience === 'advanced';
 
-    // Subscriptions — attach actual merchant names
+    // Subscriptions — single consolidated recommendation (not per-merchant)
     if (m.subscriptionCount >= T.subscriptionMinCount) {
       const subNames = subs.map((s) => s.merchant).filter(Boolean);
       const cutCount = Math.max(2, Math.round(m.subscriptionCount * T.subscriptionCutPct));
       const saving = Math.round(p.subscriptions * T.subscriptionCutPct);
+      const topSubs = subs
+        .filter((s) => s.merchant && s.averageAmount >= 5)
+        .sort((a, b) => b.averageAmount - a.averageAmount)
+        .slice(0, 4);
+      const subBreakdown = topSubs.map((s) => `${s.merchant} \u00a3${Math.round(s.averageAmount)}/mo`).join(', ');
       moves.push({
         action: `Cancel or downgrade ${cutCount} subscriptions to free \u00a3${saving}/month`,
         annualImpact: saving * 12,
@@ -703,7 +708,7 @@ const EnrichmentEngine = {
         effort: 'low',
         category: 'spending',
         merchants: subNames,
-        strategy: `${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month total.`,
+        strategy: `${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month total. Biggest: ${subBreakdown}.`,
         steps: ['Review your subscriptions — I\'ve listed them below', 'Cancel the ones you haven\'t used in 30 days', 'Rotate streaming services monthly — I\'ll remind you'],
         effect: `Saves \u00a3${saving}/month (\u00a3${saving * 12}/year).`,
       });
@@ -1202,9 +1207,6 @@ const EnrichmentEngine = {
       otherRate: total > 0 ? Math.round((other / total) * 100) : 0,
       bySource,
     };
-
-    console.log(`[enrichment] Metrics: ${total} transactions — ${high} high (${total > 0 ? Math.round((high / total) * 100) : 0}%), ${medium} medium, ${low} low. Other rate: ${metrics.otherRate}%`);
-    console.log(`[enrichment] Sources: override=${bySource.userOverride}, merchant_db=${bySource.merchantDb}, fuzzy=${bySource.fuzzyMatch}, keyword=${bySource.keyword}, unresolved=${bySource.unresolved}`);
 
     return metrics;
   },

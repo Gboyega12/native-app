@@ -6,7 +6,7 @@ const AUTH_URL = IS_SANDBOX
 const CLIENT_ID = process.env.EXPO_PUBLIC_TRUELAYER_CLIENT_ID || 'native-971b11';
 const REDIRECT_URI =
   process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
-  'https://native-app-ashy.vercel.app/api/truelayer/callback';
+  'https://app.bocy.io/api/truelayer/callback';
 const SCOPES = ['accounts', 'balance', 'transactions', 'cards'];
 const PROVIDERS = IS_SANDBOX ? ['uk-ob-all', 'uk-mock-payments-sandbox'] : ['uk-ob-all'];
 

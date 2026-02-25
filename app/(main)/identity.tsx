@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated,
-  Dimensions, Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager,
+  Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -15,9 +15,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const { width } = Dimensions.get('window');
 const CARD_GAP = 10;
-const CARD_WIDTH = (width - spacing.xl * 2 - CARD_GAP) / 2;
 
 // ── Screen definitions ──
 
@@ -446,8 +444,8 @@ function findLabel(screenIdx: number, key: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: spacing.xl, paddingTop: spacing.xxl + spacing.md, paddingBottom: spacing.lg },
-  summaryScroll: { padding: spacing.xl, paddingTop: spacing.xxl + spacing.md, paddingBottom: spacing.lg },
+  scroll: { padding: spacing.xl, paddingTop: spacing.xxl + spacing.md, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
+  summaryScroll: { padding: spacing.xl, paddingTop: spacing.xxl + spacing.md, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
 
   // ── Progress ──
   progressRow: {
@@ -492,7 +490,8 @@ const styles = StyleSheet.create({
     gap: CARD_GAP,
   },
   card: {
-    width: CARD_WIDTH,
+    flexBasis: '48%',
+    flexGrow: 1,
     backgroundColor: colors.surface,
     borderWidth: 1.5,
     borderColor: colors.border,

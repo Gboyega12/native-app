@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated,
+  View, Text, TouchableOpacity, StyleSheet, Animated,
   Platform, UIManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -10,8 +10,6 @@ import { BocyFace, IllustrationScan, IllustrationPlan, IllustrationPersonal } fr
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
-
-const { width } = Dimensions.get('window');
 
 const SLIDES = [
   {
@@ -148,6 +146,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.bg,
     paddingHorizontal: spacing.xl,
+    maxWidth: 640,
+    alignSelf: 'center' as const,
+    width: '100%',
   },
   skipBtn: {
     position: 'absolute',
@@ -187,7 +188,7 @@ const styles = StyleSheet.create({
     color: colors.text2,
     textAlign: 'center',
     lineHeight: 24,
-    maxWidth: width * 0.85,
+    maxWidth: 480,
   },
   bullets: {
     width: '100%',

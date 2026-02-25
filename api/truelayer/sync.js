@@ -118,6 +118,9 @@ async function syncConnection(bankRow, clientId, clientSecret) {
   }
 }
 
+const CONSENT_DAYS = 90;
+const WARN_DAYS = 14;
+
 /**
  * POST /api/truelayer/sync
  * Body: { user_id }
@@ -153,7 +156,7 @@ export default async function handler(req, res) {
     // Find ALL TrueLayer connections for this user
     const { data: bankRows, error: findErr } = await admin
       .from('bank_data')
-      .select('id, connection_id, refresh_token, updated_at, provider_name')
+      .select('id, connection_id, refresh_token, updated_at, provider_name, created_at')
       .eq('user_id', userId)
       .eq('source', 'truelayer')
       .not('refresh_token', 'is', null)
@@ -176,7 +179,15 @@ export default async function handler(req, res) {
 
     for (const { row, result } of results) {
       if (!result) {
-        expiredConnections.push({ connection_id: row.connection_id, provider_name: row.provider_name || null });
+        // Only flag as expired if the 90-day consent window has actually lapsed.
+        // Transient failures (network errors, TrueLayer outages) within the
+        // consent window should NOT trigger the reconnect banner.
+        const created = new Date(row.created_at || row.updated_at);
+        const expiry = new Date(created);
+        expiry.setDate(expiry.getDate() + CONSENT_DAYS);
+        if (Date.now() >= expiry.getTime()) {
+          expiredConnections.push({ connection_id: row.connection_id, provider_name: row.provider_name || null });
+        }
         continue;
       }
 
@@ -200,7 +211,14 @@ export default async function handler(req, res) {
     }
 
     if (syncedCount === 0) {
-      return res.json({ success: false, reason: 'token_expired' });
+      // If no connections are genuinely expired (past 90 days), this is a
+      // transient failure — don't tell the client to show "Reconnect".
+      const reason = expiredConnections.length > 0 ? 'token_expired' : 'sync_failed';
+      return res.json({
+        success: false,
+        reason,
+        expired_connections: expiredConnections.length > 0 ? expiredConnections : undefined,
+      });
     }
 
     // Deduplicate transactions across connections (same date+amount+desc = same tx)
@@ -217,6 +235,21 @@ export default async function handler(req, res) {
     // Return merged CSV across all connections
     const mergedCsv = ['Date,Description,Amount', ...uniqueLines].join('\n');
 
+    // Check for connections approaching 90-day consent expiry (warn at 14 days)
+    const expiringConnections = [];
+    for (const row of bankRows) {
+      const created = new Date(row.created_at || row.updated_at);
+      const expiry = new Date(created);
+      expiry.setDate(expiry.getDate() + CONSENT_DAYS);
+      const daysLeft = Math.ceil((expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      if (daysLeft <= WARN_DAYS && daysLeft > 0) {
+        expiringConnections.push({
+          provider_name: row.provider_name || null,
+          days_left: daysLeft,
+        });
+      }
+    }
+
     console.log(`[sync] Synced ${syncedCount}/${bankRows.length} connections, ${totalTx} transactions, ${mergedBalances.length} balance(s)`);
 
     return res.json({
@@ -227,6 +260,7 @@ export default async function handler(req, res) {
       connections_synced: syncedCount,
       connections_total: bankRows.length,
       expired_connections: expiredConnections.length > 0 ? expiredConnections : undefined,
+      expiring_connections: expiringConnections.length > 0 ? expiringConnections : undefined,
       updated_at: new Date().toISOString(),
     });
   } catch (err) {

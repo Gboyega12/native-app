@@ -47,7 +47,7 @@ export default async function handler(req, res) {
   const redirectUri =
     process.env.TRUELAYER_REDIRECT_URI ||
     process.env.EXPO_PUBLIC_TRUELAYER_REDIRECT_URI ||
-    'https://native-app-ashy.vercel.app/api/truelayer/callback';
+    'https://app.bocy.io/api/truelayer/callback';
 
   const clientId = process.env.TRUELAYER_CLIENT_ID;
   const clientSecret = process.env.TRUELAYER_CLIENT_SECRET;
@@ -77,7 +77,7 @@ export default async function handler(req, res) {
         redirect_uri_used: redirectUri,
         response: tokenData,
       }));
-      return fail(400, 'Token exchange failed', tokenData.error_description || tokenData.error || `redirect_uri: ${redirectUri}`);
+      return fail(400, 'Token exchange failed', tokenData.error_description || tokenData.error || 'Invalid authorization code');
     }
 
     const token = tokenData.access_token;

@@ -8,10 +8,12 @@ import { supabase } from '@/lib/supabase';
 import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
+import Card from '@/components/Card';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/lib/types';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
@@ -139,7 +141,12 @@ function PlanCard({
   const isDismissed = action.status === 'dismissed';
 
   return (
-    <View style={[s.actionCard, isApproved && s.actionCardApproved]}>
+    <Card
+      variant="action"
+      borderColor={isApproved ? colors.accent : undefined}
+      noShadow
+      style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
+    >
       <Text style={s.actionCardLabel}>{isApproved ? 'PLAN ADDED' : 'PLAN SUGGESTED'}</Text>
       <Text style={s.actionCardTitle}>{stripMd(d.action)}</Text>
       <View style={s.actionCardStats}>
@@ -189,7 +196,7 @@ function PlanCard({
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </Card>
   );
 }
 
@@ -198,7 +205,12 @@ function BudgetItemCard({ action }: { action: ChatAction }) {
   const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
   return (
-    <View style={[s.actionCard, s.actionCardApproved]}>
+    <Card
+      variant="action"
+      borderColor={colors.accent}
+      noShadow
+      style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
+    >
       <Text style={s.actionCardLabel}>BUDGET UPDATED</Text>
       <Text style={s.actionCardTitle}>{d.description}</Text>
       <View style={s.actionCardStats}>
@@ -220,7 +232,7 @@ function BudgetItemCard({ action }: { action: ChatAction }) {
       <View style={s.approvedBanner}>
         <Text style={s.approvedBannerText}>{'\u2713'} Added to your budget</Text>
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -229,14 +241,18 @@ function OverrideCard({ action }: { action: ChatAction }) {
   const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
   return (
-    <View style={s.actionCard}>
+    <Card
+      variant="action"
+      noShadow
+      style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
+    >
       <Text style={s.actionCardLabel}>TRANSACTION UPDATED</Text>
       <Text style={s.overrideDescription}>
         {'\u201C'}{d.match_description}{'\u201D'} {'\u2192'} {d.category}
         {d.is_essential ? ' (essential)' : ' (discretionary)'}
       </Text>
       <Text style={s.overrideNote}>Will apply on your next analysis.</Text>
-    </View>
+    </Card>
   );
 }
 
@@ -266,7 +282,12 @@ function GoalUpdateCard({
   const isDismissed = action.status === 'dismissed';
 
   return (
-    <View style={[s.actionCard, s.goalUpdateCard, isAccepted && s.actionCardApproved]}>
+    <Card
+      variant="action"
+      borderColor={isAccepted ? colors.accent : colors.skyDim}
+      noShadow
+      style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
+    >
       <Text style={s.goalUpdateLabel}>GOAL CHECK-IN</Text>
       <Text style={s.goalUpdateReason}>{stripMd(d.reason)}</Text>
       <View style={s.goalUpdateFields}>
@@ -316,7 +337,7 @@ function GoalUpdateCard({
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </Card>
   );
 }
 
@@ -327,6 +348,7 @@ export default function Chat() {
   const { prefill } = useLocalSearchParams<{ prefill?: string }>();
   const { isPro } = useSubscription();
   const { colors } = useTheme();
+  const { maxContentWidth, isTablet } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
   const [showPaywall, setShowPaywall] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -478,6 +500,27 @@ export default function Chat() {
         bufferRecommendation: a.goal_context.bufferRecommendation,
       } : null,
     };
+
+    // Fetch previous month snapshot for budget line month-over-month comparison
+    let prevSnapshot: { monthly_spending: number; monthly_income: number } | null = null;
+    try {
+      const now = new Date();
+      const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+      const { data: prevData } = await supabase
+        .from('score_history')
+        .select('monthly_spending, monthly_income')
+        .eq('user_id', user.id)
+        .gte('created_at', prevMonth.toISOString())
+        .lte('created_at', prevMonthEnd.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      prevSnapshot = prevData ?? null;
+    } catch {}
+
+    // Add budget line data (real income, trade-offs, month-over-month)
+    ctx.budget_line = buildBudgetLine(a, prevSnapshot);
 
     // Add recent person-to-person transfers so Claude can spot miscategorised rent/bills
     const transferItems: { description: string; amount: number; date: string }[] = [];
@@ -638,6 +681,9 @@ export default function Chat() {
           confidence: freshA.goal_context.confidence,
           bufferRecommendation: freshA.goal_context.bufferRecommendation,
         } : null;
+
+        // Rebuild budget line from fresh sync data
+        ctx.budget_line = buildBudgetLine(freshA, prevSnapshot);
 
         // Rebuild recent_transactions from fresh sync data (NOT the stale DB analysis)
         const freshSevenDaysAgo = new Date();
@@ -1139,7 +1185,7 @@ export default function Chat() {
     >
       {/* ── Header ── */}
       {messages.length > 0 && (
-        <View style={s.header}>
+        <View style={[s.header, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
           <View style={s.headerLeftChat}>
             <View style={s.chatBocyWrap}>
               <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
@@ -1157,7 +1203,10 @@ export default function Chat() {
       <ScrollView
         ref={scrollRef}
         style={s.messages}
-        contentContainerStyle={s.messagesContent}
+        contentContainerStyle={[
+          s.messagesContent,
+          isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         {/* Show suggestions when empty OR when only the payday auto-nudge is present */}
@@ -1169,14 +1218,14 @@ export default function Chat() {
                   <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
                 </View>
                 <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Ask Bocy'}</Text>
-                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'Your personal finance companion'}</Text>
+                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'I know your numbers. Ask me anything.'}</Text>
               </>
             )}
-            <View style={s.suggestedGrid}>
+            <View style={[s.suggestedGrid, isTablet && { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 12 }]}>
               {suggestedQuestions.map((q, i) => (
                 <TouchableOpacity
                   key={i}
-                  style={s.suggestedButton}
+                  style={[s.suggestedButton, isTablet && { flexBasis: '48%' as any, flexGrow: 1 }]}
                   onPress={() => sendMessage(q)}
                   activeOpacity={0.7}
                 >
@@ -1189,6 +1238,9 @@ export default function Chat() {
 
         {messages.map((msg, i) => (
           <View key={i}>
+            {msg.role === 'assistant' && (i === 0 || messages[i - 1]?.role !== 'assistant') && (
+              <Text style={s.bocyLabel}>bocy</Text>
+            )}
             <View
               style={[
                 s.bubble,
@@ -1213,9 +1265,13 @@ export default function Chat() {
                     saving={savingPlan === `${i}-${j}`}
                   />
                 ) : action.type === 'plan_error' ? (
-                  <View style={s.errorCard}>
+                  <Card
+                    variant="error"
+                    noShadow
+                    style={{ borderRadius: radius.md, padding: spacing.md, marginBottom: 0 }}
+                  >
                     <Text style={s.errorCardText}>{action.data.error || 'Plan could not be saved.'}</Text>
-                  </View>
+                  </Card>
                 ) : action.type === 'override_saved' ? (
                   <OverrideCard action={action} />
                 ) : action.type === 'budget_item_saved' ? (
@@ -1241,12 +1297,30 @@ export default function Chat() {
             <Text style={s.retryAction}>Tap to retry</Text>
           </TouchableOpacity>
         )}
+
+        {/* Follow-up suggestion chips after last assistant response */}
+        {!loading && !error && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
+          <View style={s.followUpContainer}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.followUpScroll}>
+              {suggestedQuestions.slice(0, 3).map((q, qi) => (
+                <TouchableOpacity
+                  key={qi}
+                  style={s.followUpChip}
+                  onPress={() => sendMessage(q)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.followUpChipText}>{q}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
       </ScrollView>
 
       {/* ── Input / Gate ── */}
       <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
       {freeGateReached ? (
-        <View style={s.gateRow}>
+        <View style={[s.gateRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
           <Text style={s.gateText}>You've used your {FREE_MESSAGE_LIMIT} free messages</Text>
           <TouchableOpacity
             style={s.gateBtn}
@@ -1259,13 +1333,13 @@ export default function Chat() {
       ) : (
         <>
           {!isPro && userMessageCount > 0 && (
-            <View style={s.freeBadgeRow}>
+            <View style={[s.freeBadgeRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
               <Text style={s.freeBadgeText}>
                 {freeMessagesRemaining} of {FREE_MESSAGE_LIMIT} free {freeMessagesRemaining === 1 ? 'message' : 'messages'} left
               </Text>
             </View>
           )}
-          <View style={[s.inputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }]}>
+          <View style={[s.inputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
             <TextInput
               ref={inputRef}
               style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
@@ -1323,6 +1397,44 @@ function buildSpendingBreakdown(a: Analysis | null): { category: string; monthly
   // Sort by spend descending
   items.sort((a, b) => b.monthly - a.monthly);
   return items;
+}
+
+function buildBudgetLine(
+  a: Analysis | null,
+  prevSnapshot: { monthly_spending: number; monthly_income: number } | null,
+): ChatContext['budget_line'] {
+  if (!a || !a.monthly_income) return undefined;
+  const income = a.monthly_income;
+  const essentials = a.non_discretionary?.total ?? 0;
+  const lifestyle = a.discretionary?.total ?? 0;
+  const totalSpend = essentials + lifestyle;
+  const leftToDecide = Math.max(0, income - totalSpend);
+  const essentialsPct = income > 0 ? Math.round((essentials / income) * 100) : 0;
+  const overBudget = totalSpend > income;
+  const overAmount = Math.round(Math.max(0, totalSpend - income));
+
+  const prevSpending = prevSnapshot?.monthly_spending ?? null;
+  const essentialsChangePct = prevSpending !== null && prevSpending > 0
+    ? Math.round(((essentials - prevSpending) / prevSpending) * 100)
+    : null;
+
+  const discItems = a.discretionary?.items ?? [];
+  const topLifestyle = discItems.length > 0
+    ? discItems.reduce((a, b) => a.monthly > b.monthly ? a : b)
+    : null;
+
+  return {
+    real_spending_power: Math.round(income - essentials),
+    essentials_total: Math.round(essentials),
+    lifestyle_total: Math.round(lifestyle),
+    left_to_decide: Math.round(leftToDecide),
+    essentials_pct: essentialsPct,
+    over_budget: overBudget,
+    over_amount: overAmount,
+    essentials_change_pct: essentialsChangePct,
+    top_lifestyle_category: topLifestyle?.category ?? null,
+    top_lifestyle_amount: topLifestyle ? Math.round(topLifestyle.monthly) : null,
+  };
 }
 
 // ── Styles ──
@@ -1462,28 +1574,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     maxWidth: '85%',
     marginBottom: 6,
   },
-  errorCard: {
-    backgroundColor: c.coralDim,
-    borderWidth: 1,
-    borderColor: c.coral,
-    borderRadius: radius.md,
-    padding: spacing.md,
-  },
   errorCardText: {
     fontFamily: fonts.medium,
     fontSize: 13,
     color: c.coral,
     lineHeight: 20,
-  },
-  actionCard: {
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.accentDim,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-  },
-  actionCardApproved: {
-    borderColor: c.accent,
   },
   actionCardLabel: {
     fontFamily: fonts.semibold,
@@ -1607,9 +1702,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginTop: spacing.xs,
   },
   // ── Goal update card ──
-  goalUpdateCard: {
-    borderColor: c.skyDim,
-  },
   goalUpdateLabel: {
     fontFamily: fonts.semibold,
     fontSize: 10,
@@ -1764,5 +1856,39 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 11,
     color: c.muted,
     letterSpacing: 0.3,
+  },
+
+  // ── Bocy label on assistant messages ──
+  bocyLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+    marginTop: 8,
+  },
+
+  // ── Follow-up suggestion chips ──
+  followUpContainer: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  followUpScroll: {
+    gap: 8,
+    paddingVertical: 4,
+  },
+  followUpChip: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 100,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  followUpChipText: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: c.text2,
   },
 });

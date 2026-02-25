@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npx expo export --platform web && sed -i 's/<body>/<body style=\"background-color:#050505\">/' dist/index.html && sed -i 's/<html lang=\"en\">/<html lang=\"en\" style=\"background-color:#050505\">/' dist/index.html",
+  "buildCommand": "npx expo export --platform web && sh scripts/inject-pwa.sh",
   "outputDirectory": "dist",
   "framework": null,
   "crons": [

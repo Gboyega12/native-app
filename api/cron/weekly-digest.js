@@ -14,7 +14,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const appUrl = process.env.APP_URL || 'https://native-app-ashy.vercel.app';
+const appUrl = process.env.APP_URL || 'https://app.bocy.io';
 
 export default async function handler(req, res) {
   // Verify cron secret
@@ -44,19 +44,6 @@ export default async function handler(req, res) {
 
     for (const pref of prefs) {
       try {
-        // Only send digest to Pro subscribers
-        const { data: subRow } = await admin
-          .from('user_subscriptions')
-          .select('tier, status')
-          .eq('user_id', pref.user_id)
-          .eq('status', 'active')
-          .single();
-
-        if (subRow?.tier !== 'pro') {
-          results.skipped++;
-          continue;
-        }
-
         // Get latest analysis
         const { data: analysis } = await admin
           .from('analyses')

@@ -52,7 +52,7 @@ export default function SignIn() {
       options: {
         redirectTo: Platform.OS === 'web'
           ? window.location.origin
-          : 'https://native-app-ashy.vercel.app/',
+          : 'https://app.bocy.io/',
       },
     });
     if (oauthError) {
@@ -157,6 +157,9 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     padding: spacing.xl,
+    maxWidth: 480,
+    alignSelf: 'center' as const,
+    width: '100%',
   },
   header: {
     alignItems: 'center',
