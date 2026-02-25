@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import Card, { AnimGlyph, SMOOTH_ANIM } from '@/components/Card';
 import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
@@ -20,43 +21,6 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 /** Strip markdown bold/italic markers */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
-
-// Smooth layout animation config
-const SMOOTH_ANIM = {
-  duration: 280,
-  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-  update: { type: LayoutAnimation.Types.easeInEaseOut },
-  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-};
-
-// ── Glyph micro-animation: fade+scale on mount ──
-const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 500,
-      delay,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, []);
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          opacity: anim,
-          transform: [{
-            scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
-          }],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
-};
 
 /** Category label mapping for display */
 const CATEGORY_LABELS: Record<string, string> = {
@@ -886,7 +850,7 @@ export default function Plan() {
             const nextStepIdx = planSteps.findIndex((_, idx) => !doneSteps.includes(idx));
 
             return (
-              <View key={plan.id} style={[s.card, s.activeCard]}>
+              <Card key={plan.id} variant="active" style={{ marginBottom: spacing.md }}>
                 <TouchableOpacity
                   onPress={() => setExpandedPlan(isPlanExpanded ? null : plan.id)}
                   activeOpacity={0.8}
@@ -975,7 +939,7 @@ export default function Plan() {
                     </TouchableOpacity>
                   </View>
                 )}
-              </View>
+              </Card>
             );
           })}
 
@@ -989,53 +953,57 @@ export default function Plan() {
             const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.includes(idx));
 
             return (
-              <View
+              <Card
                 key={`active-${i}`}
-                onLayout={(e) => {
-                  itemYPositions.current[i] = e.nativeEvent.layout.y;
-                  if (highlightIdx === i) {
-                    setTimeout(() => {
-                      scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - 80), animated: true });
-                    }, 150);
-                  }
-                }}
-                style={[s.card, s.activeCard, highlightIdx === i && s.cardHighlight]}
+                variant={highlightIdx === i ? 'highlight' : 'active'}
+                style={{ marginBottom: spacing.md }}
               >
-                <TouchableOpacity
-                  onPress={() => setExpanded(isExpanded ? null : i)}
-                  activeOpacity={0.8}
+                <View
+                  onLayout={(e) => {
+                    itemYPositions.current[i] = e.nativeEvent.layout.y;
+                    if (highlightIdx === i) {
+                      setTimeout(() => {
+                        scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - 80), animated: true });
+                      }, 150);
+                    }
+                  }}
                 >
-                  <View style={s.cardHeader}>
-                    <AnimGlyph delay={seqIdx * 80}>
-                      <View style={[s.badge, s.badgeActive]}>
-                        <Text style={s.badgeActiveText}>{'\u2713'}</Text>
-                      </View>
-                    </AnimGlyph>
-                    <View style={s.cardContent}>
-                      <Text style={s.moveAction}>{stripMd(move.action)}</Text>
-                      <View style={s.moveStats}>
-                        <Text style={s.impactText}>
-                          {'\u00a3'}{move.monthlyImpact}/mo
-                        </Text>
-                        <View style={[s.effortBadge, { backgroundColor: `${effortColor(move.effort, colors)}15` }]}>
-                          <Text style={[s.effortText, { color: effortColor(move.effort, colors) }]}>{effortLabel(move.effort)}</Text>
+                  <TouchableOpacity
+                    onPress={() => setExpanded(isExpanded ? null : i)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={s.cardHeader}>
+                      <AnimGlyph delay={seqIdx * 80}>
+                        <View style={[s.badge, s.badgeActive]}>
+                          <Text style={s.badgeActiveText}>{'\u2713'}</Text>
                         </View>
-                        <Text style={s.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
-                      </View>
-                      {!isExpanded && steps.length > 0 && (
-                        <View style={s.miniProgress}>
-                          <View style={s.miniProgressBar}>
-                            <View style={[s.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                      </AnimGlyph>
+                      <View style={s.cardContent}>
+                        <Text style={s.moveAction}>{stripMd(move.action)}</Text>
+                        <View style={s.moveStats}>
+                          <Text style={s.impactText}>
+                            {'\u00a3'}{move.monthlyImpact}/mo
+                          </Text>
+                          <View style={[s.effortBadge, { backgroundColor: `${effortColor(move.effort, colors)}15` }]}>
+                            <Text style={[s.effortText, { color: effortColor(move.effort, colors) }]}>{effortLabel(move.effort)}</Text>
                           </View>
-                          <Text style={s.miniProgressText}>{doneSteps.length}/{steps.length}</Text>
+                          <Text style={s.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                         </View>
-                      )}
+                        {!isExpanded && steps.length > 0 && (
+                          <View style={s.miniProgress}>
+                            <View style={s.miniProgressBar}>
+                              <View style={[s.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
+                            </View>
+                            <Text style={s.miniProgressText}>{doneSteps.length}/{steps.length}</Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
-                  </View>
-                </TouchableOpacity>
+                  </TouchableOpacity>
 
-                {isExpanded && renderExpandedMove(move, i, moveKey, steps, doneSteps, stepProgress, nextStepIdx, true)}
-              </View>
+                  {isExpanded && renderExpandedMove(move, i, moveKey, steps, doneSteps, stepProgress, nextStepIdx, true)}
+                </View>
+              </Card>
             );
           })}
         </>
@@ -1066,74 +1034,75 @@ export default function Plan() {
             const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.includes(idx));
 
             return (
-              <View
+              <Card
                 key={`opp-${i}`}
-                onLayout={(e) => {
-                  const y = e.nativeEvent.layout.y;
-                  itemYPositions.current[i] = y;
-                  if (highlightIdx === i) {
-                    setTimeout(() => {
-                      scrollRef.current?.scrollTo({ y: Math.max(0, y - 80), animated: true });
-                    }, 150);
-                  }
-                }}
-                style={[
-                  s.card,
-                  isHighlighted && s.cardHighlight,
-                ]}
+                variant={isHighlighted ? 'highlight' : 'default'}
+                style={{ marginBottom: spacing.md }}
               >
-                <TouchableOpacity
-                  onPress={() => setExpanded(isExpanded ? null : i)}
-                  activeOpacity={0.8}
+                <View
+                  onLayout={(e) => {
+                    const y = e.nativeEvent.layout.y;
+                    itemYPositions.current[i] = y;
+                    if (highlightIdx === i) {
+                      setTimeout(() => {
+                        scrollRef.current?.scrollTo({ y: Math.max(0, y - 80), animated: true });
+                      }, 150);
+                    }
+                  }}
                 >
-                  <View style={s.cardHeader}>
-                    <AnimGlyph delay={seqIdx * 80}>
-                      <View style={s.badge}>
-                        <Text style={s.badgeText}>{seqIdx + 1}</Text>
-                      </View>
-                    </AnimGlyph>
-                    <View style={s.cardContent}>
-                      <Text style={s.moveAction}>{stripMd(move.action)}</Text>
-                      <View style={s.moveStats}>
-                        <Text style={s.impactText}>
-                          {'\u00a3'}{move.monthlyImpact}/mo
-                        </Text>
-                        <View style={[s.effortBadge, { backgroundColor: `${effortColor(move.effort, colors)}15` }]}>
-                          <Text style={[s.effortText, { color: effortColor(move.effort, colors) }]}>{effortLabel(move.effort)}</Text>
-                        </View>
-                        <Text style={s.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
-                      </View>
-
-                      {/* Merchant chips preview */}
-                      {!isExpanded && move.merchants && move.merchants.length > 0 && (
-                        <View style={s.merchantChips}>
-                          {move.merchants.slice(0, 3).map((m, j) => (
-                            <View key={j} style={s.merchantChip}>
-                              <Text style={s.merchantChipText}>{m}</Text>
-                            </View>
-                          ))}
-                          {move.merchants.length > 3 && (
-                            <Text style={s.merchantMore}>+{move.merchants.length - 3}</Text>
-                          )}
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-
-                {/* Quick-start CTA visible without expanding */}
-                {!isExpanded && (
                   <TouchableOpacity
-                    style={s.quickStartBtn}
-                    onPress={() => handleStartMove(i, move)}
+                    onPress={() => setExpanded(isExpanded ? null : i)}
                     activeOpacity={0.8}
                   >
-                    <Text style={s.quickStartBtnText}>Start this move</Text>
-                  </TouchableOpacity>
-                )}
+                    <View style={s.cardHeader}>
+                      <AnimGlyph delay={seqIdx * 80}>
+                        <View style={s.badge}>
+                          <Text style={s.badgeText}>{seqIdx + 1}</Text>
+                        </View>
+                      </AnimGlyph>
+                      <View style={s.cardContent}>
+                        <Text style={s.moveAction}>{stripMd(move.action)}</Text>
+                        <View style={s.moveStats}>
+                          <Text style={s.impactText}>
+                            {'\u00a3'}{move.monthlyImpact}/mo
+                          </Text>
+                          <View style={[s.effortBadge, { backgroundColor: `${effortColor(move.effort, colors)}15` }]}>
+                            <Text style={[s.effortText, { color: effortColor(move.effort, colors) }]}>{effortLabel(move.effort)}</Text>
+                          </View>
+                          <Text style={s.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                        </View>
 
-                {isExpanded && renderExpandedMove(move, i, moveKey, steps, doneSteps, stepProgress, nextStepIdx, false)}
-              </View>
+                        {/* Merchant chips preview */}
+                        {!isExpanded && move.merchants && move.merchants.length > 0 && (
+                          <View style={s.merchantChips}>
+                            {move.merchants.slice(0, 3).map((m, j) => (
+                              <View key={j} style={s.merchantChip}>
+                                <Text style={s.merchantChipText}>{m}</Text>
+                              </View>
+                            ))}
+                            {move.merchants.length > 3 && (
+                              <Text style={s.merchantMore}>+{move.merchants.length - 3}</Text>
+                            )}
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Quick-start CTA visible without expanding */}
+                  {!isExpanded && (
+                    <TouchableOpacity
+                      style={s.quickStartBtn}
+                      onPress={() => handleStartMove(i, move)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={s.quickStartBtnText}>Start this move</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {isExpanded && renderExpandedMove(move, i, moveKey, steps, doneSteps, stepProgress, nextStepIdx, false)}
+                </View>
+              </Card>
             );
           })}
 

@@ -13,6 +13,7 @@ import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
+import Card from '@/components/Card';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/lib/types';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
@@ -140,7 +141,12 @@ function PlanCard({
   const isDismissed = action.status === 'dismissed';
 
   return (
-    <View style={[s.actionCard, isApproved && s.actionCardApproved]}>
+    <Card
+      variant="action"
+      borderColor={isApproved ? colors.accent : undefined}
+      noShadow
+      style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
+    >
       <Text style={s.actionCardLabel}>{isApproved ? 'PLAN ADDED' : 'PLAN SUGGESTED'}</Text>
       <Text style={s.actionCardTitle}>{stripMd(d.action)}</Text>
       <View style={s.actionCardStats}>
@@ -190,7 +196,7 @@ function PlanCard({
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </Card>
   );
 }
 
@@ -199,7 +205,12 @@ function BudgetItemCard({ action }: { action: ChatAction }) {
   const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
   return (
-    <View style={[s.actionCard, s.actionCardApproved]}>
+    <Card
+      variant="action"
+      borderColor={colors.accent}
+      noShadow
+      style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
+    >
       <Text style={s.actionCardLabel}>BUDGET UPDATED</Text>
       <Text style={s.actionCardTitle}>{d.description}</Text>
       <View style={s.actionCardStats}>
@@ -221,7 +232,7 @@ function BudgetItemCard({ action }: { action: ChatAction }) {
       <View style={s.approvedBanner}>
         <Text style={s.approvedBannerText}>{'\u2713'} Added to your budget</Text>
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -230,14 +241,18 @@ function OverrideCard({ action }: { action: ChatAction }) {
   const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
   return (
-    <View style={s.actionCard}>
+    <Card
+      variant="action"
+      noShadow
+      style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
+    >
       <Text style={s.actionCardLabel}>TRANSACTION UPDATED</Text>
       <Text style={s.overrideDescription}>
         {'\u201C'}{d.match_description}{'\u201D'} {'\u2192'} {d.category}
         {d.is_essential ? ' (essential)' : ' (discretionary)'}
       </Text>
       <Text style={s.overrideNote}>Will apply on your next analysis.</Text>
-    </View>
+    </Card>
   );
 }
 
@@ -267,7 +282,12 @@ function GoalUpdateCard({
   const isDismissed = action.status === 'dismissed';
 
   return (
-    <View style={[s.actionCard, s.goalUpdateCard, isAccepted && s.actionCardApproved]}>
+    <Card
+      variant="action"
+      borderColor={isAccepted ? colors.accent : colors.skyDim}
+      noShadow
+      style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
+    >
       <Text style={s.goalUpdateLabel}>GOAL CHECK-IN</Text>
       <Text style={s.goalUpdateReason}>{stripMd(d.reason)}</Text>
       <View style={s.goalUpdateFields}>
@@ -317,7 +337,7 @@ function GoalUpdateCard({
           </TouchableOpacity>
         </View>
       )}
-    </View>
+    </Card>
   );
 }
 
@@ -1245,9 +1265,13 @@ export default function Chat() {
                     saving={savingPlan === `${i}-${j}`}
                   />
                 ) : action.type === 'plan_error' ? (
-                  <View style={s.errorCard}>
+                  <Card
+                    variant="error"
+                    noShadow
+                    style={{ borderRadius: radius.md, padding: spacing.md, marginBottom: 0 }}
+                  >
                     <Text style={s.errorCardText}>{action.data.error || 'Plan could not be saved.'}</Text>
-                  </View>
+                  </Card>
                 ) : action.type === 'override_saved' ? (
                   <OverrideCard action={action} />
                 ) : action.type === 'budget_item_saved' ? (
