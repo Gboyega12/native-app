@@ -953,21 +953,22 @@ export default function Plan() {
             const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.includes(idx));
 
             return (
-              <Card
+              <View
                 key={`active-${i}`}
+                onLayout={(e) => {
+                  itemYPositions.current[i] = e.nativeEvent.layout.y;
+                  if (highlightIdx === i) {
+                    setTimeout(() => {
+                      scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - 80), animated: true });
+                    }, 150);
+                  }
+                }}
+              >
+              <Card
                 variant={highlightIdx === i ? 'highlight' : 'active'}
                 style={{ marginBottom: spacing.md }}
               >
-                <View
-                  onLayout={(e) => {
-                    itemYPositions.current[i] = e.nativeEvent.layout.y;
-                    if (highlightIdx === i) {
-                      setTimeout(() => {
-                        scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - 80), animated: true });
-                      }, 150);
-                    }
-                  }}
-                >
+                <View>
                   <TouchableOpacity
                     onPress={() => setExpanded(isExpanded ? null : i)}
                     activeOpacity={0.8}
@@ -1004,6 +1005,7 @@ export default function Plan() {
                   {isExpanded && renderExpandedMove(move, i, moveKey, steps, doneSteps, stepProgress, nextStepIdx, true)}
                 </View>
               </Card>
+              </View>
             );
           })}
         </>
@@ -1034,22 +1036,22 @@ export default function Plan() {
             const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.includes(idx));
 
             return (
-              <Card
+              <View
                 key={`opp-${i}`}
+                onLayout={(e) => {
+                  itemYPositions.current[i] = e.nativeEvent.layout.y;
+                  if (highlightIdx === i) {
+                    setTimeout(() => {
+                      scrollRef.current?.scrollTo({ y: Math.max(0, e.nativeEvent.layout.y - 80), animated: true });
+                    }, 150);
+                  }
+                }}
+              >
+              <Card
                 variant={isHighlighted ? 'highlight' : 'default'}
                 style={{ marginBottom: spacing.md }}
               >
-                <View
-                  onLayout={(e) => {
-                    const y = e.nativeEvent.layout.y;
-                    itemYPositions.current[i] = y;
-                    if (highlightIdx === i) {
-                      setTimeout(() => {
-                        scrollRef.current?.scrollTo({ y: Math.max(0, y - 80), animated: true });
-                      }, 150);
-                    }
-                  }}
-                >
+                <View>
                   <TouchableOpacity
                     onPress={() => setExpanded(isExpanded ? null : i)}
                     activeOpacity={0.8}
@@ -1103,6 +1105,7 @@ export default function Plan() {
                   {isExpanded && renderExpandedMove(move, i, moveKey, steps, doneSteps, stepProgress, nextStepIdx, false)}
                 </View>
               </Card>
+              </View>
             );
           })}
 
