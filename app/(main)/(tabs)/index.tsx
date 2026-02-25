@@ -51,7 +51,6 @@ export default function Home() {
   const [userName, setUserName] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
-  const [budgetExpanded, setBudgetExpanded] = useState(false);
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
   const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -1058,11 +1057,7 @@ export default function Home() {
     if (impact <= 0) continue;
     const amt = Math.min(impact, allocBudget);
 
-    // Human-readable label based on move category
-    let label = move.action;
-    if (label.length > 40) label = label.slice(0, 37) + '...';
-
-    moveAllocations.push({ label, amount: amt, priority: i + 1 });
+    moveAllocations.push({ label: move.action, amount: amt, priority: i + 1 });
     allocBudget -= amt;
   }
 
@@ -1642,226 +1637,202 @@ export default function Home() {
                 <View style={s.allocationList}>
                   <Text style={s.allocationHeading}>Based on your plan</Text>
                   {moveAllocations.map((alloc, idx) => (
-                    <View key={idx} style={s.allocationRow}>
-                      <Text style={s.allocationRank}>{alloc.priority}</Text>
-                      <Text style={s.allocationLabel} numberOfLines={1}>{alloc.label}</Text>
-                      <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(alloc.amount).toLocaleString()}</Text>
+                    <View key={idx} style={s.allocationItem}>
+                      <View style={s.allocationItemTop}>
+                        <Text style={s.allocationRank}>#{alloc.priority}</Text>
+                        <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(alloc.amount).toLocaleString()}{budgetPeriod === 'week' ? '/wk' : '/mo'}</Text>
+                      </View>
+                      <Text style={s.allocationLabel}>{alloc.label}</Text>
                     </View>
                   ))}
-                  {freeToSpend > 0 && (
-                    <View style={[s.allocationRow, { marginTop: 4 }]}>
-                      <Text style={s.allocationRank}>{'\u2022'}</Text>
-                      <Text style={s.allocationLabel}>Unallocated</Text>
-                      <Text style={[s.allocationAmount, { color: colors.text }]}>{'\u00a3'}{Math.round(freeToSpend).toLocaleString()}</Text>
-                    </View>
-                  )}
                 </View>
               )}
+              <View style={s.allocationUnallocated}>
+                <Text style={s.allocationUnallocatedLabel}>Unallocated</Text>
+                <Text style={[s.allocationUnallocatedAmount, { color: freeToSpend > 0 ? colors.text : colors.muted }]}>
+                  {'\u00a3'}{Math.round(freeToSpend).toLocaleString()}
+                </Text>
+              </View>
               {moveAllocations.length === 0 && periodRemaining > 0 && (
-                <Text style={s.allocationHint}>Check your Plan tab for the best way to put this to work.</Text>
+                <Text style={s.allocationHint}>Check your Plan tab to see where this could go.</Text>
               )}
             </View>
 
-            {/* Collapsible breakdown sections */}
-            {budgetExpanded && (
-              <>
-                {/* Essentials breakdown */}
-                <>
-                  <View style={s.breakdownHeaderRow}>
-                    <Text style={s.breakdownHeader}>ESSENTIALS BREAKDOWN</Text>
-                    <TouchableOpacity
-                      style={s.addItemBtn}
-                      onPress={() => {
-                        LayoutAnimation.configureNext(SMOOTH_ANIM);
-                        setAddItemEssential(true);
-                        setAddItemError('');
-                        setShowAddItem(true);
-                      }}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
-                      <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {periodNonDiscData.filter(d => d.count > 0).length === 0 && (
-                    <Text style={s.noDataText}>No essential spending {budgetPeriod === 'week' ? 'this week' : 'this month'}.</Text>
-                  )}
-                  {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
-                    const key = `nd-${item.category}`;
-                    const isExpanded = expandedCategories.has(key);
-                    const catOnTrack = item.total <= item.budget * 1.05;
-                    const visibleItems = periodNonDiscData.filter(d => d.count > 0);
-                    return (
-                      <View key={i}>
-                        <TouchableOpacity
-                          activeOpacity={0.7}
-                          onPress={() => toggleCategory(key)}
-                          style={[s.dataRow, i === visibleItems.length - 1 && !isExpanded && s.dataRowLast]}
-                        >
-                          <View style={s.dataRowLeft}>
-                            <Text style={[s.catArrow, { color: colors.text }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
-                            <View style={s.catInfo}>
-                              <Text style={s.dataLabel}>{item.category}</Text>
-                              <Text style={s.dataMeta}>
-                                {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
-                              </Text>
-                            </View>
-                          </View>
-                          <View style={s.dataRowRight}>
-                            <Text style={[s.dataValue, { color: catOnTrack ? colors.text : colors.coral }]}>
-                              {'\u00a3'}{Math.round(item.total).toLocaleString()}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                        {isExpanded && item.txs.length > 0 && (
-                          <View style={s.txDropdown}>
-                            {item.txs.map((tx, j) => (
-                              <TouchableOpacity
-                                key={j}
-                                style={[s.txRow, j === item.txs.length - 1 && s.txRowLast]}
-                                onLongPress={() => {
-                                  setRecatTx({ tx, catKey: item.category, section: 'essential' });
-                                  setRecatTarget('');
-                                  setRecatEssential(true);
-                                }}
-                                activeOpacity={0.7}
-                              >
-                                <View style={s.txLeft}>
-                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
-                                  <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                                </View>
-                                <View style={s.txRightCol}>
-                                  <Text style={[s.txAmount, { color: colors.text2 }]}>
-                                    {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
-                                  </Text>
-                                  <Text style={s.txRecatHint}>Hold to move</Text>
-                                </View>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        )}
-                        {isExpanded && item.txs.length === 0 && (
-                          <View style={s.txDropdown}>
-                            <Text style={s.txEmpty}>No transactions {budgetPeriod === 'week' ? 'this week' : 'this month'}</Text>
-                          </View>
-                        )}
-                      </View>
-                    );
-                  })}
-                </>
+          </Card>
 
-                {/* Lifestyle spending */}
-                <>
-                  <View style={[s.breakdownHeaderRow, { marginTop: 28 }]}>
-                    <Text style={s.breakdownHeader}>LIFESTYLE BREAKDOWN</Text>
-                    <TouchableOpacity
-                      style={s.addItemBtn}
-                      onPress={() => {
-                        LayoutAnimation.configureNext(SMOOTH_ANIM);
-                        setAddItemEssential(false);
-                        setAddItemError('');
-                        setShowAddItem(true);
-                      }}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
-                      <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                  {periodDiscData.filter(d => d.count > 0).length === 0 && (
-                    <Text style={s.noDataText}>No lifestyle spending {budgetPeriod === 'week' ? 'this week' : 'this month'}.</Text>
-                  )}
-                  {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
-                    const key = `d-${item.category}`;
-                    const isExpanded = expandedCategories.has(key);
-                    const catOnTrack = item.total <= item.budget * 1.05;
-                    const visibleItems = periodDiscData.filter(d => d.count > 0);
-                    return (
-                      <View key={i}>
-                        <TouchableOpacity
-                          activeOpacity={0.7}
-                          onPress={() => toggleCategory(key)}
-                          style={[s.dataRow, i === visibleItems.length - 1 && !isExpanded && s.dataRowLast]}
-                        >
-                          <View style={s.dataRowLeft}>
-                            <Text style={[s.catArrow, { color: colors.dim }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
-                            <View style={s.catInfo}>
-                              <Text style={s.dataLabel}>{item.category}</Text>
-                              <Text style={s.dataMeta}>
-                                {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
-                              </Text>
-                            </View>
-                          </View>
-                          <View style={s.dataRowRight}>
-                            <Text style={[s.dataValue, { color: catOnTrack ? colors.dim : colors.coral }]}>
-                              {'\u00a3'}{Math.round(item.total).toLocaleString()}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                        {isExpanded && item.txs.length > 0 && (
-                          <View style={s.txDropdown}>
-                            {item.txs.map((tx, j) => (
-                              <TouchableOpacity
-                                key={j}
-                                style={[s.txRow, j === item.txs.length - 1 && s.txRowLast]}
-                                onLongPress={() => {
-                                  setRecatTx({ tx, catKey: item.category, section: 'lifestyle' });
-                                  setRecatTarget('');
-                                  setRecatEssential(false);
-                                }}
-                                activeOpacity={0.7}
-                              >
-                                <View style={s.txLeft}>
-                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
-                                  <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                                </View>
-                                <View style={s.txRightCol}>
-                                  <Text style={[s.txAmount, { color: colors.dim }]}>
-                                    {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
-                                  </Text>
-                                  <Text style={s.txRecatHint}>Hold to move</Text>
-                                </View>
-                              </TouchableOpacity>
-                            ))}
-                          </View>
-                        )}
-                        {isExpanded && item.txs.length === 0 && (
-                          <View style={s.txDropdown}>
-                            <Text style={s.txEmpty}>No transactions {budgetPeriod === 'week' ? 'this week' : 'this month'}</Text>
-                          </View>
-                        )}
-                      </View>
-                    );
-                  })}
-                </>
+          {/* ── Transactions card ── */}
+          <Card style={{ marginTop: spacing.md }}>
+            <CardTitleRow>
+              <CardTitle>Transactions</CardTitle>
+            </CardTitleRow>
 
-                <Text style={s.cardFooter}>Tap any category to expand · Hold a transaction to re-categorize</Text>
-
-                <TouchableOpacity
-                  onPress={() => {
-                    LayoutAnimation.configureNext(SMOOTH_ANIM);
-                    setBudgetExpanded(false);
-                  }}
-                  style={s.viewTransactionsBtn}
-                >
-                  <Text style={s.viewTransactionsText}>Hide breakdown</Text>
-                </TouchableOpacity>
-              </>
-            )}
-
-            {/* View transactions button */}
-            {!budgetExpanded && (
+            {/* Essentials breakdown */}
+            <View style={s.breakdownHeaderRow}>
+              <Text style={s.breakdownHeader}>ESSENTIALS</Text>
               <TouchableOpacity
+                style={s.addItemBtn}
                 onPress={() => {
                   LayoutAnimation.configureNext(SMOOTH_ANIM);
-                  setBudgetExpanded(true);
+                  setAddItemEssential(true);
+                  setAddItemError('');
+                  setShowAddItem(true);
                 }}
-                style={s.viewTransactionsBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <Text style={s.viewTransactionsText}>View breakdown</Text>
+                <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
+                <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
               </TouchableOpacity>
+            </View>
+            {periodNonDiscData.filter(d => d.count > 0).length === 0 && (
+              <Text style={s.noDataText}>No essential spending {budgetPeriod === 'week' ? 'this week' : 'this month'}.</Text>
             )}
+            {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
+              const key = `nd-${item.category}`;
+              const isExpanded = expandedCategories.has(key);
+              const catOnTrack = item.total <= item.budget * 1.05;
+              const visibleItems = periodNonDiscData.filter(d => d.count > 0);
+              return (
+                <View key={i}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => toggleCategory(key)}
+                    style={[s.dataRow, i === visibleItems.length - 1 && !isExpanded && s.dataRowLast]}
+                  >
+                    <View style={s.dataRowLeft}>
+                      <Text style={[s.catArrow, { color: colors.text }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
+                      <View style={s.catInfo}>
+                        <Text style={s.dataLabel}>{item.category}</Text>
+                        <Text style={s.dataMeta}>
+                          {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={s.dataRowRight}>
+                      <Text style={[s.dataValue, { color: catOnTrack ? colors.text : colors.coral }]}>
+                        {'\u00a3'}{Math.round(item.total).toLocaleString()}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  {isExpanded && item.txs.length > 0 && (
+                    <View style={s.txDropdown}>
+                      {item.txs.map((tx, j) => (
+                        <TouchableOpacity
+                          key={j}
+                          style={[s.txRow, j === item.txs.length - 1 && s.txRowLast]}
+                          onLongPress={() => {
+                            setRecatTx({ tx, catKey: item.category, section: 'essential' });
+                            setRecatTarget('');
+                            setRecatEssential(true);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={s.txLeft}>
+                            <Text style={s.txMerchant}>{tx.merchant}</Text>
+                            <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                          </View>
+                          <View style={s.txRightCol}>
+                            <Text style={[s.txAmount, { color: colors.text2 }]}>
+                              {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                            </Text>
+                            <Text style={s.txRecatHint}>Hold to move</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                  {isExpanded && item.txs.length === 0 && (
+                    <View style={s.txDropdown}>
+                      <Text style={s.txEmpty}>No transactions {budgetPeriod === 'week' ? 'this week' : 'this month'}</Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
 
+            {/* Lifestyle breakdown */}
+            <View style={[s.breakdownHeaderRow, { marginTop: 28 }]}>
+              <Text style={s.breakdownHeader}>LIFESTYLE</Text>
+              <TouchableOpacity
+                style={s.addItemBtn}
+                onPress={() => {
+                  LayoutAnimation.configureNext(SMOOTH_ANIM);
+                  setAddItemEssential(false);
+                  setAddItemError('');
+                  setShowAddItem(true);
+                }}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
+                <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
+              </TouchableOpacity>
+            </View>
+            {periodDiscData.filter(d => d.count > 0).length === 0 && (
+              <Text style={s.noDataText}>No lifestyle spending {budgetPeriod === 'week' ? 'this week' : 'this month'}.</Text>
+            )}
+            {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
+              const key = `d-${item.category}`;
+              const isExpanded = expandedCategories.has(key);
+              const catOnTrack = item.total <= item.budget * 1.05;
+              const visibleItems = periodDiscData.filter(d => d.count > 0);
+              return (
+                <View key={i}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => toggleCategory(key)}
+                    style={[s.dataRow, i === visibleItems.length - 1 && !isExpanded && s.dataRowLast]}
+                  >
+                    <View style={s.dataRowLeft}>
+                      <Text style={[s.catArrow, { color: colors.dim }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
+                      <View style={s.catInfo}>
+                        <Text style={s.dataLabel}>{item.category}</Text>
+                        <Text style={s.dataMeta}>
+                          {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={s.dataRowRight}>
+                      <Text style={[s.dataValue, { color: catOnTrack ? colors.dim : colors.coral }]}>
+                        {'\u00a3'}{Math.round(item.total).toLocaleString()}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  {isExpanded && item.txs.length > 0 && (
+                    <View style={s.txDropdown}>
+                      {item.txs.map((tx, j) => (
+                        <TouchableOpacity
+                          key={j}
+                          style={[s.txRow, j === item.txs.length - 1 && s.txRowLast]}
+                          onLongPress={() => {
+                            setRecatTx({ tx, catKey: item.category, section: 'lifestyle' });
+                            setRecatTarget('');
+                            setRecatEssential(false);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <View style={s.txLeft}>
+                            <Text style={s.txMerchant}>{tx.merchant}</Text>
+                            <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                          </View>
+                          <View style={s.txRightCol}>
+                            <Text style={[s.txAmount, { color: colors.dim }]}>
+                              {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
+                            </Text>
+                            <Text style={s.txRecatHint}>Hold to move</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                  {isExpanded && item.txs.length === 0 && (
+                    <View style={s.txDropdown}>
+                      <Text style={s.txEmpty}>No transactions {budgetPeriod === 'week' ? 'this week' : 'this month'}</Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+
+            <Text style={s.cardFooter}>Tap any category to expand · Hold a transaction to re-categorize</Text>
           </Card>
 
           {/* Add budget item modal */}
@@ -3071,6 +3042,32 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.muted,
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  allocationItem: {
+    paddingVertical: 6,
+  },
+  allocationItemTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  allocationUnallocated: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
+  },
+  allocationUnallocatedLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.muted,
+  },
+  allocationUnallocatedAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
   },
   budgetBar: {
     flexDirection: 'row',
