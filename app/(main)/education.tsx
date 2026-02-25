@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { colors, fonts, spacing, radius } from '@/theme';
-import { BocyFace, IllustrationScan, IllustrationPlan, IllustrationPersonal } from '@/components/Bocy';
+import { BocyFace } from '@/components/Bocy';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -74,18 +74,11 @@ export default function Education() {
       )}
 
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
-        {/* Illustration */}
-        <View style={styles.illustrationWrap}>
-          {slide.illustration === 'scan' && <IllustrationScan />}
-          {slide.illustration === 'plan' && <IllustrationPlan />}
-          {slide.illustration === 'personal' && <IllustrationPersonal />}
-        </View>
-
-        {/* Bocy face as companion indicator */}
-        <View style={styles.bocyIndicator}>
+        {/* Bocy character */}
+        <View style={styles.bocyHero}>
           <BocyFace
             mood={current === 0 ? 'neutral' : current === 1 ? 'thinking' : 'happy'}
-            size="sm"
+            size="lg"
             breathing
           />
         </View>
@@ -168,36 +161,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  illustrationWrap: {
-    marginBottom: spacing.lg,
+  bocyHero: {
+    marginBottom: spacing.xl,
     alignItems: 'center',
-  },
-  bocyIndicator: {
-    marginBottom: spacing.lg,
   },
   title: {
     fontFamily: fonts.heading,
-    fontSize: 26,
+    fontSize: 28,
     color: colors.text,
     textAlign: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   body: {
     fontFamily: fonts.regular,
-    fontSize: 15,
+    fontSize: 16,
     color: colors.text2,
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 26,
     maxWidth: 480,
+    paddingHorizontal: spacing.sm,
   },
   bullets: {
     width: '100%',
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
   },
   bulletRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xl,
   },
   bulletDot: {
     width: 28,
