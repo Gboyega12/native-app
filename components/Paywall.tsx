@@ -274,7 +274,22 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
                 <Text style={s.errorText}>{error}</Text>
               </View>
             )}
-            <Text style={s.trialNote}>Cancel anytime</Text>
+            <Text style={s.legalNote}>
+              {selectedPrice === 'yearly'
+                ? (nativeYearlyPrice || '\u00a379.99') + '/year'
+                : (nativeMonthlyPrice || '\u00a39.99') + '/month'}
+              {'. '}Auto-renews. Cancel anytime.{'\n'}
+              Payment will be charged to your Apple ID account at confirmation of purchase. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. You can manage and cancel subscriptions in your Account Settings on the App Store after purchase.
+            </Text>
+            <View style={s.legalLinks}>
+              <TouchableOpacity onPress={() => Linking.openURL('https://www.bocy.io/terms.html')} activeOpacity={0.7}>
+                <Text style={s.legalLinkText}>Terms of Use</Text>
+              </TouchableOpacity>
+              <Text style={s.legalSep}>{'\u00b7'}</Text>
+              <TouchableOpacity onPress={() => Linking.openURL('https://www.bocy.io/privacy.html')} activeOpacity={0.7}>
+                <Text style={s.legalLinkText}>Privacy Policy</Text>
+              </TouchableOpacity>
+            </View>
 
             {/* Restore purchases (native only) */}
             {isNative && (
@@ -510,12 +525,32 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  trialNote: {
+  legalNote: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: c.muted,
+    textAlign: 'center',
+    marginTop: spacing.md,
+    lineHeight: 16,
+    paddingHorizontal: spacing.sm,
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    gap: spacing.xs,
+  },
+  legalLinkText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.dim,
+    textDecorationLine: 'underline',
+  },
+  legalSep: {
     fontFamily: fonts.regular,
     fontSize: 12,
     color: c.muted,
-    textAlign: 'center',
-    marginTop: spacing.sm,
   },
 
   // Restore

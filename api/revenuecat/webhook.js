@@ -11,6 +11,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY
 
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -23,8 +24,12 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'RevenueCat webhook not configured' });
   }
 
-  const authHeader = req.headers.authorization;
-  if (authHeader !== `Bearer ${secret}`) {
+  const authHeader = req.headers.authorization || '';
+  const expected = `Bearer ${secret}`;
+  if (
+    authHeader.length !== expected.length ||
+    !crypto.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected))
+  ) {
     return res.status(401).json({ error: 'Invalid authorization' });
   }
 

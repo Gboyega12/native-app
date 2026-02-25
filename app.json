@@ -75,6 +75,7 @@
     "experiments": {
       "typedRoutes": true
     },
-    "privacyUrl": "https://www.bocy.io/privacy.html"
+    "privacyUrl": "https://www.bocy.io/privacy.html",
+    "termsUrl": "https://www.bocy.io/terms.html"
   }
 }

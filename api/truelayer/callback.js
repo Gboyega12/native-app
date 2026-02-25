@@ -77,7 +77,7 @@ export default async function handler(req, res) {
         redirect_uri_used: redirectUri,
         response: tokenData,
       }));
-      return fail(400, 'Token exchange failed', tokenData.error_description || tokenData.error || `redirect_uri: ${redirectUri}`);
+      return fail(400, 'Token exchange failed', tokenData.error_description || tokenData.error || 'Invalid authorization code');
     }
 
     const token = tokenData.access_token;
