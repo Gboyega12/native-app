@@ -1002,8 +1002,10 @@ export default function Home() {
   })();
 
   // ── Period-aware budget calculations ──
-  // Compute actual totals from real transactions for the selected period
+  // Budget targets = analysis monthly averages (what you'd normally spend)
+  // Actual = real transactions in the selected period
   const txFilter = budgetPeriod === 'week' ? isCurrentWeek : isCurrentMonth;
+  const periodDivisor = budgetPeriod === 'week' ? 4.33 : 1;
 
   const computePeriodCategory = (item: BudgetCategory) => {
     const txs = (item.transactions ?? []).filter(tx => txFilter(tx.date));
@@ -1014,43 +1016,43 @@ export default function Home() {
   const periodNonDiscData = nonDiscItems.map(item => ({
     ...item,
     ...computePeriodCategory(item),
+    budget: item.monthly / periodDivisor,
   }));
   const periodDiscData = discItems.map(item => ({
     ...item,
     ...computePeriodCategory(item),
+    budget: item.monthly / periodDivisor,
   }));
 
   const periodNonDiscTotal = periodNonDiscData.reduce((s, d) => s + d.total, 0);
   const periodDiscTotal = periodDiscData.reduce((s, d) => s + d.total, 0);
   const periodSpendTotal = periodNonDiscTotal + periodDiscTotal;
-  const periodLeftover = Math.max(0, (budgetPeriod === 'week' ? income / 4.33 : income) - periodSpendTotal);
 
-  // Bar proportions for the selected period
-  const pBarTotal = periodNonDiscTotal + periodDiscTotal + periodLeftover || 1;
-  const pNonDiscFlex = periodNonDiscTotal / pBarTotal;
-  const pDiscFlex = periodDiscTotal / pBarTotal;
-  const pLeftFlex = periodLeftover / pBarTotal;
+  // Budget targets for the period (from analysis averages)
+  const periodNonDiscBudget = nonDiscTotal / periodDivisor;
+  const periodDiscBudget = discTotal / periodDivisor;
+  const periodIncome = income / periodDivisor;
+  const periodTotalBudget = periodNonDiscBudget + periodDiscBudget;
 
-  // Period-aware percentages
-  const periodIncome = budgetPeriod === 'week' ? income / 4.33 : income;
-  const [pNonDiscPct, pDiscPct, pLeftPct] = (() => {
-    if (periodIncome <= 0) return [0, 0, 0];
-    const rawPcts = [
-      (periodNonDiscTotal / periodIncome) * 100,
-      (periodDiscTotal / periodIncome) * 100,
-      (periodLeftover / periodIncome) * 100,
-    ];
-    const floored = rawPcts.map(Math.floor);
-    const remainders = rawPcts.map((r, i) => r - floored[i]);
-    let pGap = 100 - floored.reduce((a, b) => a + b, 0);
-    const pIndices = [0, 1, 2].sort((a, b) => remainders[b] - remainders[a]);
-    for (const idx of pIndices) {
-      if (pGap <= 0) break;
-      floored[idx]++;
-      pGap--;
-    }
-    return floored as [number, number, number];
-  })();
+  // On-track status per section
+  const essentialsOnTrack = periodNonDiscTotal <= periodNonDiscBudget * 1.05; // 5% tolerance
+  const lifestyleOnTrack = periodDiscTotal <= periodDiscBudget * 1.05;
+  const essentialsPctUsed = periodNonDiscBudget > 0 ? Math.min(150, Math.round((periodNonDiscTotal / periodNonDiscBudget) * 100)) : 0;
+  const lifestylePctUsed = periodDiscBudget > 0 ? Math.min(150, Math.round((periodDiscTotal / periodDiscBudget) * 100)) : 0;
+  const overallPctUsed = periodIncome > 0 ? Math.min(150, Math.round((periodSpendTotal / periodIncome) * 100)) : 0;
+
+  // Remaining breakdown: what's the surplus earmarked for?
+  const periodRemaining = Math.max(0, periodIncome - periodSpendTotal);
+  const allMoves = analysis?.all_moves ?? [];
+  const debtMoves = allMoves.filter(m => m.category === 'debt');
+  const savingsMoves = allMoves.filter(m => m.category === 'savings' || m.category === 'invest');
+  const bufferMoves = allMoves.filter(m => m.category === 'buffer');
+  const debtAllocation = debtMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0) / periodDivisor;
+  const savingsAllocation = savingsMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0) / periodDivisor;
+  const bufferAllocation = bufferMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0) / periodDivisor;
+  const goalTarget = analysis?.goal_context?.targetAmount ?? 0;
+  const totalAllocated = debtAllocation + savingsAllocation + bufferAllocation;
+  const freeToSpend = Math.max(0, periodRemaining - totalAllocated);
 
   // ── Real income & budget line insights ──
   // Real income = income minus essentials (what you can actually allocate)
@@ -1752,88 +1754,149 @@ export default function Home() {
             {infoCard === 'budget' && (
               <View style={s.infoBox}>
                 <Text style={s.infoBoxText}>
-                  Your real spending for the selected period. All amounts and transaction counts match exactly what you see when you expand a category. Switch between this month and this week for different views.
+                  Spending tracked against your typical budget. Essentials and Lifestyle budgets are based on your average spending patterns. The remaining amount shows what's earmarked for your goals.
                 </Text>
               </View>
             )}
 
-            {/* Header with period toggle */}
+            {/* Header */}
             <View style={s.budgetHeaderRow}>
               <Text style={s.cardTitle}>Your budget reality</Text>
             </View>
 
-            {/* Period toggle: Month / Week */}
+            {/* Period toggle */}
             <View style={s.periodToggleRow}>
               <TouchableOpacity
                 style={[s.periodBtn, budgetPeriod === 'month' && { backgroundColor: colors.accent }]}
-                onPress={() => {
-                  LayoutAnimation.configureNext(SMOOTH_ANIM);
-                  setBudgetPeriod('month');
-                }}
+                onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod('month'); }}
               >
-                <Text style={[s.periodBtnText, budgetPeriod === 'month' && { color: colors.bg }]}>
-                  This month
-                </Text>
+                <Text style={[s.periodBtnText, budgetPeriod === 'month' && { color: colors.bg }]}>This month</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.periodBtn, budgetPeriod === 'week' && { backgroundColor: colors.accent }]}
-                onPress={() => {
-                  LayoutAnimation.configureNext(SMOOTH_ANIM);
-                  setBudgetPeriod('week');
-                }}
+                onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod('week'); }}
               >
-                <Text style={[s.periodBtnText, budgetPeriod === 'week' && { color: colors.bg }]}>
-                  This week
-                </Text>
+                <Text style={[s.periodBtnText, budgetPeriod === 'week' && { color: colors.bg }]}>This week</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Total spend headline */}
+            {/* Overall spend vs income */}
             <View style={s.periodTotalRow}>
-              <Text style={[s.periodTotalAmount, { color: colors.text }]}>
+              <Text style={[s.periodTotalAmount, { color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
                 {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
+                <Text style={s.periodTotalOf}> of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}</Text>
               </Text>
               <Text style={s.periodTotalLabel}>
-                spent {budgetPeriod === 'week' ? 'this week' : 'this month'}
+                {overallPctUsed > 100
+                  ? `Over budget by \u00a3${Math.round(periodSpendTotal - periodIncome).toLocaleString()}`
+                  : `${overallPctUsed}% of ${budgetPeriod === 'week' ? 'weekly' : 'monthly'} income spent`}
               </Text>
             </View>
 
-            {/* 3-segment stacked bar */}
-            <View style={s.budgetBar}>
-              {pNonDiscFlex > 0 && (
-                <View style={[s.barSeg, { flex: pNonDiscFlex, backgroundColor: colors.text2 }]} />
-              )}
-              {pDiscFlex > 0 && (
-                <View style={[s.barSeg, { flex: pDiscFlex, backgroundColor: colors.dim }]} />
-              )}
-              {pLeftFlex > 0 && (
-                <View style={[s.barSeg, { flex: pLeftFlex, backgroundColor: colors.border }]} />
-              )}
+            {/* Overall progress bar */}
+            <View style={s.progressTrack}>
+              <View style={[
+                s.progressFill,
+                {
+                  width: `${Math.min(100, overallPctUsed)}%`,
+                  backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.green,
+                },
+              ]} />
             </View>
 
-            {/* Summary row */}
-            <View style={[s.summaryRow, !budgetExpanded && { marginBottom: 0 }]}>
-              <AnimGlyph delay={80} style={s.summaryItem}>
-                <Text style={[s.summaryAmount, { color: colors.text }]}>
+            {/* Essentials section */}
+            <View style={s.sectionBlock}>
+              <View style={s.sectionHeaderRow}>
+                <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
+                <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.green : colors.coral }]}>
+                  {essentialsOnTrack ? '\u2713 On track' : '\u26A0 Over budget'}
+                </Text>
+              </View>
+              <View style={s.sectionAmountRow}>
+                <Text style={[s.sectionSpent, { color: colors.text }]}>
                   {'\u00a3'}{Math.round(periodNonDiscTotal).toLocaleString()}
                 </Text>
-                <Text style={s.summaryLabel}>Essentials</Text>
-                <Text style={s.summaryPct}>{pNonDiscPct}%</Text>
-              </AnimGlyph>
-              <AnimGlyph delay={160} style={s.summaryItem}>
-                <Text style={[s.summaryAmount, { color: colors.text2 }]}>
+                <Text style={s.sectionBudget}>of {'\u00a3'}{Math.round(periodNonDiscBudget).toLocaleString()} budget</Text>
+              </View>
+              <View style={s.progressTrackSmall}>
+                <View style={[
+                  s.progressFillSmall,
+                  {
+                    width: `${Math.min(100, essentialsPctUsed)}%`,
+                    backgroundColor: essentialsOnTrack ? colors.text2 : colors.coral,
+                  },
+                ]} />
+              </View>
+            </View>
+
+            {/* Lifestyle section */}
+            <View style={s.sectionBlock}>
+              <View style={s.sectionHeaderRow}>
+                <Text style={[s.sectionLabel, { color: colors.text2 }]}>Lifestyle</Text>
+                <Text style={[s.sectionStatus, { color: lifestyleOnTrack ? colors.green : colors.coral }]}>
+                  {lifestyleOnTrack ? '\u2713 On track' : '\u26A0 Over budget'}
+                </Text>
+              </View>
+              <View style={s.sectionAmountRow}>
+                <Text style={[s.sectionSpent, { color: colors.text2 }]}>
                   {'\u00a3'}{Math.round(periodDiscTotal).toLocaleString()}
                 </Text>
-                <Text style={s.summaryLabel}>Lifestyle</Text>
-                <Text style={s.summaryPct}>{pDiscPct}%</Text>
-              </AnimGlyph>
-              <AnimGlyph delay={240} style={s.summaryItem}>
-                <Text style={[s.summaryAmount, { color: colors.text2 }]}>
-                  {'\u00a3'}{Math.round(periodLeftover).toLocaleString()}
+                <Text style={s.sectionBudget}>of {'\u00a3'}{Math.round(periodDiscBudget).toLocaleString()} budget</Text>
+              </View>
+              <View style={s.progressTrackSmall}>
+                <View style={[
+                  s.progressFillSmall,
+                  {
+                    width: `${Math.min(100, lifestylePctUsed)}%`,
+                    backgroundColor: lifestyleOnTrack ? colors.dim : colors.coral,
+                  },
+                ]} />
+              </View>
+            </View>
+
+            {/* Remaining breakdown */}
+            <View style={[s.sectionBlock, { borderBottomWidth: 0 }]}>
+              <View style={s.sectionHeaderRow}>
+                <Text style={[s.sectionLabel, { color: colors.text2 }]}>Remaining</Text>
+                <Text style={[s.sectionSpent, { color: periodRemaining > 0 ? colors.green : colors.coral }]}>
+                  {'\u00a3'}{Math.round(periodRemaining).toLocaleString()}
                 </Text>
-                <Text style={s.summaryLabel}>Unspent</Text>
-                <Text style={s.summaryPct}>{pLeftPct}%</Text>
-              </AnimGlyph>
+              </View>
+              {(debtAllocation > 0 || savingsAllocation > 0 || bufferAllocation > 0) && (
+                <View style={s.allocationList}>
+                  {debtAllocation > 0 && (
+                    <View style={s.allocationRow}>
+                      <Text style={s.allocationDot}>{'\u2022'}</Text>
+                      <Text style={s.allocationLabel}>Debt payoff</Text>
+                      <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(debtAllocation).toLocaleString()}</Text>
+                    </View>
+                  )}
+                  {savingsAllocation > 0 && (
+                    <View style={s.allocationRow}>
+                      <Text style={s.allocationDot}>{'\u2022'}</Text>
+                      <Text style={s.allocationLabel}>{goalTarget > 0 ? 'Savings goal' : 'Savings & investments'}</Text>
+                      <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(savingsAllocation).toLocaleString()}</Text>
+                    </View>
+                  )}
+                  {bufferAllocation > 0 && (
+                    <View style={s.allocationRow}>
+                      <Text style={s.allocationDot}>{'\u2022'}</Text>
+                      <Text style={s.allocationLabel}>Emergency buffer</Text>
+                      <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(bufferAllocation).toLocaleString()}</Text>
+                    </View>
+                  )}
+                  {freeToSpend > 0 && (
+                    <View style={s.allocationRow}>
+                      <Text style={s.allocationDot}>{'\u2022'}</Text>
+                      <Text style={s.allocationLabel}>Free to spend</Text>
+                      <Text style={[s.allocationAmount, { color: colors.text }]}>{'\u00a3'}{Math.round(freeToSpend).toLocaleString()}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+              {debtAllocation === 0 && savingsAllocation === 0 && bufferAllocation === 0 && periodRemaining > 0 && (
+                <Text style={s.allocationHint}>Check your Plan tab for the best way to put this to work.</Text>
+              )}
             </View>
 
             {/* Collapsible breakdown sections */}
@@ -1842,7 +1905,7 @@ export default function Home() {
                 {/* Essentials breakdown */}
                 <>
                   <View style={s.breakdownHeaderRow}>
-                    <Text style={s.breakdownHeader}>ESSENTIALS</Text>
+                    <Text style={s.breakdownHeader}>ESSENTIALS BREAKDOWN</Text>
                     <TouchableOpacity
                       style={s.addItemBtn}
                       onPress={() => {
@@ -1863,7 +1926,7 @@ export default function Home() {
                   {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
                     const key = `nd-${item.category}`;
                     const isExpanded = expandedCategories.has(key);
-                    const pctOfSection = periodNonDiscTotal > 0 ? Math.round((item.total / periodNonDiscTotal) * 100) : 0;
+                    const catOnTrack = item.total <= item.budget * 1.05;
                     const visibleItems = periodNonDiscData.filter(d => d.count > 0);
                     return (
                       <View key={i}>
@@ -1877,12 +1940,12 @@ export default function Home() {
                             <View style={s.catInfo}>
                               <Text style={s.dataLabel}>{item.category}</Text>
                               <Text style={s.dataMeta}>
-                                {item.count} txn{item.count !== 1 ? 's' : ''} · {pctOfSection}% of essentials
+                                {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
                               </Text>
                             </View>
                           </View>
                           <View style={s.dataRowRight}>
-                            <Text style={[s.dataValue, { color: colors.text }]}>
+                            <Text style={[s.dataValue, { color: catOnTrack ? colors.text : colors.coral }]}>
                               {'\u00a3'}{Math.round(item.total).toLocaleString()}
                             </Text>
                           </View>
@@ -1927,7 +1990,7 @@ export default function Home() {
                 {/* Lifestyle spending */}
                 <>
                   <View style={[s.breakdownHeaderRow, { marginTop: 28 }]}>
-                    <Text style={s.breakdownHeader}>LIFESTYLE</Text>
+                    <Text style={s.breakdownHeader}>LIFESTYLE BREAKDOWN</Text>
                     <TouchableOpacity
                       style={s.addItemBtn}
                       onPress={() => {
@@ -1948,7 +2011,7 @@ export default function Home() {
                   {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
                     const key = `d-${item.category}`;
                     const isExpanded = expandedCategories.has(key);
-                    const pctOfSection = periodDiscTotal > 0 ? Math.round((item.total / periodDiscTotal) * 100) : 0;
+                    const catOnTrack = item.total <= item.budget * 1.05;
                     const visibleItems = periodDiscData.filter(d => d.count > 0);
                     return (
                       <View key={i}>
@@ -1962,12 +2025,12 @@ export default function Home() {
                             <View style={s.catInfo}>
                               <Text style={s.dataLabel}>{item.category}</Text>
                               <Text style={s.dataMeta}>
-                                {item.count} txn{item.count !== 1 ? 's' : ''} · {pctOfSection}% of lifestyle
+                                {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
                               </Text>
                             </View>
                           </View>
                           <View style={s.dataRowRight}>
-                            <Text style={[s.dataValue, { color: colors.dim }]}>
+                            <Text style={[s.dataValue, { color: catOnTrack ? colors.dim : colors.coral }]}>
                               {'\u00a3'}{Math.round(item.total).toLocaleString()}
                             </Text>
                           </View>
@@ -3138,11 +3201,105 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 28,
     letterSpacing: -0.5,
   },
+  periodTotalOf: {
+    fontFamily: fonts.regular,
+    fontSize: 16,
+    color: c.dim,
+  },
   periodTotalLabel: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: c.dim,
     marginTop: 4,
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: c.mintDim,
+    overflow: 'hidden',
+    marginTop: 16,
+    marginBottom: 28,
+  },
+  progressFill: {
+    height: 6,
+    borderRadius: 3,
+  },
+  sectionBlock: {
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: c.mintDim,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  sectionLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+  },
+  sectionStatus: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.3,
+  },
+  sectionAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginBottom: 10,
+  },
+  sectionSpent: {
+    fontFamily: fonts.mono,
+    fontSize: 18,
+  },
+  sectionBudget: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.dim,
+  },
+  progressTrackSmall: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: c.mintDim,
+    overflow: 'hidden',
+  },
+  progressFillSmall: {
+    height: 4,
+    borderRadius: 2,
+  },
+  allocationList: {
+    marginTop: 10,
+    gap: 8,
+  },
+  allocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  allocationDot: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.dim,
+    width: 16,
+  },
+  allocationLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.dim,
+    flex: 1,
+  },
+  allocationAmount: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: c.dim,
+  },
+  allocationHint: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.muted,
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   budgetBar: {
     flexDirection: 'row',
