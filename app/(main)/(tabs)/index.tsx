@@ -19,6 +19,7 @@ import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, G
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
+import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -58,6 +59,7 @@ export default function Home() {
   const [connectionWarning, setConnectionWarning] = useState<{ message: string; banks: string[] } | null>(null);
   const [connectionDismissed, setConnectionDismissed] = useState(false);
   const [incomeDismissed, setIncomeDismissed] = useState(false);
+  const { showWalkthrough, dismissWalkthrough } = useWalkthrough();
 
   // ── Connection banner dismiss ──
   // Keyed by the sorted bank names. Dismissing stores these bank names.
@@ -2246,6 +2248,7 @@ export default function Home() {
       )}
 
       <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
+      {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} />}
     </ScrollView>
   );
 }
