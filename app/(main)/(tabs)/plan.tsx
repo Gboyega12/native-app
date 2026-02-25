@@ -633,7 +633,7 @@ export default function Plan() {
       {/* ── Income context strip ── */}
       {monthlyIncome > 0 && (
         <AnimGlyph delay={50}>
-          <View style={s.incomeStrip}>
+          <Card variant="compact" style={{ borderRadius: 16, marginBottom: spacing.xl, padding: 0 }}>
             <TouchableOpacity
               style={s.incomeStripRow}
               onPress={() => {
@@ -710,7 +710,7 @@ export default function Plan() {
                 </TouchableOpacity>
               </View>
             )}
-          </View>
+          </Card>
         </AnimGlyph>
       )}
 
@@ -718,7 +718,7 @@ export default function Plan() {
           SECTION 1 — YOUR GOAL
           ══════════════════════════════════════════════ */}
       {goalCtx && (
-        <View style={s.trajectoryCard}>
+        <Card variant="active" style={{ marginBottom: spacing.xl }}>
           <AnimGlyph>
             <Text style={s.trajGoal}>{goalCtx.goalLabel}</Text>
           </AnimGlyph>
@@ -823,7 +823,7 @@ export default function Plan() {
           {goalCtx.insight && (
             <Text style={s.trajInsight}>{goalCtx.insight}</Text>
           )}
-        </View>
+        </Card>
       )}
 
       {/* ══════════════════════════════════════════════
@@ -1108,10 +1108,10 @@ export default function Plan() {
 
           {/* ── Upgrade CTA for free users ── */}
           {!isPro && opportunities.length > Math.max(0, FREE_MOVE_LIMIT - activeMoves.length) && (
-            <TouchableOpacity
-              style={s.upgradeCard}
+            <Card
+              variant="upgrade"
               onPress={() => setShowPaywall(true)}
-              activeOpacity={0.8}
+              style={{ marginBottom: spacing.md, alignItems: 'center' }}
             >
               <Text style={s.upgradeBadge}>PRO</Text>
               <Text style={s.upgradeTitle}>
@@ -1123,7 +1123,7 @@ export default function Plan() {
               <View style={s.upgradeBtn}>
                 <Text style={s.upgradeBtnText}>See plans</Text>
               </View>
-            </TouchableOpacity>
+            </Card>
           )}
         </>
       )}
@@ -1378,14 +1378,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   infoCloseText: { fontFamily: fonts.semibold, fontSize: 14, color: c.bg },
 
   // ── Income context strip ──
-  incomeStrip: {
-    backgroundColor: c.card,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 16,
-    marginBottom: spacing.xl,
-    overflow: 'hidden',
-  },
   incomeStripRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1468,14 +1460,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
 
   // ── Goal trajectory ──
-  trajectoryCard: {
-    backgroundColor: c.card,
-    borderWidth: 1,
-    borderColor: c.accentDim,
-    borderRadius: 24,
-    padding: spacing.xl,
-    marginBottom: spacing.xl,
-  },
   trajGoal: {
     fontFamily: fonts.medium,
     fontSize: 19,
@@ -1642,21 +1626,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
 
   // ── Cards ──
-  card: {
-    backgroundColor: c.card,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 24,
-    padding: spacing.xl,
-    marginBottom: spacing.md,
-  },
-  activeCard: {
-    borderColor: c.accentDim,
-  },
-  cardHighlight: {
-    borderColor: c.accent,
-    borderWidth: 2,
-  },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -2048,15 +2017,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
 
   // ── Upgrade card (free tier gate) ──
-  upgradeCard: {
-    backgroundColor: c.card,
-    borderWidth: 1,
-    borderColor: c.greenDim,
-    borderRadius: 24,
-    padding: spacing.xl,
-    marginBottom: spacing.md,
-    alignItems: 'center',
-  },
   upgradeBadge: {
     fontFamily: fonts.mono,
     fontSize: 10,

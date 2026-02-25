@@ -1,7 +1,7 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Animated, Easing, Pressable,
+  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Pressable,
   RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -18,6 +18,7 @@ import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -38,60 +39,9 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// Smooth layout animation config for micro-interactions
-const SMOOTH_ANIM = {
-  duration: 280,
-  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-  update: { type: LayoutAnimation.Types.easeInEaseOut },
-  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-};
 
 
-// ── Breathing bar: subtle pulse on progress indicators ──
-const BreathingBar = ({ color, width: barWidth, style }: { color: string; width: string; style?: any }) => {
-  const breathAnim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(breathAnim, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-        Animated.timing(breathAnim, { toValue: 0, duration: 2000, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
-      ]),
-    ).start();
-  }, []);
-  const opacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
-  return (
-    <Animated.View style={[style, { width: barWidth, backgroundColor: color, opacity }]} />
-  );
-};
 
-// ── Glyph micro-animation: fade+scale on mount ──
-const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 500,
-      delay,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, []);
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          opacity: anim,
-          transform: [{
-            scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
-          }],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
-};
 
 export default function Home() {
   const router = useRouter();
@@ -1260,9 +1210,8 @@ export default function Home() {
             const heroMove = dashboardMoves[0];
             return (
               <AnimGlyph delay={0}>
-                <View
-                  style={s.heroCard}
-                  accessibilityRole="summary"
+                <Card
+                  variant="hero"
                   accessibilityLabel={`Your number one move: ${heroMove.action}, saves ${heroMove.annualImpact} pounds per year`}
                 >
                   <Text style={s.heroLabel}>Your #1 move</Text>
@@ -1320,16 +1269,16 @@ export default function Home() {
                       </Text>
                     </TouchableOpacity>
                   )}
-                </View>
+                </Card>
               </AnimGlyph>
             );
           })() : (
-            <View style={s.heroCard}>
+            <Card variant="hero">
               <Text style={s.heroLabel}>Your #1 move</Text>
               <Text style={s.noDataText}>
                 No actionable insights yet. Connect your bank so Bocy can find your most impactful financial move.
               </Text>
-            </View>
+            </Card>
           )}
 
           {/* ══════════════════════════════════════════════

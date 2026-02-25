@@ -1574,28 +1574,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     maxWidth: '85%',
     marginBottom: 6,
   },
-  errorCard: {
-    backgroundColor: c.coralDim,
-    borderWidth: 1,
-    borderColor: c.coral,
-    borderRadius: radius.md,
-    padding: spacing.md,
-  },
   errorCardText: {
     fontFamily: fonts.medium,
     fontSize: 13,
     color: c.coral,
     lineHeight: 20,
-  },
-  actionCard: {
-    backgroundColor: c.surface,
-    borderWidth: 1,
-    borderColor: c.accentDim,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-  },
-  actionCardApproved: {
-    borderColor: c.accent,
   },
   actionCardLabel: {
     fontFamily: fonts.semibold,
@@ -1719,9 +1702,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginTop: spacing.xs,
   },
   // ── Goal update card ──
-  goalUpdateCard: {
-    borderColor: c.skyDim,
-  },
   goalUpdateLabel: {
     fontFamily: fonts.semibold,
     fontSize: 10,
