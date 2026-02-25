@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  Linking, Alert, LayoutAnimation, Platform, UIManager, Animated, Easing, Modal, Pressable,
+  Linking, Alert, LayoutAnimation, Platform, UIManager, Modal, Pressable,
   RefreshControl,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
