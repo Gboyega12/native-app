@@ -40,9 +40,6 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 
-
-
-
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -1284,7 +1281,7 @@ export default function Home() {
           {/* ══════════════════════════════════════════════
               CARD — SAFE TO SPEND (compact)
               ══════════════════════════════════════════════ */}
-          <View style={s.card}>
+          <Card>
             <AnimGlyph delay={100}>
               <View style={s.cardTitleRow}>
                 <Text style={s.cardTitle}>Safe to spend</Text>
@@ -1450,14 +1447,14 @@ export default function Home() {
                 )}
               </View>
             )}
-          </View>
+          </Card>
 
           {/* ══════════════════════════════════════════════
               CARD — YOUR BUDGET LINE
               ══════════════════════════════════════════════ */}
           {income > 0 && (
             <AnimGlyph delay={80}>
-              <View style={s.card}>
+              <Card>
                 {(() => {
                   const totalSpend = nonDiscTotal + discTotal;
                   const overBudget = totalSpend > income;
@@ -1672,14 +1669,14 @@ export default function Home() {
                     </>
                   );
                 })()}
-              </View>
+              </Card>
             </AnimGlyph>
           )}
 
           {/* ══════════════════════════════════════════════
               CARD — YOUR BUDGET REALITY (summary only)
               ══════════════════════════════════════════════ */}
-          <View style={s.card}>
+          <Card>
             {/* Info icon for budget card */}
             <View style={s.cardTitleRow}>
               <View style={{ flex: 1 }} />
@@ -1938,7 +1935,7 @@ export default function Home() {
               </TouchableOpacity>
             )}
 
-          </View>
+          </Card>
 
           {/* Add budget item modal */}
           <Modal visible={showAddItem} transparent animationType="fade" onRequestClose={() => { setAddItemError(''); setShowAddItem(false); }}>
@@ -2407,18 +2404,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  // ── Shared Card — Nothing OS: border-defined, card surface fill ──
-  card: {
-    backgroundColor: c.card,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: 24,
-    padding: 28,
-    paddingTop: 32,
-    paddingBottom: 32,
-    marginBottom: 32,
-    overflow: 'hidden',
-  },
   cardTitle: {
     fontFamily: fonts.mono,
     fontSize: 13,
@@ -2501,18 +2486,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.text2,
   },
 
-  // ── Hero Insight Card ──
-  heroCard: {
-    backgroundColor: c.card,
-    borderWidth: 1,
-    borderColor: c.green + '40',
-    borderRadius: 24,
-    padding: 28,
-    paddingTop: 32,
-    paddingBottom: 28,
-    marginBottom: 32,
-    overflow: 'hidden',
-  },
   heroLabel: {
     fontFamily: fonts.mono,
     fontSize: 11,
