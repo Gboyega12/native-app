@@ -1,8 +1,9 @@
 // ── Card component system ──
 // Reusable card primitives with variants, press feedback, and entrance animations.
 // Nothing OS design language: border-defined, minimal shadows, monochrome-first.
+// Dot-matrix accents echo the app's grid identity.
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Animated, Easing,
   Platform, LayoutAnimation, type ViewStyle, type TextStyle,
@@ -26,6 +27,8 @@ type CardProps = {
   variant?: CardVariant;
   /** Override border color (e.g. for hero cards with green accent) */
   borderColor?: string;
+  /** Show a colored accent line at the top of the card */
+  accentLine?: string;
   /** Make the card pressable with scale feedback */
   onPress?: () => void;
   /** Accessibility label */
@@ -42,6 +45,7 @@ export default function Card({
   children,
   variant = 'default',
   borderColor,
+  accentLine,
   onPress,
   accessibilityLabel,
   style,
@@ -54,6 +58,9 @@ export default function Card({
   const shadow = noShadow ? {} : isDark ? cardShadow.dark : cardShadow.light;
 
   const variantStyles = getVariantStyles(colors, variant, borderColor);
+
+  // Resolve accent line color: explicit prop > variant default
+  const resolvedAccent = accentLine || getVariantAccent(colors, variant);
 
   const handlePressIn = useCallback(() => {
     Animated.timing(scaleAnim, {
@@ -80,6 +87,20 @@ export default function Card({
     ...(Array.isArray(style) ? style : style ? [style] : []),
   ];
 
+  const inner = (
+    <>
+      {/* Accent line — subtle top-edge color strip */}
+      {resolvedAccent && (
+        <View style={[styles.accentLine, { backgroundColor: resolvedAccent }]} />
+      )}
+      {/* Dot-grid overlay for hero cards */}
+      {variant === 'hero' && (
+        <DotGrid color={colors.green} />
+      )}
+      {children}
+    </>
+  );
+
   if (onPress) {
     return (
       <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
@@ -92,7 +113,7 @@ export default function Card({
           testID={testID}
           style={cardStyle}
         >
-          {children}
+          {inner}
         </Pressable>
       </Animated.View>
     );
@@ -104,7 +125,7 @@ export default function Card({
       testID={testID}
       style={cardStyle}
     >
-      {children}
+      {inner}
     </View>
   );
 }
@@ -151,6 +172,7 @@ export function AnimatedCard({
   delay = 0,
   variant = 'default',
   borderColor,
+  accentLine,
   onPress,
   accessibilityLabel,
   style,
@@ -182,6 +204,7 @@ export function AnimatedCard({
       <Card
         variant={variant}
         borderColor={borderColor}
+        accentLine={accentLine}
         onPress={onPress}
         accessibilityLabel={accessibilityLabel}
         style={style}
@@ -276,6 +299,114 @@ export function InfoIcon({ expanded, onPress }: { expanded: boolean; onPress: ()
   );
 }
 
+// ── DotGrid ──
+// Subtle dot-matrix pattern in the top-right corner of hero cards.
+// Evokes the app's dot-matrix "B" branding. Pure RN Views — no SVG dependency.
+function DotGrid({ color, cols = 5, rows = 3 }: { color: string; cols?: number; rows?: number }) {
+  const dots = useMemo(() => {
+    const arr = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        arr.push({ key: `${r}-${c}`, top: r * 8, left: c * 8 });
+      }
+    }
+    return arr;
+  }, [cols, rows]);
+
+  return (
+    <View style={styles.dotGrid} pointerEvents="none">
+      {dots.map((d) => (
+        <View
+          key={d.key}
+          style={[styles.dot, { top: d.top, left: d.left, backgroundColor: color }]}
+        />
+      ))}
+    </View>
+  );
+}
+
+// ── DotMatrixBar ──
+// A horizontal row of evenly spaced dots, inspired by the Nothing Phone glyph interface.
+// Use at the top of special cards for visual emphasis.
+export function DotMatrixBar({
+  color,
+  dotCount = 12,
+  dotSize = 3,
+  gap = 6,
+  style,
+}: {
+  color?: string;
+  dotCount?: number;
+  dotSize?: number;
+  gap?: number;
+  style?: ViewStyle;
+}) {
+  const { colors } = useTheme();
+  const dotColor = color || colors.dim;
+  const dots = useMemo(() => Array.from({ length: dotCount }, (_, i) => i), [dotCount]);
+
+  return (
+    <View style={[styles.dotMatrixBar, style]}>
+      {dots.map((i) => (
+        <View
+          key={i}
+          style={{
+            width: dotSize,
+            height: dotSize,
+            borderRadius: dotSize / 2,
+            backgroundColor: dotColor,
+            marginHorizontal: gap / 2,
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+// ── CardDivider ──
+// Subtle horizontal separator for visual breaks within a card.
+// Renders as a fine line or a dot-matrix row depending on the variant.
+export function CardDivider({ dotted, color, style }: { dotted?: boolean; color?: string; style?: ViewStyle }) {
+  const { colors } = useTheme();
+  const lineColor = color || colors.border;
+
+  if (dotted) {
+    return (
+      <View style={[styles.divider, style]}>
+        <DotMatrixBar color={lineColor} dotCount={20} dotSize={2} gap={4} />
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.divider, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: lineColor }, style]} />
+  );
+}
+
+// ── CardBadge ──
+// Small pill badge for effort level, status, or category indicators within cards.
+export function CardBadge({ label, color, textColor, style }: { label: string; color?: string; textColor?: string; style?: ViewStyle }) {
+  const { colors } = useTheme();
+  return (
+    <View style={[styles.badge, { backgroundColor: color || colors.accentDim }, style]}>
+      <Text style={[styles.badgeText, { color: textColor || colors.text2 }]}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+// ── Accent line color resolver ──
+// Returns the default accent line color for variants that should have one.
+function getVariantAccent(c: ThemeColors, variant: CardVariant): string | undefined {
+  switch (variant) {
+    case 'hero': return c.green;
+    case 'error': return c.coral;
+    case 'highlight': return c.accent;
+    default: return undefined;
+  }
+}
+
 // ── Variant style resolver ──
 function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: string): ViewStyle {
   const base: ViewStyle = {
@@ -314,6 +445,60 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     overflow: 'hidden' as const,
   },
+
+  // Accent line — thin color strip at the top edge
+  accentLine: {
+    position: 'absolute',
+    top: 0,
+    left: 24,
+    right: 24,
+    height: 2,
+    borderRadius: 1,
+    opacity: 0.6,
+  },
+
+  // Dot-grid — decorative corner pattern
+  dotGrid: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    width: 40,
+    height: 24,
+  },
+  dot: {
+    position: 'absolute',
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    opacity: 0.18,
+  },
+
+  // Dot-matrix bar
+  dotMatrixBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Card divider
+  divider: {
+    marginVertical: 16,
+    alignItems: 'center',
+  },
+
+  // Card badge
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 100,
+  },
+  badgeText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+
   title: {
     fontFamily: fonts.mono,
     fontSize: 13,
