@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
+  LayoutAnimation, UIManager,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -118,6 +119,29 @@ function TypingIndicator() {
         ))}
       </View>
     </View>
+  );
+}
+
+// ── Fade-in wrapper for new messages ──
+
+function FadeInView({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(6)).current;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(opacity, { toValue: 1, duration: 250, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(translateY, { toValue: 0, duration: 250, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+      {children}
+    </Animated.View>
   );
 }
 
@@ -1217,8 +1241,8 @@ export default function Chat() {
                 <View style={s.chatBocyHero}>
                   <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
                 </View>
-                <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Ask Bocy'}</Text>
-                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'I know your numbers. Ask me anything.'}</Text>
+                <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Hey, what\u2019s up?'}</Text>
+                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'I\u2019ve got your numbers. Let\u2019s talk money.'}</Text>
               </>
             )}
             <View style={[s.suggestedGrid, isTablet && { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 12 }]}>
@@ -1236,58 +1260,73 @@ export default function Chat() {
           </View>
         )}
 
-        {messages.map((msg, i) => (
-          <View key={i}>
-            {msg.role === 'assistant' && (i === 0 || messages[i - 1]?.role !== 'assistant') && (
-              <Text style={s.bocyLabel}>bocy</Text>
-            )}
-            <View
-              style={[
-                s.bubble,
-                msg.role === 'user' ? s.userBubble : s.assistantBubble,
-              ]}
-            >
-              {msg.role === 'user' ? (
-                <Text style={[s.bubbleText, s.userText]}>{msg.content}</Text>
-              ) : (
-                <Markdown>{msg.content}</Markdown>
-              )}
-            </View>
+        {messages.map((msg, i) => {
+          const isAssistant = msg.role === 'assistant';
+          const isLast = i === messages.length - 1;
+          const showLabel = isAssistant && (i === 0 || messages[i - 1]?.role !== 'assistant');
 
-            {/* Render action cards below assistant messages */}
-            {msg.actions?.map((action, j) => (
-              <View key={`action-${i}-${j}`} style={s.actionCardWrapper}>
-                {action.type === 'plan_proposed' ? (
-                  <PlanCard
-                    action={action}
-                    onApprove={() => handleApprovePlan(i, j)}
-                    onDismiss={() => handleDismissPlan(i, j)}
-                    saving={savingPlan === `${i}-${j}`}
-                  />
-                ) : action.type === 'plan_error' ? (
-                  <Card
-                    variant="error"
-                    noShadow
-                    style={{ borderRadius: radius.md, padding: spacing.md, marginBottom: 0 }}
-                  >
-                    <Text style={s.errorCardText}>{action.data.error || 'Plan could not be saved.'}</Text>
-                  </Card>
-                ) : action.type === 'override_saved' ? (
-                  <OverrideCard action={action} />
-                ) : action.type === 'budget_item_saved' ? (
-                  <BudgetItemCard action={action} />
-                ) : action.type === 'goal_update_proposed' ? (
-                  <GoalUpdateCard
-                    action={action}
-                    onAccept={() => handleAcceptGoalUpdate(i, j)}
-                    onKeep={() => handleKeepGoals(i, j)}
-                    saving={savingPlan === `${i}-${j}`}
-                  />
-                ) : null}
+          const bubble = (
+            <View key={i}>
+              {showLabel && (
+                <View style={s.bocyLabelRow}>
+                  <View style={s.bocyLabelDot} />
+                  <Text style={s.bocyLabel}>bocy</Text>
+                </View>
+              )}
+              <View
+                style={[
+                  s.bubble,
+                  msg.role === 'user' ? s.userBubble : s.assistantBubble,
+                ]}
+              >
+                {msg.role === 'user' ? (
+                  <Text style={[s.bubbleText, s.userText]}>{msg.content}</Text>
+                ) : (
+                  <Markdown>{msg.content}</Markdown>
+                )}
               </View>
-            ))}
-          </View>
-        ))}
+
+              {/* Render action cards below assistant messages */}
+              {msg.actions?.map((action, j) => (
+                <View key={`action-${i}-${j}`} style={s.actionCardWrapper}>
+                  {action.type === 'plan_proposed' ? (
+                    <PlanCard
+                      action={action}
+                      onApprove={() => handleApprovePlan(i, j)}
+                      onDismiss={() => handleDismissPlan(i, j)}
+                      saving={savingPlan === `${i}-${j}`}
+                    />
+                  ) : action.type === 'plan_error' ? (
+                    <Card
+                      variant="error"
+                      noShadow
+                      style={{ borderRadius: radius.md, padding: spacing.md, marginBottom: 0 }}
+                    >
+                      <Text style={s.errorCardText}>{action.data.error || 'Plan could not be saved.'}</Text>
+                    </Card>
+                  ) : action.type === 'override_saved' ? (
+                    <OverrideCard action={action} />
+                  ) : action.type === 'budget_item_saved' ? (
+                    <BudgetItemCard action={action} />
+                  ) : action.type === 'goal_update_proposed' ? (
+                    <GoalUpdateCard
+                      action={action}
+                      onAccept={() => handleAcceptGoalUpdate(i, j)}
+                      onKeep={() => handleKeepGoals(i, j)}
+                      saving={savingPlan === `${i}-${j}`}
+                    />
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          );
+
+          // Animate assistant messages sliding in
+          if (isAssistant && isLast) {
+            return <FadeInView key={i}>{bubble}</FadeInView>;
+          }
+          return bubble;
+        })}
 
         {loading && <TypingIndicator />}
 
@@ -1343,7 +1382,7 @@ export default function Chat() {
             <TextInput
               ref={inputRef}
               style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
-              placeholder={listening ? 'Listening...' : 'Ask about your finances...'}
+              placeholder={listening ? 'Listening...' : 'Ask me anything...'}
               placeholderTextColor={listening ? colors.green : colors.muted}
               value={input}
               onChangeText={setInput}
@@ -1499,15 +1538,15 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   suggestedTitle: {
     fontFamily: fonts.heading,
-    fontSize: 22,
+    fontSize: 24,
     color: c.text,
   },
   suggestedSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 14,
     color: c.dim,
     marginBottom: spacing.lg,
-    marginTop: 6,
+    marginTop: 8,
   },
   suggestedGrid: {
     width: '100%',
@@ -1517,9 +1556,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: radius.lg,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md,
+    borderRadius: 100,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.lg,
   },
   suggestedText: {
     fontFamily: fonts.medium,
@@ -1545,6 +1584,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderColor: c.border,
     alignSelf: 'flex-start',
     borderBottomLeftRadius: 4,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomRightRadius: 18,
   },
   bubbleText: {
     fontFamily: fonts.regular,
@@ -1566,7 +1608,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    backgroundColor: c.dim,
+    backgroundColor: c.green,
   },
   // ── Action cards ──
   actionCardWrapper: {
@@ -1859,14 +1901,25 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
 
   // ── Bocy label on assistant messages ──
+  bocyLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 4,
+    marginTop: 10,
+  },
+  bocyLabelDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: c.green,
+  },
   bocyLabel: {
     fontFamily: fonts.mono,
     fontSize: 10,
     color: c.dim,
     letterSpacing: 1,
     textTransform: 'uppercase',
-    marginBottom: 4,
-    marginTop: 8,
   },
 
   // ── Follow-up suggestion chips ──
@@ -1879,12 +1932,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 4,
   },
   followUpChip: {
-    backgroundColor: 'transparent',
+    backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 100,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
   followUpChipText: {
     fontFamily: fonts.medium,
