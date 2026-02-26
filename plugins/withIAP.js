@@ -1,16 +1,16 @@
-// Local Expo config plugin — adds In-App Purchase entitlement (iOS)
-// and billing permission (Android) for RevenueCat / StoreKit.
+// Local Expo config plugin — adds billing permission (Android)
+// for RevenueCat / StoreKit.
+//
+// NOTE: The com.apple.developer.in-app-payments entitlement was removed
+// because it is for Apple Pay (merchant card processing), NOT for
+// StoreKit In-App Purchases. RevenueCat uses StoreKit which is covered
+// by the default IAP capability in all App Store provisioning profiles.
+// Including the Apple Pay entitlement without the matching capability
+// in the provisioning profile causes iOS to kill the app on launch.
 
-const { withEntitlementsPlist, withAndroidManifest } = require('expo/config-plugins');
+const { withAndroidManifest } = require('expo/config-plugins');
 
 function withIAP(config) {
-  // iOS: add com.apple.developer.in-app-payments entitlement
-  config = withEntitlementsPlist(config, (mod) => {
-    mod.modResults['com.apple.developer.in-app-payments'] =
-      mod.modResults['com.apple.developer.in-app-payments'] || ['merchant.com.bocy.app'];
-    return mod;
-  });
-
   // Android: add BILLING permission
   config = withAndroidManifest(config, (mod) => {
     const manifest = mod.modResults.manifest;

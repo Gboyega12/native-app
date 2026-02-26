@@ -108,6 +108,8 @@ export function configureNotificationChannels(): void {
       shouldPlaySound: true,
       shouldSetBadge: true,
       shouldShowInForeground: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
     }),
   });
 }
