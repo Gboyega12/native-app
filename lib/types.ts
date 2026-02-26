@@ -302,7 +302,27 @@ export interface ChatContext {
     essentials_change_pct: number | null;
     top_lifestyle_category: string | null;
     top_lifestyle_amount: number | null;
+    /** Budget solver output: how efficiently the current allocation matches the optimal */
+    allocation_efficiency?: number;
+    /** Biggest single reallocation suggestion from the solver */
+    top_reallocation?: {
+      from: string;
+      to: string;
+      amount: number;
+      utility_gain: string;
+    } | null;
   };
+  household_cashflow?: {
+    joint_surplus: number;
+    buffer_adequacy: number;
+    shared_expense_ratio: number;
+    scenarios: {
+      label: string;
+      probability: number;
+      monthly_impact: number;
+      description: string;
+    }[];
+  } | null;
   goal_trajectory?: {
     goalLabel: string;
     currentMonths: number;

@@ -342,3 +342,233 @@ export function calcMoveConsistency(
     followThroughRate: Math.round(rate * 100),
   };
 }
+
+// ── Household Cash Flow Simulation ──
+// Extends the individual Monte Carlo model to household-level analysis.
+// Accounts for joint incomes, shared expenses, partner income shocks,
+// and life-event cost scenarios specific to the household type.
+
+export interface CashflowScenario {
+  label: string;
+  probability: number;       // annual probability (0-100)
+  monthlyImpact: number;     // £/month impact (negative = cost)
+  description: string;
+}
+
+export interface HouseholdCashflowResult {
+  jointSurplus: number;
+  sharedExpenseRatio: number; // 0-100
+  bufferAdequacy: number;     // 0-100 (how well current buffer covers simulated shocks)
+  scenarios: CashflowScenario[];
+}
+
+/**
+ * Simulate household-level cash flow with Monte Carlo.
+ * For couples: models both incomes + correlated spending shocks.
+ * For families: adds dependent-related cost scenarios.
+ * For singles: wraps the individual model with scenario analysis.
+ */
+export function simulateHouseholdCashflow(
+  profile: FinancialProfile,
+  identity: UserIdentity | null,
+  volatility: VolatilityProfile,
+  seed: number = 789,
+): HouseholdCashflowResult {
+  const household = identity?.household || 'single';
+  const rng = createRng(seed);
+
+  // ── Shared expense ratio by household type ──
+  let sharedRatio = 0;
+  let partnerIncomeFactor = 0; // multiplier of user income for partner
+  switch (household) {
+    case 'couple_shared':
+      sharedRatio = 0.65;
+      partnerIncomeFactor = 0.85;
+      break;
+    case 'couple_separate':
+      sharedRatio = 0.35;
+      partnerIncomeFactor = 0.85;
+      break;
+    case 'family':
+      sharedRatio = 0.70;
+      partnerIncomeFactor = 0.75;
+      break;
+    case 'single_parent':
+      sharedRatio = 0.80; // most expenses are shared with dependents
+      partnerIncomeFactor = 0;
+      break;
+    case 'shared_house':
+      sharedRatio = 0.40;
+      partnerIncomeFactor = 0;
+      break;
+    default: // single
+      sharedRatio = 0;
+      partnerIncomeFactor = 0;
+  }
+
+  const partnerIncome = profile.monthly.income * partnerIncomeFactor;
+  const jointIncome = profile.monthly.income + partnerIncome;
+  const sharedExpenses = profile.monthly.spending * sharedRatio;
+  const personalExpenses = profile.monthly.spending * (1 - sharedRatio);
+  const jointSurplus = jointIncome - sharedExpenses - personalExpenses;
+
+  // ── Buffer adequacy via simulation ──
+  // Run 1,000 sims of 24-month household cash flow to find how often
+  // current estimated buffer covers all shocks.
+  const estimatedBuffer = Math.max(0, profile.monthly.surplus * 3);
+  let covered = 0;
+
+  for (let sim = 0; sim < NUM_SIMS; sim++) {
+    let balance = estimatedBuffer;
+    let inShock = 0;
+    let partnerInShock = 0;
+
+    for (let m = 0; m < 24; m++) {
+      // User income
+      let mIncome: number;
+      if (inShock > 0) {
+        mIncome = 0;
+        inShock--;
+      } else {
+        mIncome = Math.max(0, sampleNormal(rng, profile.monthly.income, volatility.incomeSD));
+        if (rng() < volatility.incomeShockProb) {
+          inShock = Math.max(1, Math.round(sampleNormal(rng, volatility.incomeShockDuration, 1)));
+        }
+      }
+
+      // Partner income (if applicable)
+      let mPartner = 0;
+      if (partnerIncome > 0) {
+        if (partnerInShock > 0) {
+          mPartner = 0;
+          partnerInShock--;
+        } else {
+          mPartner = Math.max(0, sampleNormal(rng, partnerIncome, partnerIncome * 0.08));
+          // Partner has their own shock risk (slightly lower — uncorrelated)
+          if (rng() < volatility.incomeShockProb * 0.7) {
+            partnerInShock = Math.max(1, Math.round(sampleNormal(rng, volatility.incomeShockDuration, 1)));
+          }
+        }
+      }
+
+      // Spending
+      const mEssential = Math.max(0, sampleNormal(rng, profile.budgetReality.nonDiscretionary.total, volatility.essentialSD));
+      const mDisc = Math.max(0, sampleNormal(rng, profile.budgetReality.discretionary.total, volatility.discretionarySD));
+      const emergencies = samplePoisson(rng, volatility.emergencyRate) * volatility.emergencyCost;
+
+      balance += (mIncome + mPartner) - mEssential - mDisc - emergencies;
+    }
+
+    if (balance >= 0) covered++;
+  }
+
+  const bufferAdequacy = Math.round((covered / NUM_SIMS) * 100);
+
+  // ── Scenario analysis ──
+  const scenarios = buildScenarios(profile, identity, volatility);
+
+  return {
+    jointSurplus: Math.round(jointSurplus),
+    sharedExpenseRatio: Math.round(sharedRatio * 100),
+    bufferAdequacy,
+    scenarios,
+  };
+}
+
+function buildScenarios(
+  profile: FinancialProfile,
+  identity: UserIdentity | null,
+  vol: VolatilityProfile,
+): CashflowScenario[] {
+  const scenarios: CashflowScenario[] = [];
+  const events = identity?.upcoming_events || [];
+  const deps = identity?.dependents || [];
+  const household = identity?.household || 'single';
+
+  // Income disruption — universal
+  scenarios.push({
+    label: 'Income disruption',
+    probability: Math.round(vol.incomeShockProb * 12 * 100),
+    monthlyImpact: -Math.round(profile.monthly.income),
+    description: `${Math.round(vol.incomeShockProb * 12 * 100)}% annual chance of ${vol.incomeShockDuration}-month income gap`,
+  });
+
+  // Emergency expense — universal
+  scenarios.push({
+    label: 'Emergency expense',
+    probability: Math.round(Math.min(100, vol.emergencyRate * 12 * 100)),
+    monthlyImpact: -Math.round(vol.emergencyCost),
+    description: `~${Math.max(1, Math.round(vol.emergencyRate * 12))} emergencies/year averaging £${Math.round(vol.emergencyCost)}`,
+  });
+
+  // Partner income loss (couple households)
+  if (household === 'couple_shared' || household === 'couple_separate' || household === 'family') {
+    const partnerIncome = Math.round(profile.monthly.income * 0.85);
+    scenarios.push({
+      label: 'Partner income loss',
+      probability: Math.round(vol.incomeShockProb * 0.7 * 12 * 100),
+      monthlyImpact: -partnerIncome,
+      description: `${Math.round(vol.incomeShockProb * 0.7 * 12 * 100)}% annual chance — household income halves`,
+    });
+  }
+
+  // Life events
+  if (events.includes('baby')) {
+    const babyCost = Math.round(profile.monthly.spending * 0.25);
+    scenarios.push({
+      label: 'New baby costs',
+      probability: 90,
+      monthlyImpact: -babyCost,
+      description: `Estimated £${babyCost}/month increase in nappies, childcare, and essentials`,
+    });
+  }
+
+  if (events.includes('moving')) {
+    const movingCost = Math.round(profile.monthly.spending * 2);
+    scenarios.push({
+      label: 'Moving costs',
+      probability: 80,
+      monthlyImpact: -movingCost,
+      description: `One-off ~£${movingCost} for deposits, removals, and setup (amortised)`,
+    });
+  }
+
+  if (events.includes('career_change')) {
+    scenarios.push({
+      label: 'Career transition gap',
+      probability: 70,
+      monthlyImpact: -Math.round(profile.monthly.income * 0.5),
+      description: 'Potential 50% income reduction during 3-6 month transition',
+    });
+  }
+
+  if (events.includes('wedding')) {
+    scenarios.push({
+      label: 'Wedding costs',
+      probability: 85,
+      monthlyImpact: -Math.round(1500), // ~£18k spread over 12 months
+      description: 'UK average wedding ~£18k — ~£1,500/month if saving over 12 months',
+    });
+  }
+
+  // Dependent scenarios
+  if (deps.includes('elderly_parents')) {
+    scenarios.push({
+      label: 'Care contribution',
+      probability: 40,
+      monthlyImpact: -300,
+      description: 'Potential £300/month contribution to elderly parent care needs',
+    });
+  }
+
+  if (deps.includes('young_children')) {
+    scenarios.push({
+      label: 'Childcare cost increase',
+      probability: 30,
+      monthlyImpact: -Math.round(200),
+      description: 'Holiday clubs, activity costs, or childcare price increases',
+    });
+  }
+
+  return scenarios;
+}

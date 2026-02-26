@@ -1,4 +1,5 @@
 import type { Goals, Move, GoalTrajectory, FlowchartPosition, FinancialProfile, UserIdentity } from './types';
+import type { LiquidityTier } from './liquidity-engine';
 import { MAX_TRAJECTORY_MONTHS } from './constants';
 import {
   estimateVolatility,
@@ -7,6 +8,7 @@ import {
   calcMoveConsistency,
   type VolatilityProfile,
 } from './monte-carlo';
+import { calcMoveMarginalUtility } from './liquidity-engine';
 
 const GOAL_LABELS: Record<string, string> = {
   clear_debt: 'Clear all debt',
@@ -99,90 +101,20 @@ export interface RankedMove extends Move {
   consistencyScore?: number;
   /** Marginal utility multiplier — shows how much value the next pound delivers in this move's context */
   marginalMultiplier?: number;
+  /** Liquidity tier: how quickly the savings from this move can be accessed */
+  liquidityTier?: LiquidityTier;
 }
 
-// ── Layer 2b: Marginal Utility Multiplier ──
-// Replaces the binary UKPF 3x/1.5x gate with a continuous, non-linear
-// per-pound value score. Each move's multiplier depends on the user's
-// current position on that category's diminishing returns curve.
+// ── Layer 2b: Liquidity-Adjusted Marginal Utility ──
+// Uses CRRA (Constant Relative Risk Aversion) utility functions instead of
+// heuristic multipliers. Each move's value depends on:
 //
-// Buffer: steep when savings thin + variance high, flattens as buffer approaches target.
-// Debt:   scales with utilization, bonus when close to closing an account.
-// Invest: discounted when liquid reserves are thin (illiquid moves penalized more).
-// Spending/Savings: flat — a freed/earned pound is a pound.
-// Break-even: always urgent.
-
-function calcMarginalMultiplier(
-  move: Move,
-  profile: FinancialProfile,
-  vol: VolatilityProfile | null,
-  identity: UserIdentity | null,
-  debtAccounts?: any[],
-  bufferRec?: { months: number; amount: number } | null,
-): number {
-  const cat = move.category || 'spending';
-  const savingsRate = profile.metrics.savingsRate;
-
-  // Variance-adjusted buffer target (as savings rate %)
-  // Higher volatility → need more buffer → curve stays steep longer
-  let bufferTargetRate: number;
-  if (bufferRec && bufferRec.months > 0) {
-    // Monte Carlo says this user needs N months of expenses as buffer.
-    // Convert to a savings rate threshold: if they're saving enough to
-    // build that buffer in ~12 months, they're on track.
-    const monthlyExpenses = profile.monthly.spending;
-    const neededMonthly = (bufferRec.amount) / 12;
-    bufferTargetRate = profile.monthly.income > 0
-      ? (neededMonthly / profile.monthly.income) * 100
-      : 15;
-    bufferTargetRate = Math.max(8, Math.min(bufferTargetRate, 30));
-  } else {
-    // Heuristic fallback based on work setup
-    const work = identity?.work_setup;
-    if (work === 'self_employed') bufferTargetRate = 25;
-    else if (work === 'multiple_jobs' || work === 'student') bufferTargetRate = 20;
-    else bufferTargetRate = 12;
-  }
-
-  switch (cat) {
-    case 'buffer': {
-      // Urgency: 1.0 when no savings, 0.0 when savings rate meets target
-      const urgency = Math.max(0, Math.min(1, 1 - savingsRate / bufferTargetRate));
-      // Range: 1.0 (fully buffered) to 3.0 (no buffer at all)
-      return 1 + 2 * urgency;
-    }
-
-    case 'debt': {
-      const debts = debtAccounts || [];
-      const totalLimit = debts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
-      const totalBalance = debts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
-      const util = totalLimit > 0 ? totalBalance / totalLimit : 0.5; // default mid if unknown
-      const urgency = Math.min(1, util);
-      // Closing bonus: if total balance could be cleared in ≤3 months of surplus
-      const surplus = profile.monthly.surplus;
-      const closingBonus = (totalBalance > 0 && surplus > 0 && totalBalance < surplus * 3) ? 0.5 : 0;
-      // Range: 1.0 (low util, not close to clearing) to 3.0 (max util + close to clearing)
-      return Math.min(3, 1 + 1.5 * urgency + closingBonus);
-    }
-
-    case 'invest': {
-      // Liquidity discount: penalize illiquid moves when buffer is thin
-      const bufferGap = Math.max(0, Math.min(1, 1 - savingsRate / bufferTargetRate));
-      const actionLower = (move.action || '').toLowerCase();
-      const isIlliquid = actionLower.includes('pension') || actionLower.includes('salary sacrifice') || actionLower.includes('lifetime isa');
-      // Illiquid: 0.5 to 1.0. Liquid: 0.8 to 1.0.
-      return isIlliquid ? (1 - 0.5 * bufferGap) : (1 - 0.2 * bufferGap);
-    }
-
-    case 'break_even':
-      return 2.5; // always urgent — in deficit
-
-    case 'spending':
-    case 'savings':
-    default:
-      return 1.0;
-  }
-}
+//   1. Diminishing returns curve (category-specific γ parameter)
+//   2. Liquidity tier (instant → long-locked) with buffer-gap amplification
+//   3. Debt closing bonus (psychological + financial win near debt freedom)
+//   4. Variance-adjusted reference points (from Monte Carlo buffer sizing)
+//
+// See lib/liquidity-engine.ts for the full economic model.
 
 export function rankMoves(
   decisionStack: Move[],
@@ -216,9 +148,9 @@ export function rankMoves(
     if (move.effort === 'low') score *= 1.3;
     else if (move.effort === 'high') score *= 0.8;
 
-    // Marginal utility multiplier — continuous, non-linear per-pound value
-    // Replaces the binary UKPF 3x gate with diminishing returns curves
-    const marginal = calcMarginalMultiplier(
+    // Liquidity-adjusted marginal utility — CRRA diminishing returns
+    // with liquidity tier discounts and variance-adjusted reference points
+    const { multiplier: marginal, liquidityTier } = calcMoveMarginalUtility(
       move,
       profile as FinancialProfile,
       vol,
@@ -263,6 +195,7 @@ export function rankMoves(
       riskAdjustedImpact,
       consistencyScore,
       marginalMultiplier: marginal,
+      liquidityTier,
     };
   });
 

@@ -738,7 +738,41 @@ Tools:
       const tradeOff = Math.min(50, Math.round(bl.top_lifestyle_amount * 0.3));
       prompt += `\n- Trade-off example: cutting £${tradeOff} from ${bl.top_lifestyle_category.toLowerCase()} = £${tradeOff} more toward savings or debt.`;
     }
+    if (bl.allocation_efficiency != null) {
+      prompt += `\n- Allocation efficiency: ${bl.allocation_efficiency}/100 (how close their current spending pattern is to the mathematically optimal allocation given their priorities)`;
+      if (bl.allocation_efficiency < 60) {
+        prompt += ` — significant room to rebalance for better outcomes.`;
+      } else if (bl.allocation_efficiency >= 85) {
+        prompt += ` — well-optimised. Minor tweaks only.`;
+      }
+    }
+    if (bl.top_reallocation) {
+      const r = bl.top_reallocation;
+      prompt += `\n- Top reallocation: move £${r.amount}/month from ${r.from} to ${r.to}. ${r.utility_gain}.`;
+    }
     prompt += `\nIMPORTANT: When discussing budgets, trade-offs, or "can I afford X", use these budget line numbers. Say things like "You earn £X but £Y goes to fixed costs, so you actually have £Z to work with" — make it tangible, not abstract.`;
+  }
+
+  // ── Household cash flow scenarios ──
+  if (ctx.household_cashflow) {
+    const hc = ctx.household_cashflow;
+    prompt += `\n\nHousehold cash flow (Monte Carlo simulated):`;
+    if (hc.shared_expense_ratio > 0) {
+      prompt += `\n- Joint surplus: £${hc.joint_surplus}/month (${hc.shared_expense_ratio}% of expenses are shared)`;
+    }
+    prompt += `\n- Buffer adequacy: ${hc.buffer_adequacy}% (probability current savings survive 24 months of simulated shocks)`;
+    if (hc.buffer_adequacy < 50) {
+      prompt += ` — this is concerning. Prioritise building the buffer.`;
+    } else if (hc.buffer_adequacy >= 80) {
+      prompt += ` — strong position. Buffer handles most scenarios.`;
+    }
+    if (hc.scenarios?.length) {
+      prompt += `\n- Risk scenarios:`;
+      for (const s of hc.scenarios.slice(0, 5)) {
+        prompt += `\n  • ${s.label} (${s.probability}% annual chance): £${Math.abs(s.monthly_impact)}/month impact — ${s.description}`;
+      }
+    }
+    prompt += `\nIMPORTANT: When the user asks about financial resilience, "what if" scenarios, or whether they can afford a life change, reference these scenario probabilities. Make risk feel concrete: "There's a ${hc.scenarios?.[0]?.probability || 6}% chance of income disruption this year — your buffer ${hc.buffer_adequacy >= 70 ? 'covers that well' : 'would struggle with that'}."`;
   }
 
   // ── Spending breakdown ──

@@ -14,7 +14,9 @@ import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import Card from '@/components/Card';
-import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/lib/types';
+import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals, FinancialProfile, UserIdentity } from '@/lib/types';
+import { solveBudgetAllocation } from '@/lib/budget-solver';
+import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -725,7 +727,7 @@ export default function Chat() {
           bufferRecommendation: freshA.goal_context.bufferRecommendation,
         } : null;
 
-        // Rebuild budget line from fresh sync data
+        // Rebuild budget line from fresh sync data (identity not yet available here, enriched later)
         ctx.budget_line = buildBudgetLine(freshA, prevSnapshot);
 
         // Rebuild recent_transactions from fresh sync data (NOT the stale DB analysis)
@@ -815,6 +817,15 @@ export default function Chat() {
         }
       }
     } catch {}
+
+    // ── Enrich budget line with solver output + add household cashflow ──
+    // Now that identity is available, re-run with optimisation and scenario analysis
+    const identityForSolver = (ctx as any).identity as UserIdentity | null;
+    const latestAnalysis = analysis || a;
+    if (identityForSolver && latestAnalysis) {
+      ctx.budget_line = buildBudgetLine(latestAnalysis, prevSnapshot, identityForSolver);
+      ctx.household_cashflow = buildHouseholdCashflow(latestAnalysis, identityForSolver);
+    }
 
     setContext(ctx);
 
@@ -1472,6 +1483,7 @@ function buildSpendingBreakdown(a: Analysis | null): { category: string; monthly
 function buildBudgetLine(
   a: Analysis | null,
   prevSnapshot: { monthly_spending: number; monthly_income: number } | null,
+  identity?: UserIdentity | null,
 ): ChatContext['budget_line'] {
   if (!a || !a.monthly_income) return undefined;
   const income = a.monthly_income;
@@ -1493,6 +1505,27 @@ function buildBudgetLine(
     ? discItems.reduce((a, b) => a.monthly > b.monthly ? a : b)
     : null;
 
+  // ── Budget solver: constrained optimisation ──
+  // Reconstruct a minimal FinancialProfile from the stored Analysis to
+  // run the solver. This finds the optimal reallocation of every pound.
+  let allocationEfficiency: number | undefined;
+  let topReallocation: { from: string; to: string; amount: number; utility_gain: string } | null | undefined = null;
+  try {
+    const profile = analysisToProfile(a);
+    if (profile) {
+      const allocation = solveBudgetAllocation(profile, identity);
+      allocationEfficiency = allocation.efficiency;
+      if (allocation.topReallocation) {
+        topReallocation = {
+          from: allocation.topReallocation.from,
+          to: allocation.topReallocation.to,
+          amount: allocation.topReallocation.amount,
+          utility_gain: allocation.topReallocation.utilityGain,
+        };
+      }
+    }
+  } catch {}
+
   return {
     real_spending_power: Math.round(income - essentials),
     essentials_total: Math.round(essentials),
@@ -1504,7 +1537,85 @@ function buildBudgetLine(
     essentials_change_pct: essentialsChangePct,
     top_lifestyle_category: topLifestyle?.category ?? null,
     top_lifestyle_amount: topLifestyle ? Math.round(topLifestyle.monthly) : null,
+    allocation_efficiency: allocationEfficiency,
+    top_reallocation: topReallocation,
   };
+}
+
+/** Reconstruct a minimal FinancialProfile from a stored Analysis for solver/MC use. */
+function analysisToProfile(a: Analysis): FinancialProfile | null {
+  if (!a.monthly_income) return null;
+  const spending = a.monthly_spending || 0;
+  return {
+    monthly: {
+      income: a.monthly_income,
+      spending,
+      surplus: a.surplus ?? (a.monthly_income - spending),
+      subscriptions: 0,
+      foodDelivery: 0,
+      transport: 0,
+      groceries: 0,
+      shopping: 0,
+      eatingOut: 0,
+      entertainment: 0,
+      debtPayments: 0,
+    },
+    budgetReality: {
+      nonDiscretionary: a.non_discretionary ?? { total: 0, items: [] },
+      discretionary: a.discretionary ?? { total: 0, items: [] },
+    },
+    incomeSources: a.income_sources ?? [],
+    subscriptions: [],
+    metrics: {
+      savingsRate: a.monthly_income > 0 ? ((a.surplus ?? 0) / a.monthly_income) * 100 : 0,
+      creditCardCount: 0,
+      bnplCount: 0,
+      debtAccountCount: 0,
+      subscriptionCount: 0,
+      streamingCount: 0,
+      foodDelivery: 0,
+      transport: 0,
+      groceries: 0,
+      shopping: 0,
+      eatingOut: 0,
+      coffeeAndCafes: 0,
+      entertainment: 0,
+      debtPayments: 0,
+    },
+  };
+}
+
+/** Build household cashflow scenario analysis for the chat context. */
+function buildHouseholdCashflow(
+  a: Analysis | null,
+  identity: UserIdentity | null,
+): ChatContext['household_cashflow'] {
+  if (!a || !identity || !a.monthly_income) return null;
+  // Only add household cashflow for non-single households or users with upcoming events
+  const household = identity.household || 'single';
+  const hasEvents = identity.upcoming_events?.some((e: string) => e !== 'none');
+  const hasDeps = identity.dependents?.some((d: string) => d !== 'none');
+  if (household === 'single' && !hasEvents && !hasDeps) return null;
+
+  try {
+    const profile = analysisToProfile(a);
+    if (!profile) return null;
+    const vol = estimateVolatility(profile, identity);
+    const result = simulateHouseholdCashflow(profile, identity, vol);
+    return {
+      joint_surplus: result.jointSurplus,
+      buffer_adequacy: result.bufferAdequacy,
+      shared_expense_ratio: result.sharedExpenseRatio,
+      scenarios: result.scenarios.map((s) => ({
+        label: s.label,
+        probability: s.probability,
+        monthly_impact: s.monthlyImpact,
+        description: s.description,
+      })),
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Styles ──
