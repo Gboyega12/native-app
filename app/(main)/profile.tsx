@@ -439,7 +439,7 @@ export default function Profile() {
           <View style={s.avatar}>
             <Text style={s.avatarText}>{initials || '?'}</Text>
           </View>
-          <Text style={s.userName}>{name || 'User'}</Text>
+          <Text style={s.userName}>{name.split(' ')[0] || 'User'}</Text>
           <Text style={s.userEmail}>{email}</Text>
           <View style={s.tierRow}>
             <View style={[s.tierBadge, isPro && s.tierBadgePro]}>

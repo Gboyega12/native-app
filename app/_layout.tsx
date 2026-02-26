@@ -12,7 +12,7 @@ import { initRevenueCat } from '@/lib/revenuecat';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
 
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // Capture OAuth code+state at module load time — before any component renders.
 // This is critical because app/index.tsx's <Redirect> fires during render and
@@ -45,19 +45,32 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
-      setSession(sess);
-      setReady(true);
-    });
-    return () => subscription.unsubscribe();
+    let subscription: { unsubscribe: () => void } | null = null;
+    try {
+      const { data } = supabase.auth.onAuthStateChange((_event, sess) => {
+        setSession(sess);
+        setReady(true);
+      });
+      subscription = data.subscription;
+    } catch (e) {
+      console.warn('[AuthGate] onAuthStateChange error:', e);
+      setReady(true); // unblock the UI so it shows sign-in
+    }
+    return () => subscription?.unsubscribe();
   }, []);
 
   // Register push token + init RevenueCat once session is available
   useEffect(() => {
     if (session?.user?.id) {
-      configureNotificationChannels();
-      registerPushToken(session.user.id);
-      initRevenueCat(session.user.id);
+      try { configureNotificationChannels(); } catch (e) {
+        console.warn('[Layout] configureNotificationChannels error:', e);
+      }
+      registerPushToken(session.user.id).catch((e) =>
+        console.warn('[Layout] registerPushToken error:', e),
+      );
+      initRevenueCat(session.user.id).catch((e) =>
+        console.warn('[Layout] initRevenueCat error:', e),
+      );
     }
   }, [session?.user?.id]);
 

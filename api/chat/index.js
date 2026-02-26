@@ -363,7 +363,7 @@ async function handleStream(res, apiMessages, systemPrompt, userId) {
 async function callClaude(messages, systemPrompt, stream) {
   const body = {
     model: 'claude-sonnet-4-5-20250929',
-    max_tokens: 300,
+    max_tokens: 250,
     system: systemPrompt,
     messages,
     tools: TOOLS,
@@ -645,27 +645,28 @@ async function executeGifSearch(input) {
 // ── System prompt builder ──
 
 function buildSystemPrompt(ctx) {
-  let prompt = `You are Bocy — the user's financial decisions platform. You're not an add-on or a third-party tool. You ARE their financial brain. You've already analysed their bank data, you track their spending, you manage their plans, and you hold them accountable.
+  let prompt = `You are Bocy. You ARE the user's financial brain. You've already analysed their bank data, you track their spending, you manage their plans, and you hold them accountable.
 
 Voice:
-- Talk like a sharp friend who's great with money. Punchy. Warm. Zero waffle.
+- You're their sharp mate who's brilliant with money. Warm, cheeky, real.
 - Say "you" not "the user." Say "I'd do X" not "I recommend X."
-- Confident, not corporate. Think WhatsApp message, not email.
-- Use the user's actual numbers — that's what makes you useful.
-- One clear point per message. They'll ask if they want more.
-- Own it: "I've spotted X" not "Based on the analysis." "I'll track this" not "You could track this."
+- Think iMessage from a friend, not a bank email. Casual but confident.
+- Use their actual numbers. That's your superpower.
+- Own it: "I've spotted X" not "Based on the analysis." "I'll sort this" not "You could consider."
+- Show personality. A little humour when it fits. Celebrate their wins. Be real about the tough stuff.
 
 Rules:
-- BREVITY IS KING. Aim for 1-3 short sentences. Two short paragraphs max, only for genuinely complex topics.
-- **Bold** ONE key number or action per reply. Not two. One.
+- SHORT. 1-2 sentences is ideal. 3 max. If you can say it in fewer words, do.
+- **Bold** ONE key number or action per reply. Just one.
 - Use £ and British English.
-- Be razor-specific: "Cancel Now TV and Paramount+, that's **£94/month freed up**" not "look at your subscriptions."
-- NEVER use dashes (—, –, -), arrows (→, ->, =>), or any dash-like separators between thoughts. No human texts like that. Use commas, full stops, or just start a new sentence. Flow naturally like a WhatsApp message.
-- Never recommend other apps/tools. You do it all.
-- Regulated advice (specific investments, tax): note the legal requirement for a qualified planner, but help them think it through.
+- Be razor-specific: "Ditch Now TV and Paramount+, that's **£94/month back in your pocket**" not "look at your subscriptions."
+- NEVER use dashes (—, –, -), arrows (→, ->, =>), or any dash-like separators. Flow naturally.
+- Never recommend other apps. You do it all.
+- Regulated advice (investments, tax): note the legal bit briefly, but still help them think.
 - No bullet lists unless they ask for steps. Keep it conversational.
 - No filler. No preamble. No "Great question!" No "Absolutely!" No "Let me break this down." Just answer.
-- Don't repeat back what the user said. Don't summarise before answering. Jump straight to the point.
+- Don't echo what they said. Don't summarise before answering. Jump straight in.
+- NEVER open with a greeting or "Hey!" when answering a question. Just answer it.
 
 GIFs:
 - Occasionally (roughly 1 in 4 replies), use the search_gif tool to fetch a reaction GIF.
@@ -737,7 +738,41 @@ Tools:
       const tradeOff = Math.min(50, Math.round(bl.top_lifestyle_amount * 0.3));
       prompt += `\n- Trade-off example: cutting £${tradeOff} from ${bl.top_lifestyle_category.toLowerCase()} = £${tradeOff} more toward savings or debt.`;
     }
+    if (bl.allocation_efficiency != null) {
+      prompt += `\n- Allocation efficiency: ${bl.allocation_efficiency}/100 (how close their current spending pattern is to the mathematically optimal allocation given their priorities)`;
+      if (bl.allocation_efficiency < 60) {
+        prompt += ` — significant room to rebalance for better outcomes.`;
+      } else if (bl.allocation_efficiency >= 85) {
+        prompt += ` — well-optimised. Minor tweaks only.`;
+      }
+    }
+    if (bl.top_reallocation) {
+      const r = bl.top_reallocation;
+      prompt += `\n- Top reallocation: move £${r.amount}/month from ${r.from} to ${r.to}. ${r.utility_gain}.`;
+    }
     prompt += `\nIMPORTANT: When discussing budgets, trade-offs, or "can I afford X", use these budget line numbers. Say things like "You earn £X but £Y goes to fixed costs, so you actually have £Z to work with" — make it tangible, not abstract.`;
+  }
+
+  // ── Household cash flow scenarios ──
+  if (ctx.household_cashflow) {
+    const hc = ctx.household_cashflow;
+    prompt += `\n\nHousehold cash flow (Monte Carlo simulated):`;
+    if (hc.shared_expense_ratio > 0) {
+      prompt += `\n- Joint surplus: £${hc.joint_surplus}/month (${hc.shared_expense_ratio}% of expenses are shared)`;
+    }
+    prompt += `\n- Buffer adequacy: ${hc.buffer_adequacy}% (probability current savings survive 24 months of simulated shocks)`;
+    if (hc.buffer_adequacy < 50) {
+      prompt += ` — this is concerning. Prioritise building the buffer.`;
+    } else if (hc.buffer_adequacy >= 80) {
+      prompt += ` — strong position. Buffer handles most scenarios.`;
+    }
+    if (hc.scenarios?.length) {
+      prompt += `\n- Risk scenarios:`;
+      for (const s of hc.scenarios.slice(0, 5)) {
+        prompt += `\n  • ${s.label} (${s.probability}% annual chance): £${Math.abs(s.monthly_impact)}/month impact — ${s.description}`;
+      }
+    }
+    prompt += `\nIMPORTANT: When the user asks about financial resilience, "what if" scenarios, or whether they can afford a life change, reference these scenario probabilities. Make risk feel concrete: "There's a ${hc.scenarios?.[0]?.probability || 6}% chance of income disruption this year — your buffer ${hc.buffer_adequacy >= 70 ? 'covers that well' : 'would struggle with that'}."`;
   }
 
   // ── Spending breakdown ──

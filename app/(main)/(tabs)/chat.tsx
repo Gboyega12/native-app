@@ -14,7 +14,9 @@ import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import Card from '@/components/Card';
-import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals } from '@/lib/types';
+import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals, FinancialProfile, UserIdentity } from '@/lib/types';
+import { solveBudgetAllocation } from '@/lib/budget-solver';
+import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -119,6 +121,49 @@ function TypingIndicator() {
       </View>
     </View>
   );
+}
+
+// ── Fade-in wrapper for new messages ──
+
+function FadeInView({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(6)).current;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(opacity, { toValue: 1, duration: 250, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(translateY, { toValue: 0, duration: 250, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <Animated.View style={{ opacity, transform: [{ translateY }] }}>
+      {children}
+    </Animated.View>
+  );
+}
+
+// ── Pulse animation for button mode transitions ──
+
+function PulseButton({ children, trigger }: { children: React.ReactNode; trigger: string }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const prevTrigger = useRef(trigger);
+
+  useEffect(() => {
+    if (prevTrigger.current !== trigger) {
+      prevTrigger.current = trigger;
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 0.85, duration: 80, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1.05, duration: 120, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1, duration: 100, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [trigger]);
+
+  return <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>;
 }
 
 // ── Inline action cards ──
@@ -682,7 +727,7 @@ export default function Chat() {
           bufferRecommendation: freshA.goal_context.bufferRecommendation,
         } : null;
 
-        // Rebuild budget line from fresh sync data
+        // Rebuild budget line from fresh sync data (identity not yet available here, enriched later)
         ctx.budget_line = buildBudgetLine(freshA, prevSnapshot);
 
         // Rebuild recent_transactions from fresh sync data (NOT the stale DB analysis)
@@ -772,6 +817,15 @@ export default function Chat() {
         }
       }
     } catch {}
+
+    // ── Enrich budget line with solver output + add household cashflow ──
+    // Now that identity is available, re-run with optimisation and scenario analysis
+    const identityForSolver = (ctx as any).identity as UserIdentity | null;
+    const latestAnalysis = analysis || a;
+    if (identityForSolver && latestAnalysis) {
+      ctx.budget_line = buildBudgetLine(latestAnalysis, prevSnapshot, identityForSolver);
+      ctx.household_cashflow = buildHouseholdCashflow(latestAnalysis, identityForSolver);
+    }
 
     setContext(ctx);
 
@@ -1217,8 +1271,8 @@ export default function Chat() {
                 <View style={s.chatBocyHero}>
                   <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
                 </View>
-                <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Ask Bocy'}</Text>
-                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'I know your numbers. Ask me anything.'}</Text>
+                <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Hey, what\u2019s up?'}</Text>
+                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'I\u2019ve got your numbers. Let\u2019s talk money.'}</Text>
               </>
             )}
             <View style={[s.suggestedGrid, isTablet && { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 12 }]}>
@@ -1236,58 +1290,73 @@ export default function Chat() {
           </View>
         )}
 
-        {messages.map((msg, i) => (
-          <View key={i}>
-            {msg.role === 'assistant' && (i === 0 || messages[i - 1]?.role !== 'assistant') && (
-              <Text style={s.bocyLabel}>bocy</Text>
-            )}
-            <View
-              style={[
-                s.bubble,
-                msg.role === 'user' ? s.userBubble : s.assistantBubble,
-              ]}
-            >
-              {msg.role === 'user' ? (
-                <Text style={[s.bubbleText, s.userText]}>{msg.content}</Text>
-              ) : (
-                <Markdown>{msg.content}</Markdown>
-              )}
-            </View>
+        {messages.map((msg, i) => {
+          const isAssistant = msg.role === 'assistant';
+          const isLast = i === messages.length - 1;
+          const showLabel = isAssistant && (i === 0 || messages[i - 1]?.role !== 'assistant');
 
-            {/* Render action cards below assistant messages */}
-            {msg.actions?.map((action, j) => (
-              <View key={`action-${i}-${j}`} style={s.actionCardWrapper}>
-                {action.type === 'plan_proposed' ? (
-                  <PlanCard
-                    action={action}
-                    onApprove={() => handleApprovePlan(i, j)}
-                    onDismiss={() => handleDismissPlan(i, j)}
-                    saving={savingPlan === `${i}-${j}`}
-                  />
-                ) : action.type === 'plan_error' ? (
-                  <Card
-                    variant="error"
-                    noShadow
-                    style={{ borderRadius: radius.md, padding: spacing.md, marginBottom: 0 }}
-                  >
-                    <Text style={s.errorCardText}>{action.data.error || 'Plan could not be saved.'}</Text>
-                  </Card>
-                ) : action.type === 'override_saved' ? (
-                  <OverrideCard action={action} />
-                ) : action.type === 'budget_item_saved' ? (
-                  <BudgetItemCard action={action} />
-                ) : action.type === 'goal_update_proposed' ? (
-                  <GoalUpdateCard
-                    action={action}
-                    onAccept={() => handleAcceptGoalUpdate(i, j)}
-                    onKeep={() => handleKeepGoals(i, j)}
-                    saving={savingPlan === `${i}-${j}`}
-                  />
-                ) : null}
+          const bubble = (
+            <View key={i}>
+              {showLabel && (
+                <View style={s.bocyLabelRow}>
+                  <View style={s.bocyLabelDot} />
+                  <Text style={s.bocyLabel}>bocy</Text>
+                </View>
+              )}
+              <View
+                style={[
+                  s.bubble,
+                  msg.role === 'user' ? s.userBubble : s.assistantBubble,
+                ]}
+              >
+                {msg.role === 'user' ? (
+                  <Text style={[s.bubbleText, s.userText]}>{msg.content}</Text>
+                ) : (
+                  <Markdown>{msg.content}</Markdown>
+                )}
               </View>
-            ))}
-          </View>
-        ))}
+
+              {/* Render action cards below assistant messages */}
+              {msg.actions?.map((action, j) => (
+                <View key={`action-${i}-${j}`} style={s.actionCardWrapper}>
+                  {action.type === 'plan_proposed' ? (
+                    <PlanCard
+                      action={action}
+                      onApprove={() => handleApprovePlan(i, j)}
+                      onDismiss={() => handleDismissPlan(i, j)}
+                      saving={savingPlan === `${i}-${j}`}
+                    />
+                  ) : action.type === 'plan_error' ? (
+                    <Card
+                      variant="error"
+                      noShadow
+                      style={{ borderRadius: radius.md, padding: spacing.md, marginBottom: 0 }}
+                    >
+                      <Text style={s.errorCardText}>{action.data.error || 'Plan could not be saved.'}</Text>
+                    </Card>
+                  ) : action.type === 'override_saved' ? (
+                    <OverrideCard action={action} />
+                  ) : action.type === 'budget_item_saved' ? (
+                    <BudgetItemCard action={action} />
+                  ) : action.type === 'goal_update_proposed' ? (
+                    <GoalUpdateCard
+                      action={action}
+                      onAccept={() => handleAcceptGoalUpdate(i, j)}
+                      onKeep={() => handleKeepGoals(i, j)}
+                      saving={savingPlan === `${i}-${j}`}
+                    />
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          );
+
+          // Animate assistant messages sliding in
+          if (isAssistant && isLast) {
+            return <FadeInView key={i}>{bubble}</FadeInView>;
+          }
+          return bubble;
+        })}
 
         {loading && <TypingIndicator />}
 
@@ -1343,7 +1412,7 @@ export default function Chat() {
             <TextInput
               ref={inputRef}
               style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
-              placeholder={listening ? 'Listening...' : 'Ask about your finances...'}
+              placeholder={listening ? 'Listening...' : 'Ask me anything...'}
               placeholderTextColor={listening ? colors.green : colors.muted}
               value={input}
               onChangeText={setInput}
@@ -1354,24 +1423,36 @@ export default function Chat() {
               maxLength={1000}
               blurOnSubmit
             />
-            {voiceSupported && (
-              <TouchableOpacity
-                style={[s.voiceButton, listening && s.voiceButtonActive]}
-                onPress={toggleVoice}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.voiceIcon, listening && s.voiceIconActive]}>
-                  {listening ? '\u23F9' : '\u{1F3A4}'}
-                </Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={[s.sendButton, (!input.trim() || loading) && s.sendDisabled]}
-              onPress={() => sendMessage(input)}
-              disabled={!input.trim() || loading}
-            >
-              <Text style={s.sendText}>{'\u2191'}</Text>
-            </TouchableOpacity>
+            <PulseButton trigger={input.trim() ? 'send' : listening ? 'listening' : 'voice'}>
+              {input.trim() ? (
+                <TouchableOpacity
+                  style={[s.actionButton, loading && s.actionButtonDisabled]}
+                  onPress={() => sendMessage(input)}
+                  disabled={loading}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.actionButtonIcon}>{'\u2191'}</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[s.actionButton, listening && s.actionButtonListening]}
+                  onPress={voiceSupported ? toggleVoice : undefined}
+                  activeOpacity={0.7}
+                  disabled={!voiceSupported}
+                >
+                  <View style={s.glyphRing}>
+                    {listening ? (
+                      <View style={s.glyphStop} />
+                    ) : (
+                      <View style={s.glyphMic}>
+                        <View style={s.glyphMicHead} />
+                        <View style={s.glyphMicStem} />
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              )}
+            </PulseButton>
           </View>
         </>
       )}
@@ -1402,6 +1483,7 @@ function buildSpendingBreakdown(a: Analysis | null): { category: string; monthly
 function buildBudgetLine(
   a: Analysis | null,
   prevSnapshot: { monthly_spending: number; monthly_income: number } | null,
+  identity?: UserIdentity | null,
 ): ChatContext['budget_line'] {
   if (!a || !a.monthly_income) return undefined;
   const income = a.monthly_income;
@@ -1423,6 +1505,27 @@ function buildBudgetLine(
     ? discItems.reduce((a, b) => a.monthly > b.monthly ? a : b)
     : null;
 
+  // ── Budget solver: constrained optimisation ──
+  // Reconstruct a minimal FinancialProfile from the stored Analysis to
+  // run the solver. This finds the optimal reallocation of every pound.
+  let allocationEfficiency: number | undefined;
+  let topReallocation: { from: string; to: string; amount: number; utility_gain: string } | null | undefined = null;
+  try {
+    const profile = analysisToProfile(a);
+    if (profile) {
+      const allocation = solveBudgetAllocation(profile, identity);
+      allocationEfficiency = allocation.efficiency;
+      if (allocation.topReallocation) {
+        topReallocation = {
+          from: allocation.topReallocation.from,
+          to: allocation.topReallocation.to,
+          amount: allocation.topReallocation.amount,
+          utility_gain: allocation.topReallocation.utilityGain,
+        };
+      }
+    }
+  } catch {}
+
   return {
     real_spending_power: Math.round(income - essentials),
     essentials_total: Math.round(essentials),
@@ -1434,7 +1537,85 @@ function buildBudgetLine(
     essentials_change_pct: essentialsChangePct,
     top_lifestyle_category: topLifestyle?.category ?? null,
     top_lifestyle_amount: topLifestyle ? Math.round(topLifestyle.monthly) : null,
+    allocation_efficiency: allocationEfficiency,
+    top_reallocation: topReallocation,
   };
+}
+
+/** Reconstruct a minimal FinancialProfile from a stored Analysis for solver/MC use. */
+function analysisToProfile(a: Analysis): FinancialProfile | null {
+  if (!a.monthly_income) return null;
+  const spending = a.monthly_spending || 0;
+  return {
+    monthly: {
+      income: a.monthly_income,
+      spending,
+      surplus: a.surplus ?? (a.monthly_income - spending),
+      subscriptions: 0,
+      foodDelivery: 0,
+      transport: 0,
+      groceries: 0,
+      shopping: 0,
+      eatingOut: 0,
+      entertainment: 0,
+      debtPayments: 0,
+    },
+    budgetReality: {
+      nonDiscretionary: a.non_discretionary ?? { total: 0, items: [] },
+      discretionary: a.discretionary ?? { total: 0, items: [] },
+    },
+    incomeSources: a.income_sources ?? [],
+    subscriptions: [],
+    metrics: {
+      savingsRate: a.monthly_income > 0 ? ((a.surplus ?? 0) / a.monthly_income) * 100 : 0,
+      creditCardCount: 0,
+      bnplCount: 0,
+      debtAccountCount: 0,
+      subscriptionCount: 0,
+      streamingCount: 0,
+      foodDelivery: 0,
+      transport: 0,
+      groceries: 0,
+      shopping: 0,
+      eatingOut: 0,
+      coffeeAndCafes: 0,
+      entertainment: 0,
+      debtPayments: 0,
+    },
+  };
+}
+
+/** Build household cashflow scenario analysis for the chat context. */
+function buildHouseholdCashflow(
+  a: Analysis | null,
+  identity: UserIdentity | null,
+): ChatContext['household_cashflow'] {
+  if (!a || !identity || !a.monthly_income) return null;
+  // Only add household cashflow for non-single households or users with upcoming events
+  const household = identity.household || 'single';
+  const hasEvents = identity.upcoming_events?.some((e: string) => e !== 'none');
+  const hasDeps = identity.dependents?.some((d: string) => d !== 'none');
+  if (household === 'single' && !hasEvents && !hasDeps) return null;
+
+  try {
+    const profile = analysisToProfile(a);
+    if (!profile) return null;
+    const vol = estimateVolatility(profile, identity);
+    const result = simulateHouseholdCashflow(profile, identity, vol);
+    return {
+      joint_surplus: result.jointSurplus,
+      buffer_adequacy: result.bufferAdequacy,
+      shared_expense_ratio: result.sharedExpenseRatio,
+      scenarios: result.scenarios.map((s) => ({
+        label: s.label,
+        probability: s.probability,
+        monthly_impact: s.monthlyImpact,
+        description: s.description,
+      })),
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Styles ──
@@ -1488,38 +1669,38 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flex: 1,
   },
   messagesContent: {
-    padding: spacing.md,
-    paddingTop: spacing.xxl + spacing.md,
-    paddingBottom: spacing.sm,
+    padding: spacing.lg,
+    paddingTop: spacing.xxl + spacing.lg,
+    paddingBottom: spacing.md,
   },
   suggestedContainer: {
-    marginTop: spacing.xl,
+    marginTop: spacing.xxl,
     alignItems: 'center',
-    paddingHorizontal: spacing.xs,
+    paddingHorizontal: spacing.sm,
   },
   suggestedTitle: {
     fontFamily: fonts.heading,
-    fontSize: 22,
+    fontSize: 24,
     color: c.text,
   },
   suggestedSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 14,
     color: c.dim,
     marginBottom: spacing.lg,
-    marginTop: 6,
+    marginTop: 8,
   },
   suggestedGrid: {
     width: '100%',
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   suggestedButton: {
     backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: radius.lg,
-    paddingVertical: 12,
-    paddingHorizontal: spacing.md,
+    borderRadius: 100,
+    paddingVertical: 14,
+    paddingHorizontal: spacing.lg,
   },
   suggestedText: {
     fontFamily: fonts.medium,
@@ -1528,11 +1709,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     textAlign: 'center',
   },
   bubble: {
-    maxWidth: '82%',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    marginBottom: 6,
+    maxWidth: '80%',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginBottom: 10,
   },
   userBubble: {
     backgroundColor: c.accent,
@@ -1545,6 +1726,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderColor: c.border,
     alignSelf: 'flex-start',
     borderBottomLeftRadius: 4,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomRightRadius: 18,
   },
   bubbleText: {
     fontFamily: fonts.regular,
@@ -1566,13 +1750,13 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    backgroundColor: c.dim,
+    backgroundColor: c.green,
   },
   // ── Action cards ──
   actionCardWrapper: {
     alignSelf: 'flex-start',
     maxWidth: '85%',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   errorCardText: {
     fontFamily: fonts.medium,
@@ -1760,12 +1944,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // ── Input row ──
   inputRow: {
     flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
     backgroundColor: c.bg,
-    gap: 8,
+    gap: 10,
     alignItems: 'flex-end',
   },
   input: {
@@ -1780,40 +1964,59 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 14,
     color: c.text,
   },
-  voiceButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: c.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  voiceButtonActive: {
-    borderColor: c.green,
-    backgroundColor: c.greenDim,
-  },
-  voiceIcon: {
-    fontSize: 16,
-  },
-  voiceIconActive: {
-    color: c.green,
-  },
-  sendButton: {
+  // ── Unified action button (glyph style) ──
+  actionButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: c.accent,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sendDisabled: {
+  actionButtonDisabled: {
     opacity: 0.3,
   },
-  sendText: {
+  actionButtonListening: {
+    backgroundColor: c.green,
+  },
+  actionButtonIcon: {
     fontFamily: fonts.semibold,
-    fontSize: 18,
+    fontSize: 20,
     color: c.bg,
+    marginTop: -1,
+  },
+  // ── Glyph mic icon (Nothing Phone style) ──
+  glyphRing: {
+    width: 22,
+    height: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  glyphMic: {
+    alignItems: 'center',
+  },
+  glyphMicHead: {
+    width: 8,
+    height: 10,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: c.bg,
+  },
+  glyphMicStem: {
+    width: 12,
+    height: 6,
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6,
+    borderWidth: 1.5,
+    borderTopWidth: 0,
+    borderColor: c.bg,
+    marginTop: -1,
+  },
+  glyphStop: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: c.bg,
   },
 
   // ── Free tier gate (replaces input after limit reached) ──
@@ -1859,32 +2062,43 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
 
   // ── Bocy label on assistant messages ──
+  bocyLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+    marginTop: 14,
+  },
+  bocyLabelDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: c.green,
+  },
   bocyLabel: {
     fontFamily: fonts.mono,
     fontSize: 10,
     color: c.dim,
     letterSpacing: 1,
     textTransform: 'uppercase',
-    marginBottom: 4,
-    marginTop: 8,
   },
 
   // ── Follow-up suggestion chips ──
   followUpContainer: {
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
   },
   followUpScroll: {
     gap: 8,
     paddingVertical: 4,
   },
   followUpChip: {
-    backgroundColor: 'transparent',
+    backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 100,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
   followUpChipText: {
     fontFamily: fonts.medium,
