@@ -2,7 +2,6 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
-  LayoutAnimation, UIManager,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -143,6 +142,26 @@ function FadeInView({ children, delay = 0 }: { children: React.ReactNode; delay?
       {children}
     </Animated.View>
   );
+}
+
+// ── Pulse animation for button mode transitions ──
+
+function PulseButton({ children, trigger }: { children: React.ReactNode; trigger: string }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const prevTrigger = useRef(trigger);
+
+  useEffect(() => {
+    if (prevTrigger.current !== trigger) {
+      prevTrigger.current = trigger;
+      Animated.sequence([
+        Animated.timing(scale, { toValue: 0.85, duration: 80, useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1.05, duration: 120, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1, duration: 100, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [trigger]);
+
+  return <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>;
 }
 
 // ── Inline action cards ──
@@ -1393,24 +1412,36 @@ export default function Chat() {
               maxLength={1000}
               blurOnSubmit
             />
-            {voiceSupported && (
-              <TouchableOpacity
-                style={[s.voiceButton, listening && s.voiceButtonActive]}
-                onPress={toggleVoice}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.voiceIcon, listening && s.voiceIconActive]}>
-                  {listening ? '\u23F9' : '\u{1F3A4}'}
-                </Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={[s.sendButton, (!input.trim() || loading) && s.sendDisabled]}
-              onPress={() => sendMessage(input)}
-              disabled={!input.trim() || loading}
-            >
-              <Text style={s.sendText}>{'\u2191'}</Text>
-            </TouchableOpacity>
+            <PulseButton trigger={input.trim() ? 'send' : listening ? 'listening' : 'voice'}>
+              {input.trim() ? (
+                <TouchableOpacity
+                  style={[s.actionButton, loading && s.actionButtonDisabled]}
+                  onPress={() => sendMessage(input)}
+                  disabled={loading}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.actionButtonIcon}>{'\u2191'}</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[s.actionButton, listening && s.actionButtonListening]}
+                  onPress={voiceSupported ? toggleVoice : undefined}
+                  activeOpacity={0.7}
+                  disabled={!voiceSupported}
+                >
+                  <View style={s.glyphRing}>
+                    {listening ? (
+                      <View style={s.glyphStop} />
+                    ) : (
+                      <View style={s.glyphMic}>
+                        <View style={s.glyphMicHead} />
+                        <View style={s.glyphMicStem} />
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              )}
+            </PulseButton>
           </View>
         </>
       )}
@@ -1527,14 +1558,14 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flex: 1,
   },
   messagesContent: {
-    padding: spacing.md,
-    paddingTop: spacing.xxl + spacing.md,
-    paddingBottom: spacing.sm,
+    padding: spacing.lg,
+    paddingTop: spacing.xxl + spacing.lg,
+    paddingBottom: spacing.md,
   },
   suggestedContainer: {
-    marginTop: spacing.xl,
+    marginTop: spacing.xxl,
     alignItems: 'center',
-    paddingHorizontal: spacing.xs,
+    paddingHorizontal: spacing.sm,
   },
   suggestedTitle: {
     fontFamily: fonts.heading,
@@ -1550,7 +1581,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   suggestedGrid: {
     width: '100%',
-    gap: spacing.sm,
+    gap: spacing.md,
   },
   suggestedButton: {
     backgroundColor: c.surface,
@@ -1567,11 +1598,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     textAlign: 'center',
   },
   bubble: {
-    maxWidth: '82%',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    marginBottom: 6,
+    maxWidth: '80%',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginBottom: 10,
   },
   userBubble: {
     backgroundColor: c.accent,
@@ -1614,7 +1645,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   actionCardWrapper: {
     alignSelf: 'flex-start',
     maxWidth: '85%',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   errorCardText: {
     fontFamily: fonts.medium,
@@ -1802,12 +1833,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // ── Input row ──
   inputRow: {
     flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
     backgroundColor: c.bg,
-    gap: 8,
+    gap: 10,
     alignItems: 'flex-end',
   },
   input: {
@@ -1822,40 +1853,59 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 14,
     color: c.text,
   },
-  voiceButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: c.border,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  voiceButtonActive: {
-    borderColor: c.green,
-    backgroundColor: c.greenDim,
-  },
-  voiceIcon: {
-    fontSize: 16,
-  },
-  voiceIconActive: {
-    color: c.green,
-  },
-  sendButton: {
+  // ── Unified action button (glyph style) ──
+  actionButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: c.accent,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  sendDisabled: {
+  actionButtonDisabled: {
     opacity: 0.3,
   },
-  sendText: {
+  actionButtonListening: {
+    backgroundColor: c.green,
+  },
+  actionButtonIcon: {
     fontFamily: fonts.semibold,
-    fontSize: 18,
+    fontSize: 20,
     color: c.bg,
+    marginTop: -1,
+  },
+  // ── Glyph mic icon (Nothing Phone style) ──
+  glyphRing: {
+    width: 22,
+    height: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  glyphMic: {
+    alignItems: 'center',
+  },
+  glyphMicHead: {
+    width: 8,
+    height: 10,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: c.bg,
+  },
+  glyphMicStem: {
+    width: 12,
+    height: 6,
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6,
+    borderWidth: 1.5,
+    borderTopWidth: 0,
+    borderColor: c.bg,
+    marginTop: -1,
+  },
+  glyphStop: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: c.bg,
   },
 
   // ── Free tier gate (replaces input after limit reached) ──
@@ -1904,9 +1954,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   bocyLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    marginBottom: 4,
-    marginTop: 10,
+    gap: 6,
+    marginBottom: 6,
+    marginTop: 14,
   },
   bocyLabelDot: {
     width: 6,
@@ -1924,8 +1974,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Follow-up suggestion chips ──
   followUpContainer: {
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
   },
   followUpScroll: {
     gap: 8,
