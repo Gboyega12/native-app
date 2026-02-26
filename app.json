@@ -70,9 +70,7 @@
     "extra": {
       "eas": {
         "projectId": "f8e22d4e-78f5-43b2-9369-4dfa3c00ff02"
-      },
-      "privacyUrl": "https://www.bocy.io/privacy.html",
-      "termsUrl": "https://www.bocy.io/terms.html"
+      }
     },
     "experiments": {
       "typedRoutes": true
