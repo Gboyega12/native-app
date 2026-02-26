@@ -7,7 +7,7 @@ function withIAP(config) {
   // iOS: add com.apple.developer.in-app-payments entitlement
   config = withEntitlementsPlist(config, (mod) => {
     mod.modResults['com.apple.developer.in-app-payments'] =
-      mod.modResults['com.apple.developer.in-app-payments'] || ['*'];
+      mod.modResults['com.apple.developer.in-app-payments'] || ['merchant.com.bocy.app'];
     return mod;
   });
 
