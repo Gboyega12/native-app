@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
-import Card, { AnimGlyph, CardDivider, CardBadge, SMOOTH_ANIM } from '@/components/Card';
+import Card, { AnimGlyph, SMOOTH_ANIM } from '@/components/Card';
 import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
@@ -1150,7 +1150,7 @@ export default function Plan() {
 
     return (
       <View style={s.expandedSection}>
-        <CardDivider dotted color={colors.border} />
+        <View style={s.separator} />
 
         {/* Strategy */}
         {move.strategy && (

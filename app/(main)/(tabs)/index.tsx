@@ -18,7 +18,7 @@ import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
-import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, CardDivider, CardBadge, DotMatrixBar, SMOOTH_ANIM } from '@/components/Card';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
@@ -1278,8 +1278,6 @@ export default function Home() {
                   variant="hero"
                   accessibilityLabel={`Your number one move: ${heroMove.action}, saves ${heroMove.annualImpact} pounds per year`}
                 >
-                  <DotMatrixBar color={colors.green + '30'} dotCount={16} dotSize={2} gap={5} style={{ marginBottom: 16 }} />
-
                   <Text style={s.heroLabel}>Your #1 move</Text>
 
                   <Text style={s.heroAction}>
@@ -1292,22 +1290,19 @@ export default function Home() {
                       +{'\u00a3'}{(heroMove.annualImpact || 0).toLocaleString()}/yr
                     </Text>
                     {heroMove.effort && (
-                      <CardBadge
-                        label={heroMove.effort}
-                        color={colors.greenDim}
-                        textColor={colors.green}
-                      />
+                      <View style={s.effortPill}>
+                        <Text style={s.effortPillText}>
+                          {heroMove.effort}
+                        </Text>
+                      </View>
                     )}
                   </View>
 
                   {/* Strategy — the WHY */}
                   {heroMove.strategy ? (
-                    <>
-                      <CardDivider color={colors.green + '20'} />
-                      <Text style={s.heroStrategy}>
-                        {stripMd(heroMove.strategy)}
-                      </Text>
-                    </>
+                    <Text style={s.heroStrategy}>
+                      {stripMd(heroMove.strategy)}
+                    </Text>
                   ) : null}
 
                   {/* CTA */}
