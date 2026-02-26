@@ -12,7 +12,7 @@ import { initRevenueCat } from '@/lib/revenuecat';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
 
-SplashScreen.preventAutoHideAsync();
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // Capture OAuth code+state at module load time — before any component renders.
 // This is critical because app/index.tsx's <Redirect> fires during render and
