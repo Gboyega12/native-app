@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
   LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Pressable,
@@ -60,6 +60,8 @@ export default function Home() {
   const [connectionDismissed, setConnectionDismissed] = useState(false);
   const [incomeDismissed, setIncomeDismissed] = useState(false);
   const { showWalkthrough, dismissWalkthrough } = useWalkthrough();
+  const dashScrollRef = useRef<ScrollView>(null);
+  const cardPositions = useRef<Record<string, number>>({});
 
   // ── Connection banner dismiss ──
   // Keyed by the sorted bank names. Dismissing stores these bank names.
@@ -1121,6 +1123,7 @@ export default function Home() {
 
   return (
     <ScrollView
+      ref={dashScrollRef}
       style={s.container}
       contentContainerStyle={[
         s.scroll,
@@ -1269,6 +1272,7 @@ export default function Home() {
           {dashboardMoves.length > 0 ? (() => {
             const heroMove = dashboardMoves[0];
             return (
+              <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
               <AnimGlyph delay={0}>
                 <Card
                   variant="hero"
@@ -1331,19 +1335,23 @@ export default function Home() {
                   )}
                 </Card>
               </AnimGlyph>
+              </View>
             );
           })() : (
+            <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
             <Card variant="hero">
               <Text style={s.heroLabel}>Your #1 move</Text>
               <Text style={s.noDataText}>
                 No actionable insights yet. Connect your bank so Bocy can find your most impactful financial move.
               </Text>
             </Card>
+            </View>
           )}
 
           {/* ══════════════════════════════════════════════
               CARD — SAFE TO SPEND (compact)
               ══════════════════════════════════════════════ */}
+          <View onLayout={(e) => { cardPositions.current.safeToSpend = e.nativeEvent.layout.y; }}>
           <Card>
             <AnimGlyph delay={100}>
               <View style={s.cardTitleRow}>
@@ -1511,10 +1519,12 @@ export default function Home() {
               </View>
             )}
           </Card>
+          </View>
 
           {/* ══════════════════════════════════════════════
               CARD — YOUR BUDGET REALITY (summary only)
               ══════════════════════════════════════════════ */}
+          <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; }}>
           <Card>
             {/* Info icon for budget card */}
             <View style={s.cardTitleRow}>
@@ -1852,6 +1862,7 @@ export default function Home() {
             <Text style={s.cardFooter}>Tap any category to expand · Hold a transaction to re-categorize</Text>
             </>)}
           </Card>
+          </View>
 
           {/* Add budget item modal */}
           <Modal visible={showAddItem} transparent animationType="fade" onRequestClose={() => { setAddItemError(''); setShowAddItem(false); }}>
@@ -2162,7 +2173,7 @@ export default function Home() {
       )}
 
       <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
-      {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} />}
+      {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} scrollRef={dashScrollRef} cardPositions={cardPositions} router={router} />}
     </ScrollView>
   );
 }
