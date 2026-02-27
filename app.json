@@ -17,10 +17,6 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.bocy.app",
       "buildNumber": "1",
-      "associatedDomains": [
-        "applinks:bocy.app",
-        "webcredentials:bocy.app"
-      ],
       "infoPlist": {
         "NSCameraUsageDescription": "Bocy needs camera access to scan documents.",
         "NSPhotoLibraryUsageDescription": "Bocy needs photo library access to upload documents.",
