@@ -18,20 +18,33 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const storage = {
   getItem: async (key: string): Promise<string | null> => {
     if (Platform.OS === 'web') return localStorage.getItem(key);
-    return SecureStore?.getItemAsync(key) ?? null;
+    try {
+      return (await SecureStore?.getItemAsync(key)) ?? null;
+    } catch (e) {
+      console.warn('[SecureStore] getItem failed for key', key, e);
+      return null;
+    }
   },
   setItem: async (key: string, value: string): Promise<void> => {
     if (Platform.OS === 'web') {
       localStorage.setItem(key, value);
     } else {
-      await SecureStore?.setItemAsync(key, value);
+      try {
+        await SecureStore?.setItemAsync(key, value);
+      } catch (e) {
+        console.warn('[SecureStore] setItem failed for key', key, e);
+      }
     }
   },
   removeItem: async (key: string): Promise<void> => {
     if (Platform.OS === 'web') {
       localStorage.removeItem(key);
     } else {
-      await SecureStore?.deleteItemAsync(key);
+      try {
+        await SecureStore?.deleteItemAsync(key);
+      } catch (e) {
+        console.warn('[SecureStore] removeItem failed for key', key, e);
+      }
     }
   },
 };
