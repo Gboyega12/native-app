@@ -482,7 +482,7 @@ function buildWeeklyContext(
   // Detect income arrivals this week
   const incomeThisWeek = thisWeekTxs.filter((t) => t.isIncome && t.amount > 0);
   const incomeSources = profile.incomeSources || [];
-  const primarySource = incomeSources.find((s) => s.isSalary) || incomeSources[0];
+  const primarySource = incomeSources.find((s) => s.isSalary) || incomeSources[0] || null;
 
   const recentIncomeEvents: IncomeEvent[] = incomeThisWeek.map((t) => ({
     source: t.merchant || t.description,
