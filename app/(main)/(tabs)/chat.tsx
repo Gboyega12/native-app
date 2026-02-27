@@ -421,7 +421,7 @@ export default function Chat() {
 
   // ── Voice input via Web Speech API ──
   const voiceSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
-    !!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition;
+    (!!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition);
 
   const toggleVoice = () => {
     if (listening) {
