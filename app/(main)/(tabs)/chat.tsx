@@ -566,7 +566,7 @@ export default function Chat() {
         .lte('created_at', prevMonthEnd.toISOString())
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
       prevSnapshot = prevData ?? null;
     } catch {}
 
@@ -683,7 +683,7 @@ export default function Chat() {
         .from('user_identity')
         .select('work_setup, household, housing, financial_experience, risk_appetite, priorities, upcoming_events, dependents')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
       if (identityData) {
         (ctx as any).identity = identityData;
       }

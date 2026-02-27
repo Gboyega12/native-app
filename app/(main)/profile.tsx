@@ -162,7 +162,7 @@ export default function Profile() {
           .from('notification_preferences')
           .select('weekly_digest, milestone_alerts, checkin_prompts, achievement_alerts')
           .eq('user_id', user.id)
-          .single();
+          .maybeSingle();
         if (prefs) {
           setNotifPrefs({
             weekly_digest: prefs.weekly_digest ?? true,
@@ -359,7 +359,11 @@ export default function Profile() {
 
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn('[profile] signOut error:', e);
+    }
     router.replace('/(auth)/sign-in');
   };
 

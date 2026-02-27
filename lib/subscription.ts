@@ -53,7 +53,13 @@ export function useSubscription(): SubscriptionState {
 
   const fetchTier = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      let user: any = null;
+      try {
+        const { data } = await supabase.auth.getUser();
+        user = data?.user;
+      } catch (e) {
+        console.warn('[subscription] auth.getUser failed:', e);
+      }
       if (!user) {
         applyRow(null);
         setLoading(false);
@@ -65,7 +71,7 @@ export function useSubscription(): SubscriptionState {
         .from('user_subscriptions')
         .select(SELECT_COLS)
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
       applyRow(data);
     } catch {

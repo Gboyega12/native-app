@@ -272,7 +272,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         .from('user_identity')
         .select('*')
         .eq('user_id', userId)
-        .single(),
+        .maybeSingle(),
     ]);
     if (debtRes.data) debtAccountsData = debtRes.data;
     if (idRes.data) identityData = idRes.data;
@@ -302,7 +302,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .from('goals')
       .select('*')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
     goals = goalsData;
   } catch {}
 
@@ -345,14 +345,6 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   };
 
   // ── 6. Upsert to Supabase ──
-  const { data: existingRow } = await supabase
-    .from('analyses')
-    .select('id')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
-
   const fields = {
     archetype: rawAnalysis.archetype,
     decision_score: rawAnalysis.decision_score,
@@ -368,10 +360,22 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     goal_context: rawAnalysis.goal_context,
   };
 
-  if (existingRow?.id) {
-    await supabase.from('analyses').update(fields).eq('id', existingRow.id);
-  } else {
-    await supabase.from('analyses').insert({ user_id: userId, ...fields });
+  try {
+    const { data: existingRow } = await supabase
+      .from('analyses')
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRow?.id) {
+      await supabase.from('analyses').update(fields).eq('id', existingRow.id);
+    } else {
+      await supabase.from('analyses').insert({ user_id: userId, ...fields });
+    }
+  } catch (e: any) {
+    console.warn('[sync] Failed to upsert analysis:', e?.message);
   }
 
   // ── 7. Score snapshot ──

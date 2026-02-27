@@ -641,7 +641,7 @@ export default function Home() {
             .eq('user_id', user.id)
             .order('created_at', { ascending: false })
             .limit(1)
-            .single();
+            .maybeSingle();
           if (latest?.id) {
             await supabase.from('analyses')
               .update({ all_moves: updatedMoves })
@@ -757,7 +757,7 @@ export default function Home() {
           .from('user_streaks')
           .select('current_streak, longest_streak, last_active_date, total_active_days')
           .eq('user_id', user.id)
-          .single();
+          .maybeSingle();
 
         if (streak) {
           if (streak.last_active_date !== today) {
@@ -841,7 +841,7 @@ export default function Home() {
           .lte('created_at', prevMonthEnd.toISOString())
           .order('created_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
         setPrevSnapshot(prevData ?? null);
       } catch {
         setPrevSnapshot(null);

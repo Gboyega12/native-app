@@ -489,7 +489,7 @@ export default function Plan() {
         .eq('user_id', uid)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
       if (latest?.id) {
         const dbMoves = (latest.all_moves || []).filter(
           (m: any) => m.action !== moveToDelete.action,

@@ -14,6 +14,17 @@ import UpdateBanner from '@/components/UpdateBanner';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
+// Prevent unhandled promise rejections from crashing the app on iOS.
+// React Native treats unhandled rejections as fatal errors by default.
+if (Platform.OS !== 'web') {
+  const origHandler = (globalThis as any).ErrorUtils?.getGlobalHandler?.();
+  (globalThis as any).ErrorUtils?.setGlobalHandler?.((error: any, isFatal: boolean) => {
+    // Log but don't re-throw — prevents abort on recoverable async errors
+    console.warn('[global]', isFatal ? 'Fatal:' : 'Error:', error?.message || error);
+    if (origHandler && !isFatal) origHandler(error, isFatal);
+  });
+}
+
 // Capture OAuth code+state at module load time — before any component renders.
 // This is critical because app/index.tsx's <Redirect> fires during render and
 // clears the URL params before useEffect can read them.
@@ -88,7 +99,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         sessionStorage.setItem('_emailConfirmed', '1');
       }
-      supabase.auth.signOut();
+      supabase.auth.signOut().catch(() => {});
       router.replace('/(auth)/sign-in');
       return;
     }
@@ -126,7 +137,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
               .from('user_identity')
               .select('user_id')
               .eq('user_id', session.user.id)
-              .single();
+              .maybeSingle();
             if (data) {
               // Identity complete — check if they have an analysis
               try {
