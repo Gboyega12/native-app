@@ -814,7 +814,7 @@ export default function Home() {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.warn('[home] Failed to fetch analysis:', error.message);
@@ -860,11 +860,15 @@ export default function Home() {
 
   // Pull-to-refresh handler — force a fresh TrueLayer fetch
   const onRefresh = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setRefreshing(true);
-    invalidateSyncCache();
-    await syncInBackground(user.id, true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setRefreshing(true);
+      invalidateSyncCache();
+      await syncInBackground(user.id, true);
+    } catch (err: any) {
+      console.warn('[home] onRefresh error:', err?.message);
+    }
     setRefreshing(false);
   }, []);
 

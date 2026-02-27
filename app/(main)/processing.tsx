@@ -178,7 +178,7 @@ function ProcessingInner() {
         const { data: { user: idUser } } = await supabase.auth.getUser();
         if (idUser) {
           const [idRes, debtRes] = await Promise.all([
-            supabase.from('user_identity').select('*').eq('user_id', idUser.id).single(),
+            supabase.from('user_identity').select('*').eq('user_id', idUser.id).maybeSingle(),
             supabase.from('debt_accounts').select('account_name, account_type, outstanding_balance, credit_limit').eq('user_id', idUser.id),
           ]);
           if (idRes.data) identityData = idRes.data;
@@ -292,12 +292,14 @@ function ProcessingInner() {
       }
       let goals: Goals | null = null;
       if (user) {
-        const { data } = await supabase
-          .from('goals')
-          .select('*')
-          .eq('user_id', user.id)
-          .single();
-        goals = data;
+        try {
+          const { data } = await supabase
+            .from('goals')
+            .select('*')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          goals = data;
+        } catch {}
       }
 
       // ── Layer 2: Move Engine ──
@@ -510,7 +512,7 @@ function ProcessingInner() {
             const { data: progressData } = await supabase
               .from('plan_progress').select('completed_steps').eq('user_id', user.id);
             const { data: streakData } = await supabase
-              .from('user_streaks').select('current_streak').eq('user_id', user.id).single();
+              .from('user_streaks').select('current_streak').eq('user_id', user.id).maybeSingle();
 
             const completedCount = (progressData || []).filter(
               (p: any) => p.completed_steps && p.completed_steps.length > 0
@@ -568,7 +570,7 @@ function ProcessingInner() {
               .not('card_balances', 'is', null)
               .order('created_at', { ascending: false })
               .limit(1)
-              .single();
+              .maybeSingle();
 
             if (bankRows?.card_balances && Array.isArray(bankRows.card_balances)) {
               for (const card of bankRows.card_balances) {

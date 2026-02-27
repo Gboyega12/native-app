@@ -491,7 +491,13 @@ export default function Chat() {
   );
 
   const loadContext = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
+    let user: any = null;
+    try {
+      const { data } = await supabase.auth.getUser();
+      user = data?.user;
+    } catch (e) {
+      console.warn('[chat] auth.getUser failed:', e);
+    }
     if (!user) return;
     setUserId(user.id);
 
@@ -502,16 +508,16 @@ export default function Chat() {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single(),
+        .maybeSingle(),
       supabase
         .from('goals')
         .select('*')
         .eq('user_id', user.id)
-        .single(),
+        .maybeSingle(),
     ]);
 
-    const a: Analysis | null = analysisRes.data;
-    const g: Goals | null = goalsRes.data;
+    const a: Analysis | null = analysisRes.data ?? null;
+    const g: Goals | null = goalsRes.data ?? null;
     setAnalysis(a);
     setGoals(g);
 
@@ -830,11 +836,15 @@ export default function Chat() {
     setContext(ctx);
 
     // ── Load persisted messages ──
-    const { data: chatData } = await supabase
-      .from('chat_messages')
-      .select('messages')
-      .eq('user_id', user.id)
-      .single();
+    let chatData: { messages: any[] } | null = null;
+    try {
+      const { data } = await supabase
+        .from('chat_messages')
+        .select('messages')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      chatData = data;
+    } catch {}
 
     if (chatData?.messages?.length) {
       setMessages(chatData.messages);
@@ -853,15 +863,18 @@ export default function Chat() {
   // ── Persist messages to Supabase ──
 
   const persistMessages = async (msgs: ChatMessage[]) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    // Keep last 50 messages to avoid bloating the row
-    const toStore = msgs.slice(-50);
-    await supabase
-      .from('chat_messages')
-      .upsert({ user_id: user.id, messages: toStore }, { onConflict: 'user_id' })
-      .then(() => {});
+      // Keep last 50 messages to avoid bloating the row
+      const toStore = msgs.slice(-50);
+      await supabase
+        .from('chat_messages')
+        .upsert({ user_id: user.id, messages: toStore }, { onConflict: 'user_id' });
+    } catch (e) {
+      console.warn('[chat] persistMessages error:', e);
+    }
   };
 
   // ── Handle plan approval (via server API) ──
@@ -874,13 +887,18 @@ export default function Chat() {
     // Get fresh user ID in case state hasn't settled
     let uid = userId;
     if (!uid) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        Alert.alert('Not signed in', 'Please sign in to save plans.');
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          Alert.alert('Not signed in', 'Please sign in to save plans.');
+          return;
+        }
+        uid = user.id;
+        setUserId(uid);
+      } catch {
+        Alert.alert('Error', 'Could not verify sign-in. Please try again.');
         return;
       }
-      uid = user.id;
-      setUserId(uid);
     }
 
     const key = `${msgIndex}-${actionIndex}`;
@@ -958,8 +976,12 @@ export default function Chat() {
     const planId = action.data.id;
     let uid = userId;
     if (!uid) {
-      const { data: { user } } = await supabase.auth.getUser();
-      uid = user?.id || null;
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        uid = user?.id || null;
+      } catch {
+        uid = null;
+      }
     }
 
     // Dismiss server-side if we have a plan ID
@@ -992,13 +1014,18 @@ export default function Chat() {
 
     let uid = userId;
     if (!uid) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        Alert.alert('Not signed in', 'Please sign in to update goals.');
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          Alert.alert('Not signed in', 'Please sign in to update goals.');
+          return;
+        }
+        uid = user.id;
+        setUserId(uid);
+      } catch {
+        Alert.alert('Error', 'Could not verify sign-in. Please try again.');
         return;
       }
-      uid = user.id;
-      setUserId(uid);
     }
 
     const key = `${msgIndex}-${actionIndex}`;
@@ -1217,9 +1244,13 @@ export default function Chat() {
   const clearChat = async () => {
     setMessages([]);
     setError(null);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      await supabase.from('chat_messages').delete().eq('user_id', user.id);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('chat_messages').delete().eq('user_id', user.id);
+      }
+    } catch (e) {
+      console.warn('[chat] clearChat error:', e);
     }
   };
 

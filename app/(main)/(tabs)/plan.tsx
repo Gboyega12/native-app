@@ -298,7 +298,7 @@ export default function Plan() {
 
       const [analysisRes, plansRes, progressRes] = await Promise.all([
         supabase.from('analyses').select('*').eq('user_id', user.id)
-          .order('created_at', { ascending: false }).limit(1).single(),
+          .order('created_at', { ascending: false }).limit(1).maybeSingle(),
         supabase.from('user_plans').select('*').eq('user_id', user.id)
           .eq('status', 'active').order('created_at', { ascending: false }),
         supabase.from('plan_progress').select('*').eq('user_id', user.id),
