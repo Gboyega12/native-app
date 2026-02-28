@@ -1,9 +1,30 @@
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
-let SecureStore: typeof import('expo-secure-store') | null = null;
-if (Platform.OS !== 'web') {
-  SecureStore = require('expo-secure-store');
+// Lazy-load expo-secure-store to avoid triggering native Keychain access
+// before the RN bridge is fully initialized. Eagerly requiring the module
+// at import time caused a SIGABRT on iOS launch (SecureStoreModule.searchKeyChain
+// → SecItemCopyMatching crashed before promise-rejection tracking was active).
+let _secureStore: typeof import('expo-secure-store') | null = null;
+function getSecureStore() {
+  if (_secureStore) return _secureStore;
+  if (Platform.OS === 'web') return null;
+  try {
+    _secureStore = require('expo-secure-store');
+  } catch (e) {
+    console.warn('[SecureStore] Failed to load module:', e);
+  }
+  return _secureStore;
+}
+
+// Gate native storage access behind a readiness flag. During createClient()
+// (module load time), Supabase calls storage.getItem() to restore the
+// persisted session. The native bridge may not be ready yet, so we return
+// null and re-check the session once the React tree has mounted.
+let _nativeReady = Platform.OS === 'web';
+
+export function markStorageReady() {
+  _nativeReady = true;
 }
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -18,8 +39,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const storage = {
   getItem: async (key: string): Promise<string | null> => {
     if (Platform.OS === 'web') return localStorage.getItem(key);
+    if (!_nativeReady) return null;
     try {
-      return (await SecureStore?.getItemAsync(key)) ?? null;
+      return (await getSecureStore()?.getItemAsync(key)) ?? null;
     } catch (e) {
       console.warn('[SecureStore] getItem failed for key', key, e);
       return null;
@@ -30,7 +52,7 @@ const storage = {
       localStorage.setItem(key, value);
     } else {
       try {
-        await SecureStore?.setItemAsync(key, value);
+        await getSecureStore()?.setItemAsync(key, value);
       } catch (e) {
         console.warn('[SecureStore] setItem failed for key', key, e);
       }
@@ -41,7 +63,7 @@ const storage = {
       localStorage.removeItem(key);
     } else {
       try {
-        await SecureStore?.deleteItemAsync(key);
+        await getSecureStore()?.deleteItemAsync(key);
       } catch (e) {
         console.warn('[SecureStore] removeItem failed for key', key, e);
       }

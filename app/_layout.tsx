@@ -5,7 +5,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { Session } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+import { supabase, markStorageReady } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { registerPushToken, configureNotificationChannels } from '@/lib/notifications';
 import { initRevenueCat } from '@/lib/revenuecat';
@@ -91,6 +91,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
 
   useEffect(() => {
+    // Now that the React tree is mounted and the RN bridge is initialized,
+    // unlock native SecureStore access and re-check for a persisted session.
+    // During module-load, storage.getItem() returned null to avoid a native
+    // crash (SecureStoreModule → SecItemCopyMatching before the bridge is ready).
+    markStorageReady();
+
     let subscription: { unsubscribe: () => void } | null = null;
     try {
       const { data } = supabase.auth.onAuthStateChange((_event, sess) => {
@@ -102,6 +108,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       console.warn('[AuthGate] onAuthStateChange error:', e);
       setReady(true); // unblock the UI so it shows sign-in
     }
+
+    // Force Supabase to re-read the session from (now-accessible) storage.
+    // getSession() checks storage when the in-memory session is empty.
+    supabase.auth.getSession().catch((e) =>
+      console.warn('[AuthGate] getSession error:', e),
+    );
+
     return () => subscription?.unsubscribe();
   }, []);
 
