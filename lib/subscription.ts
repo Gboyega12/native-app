@@ -132,7 +132,7 @@ export async function getUserTier(userId: string, adminClient: any): Promise<Tie
       .select('tier, status')
       .eq('user_id', userId)
       .eq('status', 'active')
-      .single();
+      .maybeSingle();
 
     return data?.tier === 'pro' ? 'pro' : 'free';
   } catch {

@@ -50,6 +50,10 @@ export async function requestSync(
       }
       return result;
     })
+    .catch((e) => {
+      console.warn('[sync-coordinator] syncBankData failed:', e?.message || e);
+      return null;
+    })
     .finally(() => {
       _activeSyncPromise = null;
     });

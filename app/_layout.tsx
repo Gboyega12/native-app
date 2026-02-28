@@ -14,15 +14,47 @@ import UpdateBanner from '@/components/UpdateBanner';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
-// Prevent unhandled promise rejections from crashing the app on iOS.
-// React Native treats unhandled rejections as fatal errors by default.
+// Prevent unhandled errors from crashing the app on iOS.
+// Two separate error paths can trigger RCTFatal → SIGABRT:
+//   1. Synchronous JS errors — go through ErrorUtils.__guard → global handler
+//   2. Unhandled promise rejections — go through promise/rejection-tracking
+//      → ExceptionsManager.handleException DIRECTLY (bypasses ErrorUtils!)
+// Both paths must be intercepted to prevent the crash.
 if (Platform.OS !== 'web') {
+  // Path 1: Synchronous errors via ErrorUtils
   const origHandler = (globalThis as any).ErrorUtils?.getGlobalHandler?.();
   (globalThis as any).ErrorUtils?.setGlobalHandler?.((error: any, isFatal: boolean) => {
-    // Log but don't re-throw — prevents abort on recoverable async errors
     console.warn('[global]', isFatal ? 'Fatal:' : 'Error:', error?.message || error);
     if (origHandler && !isFatal) origHandler(error, isFatal);
   });
+
+  // Path 2: Unhandled promise rejections — replace the default tracker that
+  // calls ExceptionsManager.handleException(error, true) → reportFatalException
+  // → RCTFatal → abort. Re-enabling with a no-op onUnhandled prevents the crash.
+  try {
+    const rejectionTracking = require('promise/setimmediate/rejection-tracking');
+    rejectionTracking.disable();
+    rejectionTracking.enable({
+      allRejections: true,
+      onUnhandled: (_id: number, error: any) => {
+        console.warn('[promise] Unhandled rejection:', error?.message || error);
+      },
+      onHandled: () => {},
+    });
+  } catch {
+    // Fallback for Hermes-specific rejection tracking
+    try {
+      const g = globalThis as any;
+      if (typeof g.HermesInternal?.enablePromiseRejectionTracker === 'function') {
+        g.HermesInternal.enablePromiseRejectionTracker({
+          allRejections: true,
+          onUnhandled: (_id: number, error: any) => {
+            console.warn('[hermes] Unhandled rejection:', error?.message || error);
+          },
+        });
+      }
+    } catch {}
+  }
 }
 
 // Capture OAuth code+state at module load time — before any component renders.

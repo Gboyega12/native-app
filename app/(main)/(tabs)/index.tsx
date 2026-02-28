@@ -77,13 +77,13 @@ export default function Home() {
       // Compare stored bank fingerprint with current warning
       const currentFingerprint = connectionWarning.banks.sort().join(',');
       setConnectionDismissed(stored === currentFingerprint);
-    });
+    }).catch(() => {});
   }, [connectionWarning]);
 
   // When connections are healthy, clear the stored dismiss so future warnings are fresh
   useEffect(() => {
     if (connectionWarning === null) {
-      AsyncStorage.removeItem(CONN_DISMISS_KEY);
+      AsyncStorage.removeItem(CONN_DISMISS_KEY).catch(() => {});
     }
   }, [connectionWarning]);
 
@@ -102,19 +102,19 @@ export default function Home() {
     if (!incomeFingerprint) return; // No income events yet — keep current state
     AsyncStorage.getItem(INCOME_DISMISS_KEY).then((stored) => {
       setIncomeDismissed(stored === incomeFingerprint);
-    });
+    }).catch(() => {});
   }, [incomeFingerprint]);
 
   const dismissConnection = () => {
     setConnectionDismissed(true);
     if (connectionWarning) {
-      AsyncStorage.setItem(CONN_DISMISS_KEY, connectionWarning.banks.sort().join(','));
+      AsyncStorage.setItem(CONN_DISMISS_KEY, connectionWarning.banks.sort().join(',')).catch(() => {});
     }
   };
   const dismissIncome = () => {
     setIncomeDismissed(true);
     if (incomeFingerprint) {
-      AsyncStorage.setItem(INCOME_DISMISS_KEY, incomeFingerprint);
+      AsyncStorage.setItem(INCOME_DISMISS_KEY, incomeFingerprint).catch(() => {});
     }
   };
 
@@ -194,7 +194,7 @@ export default function Home() {
   useEffect(() => {
     AsyncStorage.getItem('custom_weekly_limit').then((val) => {
       if (val) setCustomWeeklyLimit(parseFloat(val));
-    });
+    }).catch(() => {});
   }, []);
 
   // Categorise review modal state
@@ -1114,14 +1114,14 @@ export default function Home() {
     const val = parseFloat(limitInput);
     if (!isNaN(val) && val > 0) {
       setCustomWeeklyLimit(val);
-      AsyncStorage.setItem('custom_weekly_limit', String(val));
+      AsyncStorage.setItem('custom_weekly_limit', String(val)).catch(() => {});
       setShowLimitEditor(false);
       setLimitInput('');
     }
   };
   const resetCustomLimit = () => {
     setCustomWeeklyLimit(null);
-    AsyncStorage.removeItem('custom_weekly_limit');
+    AsyncStorage.removeItem('custom_weekly_limit').catch(() => {});
     setShowLimitEditor(false);
   };
 

@@ -260,7 +260,7 @@ export default function Profile() {
         .from('debt_accounts')
         .insert(newDebt)
         .select()
-        .single();
+        .maybeSingle();
 
       if (insertErr) {
         if (insertErr.message?.includes('unique') || insertErr.code === '23505') {
