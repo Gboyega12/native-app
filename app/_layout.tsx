@@ -5,7 +5,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { Session } from '@supabase/supabase-js';
-import { supabase, markStorageReady } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { registerPushToken, configureNotificationChannels } from '@/lib/notifications';
 import { initRevenueCat } from '@/lib/revenuecat';
@@ -13,13 +13,6 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
-
-// Fatal-error interception is handled by index.js (the app entry point)
-// which sets global.RN$handleException and the ErrorUtils handler BEFORE
-// any user modules (including this file) are loaded. This ensures errors
-// during module initialization are caught — the previous approach of
-// setting handlers here ran too late (ES imports resolve before module
-// code executes, so an import-time throw bypassed the handler).
 
 // Capture OAuth code+state at module load time — before any component renders.
 // This is critical because app/index.tsx's <Redirect> fires during render and
@@ -55,12 +48,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const segments = useSegments();
 
   useEffect(() => {
-    // Unlock native SecureStore access now that the React tree is mounted
-    // and the RN bridge is fully initialized. Supabase's _initialize() has
-    // been suspended (awaiting the storage promise) since createClient() —
-    // resolving it lets the session restore proceed safely.
-    markStorageReady();
-
     let subscription: { unsubscribe: () => void } | null = null;
     try {
       const { data } = supabase.auth.onAuthStateChange((_event, sess) => {

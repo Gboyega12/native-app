@@ -1,10 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 
-// Lazy-load expo-secure-store to avoid triggering native Keychain access
-// before the RN bridge is fully initialized. Eagerly requiring the module
-// at import time caused a SIGABRT on iOS launch (SecureStoreModule.searchKeyChain
-// → SecItemCopyMatching crashed before promise-rejection tracking was active).
+// Lazy-load expo-secure-store so the app can boot even if the native module
+// fails to link. A top-level `import` would crash the JS bundle at load time.
 let _secureStore: typeof import('expo-secure-store') | null = null;
 function getSecureStore() {
   if (_secureStore) return _secureStore;
@@ -17,47 +15,10 @@ function getSecureStore() {
   return _secureStore;
 }
 
-// Suspend native storage access until the RN bridge is ready.
-//
-// During createClient() (module-load time), Supabase calls storage.getItem()
-// to restore the persisted session via _initialize(). On native, we make
-// getItem() await a promise that only resolves once markStorageReady() is
-// called from a useEffect (= after the React tree mounts and the bridge is
-// fully initialized). This *suspends* Supabase's initialization rather than
-// skipping it, so the session is correctly restored once the bridge is ready.
-// Using a boolean flag + returning null would silently discard the stored
-// session and force re-login on every cold start.
-let _resolveReady: (() => void) | null = null;
-const _readyPromise =
-  Platform.OS === 'web'
-    ? Promise.resolve()
-    : Promise.race([
-        new Promise<void>((resolve) => {
-          _resolveReady = resolve;
-        }),
-        new Promise<void>((resolve) => {
-          // Safety timeout: if markStorageReady() is never called (e.g. bridge
-          // init crash), unblock after 10 s so the app doesn't hang forever.
-          setTimeout(() => {
-            console.warn('[Supabase] _readyPromise timed out after 10 s — unblocking storage');
-            resolve();
-          }, 10_000);
-        }),
-      ]);
-
-export function markStorageReady() {
-  _resolveReady?.();
-  _resolveReady = null;
-}
-
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  // Use console.warn (not console.error) — in production, console.error is
-  // patched by ExceptionsManager.installConsoleErrorReporter() to send errors
-  // to NativeExceptionsManager.reportException(). During module-load time this
-  // can trigger the native error reporting path unnecessarily.
   console.warn(
     '[Supabase] Missing env vars — EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY is empty. Auth will not work.',
   );
@@ -66,7 +27,6 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const storage = {
   getItem: async (key: string): Promise<string | null> => {
     if (Platform.OS === 'web') return localStorage.getItem(key);
-    await _readyPromise;
     try {
       return (await getSecureStore()?.getItemAsync(key)) ?? null;
     } catch (e) {
