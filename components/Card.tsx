@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
     padding: 28,
     paddingTop: 32,
     paddingBottom: 32,
-    marginBottom: 32,
+    marginBottom: 16,
     overflow: 'hidden' as const,
   },
   title: {
