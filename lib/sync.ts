@@ -161,11 +161,15 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   const expiringConnections: { name: string; daysLeft: number }[] = [];
 
   try {
+    const syncController = new AbortController();
+    const syncTimeout = setTimeout(() => syncController.abort(), 15_000);
     const res = await fetch('/api/truelayer/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
+      signal: syncController.signal,
     });
+    clearTimeout(syncTimeout);
     const data = await res.json();
     if (data.success && data.csv_data) {
       csvData = data.csv_data;

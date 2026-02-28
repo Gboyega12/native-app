@@ -31,9 +31,19 @@ let _resolveReady: (() => void) | null = null;
 const _readyPromise =
   Platform.OS === 'web'
     ? Promise.resolve()
-    : new Promise<void>((resolve) => {
-        _resolveReady = resolve;
-      });
+    : Promise.race([
+        new Promise<void>((resolve) => {
+          _resolveReady = resolve;
+        }),
+        new Promise<void>((resolve) => {
+          // Safety timeout: if markStorageReady() is never called (e.g. bridge
+          // init crash), unblock after 10 s so the app doesn't hang forever.
+          setTimeout(() => {
+            console.warn('[Supabase] _readyPromise timed out after 10 s — unblocking storage');
+            resolve();
+          }, 10_000);
+        }),
+      ]);
 
 export function markStorageReady() {
   _resolveReady?.();
