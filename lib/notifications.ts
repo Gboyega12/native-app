@@ -5,8 +5,12 @@
 //   1. Email        — Resend API for weekly digests, milestones, check-ins
 //   2. Push         — expo-notifications for real-time alerts on mobile
 //   3. In-app       — Proactive chat messages from Bocy
+//
+// IMPORTANT: expo-notifications is loaded lazily (require()) so the app
+// can still boot even if the native module fails to link. A top-level
+// `import` would crash the entire JS bundle at module-load time if the
+// native module throws during initialization.
 
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 
@@ -42,11 +46,29 @@ export interface NotificationPayload {
   data?: Record<string, any>;
 }
 
+// ── Lazy-load expo-notifications ──
+// Same pattern as revenuecat.ts — prevents a top-level import from crashing
+// the JS bundle if the native module has initialization issues.
+let _notifications: typeof import('expo-notifications') | null = null;
+function getNotifications() {
+  if (_notifications) return _notifications;
+  if (Platform.OS === 'web') return null;
+  try {
+    _notifications = require('expo-notifications');
+  } catch (e) {
+    console.warn('[Notifications] Failed to load module:', e);
+  }
+  return _notifications;
+}
+
 // ── Push notification registration ──
 
 export async function registerPushToken(userId: string): Promise<string | null> {
   // Push notifications are only available on native platforms
   if (Platform.OS === 'web') return null;
+
+  const Notifications = getNotifications();
+  if (!Notifications) return null;
 
   try {
     const { status: existing } = await Notifications.getPermissionsAsync();
@@ -101,6 +123,9 @@ export async function sendPushNotification(
 
 export function configureNotificationChannels(): void {
   if (Platform.OS === 'web') return;
+
+  const Notifications = getNotifications();
+  if (!Notifications) return;
 
   Notifications.setNotificationHandler({
     handleNotification: async () => ({

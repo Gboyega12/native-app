@@ -54,7 +54,11 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error(
+  // Use console.warn (not console.error) — in production, console.error is
+  // patched by ExceptionsManager.installConsoleErrorReporter() to send errors
+  // to NativeExceptionsManager.reportException(). During module-load time this
+  // can trigger the native error reporting path unnecessarily.
+  console.warn(
     '[Supabase] Missing env vars — EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_ANON_KEY is empty. Auth will not work.',
   );
 }
