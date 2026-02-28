@@ -17,14 +17,27 @@ function getSecureStore() {
   return _secureStore;
 }
 
-// Gate native storage access behind a readiness flag. During createClient()
-// (module load time), Supabase calls storage.getItem() to restore the
-// persisted session. The native bridge may not be ready yet, so we return
-// null and re-check the session once the React tree has mounted.
-let _nativeReady = Platform.OS === 'web';
+// Suspend native storage access until the RN bridge is ready.
+//
+// During createClient() (module-load time), Supabase calls storage.getItem()
+// to restore the persisted session via _initialize(). On native, we make
+// getItem() await a promise that only resolves once markStorageReady() is
+// called from a useEffect (= after the React tree mounts and the bridge is
+// fully initialized). This *suspends* Supabase's initialization rather than
+// skipping it, so the session is correctly restored once the bridge is ready.
+// Using a boolean flag + returning null would silently discard the stored
+// session and force re-login on every cold start.
+let _resolveReady: (() => void) | null = null;
+const _readyPromise =
+  Platform.OS === 'web'
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => {
+        _resolveReady = resolve;
+      });
 
 export function markStorageReady() {
-  _nativeReady = true;
+  _resolveReady?.();
+  _resolveReady = null;
 }
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
@@ -39,7 +52,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const storage = {
   getItem: async (key: string): Promise<string | null> => {
     if (Platform.OS === 'web') return localStorage.getItem(key);
-    if (!_nativeReady) return null;
+    await _readyPromise;
     try {
       return (await getSecureStore()?.getItemAsync(key)) ?? null;
     } catch (e) {
