@@ -11,7 +11,8 @@ const TEXT_COLOR = '#FFFFFF';
 const TEXT_DIM = '#999999';
 const BORDER_COLOR = '#1F1F1F';
 
-function baseLayout(content: string, preheader: string = ''): string {
+function baseLayout(content: string, preheader: string = '', appUrl: string = 'https://app.bocy.io'): string {
+  const notifSettingsUrl = `${appUrl}/profile?section=notifications`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -55,7 +56,8 @@ function baseLayout(content: string, preheader: string = ''): string {
     <div class="footer">
       <p class="dim small">
         You're receiving this because you have a Bocy account.<br>
-        <a href="{{unsubscribe_url}}" style="color: ${TEXT_DIM};">Manage email preferences</a>
+        To manage or turn off email notifications, visit your
+        <a href="${notifSettingsUrl}" style="color: ${TEXT_DIM};">notification settings</a> in the app.
       </p>
     </div>
   </div>
@@ -144,7 +146,7 @@ export function weeklyDigestEmail(data: WeeklyDigestData): { subject: string; ht
 
   return {
     subject: `Your score: ${data.decisionScore} ${scoreArrow}${Math.abs(data.scoreChange)} — Bocy Weekly`,
-    html: baseLayout(content, `Decision score: ${data.decisionScore}. ${data.surplus >= 0 ? `\u00a3${Math.round(data.surplus)} surplus.` : `\u00a3${Math.round(Math.abs(data.surplus))} deficit.`}`),
+    html: baseLayout(content, `Decision score: ${data.decisionScore}. ${data.surplus >= 0 ? `\u00a3${Math.round(data.surplus)} surplus.` : `\u00a3${Math.round(Math.abs(data.surplus))} deficit.`}`, data.appUrl),
   };
 }
 
@@ -167,7 +169,7 @@ export function achievementEmail(name: string, achievement: Achievement, appUrl:
 
   return {
     subject: `${achievement.name} unlocked — ${achievement.description}`,
-    html: baseLayout(content, `You earned: ${achievement.name} — ${achievement.description}`),
+    html: baseLayout(content, `You earned: ${achievement.name} — ${achievement.description}`, appUrl),
   };
 }
 
@@ -190,7 +192,7 @@ export function checkinEmail(name: string, message: string, appUrl: string): { s
 
   return {
     subject: 'Bocy has a suggestion for you',
-    html: baseLayout(content, message.slice(0, 100)),
+    html: baseLayout(content, message.slice(0, 100), appUrl),
   };
 }
 
@@ -226,6 +228,6 @@ export function scoreChangeEmail(
 
   return {
     subject: `Score ${arrow} ${Math.abs(delta)} — now ${newScore} (${verdict})`,
-    html: baseLayout(content, `Your decision score went from ${oldScore} to ${newScore}.`),
+    html: baseLayout(content, `Your decision score went from ${oldScore} to ${newScore}.`, appUrl),
   };
 }

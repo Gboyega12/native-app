@@ -59,6 +59,13 @@ const EnrichmentEngine = {
   enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[], identity?: any): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
     const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
+
+    // Reclassify credit card payoffs for full-payers.
+    // Users who use credit cards for points and pay off in full each month
+    // should not have those payoffs counted as "Debt Payments" — they are
+    // internal transfers between the user's own accounts.
+    this._reclassifyCreditCardPayoffs(enriched, debtAccounts);
+
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
@@ -1184,6 +1191,115 @@ const EnrichmentEngine = {
       /\bcredit\s*balance\s*transfer\b/,
     ];
     return patterns.some((rx) => rx.test(lower));
+  },
+
+  /**
+   * Detect credit card full-payers and reclassify their payoff transactions.
+   *
+   * Problem: users who use credit cards for points/rewards and pay off in full
+   * have their spending double-counted — once when the card spending appears in
+   * the merged CSV, and again when the bank-account payment to the card issuer
+   * (e.g. "AMEX", "BARCLAYCARD") is classified as "Debt Payments".
+   *
+   * Detection strategy:
+   *   1. Low utilization: if a TrueLayer-synced credit card has balance < 15%
+   *      of credit limit, the user is clearly paying it off regularly.
+   *   2. Payment-to-spending ratio: if monthly payments to a card issuer are
+   *      within 30% of the monthly card spending, the user pays in full.
+   *
+   * When detected, the payoff transactions are reclassified as internal
+   * transfers (isTransfer=true, isDebt=false) so they don't inflate spending
+   * or create a false negative surplus.
+   */
+  _reclassifyCreditCardPayoffs(enriched: EnrichedTransaction[], debtAccounts?: any[]): void {
+    // Known credit card issuer merchants (must match merchant-db entries)
+    const CC_ISSUERS = new Set([
+      'American Express', 'Barclaycard', 'MBNA', 'Capital One', 'Vanquis',
+      'Aqua', 'NewDay', 'Virgin Money', 'Tesco Bank', "Sainsbury's Bank",
+    ]);
+
+    // Step 1: Check debtAccounts from TrueLayer for low-utilization cards
+    const fullPayerIssuers = new Set<string>();
+
+    if (debtAccounts && debtAccounts.length > 0) {
+      for (const acct of debtAccounts) {
+        if (acct.account_type !== 'credit_card' && acct.account_type !== 'credit') continue;
+        const balance = acct.outstanding_balance ?? 0;
+        const limit = acct.credit_limit ?? 0;
+        // If we have a credit limit and utilization is under 15%, this is a full-payer card
+        if (limit > 0 && (balance / limit) < 0.15) {
+          fullPayerIssuers.add((acct.account_name || '').toLowerCase());
+        }
+      }
+    }
+
+    // Step 2: Analyse transaction patterns to detect full-payer behavior
+    // even without card balance data. Compare monthly outgoing payments to
+    // each CC issuer vs total card spending in the same period.
+    const cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - ANALYSIS_MONTHS);
+    const recent = enriched.filter((t) => new Date(t.date) >= cutoff);
+
+    // Find payments TO credit card issuers (outgoing debits flagged as debt)
+    const ccPayments: Record<string, number> = {};
+    const ccPaymentTxs: EnrichedTransaction[] = [];
+    for (const tx of recent) {
+      if (!tx.isDebt || tx.amount >= 0) continue;
+      if (!CC_ISSUERS.has(tx.merchant)) continue;
+      const key = tx.merchant;
+      ccPayments[key] = (ccPayments[key] || 0) + Math.abs(tx.amount);
+      ccPaymentTxs.push(tx);
+    }
+
+    // If no CC payments found, nothing to reclassify
+    if (ccPaymentTxs.length === 0) return;
+
+    // Calculate total spending on credit-card-like categories
+    // (all spending that isn't itself a CC payment, transfer, savings, refund)
+    const totalSpending = recent
+      .filter((t) => t.amount < 0 && !t.isDebt && !t.isTransfer && !t.isSavings && !t.isRefund)
+      .reduce((s, t) => s + Math.abs(t.amount), 0);
+
+    const totalCCPayments = Object.values(ccPayments).reduce((s, v) => s + v, 0);
+
+    // Heuristic: if total CC payments are within 30% of total other spending,
+    // this strongly suggests the user routes most spending through cards and
+    // pays them off. The payments are duplicates of the card spending.
+    const paymentToSpendRatio = totalSpending > 0 ? totalCCPayments / totalSpending : 0;
+    const isLikelyFullPayer = paymentToSpendRatio >= 0.5 && paymentToSpendRatio <= 1.5;
+
+    // Build the set of issuer merchants to reclassify
+    const issuersToReclassify = new Set<string>();
+
+    // From balance data (highest confidence)
+    for (const issuerName of fullPayerIssuers) {
+      for (const merchant of CC_ISSUERS) {
+        if (merchant.toLowerCase().includes(issuerName) || issuerName.includes(merchant.toLowerCase())) {
+          issuersToReclassify.add(merchant);
+        }
+      }
+    }
+
+    // From spending ratio analysis
+    if (isLikelyFullPayer) {
+      for (const merchant of Object.keys(ccPayments)) {
+        issuersToReclassify.add(merchant);
+      }
+    }
+
+    if (issuersToReclassify.size === 0) return;
+
+    // Step 3: Reclassify matching transactions in-place
+    for (const tx of enriched) {
+      if (!tx.isDebt || tx.amount >= 0) continue;
+      if (!issuersToReclassify.has(tx.merchant)) continue;
+
+      // Reclassify: this is an internal transfer, not debt spending
+      tx.isDebt = false;
+      tx.isTransfer = true;
+      tx.category = 'Credit Card Payoff';
+      tx.isEssential = false;
+    }
   },
 
   _isInternationalTransfer(description: string): boolean {

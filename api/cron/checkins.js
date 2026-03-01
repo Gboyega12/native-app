@@ -179,7 +179,7 @@ export default async function handler(req, res) {
     </div>
   </div>
   <div style="text-align:center;margin-top:32px;padding-top:24px;border-top:1px solid ${BORDER};">
-    <p style="color:${DIM};font-size:12px;">You're receiving this because you have a Bocy account.</p>
+    <p style="color:${DIM};font-size:12px;">You're receiving this because you have a Bocy account.<br>To manage or turn off email notifications, visit your <a href="${appUrl}/profile?section=notifications" style="color:${DIM};">notification settings</a> in the app.</p>
   </div>
 </div></body></html>`;
 

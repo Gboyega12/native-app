@@ -10,6 +10,14 @@
     {
       "path": "/api/cron/checkins",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/bank-sync",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/daily-spending",
+      "schedule": "0 19 * * *"
     }
   ],
   "headers": [
