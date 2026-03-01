@@ -1583,8 +1583,8 @@ export default function Home() {
             )}
 
             {/* Header */}
-            <View style={s.budgetHeaderRow}>
-              <Text style={s.cardTitle}>Your budget reality</Text>
+            <View style={[s.budgetHeaderRow, { justifyContent: 'center' }]}>
+              <Text style={[s.cardTitle, { marginBottom: 0 }]}>Your budget reality</Text>
             </View>
 
             {/* Period toggle */}
@@ -1606,18 +1606,13 @@ export default function Home() {
             <View style={s.periodTotalRow}>
               <Text style={[s.periodTotalAmount, { color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
                 {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
-                <Text style={s.periodTotalOf}> of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}</Text>
+                <Text style={s.periodTotalOf}> of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}{isVariableIncome ? '*' : ''}</Text>
               </Text>
               <Text style={s.periodTotalLabel}>
                 {overallPctUsed > 100
                   ? `Over budget by \u00a3${Math.round(periodSpendTotal - periodIncome).toLocaleString()}`
                   : `${overallPctUsed}% of ${periodAdj} income spent`}
               </Text>
-              {isVariableIncome && (
-                <Text style={[s.periodTotalLabel, { color: colors.amber || colors.coral, marginTop: 4, fontSize: 11 }]}>
-                  Variable income — budgeted on {'\u00a3'}{Math.round(incomeFloor / periodDivisor).toLocaleString()}{periodSuffix} (conservative)
-                </Text>
-              )}
             </View>
 
             {/* Overall progress bar */}
@@ -1720,6 +1715,12 @@ export default function Home() {
                 </TouchableOpacity>
               )}
             </View>
+
+            {isVariableIncome && (
+              <Text style={s.variableIncomeFootnote}>
+                *Conservative estimate based on {'\u00a3'}{Math.round(incomeFloor / periodDivisor).toLocaleString()}{periodSuffix}
+              </Text>
+            )}
 
           </Card>
 
@@ -2960,7 +2961,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 20,
   },
   expandHint: {
     fontFamily: fonts.regular,
@@ -2985,8 +2986,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   periodToggleRow: {
     flexDirection: 'row',
+    justifyContent: 'center',
     gap: 8,
-    marginBottom: 24,
+    marginBottom: 28,
   },
   periodBtn: {
     paddingVertical: 8,
@@ -3002,12 +3004,14 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     letterSpacing: 0.5,
   },
   periodTotalRow: {
+    alignItems: 'center',
     marginBottom: 8,
   },
   periodTotalAmount: {
     fontFamily: fonts.mono,
     fontSize: 28,
     letterSpacing: -0.5,
+    textAlign: 'center',
   },
   periodTotalOf: {
     fontFamily: fonts.regular,
@@ -3018,30 +3022,31 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 13,
     color: c.dim,
-    marginTop: 4,
+    marginTop: 6,
+    textAlign: 'center',
   },
   progressTrack: {
     height: 6,
     borderRadius: 3,
     backgroundColor: c.mintDim,
     overflow: 'hidden',
-    marginTop: 16,
-    marginBottom: 28,
+    marginTop: 20,
+    marginBottom: 32,
   },
   progressFill: {
     height: 6,
     borderRadius: 3,
   },
   sectionBlock: {
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
+    paddingVertical: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   sectionLabel: {
     fontFamily: fonts.semibold,
@@ -3055,8 +3060,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   sectionAmountRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: 6,
-    marginBottom: 10,
+    gap: 8,
+    marginBottom: 12,
   },
   sectionSpent: {
     fontFamily: fonts.mono,
@@ -3078,8 +3083,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: 2,
   },
   allocationList: {
-    marginTop: 10,
-    gap: 8,
+    marginTop: 12,
+    gap: 10,
   },
   allocationHeading: {
     fontFamily: fonts.mono,
@@ -3129,8 +3134,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 10,
+    marginTop: 14,
+    paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
   },
@@ -3157,6 +3162,13 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 13,
     marginTop: 6,
+  },
+  variableIncomeFootnote: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: c.muted,
+    marginTop: 16,
+    textAlign: 'center',
   },
   txCardHeader: {
     flexDirection: 'row',
