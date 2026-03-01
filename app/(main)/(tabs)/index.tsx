@@ -93,9 +93,9 @@ export default function Home() {
   const INCOME_DISMISS_KEY = 'dismiss:income:events';
 
   const incomeFingerprint = useMemo(() => {
-    const events = weeklyCtx?.recentIncomeEvents ?? [];
+    const events = Array.isArray(weeklyCtx?.recentIncomeEvents) ? weeklyCtx.recentIncomeEvents : [];
     if (events.length === 0) return '';
-    return events.map((e) => `${e.source}:${Math.round(e.amount)}`).sort().join('|');
+    return events.map((e) => `${e?.source ?? ''}:${Math.round(e?.amount ?? 0)}`).sort().join('|');
   }, [weeklyCtx?.recentIncomeEvents]);
 
   useEffect(() => {
@@ -198,10 +198,10 @@ export default function Home() {
   // Default budget period matches salary frequency
   useEffect(() => {
     if (budgetPeriodInitialised.current) return;
-    const sources = analysis?.income_sources ?? [];
-    const primary = sources.find((s: IncomeSource) => s.isSalary)
+    const sources = Array.isArray(analysis?.income_sources) ? analysis.income_sources : [];
+    const primary = sources.find((s: IncomeSource) => s?.isSalary)
       || (sources.length > 0
-        ? sources.reduce((a: IncomeSource, b: IncomeSource) => a.avgAmount > b.avgAmount ? a : b)
+        ? sources.reduce((a: IncomeSource, b: IncomeSource) => (a?.avgAmount ?? 0) > (b?.avgAmount ?? 0) ? a : b)
         : null);
     if (!primary) return;
     budgetPeriodInitialised.current = true;
@@ -375,23 +375,25 @@ export default function Home() {
     if (!analysis) return [];
     const txs: TransactionDetail[] = [];
     for (const section of [analysis.discretionary, analysis.non_discretionary]) {
-      if (!(section as any)?.items) continue;
-      for (const item of (section as any).items) {
-        if (item.category === 'Other') {
-          txs.push(...(item.transactions || []));
+      const items = (section as any)?.items;
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        if (item?.category === 'Other') {
+          txs.push(...(Array.isArray(item.transactions) ? item.transactions : []));
         }
       }
     }
     // Group by normalized merchant/description — user assigns one category per group
     const groups = new Map<string, { key: string; label: string; merchants: string[]; txs: TransactionDetail[]; total: number }>();
     for (const tx of txs) {
-      const raw = tx.merchant || tx.description;
+      if (!tx) continue;
+      const raw = tx.merchant || tx.description || '';
       const normalized = normalizeMerchant(raw);
       if (!groups.has(normalized)) groups.set(normalized, { key: normalized, label: raw, merchants: [], txs: [], total: 0 });
       const g = groups.get(normalized)!;
       if (!g.merchants.includes(raw)) g.merchants.push(raw);
       g.txs.push(tx);
-      g.total += Math.abs(tx.amount);
+      g.total += Math.abs(tx.amount ?? 0);
     }
     return Array.from(groups.values()).sort((a, b) => b.total - a.total);
   }, [analysis]);
@@ -719,13 +721,13 @@ export default function Home() {
 
   // Merge budget adjustments into an analysis object
   const mergeAdjustments = (base: Analysis, adjustments: any[]): Analysis => {
-    if (!adjustments.length) return base;
+    if (!base || !adjustments.length) return base;
 
     const updated = { ...base };
     const nonDisc = { ...((updated.non_discretionary as any) || { total: 0, items: [] }) };
     const disc = { ...((updated.discretionary as any) || { total: 0, items: [] }) };
-    nonDisc.items = [...(nonDisc.items || [])];
-    disc.items = [...(disc.items || [])];
+    nonDisc.items = [...(Array.isArray(nonDisc.items) ? nonDisc.items : [])];
+    disc.items = [...(Array.isArray(disc.items) ? disc.items : [])];
 
     for (const adj of adjustments) {
       const section = adj.is_essential ? nonDisc : disc;
@@ -929,7 +931,7 @@ export default function Home() {
           .eq('user_id', userId);
         if (allDebt) setDebtAccounts(allDebt);
       } catch {
-        if (result.debtAccounts.length > 0) setDebtAccounts(result.debtAccounts);
+        if (result.debtAccounts?.length > 0) setDebtAccounts(result.debtAccounts);
       }
 
       // Update adaptive weekly context
@@ -977,9 +979,9 @@ export default function Home() {
   }
 
   // ── Derived data ──
-  const moves = analysis?.all_moves ?? [];
+  const moves = Array.isArray(analysis?.all_moves) ? analysis.all_moves : [];
   const income = analysis?.monthly_income ?? 0;
-  const incomeSources = analysis?.income_sources ?? [];
+  const incomeSources = Array.isArray(analysis?.income_sources) ? analysis.income_sources : [];
   const isVariableIncome = analysis?.is_variable_income ?? false;
   const incomeFloor = analysis?.income_floor ?? income;
   const incomeCV = analysis?.income_cv ?? 0;
@@ -993,15 +995,15 @@ export default function Home() {
   // Primary income source only
   const primaryIncome = incomeSources.find((s: IncomeSource) => s.isSalary)
     || (incomeSources.length > 0
-      ? incomeSources.reduce((a, b) => a.avgAmount > b.avgAmount ? a : b)
+      ? incomeSources.reduce((a, b) => (a?.avgAmount ?? 0) > (b?.avgAmount ?? 0) ? a : b)
       : null);
 
   const nonDisc = analysis?.non_discretionary as any;
   const disc = analysis?.discretionary as any;
   const nonDiscTotal = nonDisc?.total ?? 0;
   const discTotal = disc?.total ?? 0;
-  const nonDiscItems: BudgetCategory[] = nonDisc?.items ?? [];
-  const discItems: BudgetCategory[] = disc?.items ?? [];
+  const nonDiscItems: BudgetCategory[] = Array.isArray(nonDisc?.items) ? nonDisc.items : [];
+  const discItems: BudgetCategory[] = Array.isArray(disc?.items) ? disc.items : [];
   const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
 
   // Bar segment proportions
@@ -1038,8 +1040,8 @@ export default function Home() {
   const periodDivisor = budgetPeriod === 'year' ? (1 / 12) : budgetPeriod === 'week' ? 4.33 : 1;
 
   const computePeriodCategory = (item: BudgetCategory) => {
-    const txs = (item.transactions ?? []).filter(tx => txFilter(tx.date));
-    const total = txs.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+    const txs = (Array.isArray(item?.transactions) ? item.transactions : []).filter(tx => tx?.date && txFilter(tx.date));
+    const total = txs.reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
     return { txs, total, count: txs.length };
   };
 
@@ -1121,11 +1123,11 @@ export default function Home() {
 
   const weekStart = getWeekStart();
   const allDiscTxs: TransactionDetail[] = discItems.flatMap(
-    (item: BudgetCategory) => item.transactions ?? []
+    (item: BudgetCategory) => Array.isArray(item?.transactions) ? item.transactions : []
   );
   const spentThisWeek = allDiscTxs
-    .filter((tx) => new Date(tx.date) >= weekStart)
-    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+    .filter((tx) => tx?.date && new Date(tx.date) >= weekStart)
+    .reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
 
   // Apply custom limit if set (capped at calculated budget — user can lower, not inflate)
   const weeklyBudget = customWeeklyLimit !== null
@@ -1271,7 +1273,7 @@ export default function Home() {
           )}
 
           {/* ── Income arrival alert ── */}
-          {weeklyCtx?.incomeArrivedThisWeek && weeklyCtx.recentIncomeEvents.length > 0 && !incomeDismissed && (
+          {weeklyCtx?.incomeArrivedThisWeek && Array.isArray(weeklyCtx?.recentIncomeEvents) && weeklyCtx.recentIncomeEvents.length > 0 && !incomeDismissed && (
             <AnimGlyph delay={0}>
               <View style={s.incomeAlert}>
                 <View style={s.incomeAlertHeader}>
@@ -1285,10 +1287,10 @@ export default function Home() {
                 </View>
                 <Text style={s.incomeAlertText}>
                   {weeklyCtx.recentIncomeEvents.map((e) =>
-                    `\u00a3${Math.round(e.amount).toLocaleString()} from ${e.source}`
+                    `\u00a3${Math.round(e?.amount ?? 0).toLocaleString()} from ${e?.source ?? 'unknown'}`
                   ).join(', ')}
                   {' '}landed this week.
-                  {weeklyCtx.committedThisWeek > 0
+                  {(weeklyCtx.committedThisWeek ?? 0) > 0
                     ? ` \u00a3${Math.round(weeklyCtx.committedThisWeek).toLocaleString()} already committed to bills & essentials.`
                     : ''}
                 </Text>
@@ -1468,25 +1470,25 @@ export default function Home() {
                   <Text style={s.breakdownValue}>{'\u00a3'}{Math.round(staticWeeklyBudget).toLocaleString()}/wk</Text>
                 </View>
 
-                {weeklyCtx?.incomeArrivedThisWeek && (
+                {weeklyCtx?.incomeArrivedThisWeek && Array.isArray(weeklyCtx?.recentIncomeEvents) && (
                   <>
                     <View style={s.breakdownAdaptive}>
                       <Text style={s.breakdownAdaptiveLabel}>Adaptive adjustment</Text>
                       {weeklyCtx.recentIncomeEvents.map((e, i) => (
                         <View key={i} style={s.breakdownRow}>
-                          <Text style={s.breakdownLabel}>Income: {e.source}</Text>
-                          <Text style={[s.breakdownValue, { color: colors.green }]}>+{'\u00a3'}{Math.round(e.amount).toLocaleString()}</Text>
+                          <Text style={s.breakdownLabel}>Income: {e?.source ?? 'unknown'}</Text>
+                          <Text style={[s.breakdownValue, { color: colors.green }]}>+{'\u00a3'}{Math.round(e?.amount ?? 0).toLocaleString()}</Text>
                         </View>
                       ))}
-                      {weeklyCtx.committedThisWeek > 0 && (
+                      {(weeklyCtx.committedThisWeek ?? 0) > 0 && (
                         <View style={s.breakdownRow}>
                           <Text style={s.breakdownLabel}>Committed payments</Text>
-                          <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek).toLocaleString()}</Text>
+                          <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek ?? 0).toLocaleString()}</Text>
                         </View>
                       )}
                       <View style={s.breakdownRow}>
                         <Text style={[s.breakdownLabel, s.breakdownBold]}>Adaptive budget</Text>
-                        <Text style={[s.breakdownValue, s.breakdownBold]}>{'\u00a3'}{Math.round(weeklyCtx.adaptiveBudget).toLocaleString()}/wk</Text>
+                        <Text style={[s.breakdownValue, s.breakdownBold]}>{'\u00a3'}{Math.round(weeklyCtx.adaptiveBudget ?? 0).toLocaleString()}/wk</Text>
                       </View>
                     </View>
                   </>

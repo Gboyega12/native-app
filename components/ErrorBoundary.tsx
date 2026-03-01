@@ -32,12 +32,17 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      const errorMsg = this.state.error?.message || 'Unknown error';
+      const errorName = this.state.error?.name || 'Error';
       return (
         <View style={styles.container}>
           <Text style={styles.emoji}>!</Text>
           <Text style={styles.title}>Something went wrong</Text>
           <Text style={styles.message}>
             {this.props.fallbackMessage || 'An unexpected error occurred. Please try again.'}
+          </Text>
+          <Text style={styles.errorDetail}>
+            {errorName}: {errorMsg}
           </Text>
           <TouchableOpacity style={styles.button} onPress={this.handleRetry}>
             <Text style={styles.buttonText}>Try again</Text>
@@ -76,6 +81,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: spacing.xl,
     lineHeight: 20,
+  },
+  errorDetail: {
+    fontSize: 11,
+    color: colors.muted,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+    lineHeight: 16,
+    fontFamily: fonts.mono,
+    maxWidth: 320,
   },
   button: {
     backgroundColor: colors.accent,

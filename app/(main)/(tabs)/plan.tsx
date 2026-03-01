@@ -247,8 +247,8 @@ export default function Plan() {
 
     // Build the same sorted moves array used for rendering
     const effortOrd: Record<string, number> = { high: 0, medium: 1, low: 2 };
-    const sortedMoves = [...(analysis.all_moves || [])].sort(
-      (a, b) => (effortOrd[a.effort] ?? 2) - (effortOrd[b.effort] ?? 2),
+    const sortedMoves = [...(Array.isArray(analysis.all_moves) ? analysis.all_moves : [])].sort(
+      (a, b) => (effortOrd[a?.effort] ?? 2) - (effortOrd[b?.effort] ?? 2),
     );
 
     const idx = sortedMoves.findIndex(
@@ -527,8 +527,8 @@ export default function Plan() {
   // ── Derived data ──
 
   const effortOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
-  const moves: Move[] = [...(analysis?.all_moves || [])].sort(
-    (a, b) => (effortOrder[a.effort] ?? 2) - (effortOrder[b.effort] ?? 2),
+  const moves: Move[] = [...(Array.isArray(analysis?.all_moves) ? analysis.all_moves : [])].sort(
+    (a, b) => (effortOrder[a?.effort] ?? 2) - (effortOrder[b?.effort] ?? 2),
   );
 
   const activeMoves = moves
@@ -555,7 +555,7 @@ export default function Plan() {
   const monthlyIncome = analysis?.monthly_income ?? 0;
   const monthlySpending = analysis?.monthly_spending ?? 0;
   const surplus = analysis?.surplus ?? 0;
-  const incomeSources = analysis?.income_sources ?? [];
+  const incomeSources = Array.isArray(analysis?.income_sources) ? analysis.income_sources : [];
   const isVariableIncome = analysis?.is_variable_income ?? false;
   const incomeFloor = analysis?.income_floor ?? monthlyIncome;
 
