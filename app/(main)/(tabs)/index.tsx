@@ -193,6 +193,22 @@ export default function Home() {
   const [limitInput, setLimitInput] = useState('');
   const [breakdownExpanded, setBreakdownExpanded] = useState(false);
   const [budgetPeriod, setBudgetPeriod] = useState<'year' | 'month' | 'week'>('month');
+  const budgetPeriodInitialised = useRef(false);
+
+  // Default budget period matches salary frequency
+  useEffect(() => {
+    if (budgetPeriodInitialised.current) return;
+    const sources = analysis?.income_sources ?? [];
+    const primary = sources.find((s: IncomeSource) => s.isSalary)
+      || (sources.length > 0
+        ? sources.reduce((a: IncomeSource, b: IncomeSource) => a.avgAmount > b.avgAmount ? a : b)
+        : null);
+    if (!primary) return;
+    budgetPeriodInitialised.current = true;
+    const freq = primary.frequency;
+    if (freq === 'weekly' || freq === 'fortnightly') setBudgetPeriod('week');
+    else setBudgetPeriod('month');
+  }, [analysis]);
 
   // Load custom weekly limit from storage
   useEffect(() => {
@@ -979,16 +995,6 @@ export default function Home() {
     || (incomeSources.length > 0
       ? incomeSources.reduce((a, b) => a.avgAmount > b.avgAmount ? a : b)
       : null);
-
-  // Default budget period matches salary frequency
-  const budgetPeriodInitialised = useRef(false);
-  useEffect(() => {
-    if (budgetPeriodInitialised.current || !primaryIncome) return;
-    budgetPeriodInitialised.current = true;
-    const freq = primaryIncome.frequency;
-    if (freq === 'weekly' || freq === 'fortnightly') setBudgetPeriod('week');
-    else setBudgetPeriod('month'); // monthly, irregular → default to month
-  }, [primaryIncome]);
 
   const nonDisc = analysis?.non_discretionary as any;
   const disc = analysis?.discretionary as any;
