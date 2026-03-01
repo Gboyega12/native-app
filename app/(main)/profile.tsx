@@ -12,6 +12,7 @@ import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import { restorePurchases } from '@/lib/revenuecat';
+import { useWebPush } from '@/lib/web-push';
 
 // ── Glyph micro-animation: fade+scale on mount ──
 const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
@@ -93,6 +94,8 @@ export default function Profile() {
     achievement_alerts: true,
   });
   const [notifExpanded, setNotifExpanded] = useState(false);
+  const [userId, setUserId] = useState<string | undefined>();
+  const webPush = useWebPush(userId);
 
   // Add debt modal state
   const [showAddDebt, setShowAddDebt] = useState(false);
@@ -131,6 +134,7 @@ export default function Profile() {
 
       setName(user.user_metadata?.full_name || '');
       setEmail(user.email || '');
+      setUserId(user.id);
 
       // Try to claim any unclaimed bank_data rows for this user
       // This handles cases where TrueLayer redirect didn't properly set user_id
@@ -684,6 +688,34 @@ export default function Profile() {
               <TouchableOpacity style={s.notifUpgrade} onPress={() => setShowPaywall(true)} activeOpacity={0.7}>
                 <Text style={s.notifUpgradeText}>Unlock all with Pro</Text>
               </TouchableOpacity>
+            )}
+            {webPush.supported && (
+              <>
+                <View style={s.groupDivider} />
+                <View style={s.notifRow}>
+                  <View style={s.notifInfo}>
+                    <Text style={s.notifLabel}>Push notifications</Text>
+                    <Text style={s.notifDesc}>
+                      {webPush.permission === 'denied'
+                        ? 'Blocked in browser settings'
+                        : 'Receive alerts in your browser'}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={webPush.subscribed}
+                    onValueChange={() => {
+                      if (webPush.subscribed) {
+                        webPush.unsubscribe();
+                      } else {
+                        webPush.subscribe();
+                      }
+                    }}
+                    trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+                    thumbColor={webPush.subscribed ? colors.green : colors.thumbOff}
+                    disabled={webPush.loading || webPush.permission === 'denied'}
+                  />
+                </View>
+              </>
             )}
           </>
         )}

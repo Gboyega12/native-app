@@ -8,6 +8,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { registerPushToken, configureNotificationChannels } from '@/lib/notifications';
+import { registerServiceWorker } from '@/lib/register-sw';
 import { initRevenueCat } from '@/lib/revenuecat';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
@@ -71,6 +72,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       registerPushToken(session.user.id).catch((e) =>
         console.warn('[Layout] registerPushToken error:', e),
       );
+      registerServiceWorker();
       initRevenueCat(session.user.id).catch((e) =>
         console.warn('[Layout] initRevenueCat error:', e),
       );

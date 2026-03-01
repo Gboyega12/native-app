@@ -1,8 +1,7 @@
-// ── Send Email Notification ──
-// Generic email sender endpoint. Uses Resend API.
+// ── Send Notification (Email + Web Push) ──
+// Multi-channel notification endpoint. Sends email via Resend API and
+// web push via /api/notifications/web-push-send.
 // Called by cron jobs and achievement triggers.
-//
-// When building for iOS/Android, add push notification delivery here too.
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -71,7 +70,33 @@ export default async function handler(req, res) {
       return res.json({ success: false, error: data?.message || 'send_failed' });
     }
 
-    return res.json({ success: true, id: data.id });
+    // Also deliver via web push if user_id is provided
+    let webPushResult = null;
+    if (user_id) {
+      try {
+        const pushRes = await fetch(
+          `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/notifications/web-push-send`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${cronSecret}`,
+            },
+            body: JSON.stringify({
+              user_id,
+              title: subject,
+              body: subject, // Plain text fallback
+              tag: notification_type || 'general',
+            }),
+          }
+        );
+        webPushResult = await pushRes.json();
+      } catch (pushErr) {
+        console.warn('[notifications] Web push delivery failed:', pushErr?.message);
+      }
+    }
+
+    return res.json({ success: true, id: data.id, web_push: webPushResult });
   } catch (err) {
     console.error('[notifications] Send failed:', err?.message);
     return res.json({ success: false, error: err?.message || 'request_failed' });
