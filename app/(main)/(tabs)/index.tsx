@@ -143,6 +143,10 @@ export default function Home() {
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   };
 
+  const isCurrentYear = (dateStr: string) => {
+    return new Date(dateStr).getFullYear() === new Date().getFullYear();
+  };
+
   const isCurrentMonth = (dateStr: string) => {
     const d = new Date(dateStr);
     const now = new Date();
@@ -188,7 +192,7 @@ export default function Home() {
   const [showLimitEditor, setShowLimitEditor] = useState(false);
   const [limitInput, setLimitInput] = useState('');
   const [breakdownExpanded, setBreakdownExpanded] = useState(false);
-  const [budgetPeriod, setBudgetPeriod] = useState<'month' | 'week'>('month');
+  const [budgetPeriod, setBudgetPeriod] = useState<'year' | 'month' | 'week'>('month');
 
   // Load custom weekly limit from storage
   useEffect(() => {
@@ -976,6 +980,16 @@ export default function Home() {
       ? incomeSources.reduce((a, b) => a.avgAmount > b.avgAmount ? a : b)
       : null);
 
+  // Default budget period matches salary frequency
+  const budgetPeriodInitialised = useRef(false);
+  useEffect(() => {
+    if (budgetPeriodInitialised.current || !primaryIncome) return;
+    budgetPeriodInitialised.current = true;
+    const freq = primaryIncome.frequency;
+    if (freq === 'weekly' || freq === 'fortnightly') setBudgetPeriod('week');
+    else setBudgetPeriod('month'); // monthly, irregular → default to month
+  }, [primaryIncome]);
+
   const nonDisc = analysis?.non_discretionary as any;
   const disc = analysis?.discretionary as any;
   const nonDiscTotal = nonDisc?.total ?? 0;
@@ -1013,8 +1027,9 @@ export default function Home() {
   // ── Period-aware budget calculations ──
   // Budget targets = analysis monthly averages (what you'd normally spend)
   // Actual = real transactions in the selected period
-  const txFilter = budgetPeriod === 'week' ? isCurrentWeek : isCurrentMonth;
-  const periodDivisor = budgetPeriod === 'week' ? 4.33 : 1;
+  const txFilter = budgetPeriod === 'year' ? isCurrentYear : budgetPeriod === 'week' ? isCurrentWeek : isCurrentMonth;
+  // periodDivisor converts monthly values: year = 1/12 (×12), month = 1, week = 4.33 (÷4.33)
+  const periodDivisor = budgetPeriod === 'year' ? (1 / 12) : budgetPeriod === 'week' ? 4.33 : 1;
 
   const computePeriodCategory = (item: BudgetCategory) => {
     const txs = (item.transactions ?? []).filter(tx => txFilter(tx.date));
@@ -1042,6 +1057,11 @@ export default function Home() {
   const periodDiscBudget = discTotal / periodDivisor;
   const periodIncome = income / periodDivisor;
   const periodTotalBudget = periodNonDiscBudget + periodDiscBudget;
+
+  // Period labels for display
+  const periodAdj = budgetPeriod === 'year' ? 'yearly' : budgetPeriod === 'week' ? 'weekly' : 'monthly';
+  const periodSuffix = budgetPeriod === 'year' ? '/yr' : budgetPeriod === 'week' ? '/wk' : '/mo';
+  const periodThisLabel = budgetPeriod === 'year' ? 'this year' : budgetPeriod === 'week' ? 'this week' : 'this month';
 
   // On-track status per section
   const essentialsOnTrack = periodNonDiscTotal <= periodNonDiscBudget * 1.05; // 5% tolerance
@@ -1561,18 +1581,17 @@ export default function Home() {
 
             {/* Period toggle */}
             <View style={s.periodToggleRow}>
-              <TouchableOpacity
-                style={[s.periodBtn, budgetPeriod === 'month' && { backgroundColor: colors.accent }]}
-                onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod('month'); }}
-              >
-                <Text style={[s.periodBtnText, budgetPeriod === 'month' && { color: colors.bg }]}>This month</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.periodBtn, budgetPeriod === 'week' && { backgroundColor: colors.accent }]}
-                onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod('week'); }}
-              >
-                <Text style={[s.periodBtnText, budgetPeriod === 'week' && { color: colors.bg }]}>This week</Text>
-              </TouchableOpacity>
+              {(['year', 'month', 'week'] as const).map((p) => (
+                <TouchableOpacity
+                  key={p}
+                  style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]}
+                  onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod(p); }}
+                >
+                  <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>
+                    {p === 'year' ? 'This year' : p === 'month' ? 'This month' : 'This week'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
 
             {/* Overall spend vs income */}
@@ -1584,11 +1603,11 @@ export default function Home() {
               <Text style={s.periodTotalLabel}>
                 {overallPctUsed > 100
                   ? `Over budget by \u00a3${Math.round(periodSpendTotal - periodIncome).toLocaleString()}`
-                  : `${overallPctUsed}% of ${budgetPeriod === 'week' ? 'weekly' : 'monthly'} income spent`}
+                  : `${overallPctUsed}% of ${periodAdj} income spent`}
               </Text>
               {isVariableIncome && (
                 <Text style={[s.periodTotalLabel, { color: colors.amber || colors.coral, marginTop: 4, fontSize: 11 }]}>
-                  Variable income — budgeted on {'\u00a3'}{Math.round(incomeFloor / (budgetPeriod === 'week' ? 4.33 : 1)).toLocaleString()}/{budgetPeriod === 'week' ? 'wk' : 'mo'} (conservative)
+                  Variable income — budgeted on {'\u00a3'}{Math.round(incomeFloor / periodDivisor).toLocaleString()}{periodSuffix} (conservative)
                 </Text>
               )}
             </View>
@@ -1670,7 +1689,7 @@ export default function Home() {
                       <View key={idx} style={s.allocationItem}>
                         <View style={s.allocationItemTop}>
                           <Text style={s.allocationRank}>#{alloc.priority}</Text>
-                          <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(alloc.amount).toLocaleString()}{budgetPeriod === 'week' ? '/wk' : '/mo'}</Text>
+                          <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(alloc.amount).toLocaleString()}{periodSuffix}</Text>
                         </View>
                         <Text style={s.allocationLabel}>{alloc.label}</Text>
                       </View>
@@ -1729,7 +1748,7 @@ export default function Home() {
               </TouchableOpacity>
             </View>
             {periodNonDiscData.filter(d => d.count > 0).length === 0 && (
-              <Text style={s.noDataText}>No essential spending {budgetPeriod === 'week' ? 'this week' : 'this month'}.</Text>
+              <Text style={s.noDataText}>No essential spending {periodThisLabel}.</Text>
             )}
             {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
               const key = `nd-${item.category}`;
@@ -1787,7 +1806,7 @@ export default function Home() {
                   )}
                   {isExpanded && item.txs.length === 0 && (
                     <View style={s.txDropdown}>
-                      <Text style={s.txEmpty}>No transactions {budgetPeriod === 'week' ? 'this week' : 'this month'}</Text>
+                      <Text style={s.txEmpty}>No transactions {periodThisLabel}</Text>
                     </View>
                   )}
                 </View>
@@ -1812,7 +1831,7 @@ export default function Home() {
               </TouchableOpacity>
             </View>
             {periodDiscData.filter(d => d.count > 0).length === 0 && (
-              <Text style={s.noDataText}>No lifestyle spending {budgetPeriod === 'week' ? 'this week' : 'this month'}.</Text>
+              <Text style={s.noDataText}>No lifestyle spending {periodThisLabel}.</Text>
             )}
             {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
               const key = `d-${item.category}`;
@@ -1870,7 +1889,7 @@ export default function Home() {
                   )}
                   {isExpanded && item.txs.length === 0 && (
                     <View style={s.txDropdown}>
-                      <Text style={s.txEmpty}>No transactions {budgetPeriod === 'week' ? 'this week' : 'this month'}</Text>
+                      <Text style={s.txEmpty}>No transactions {periodThisLabel}</Text>
                     </View>
                   )}
                 </View>
@@ -2963,14 +2982,14 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   periodBtn: {
     paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     borderRadius: 100,
     borderWidth: 1,
     borderColor: c.border,
   },
   periodBtnText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
+    fontSize: 11,
     color: c.muted,
     letterSpacing: 0.5,
   },
