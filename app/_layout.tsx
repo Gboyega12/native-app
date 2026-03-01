@@ -12,6 +12,7 @@ import { registerServiceWorker } from '@/lib/register-sw';
 import { initRevenueCat } from '@/lib/revenuecat';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
+import { Analytics } from '@vercel/analytics/react';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -191,6 +192,7 @@ export default function RootLayout() {
       <ThemeProvider>
         <InnerLayout />
         <UpdateBanner />
+        {Platform.OS === 'web' && <Analytics />}
       </ThemeProvider>
     </ErrorBoundary>
   );
