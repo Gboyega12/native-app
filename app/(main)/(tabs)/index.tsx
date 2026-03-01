@@ -960,6 +960,9 @@ export default function Home() {
   const moves = analysis?.all_moves ?? [];
   const income = analysis?.monthly_income ?? 0;
   const incomeSources = analysis?.income_sources ?? [];
+  const isVariableIncome = analysis?.is_variable_income ?? false;
+  const incomeFloor = analysis?.income_floor ?? income;
+  const incomeCV = analysis?.income_cv ?? 0;
 
   // Only show high + medium effort moves on dashboard; low effort → plan page only
   // Sort: high effort first, then medium
@@ -1413,9 +1416,15 @@ export default function Home() {
                 <Text style={s.breakdownTitle}>How this is calculated</Text>
 
                 <View style={s.breakdownRow}>
-                  <Text style={s.breakdownLabel}>Monthly income</Text>
+                  <Text style={s.breakdownLabel}>Monthly income{isVariableIncome ? ' (avg)' : ''}</Text>
                   <Text style={s.breakdownValue}>{'\u00a3'}{Math.round(income).toLocaleString()}</Text>
                 </View>
+                {isVariableIncome && (
+                  <View style={s.breakdownRow}>
+                    <Text style={[s.breakdownLabel, { color: colors.amber || colors.coral }]}>Budget based on</Text>
+                    <Text style={[s.breakdownValue, { color: colors.amber || colors.coral }]}>{'\u00a3'}{Math.round(incomeFloor).toLocaleString()}/mo</Text>
+                  </View>
+                )}
                 <View style={s.breakdownRow}>
                   <Text style={s.breakdownLabel}>Essentials</Text>
                   <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}</Text>
@@ -1577,6 +1586,11 @@ export default function Home() {
                   ? `Over budget by \u00a3${Math.round(periodSpendTotal - periodIncome).toLocaleString()}`
                   : `${overallPctUsed}% of ${budgetPeriod === 'week' ? 'weekly' : 'monthly'} income spent`}
               </Text>
+              {isVariableIncome && (
+                <Text style={[s.periodTotalLabel, { color: colors.amber || colors.coral, marginTop: 4, fontSize: 11 }]}>
+                  Variable income — budgeted on {'\u00a3'}{Math.round(incomeFloor / (budgetPeriod === 'week' ? 4.33 : 1)).toLocaleString()}/{budgetPeriod === 'week' ? 'wk' : 'mo'} (conservative)
+                </Text>
+              )}
             </View>
 
             {/* Overall progress bar */}

@@ -486,7 +486,18 @@ const EnrichmentEngine = {
       if (avgInt >= 25 && avgInt <= 35) frequency = 'monthly';
       else if (avgInt >= 12 && avgInt <= 17) frequency = 'fortnightly';
       else if (avgInt >= 5 && avgInt <= 9) frequency = 'weekly';
-      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt };
+      // Compute per-source variability from individual payment amounts
+      const amounts = txs.map((t) => t.amount);
+      const recentAmounts = sorted.slice(-8).map((t) => t.amount); // last 8 payments
+      let amountSD = 0;
+      let variability = 0;
+      if (amounts.length >= 2) {
+        const mean = avgAmount;
+        const variance = amounts.reduce((s, a) => s + Math.pow(a - mean, 2), 0) / amounts.length;
+        amountSD = Math.sqrt(variance);
+        variability = mean > 0 ? amountSD / mean : 0;
+      }
+      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt, recentAmounts, amountSD, variability };
     })
     .filter((src) => {
       // Known salary/employer/benefit keywords → always income
@@ -542,6 +553,33 @@ const EnrichmentEngine = {
       debtPayments: catMonthly('Debt Payments'),
     };
 
+    // ── Income volatility: compute overall CV and conservative floor ──
+    // Aggregate variability across all income sources, weighted by contribution.
+    // For variable earners (CV > 10%), the budget should use a conservative
+    // estimate (p25 ≈ mean - 0.67·SD) so the budget doesn't assume a good week.
+    let overallIncomeCV = 0;
+    let incomeFloor = monthlyIncome;
+    const isVariableIncome = (() => {
+      if (incomeSources.length === 0 || monthlyIncome <= 0) return false;
+      // Weighted average CV across sources (weighted by monthly contribution)
+      let weightedCV = 0;
+      let totalWeight = 0;
+      for (const src of incomeSources) {
+        const w = Math.abs(src.monthly);
+        weightedCV += (src.variability || 0) * w;
+        totalWeight += w;
+      }
+      overallIncomeCV = totalWeight > 0 ? weightedCV / totalWeight : 0;
+      // Variable if CV > 10% (salaried workers typically have < 5% variation)
+      if (overallIncomeCV > 0.10) {
+        // Conservative floor = mean - 0.67 * SD (≈ 25th percentile assuming normal)
+        const incomeSD = overallIncomeCV * monthlyIncome;
+        incomeFloor = Math.max(0, monthlyIncome - 0.67 * incomeSD);
+        return true;
+      }
+      return false;
+    })();
+
     return {
       monthly: {
         income: monthlyIncome,
@@ -555,6 +593,9 @@ const EnrichmentEngine = {
         eatingOut: metrics.eatingOut,
         entertainment: metrics.entertainment,
         debtPayments: metrics.debtPayments,
+        incomeFloor: Math.round(incomeFloor),
+        isVariableIncome,
+        incomeCV: Math.round(overallIncomeCV * 100) / 100,
       },
       budgetReality: {
         nonDiscretionary: { total: nonDiscTotal, items: nonDiscItems.sort((a, b) => b.monthly - a.monthly) },

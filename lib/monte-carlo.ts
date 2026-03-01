@@ -74,18 +74,23 @@ export function estimateVolatility(
   const essential = profile.budgetReality.nonDiscretionary.total;
   const discretionary = profile.budgetReality.discretionary.total;
 
-  // Income volatility depends on work setup
+  // Income volatility: prefer the real CV computed from transaction data,
+  // fall back to heuristic estimates from work setup / frequency detection.
   const work = identity?.work_setup || 'office';
-  let incomeCV = 0.05; // coefficient of variation (default: salaried ≈ 5%)
-  if (work === 'self_employed') incomeCV = 0.25;
-  else if (work === 'multiple_jobs') incomeCV = 0.18;
-  else if (work === 'student') incomeCV = 0.20;
+  let incomeCV = profile.monthly.incomeCV ?? 0;
+  if (incomeCV <= 0) {
+    // Heuristic fallback when transaction data is insufficient
+    incomeCV = 0.05; // default: salaried ≈ 5%
+    if (work === 'self_employed') incomeCV = 0.25;
+    else if (work === 'multiple_jobs') incomeCV = 0.18;
+    else if (work === 'student') incomeCV = 0.20;
 
-  // Detect irregular income from source frequency
-  const hasIrregular = profile.incomeSources.some(
-    (s) => s.frequency === 'irregular' || s.frequency === 'weekly',
-  );
-  if (hasIrregular) incomeCV = Math.max(incomeCV, 0.15);
+    // Detect irregular income from source frequency
+    const hasIrregular = profile.incomeSources.some(
+      (s) => s.frequency === 'irregular' || s.frequency === 'weekly',
+    );
+    if (hasIrregular) incomeCV = Math.max(incomeCV, 0.15);
+  }
 
   // Essential spending: low variance (rent/mortgage are fixed, utilities predictable)
   const essentialCV = 0.08;

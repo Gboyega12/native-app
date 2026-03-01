@@ -346,6 +346,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     all_moves: allMoves,
     behavioral_patterns: result.behavioralPatterns,
     goal_context: topMove?.trajectory || null,
+    income_floor: result.profile.monthly.incomeFloor,
+    is_variable_income: result.profile.monthly.isVariableIncome,
+    income_cv: result.profile.monthly.incomeCV,
   };
 
   // ── 6. Upsert to Supabase ──
@@ -362,6 +365,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     all_moves: rawAnalysis.all_moves,
     behavioral_patterns: rawAnalysis.behavioral_patterns,
     goal_context: rawAnalysis.goal_context,
+    income_floor: rawAnalysis.income_floor,
+    is_variable_income: rawAnalysis.is_variable_income,
+    income_cv: rawAnalysis.income_cv,
   };
 
   try {
@@ -513,8 +519,11 @@ function buildWeeklyContext(
     .filter((t) => t.amount < 0 && !t.isEssential && !t.isDebt && !t.isTransfer && !t.isSavings && !t.isRefund)
     .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
-  // Static weekly budget
-  const income = analysis.monthly_income || 0;
+  // Static weekly budget — for variable earners, use the conservative floor
+  const rawIncome = analysis.monthly_income || 0;
+  const income = analysis.is_variable_income && analysis.income_floor
+    ? analysis.income_floor
+    : rawIncome;
   const nonDiscTotal = (analysis.non_discretionary as any)?.total || 0;
   const discTotal = (analysis.discretionary as any)?.total || 0;
   const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);

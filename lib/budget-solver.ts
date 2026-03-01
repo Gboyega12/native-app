@@ -125,7 +125,11 @@ export function solveBudgetAllocation(
   profile: FinancialProfile,
   identity?: UserIdentity | null,
 ): BudgetAllocation {
-  const income = profile.monthly.income;
+  // For variable earners, solve against the conservative income floor (p25)
+  // so the budget doesn't assume a good week every week.
+  const income = profile.monthly.isVariableIncome && profile.monthly.incomeFloor
+    ? profile.monthly.incomeFloor
+    : profile.monthly.income;
   if (income <= 0) {
     return {
       slices: [], totalIncome: 0, totalCurrentSpend: 0,

@@ -556,6 +556,8 @@ export default function Plan() {
   const monthlySpending = analysis?.monthly_spending ?? 0;
   const surplus = analysis?.surplus ?? 0;
   const incomeSources = analysis?.income_sources ?? [];
+  const isVariableIncome = analysis?.is_variable_income ?? false;
+  const incomeFloor = analysis?.income_floor ?? monthlyIncome;
 
   // ── Render ──
 
@@ -646,7 +648,7 @@ export default function Plan() {
                 <Text style={s.incomeStripValue}>
                   {'\u00a3'}{Math.round(monthlyIncome).toLocaleString()}
                 </Text>
-                <Text style={s.incomeStripLabel}>income</Text>
+                <Text style={s.incomeStripLabel}>{isVariableIncome ? 'income (avg)' : 'income'}</Text>
               </View>
               <View style={s.incomeStripDivider} />
               <View style={s.incomeStripItem}>
@@ -683,13 +685,25 @@ export default function Plan() {
                 <Text style={s.incomeDetailNote}>
                   Detected from your bank transactions. Spending includes all outgoing transactions from the past month.
                 </Text>
+                {isVariableIncome && (
+                  <Text style={[s.incomeDetailNote, { color: colors.amber || colors.coral, marginTop: 8 }]}>
+                    Your income varies — budgets use {'\u00a3'}{Math.round(incomeFloor).toLocaleString()}/mo (conservative estimate) so you're covered on lower weeks.
+                  </Text>
+                )}
 
                 {incomeSources.length > 0 && (
                   <>
                     <Text style={s.incomeDetailHeading}>Income sources</Text>
                     {incomeSources.map((src, idx) => (
                       <View key={idx} style={s.incomeSourceRow}>
-                        <Text style={s.incomeSourceName}>{src.source}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={s.incomeSourceName}>{src.source}</Text>
+                          {(src.variability ?? 0) > 0.10 && src.recentAmounts && src.recentAmounts.length >= 2 && (
+                            <Text style={[s.incomeSourceAmount, { fontSize: 10, color: colors.amber || colors.coral }]}>
+                              Range: {'\u00a3'}{Math.round(Math.min(...src.recentAmounts)).toLocaleString()} – {'\u00a3'}{Math.round(Math.max(...src.recentAmounts)).toLocaleString()}
+                            </Text>
+                          )}
+                        </View>
                         <Text style={s.incomeSourceAmount}>
                           {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}/{src.frequency === 'weekly' ? 'wk' : src.frequency === 'fortnightly' ? '2wk' : 'mo'}
                         </Text>

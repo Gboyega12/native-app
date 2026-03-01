@@ -714,6 +714,9 @@ export default function Chat() {
         ctx.monthly_income = freshA.monthly_income;
         ctx.monthly_spending = freshA.monthly_spending;
         ctx.surplus = freshA.surplus;
+        ctx.is_variable_income = freshA.is_variable_income;
+        ctx.income_floor = freshA.income_floor;
+        ctx.income_cv = freshA.income_cv;
         ctx.archetype = freshA.archetype;
         ctx.decision_score = freshA.decision_score;
         ctx.all_moves = freshA.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string }) => ({

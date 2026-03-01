@@ -64,6 +64,12 @@ export interface IncomeSource {
   avgAmount: number;
   monthly: number;
   isSalary: boolean;
+  /** Individual amounts observed for this source (most recent N periods) */
+  recentAmounts?: number[];
+  /** Standard deviation of payment amounts */
+  amountSD?: number;
+  /** Coefficient of variation (SD / mean) — higher = more variable */
+  variability?: number;
 }
 
 export interface FinancialProfile {
@@ -79,6 +85,12 @@ export interface FinancialProfile {
     eatingOut: number;
     entertainment: number;
     debtPayments: number;
+    /** Conservative income estimate (p25 — what to budget against for variable earners) */
+    incomeFloor?: number;
+    /** Whether income is classified as variable (CV > 10%) */
+    isVariableIncome?: boolean;
+    /** Income coefficient of variation across all sources (0-1 scale) */
+    incomeCV?: number;
   };
   budgetReality: {
     nonDiscretionary: BudgetSection;
@@ -167,6 +179,12 @@ export interface Analysis {
   behavioral_patterns: string[];
   goal_context?: GoalTrajectory | null;
   created_at?: string;
+  /** Conservative income estimate for variable earners (p25) */
+  income_floor?: number;
+  /** Whether income is classified as variable (CV > 10%) */
+  is_variable_income?: boolean;
+  /** Income coefficient of variation (0-1 scale) */
+  income_cv?: number;
 }
 
 // ── Goal Trajectory ──
@@ -266,6 +284,12 @@ export interface ChatContext {
   monthly_income?: number;
   monthly_spending?: number;
   surplus?: number;
+  /** Whether income is classified as variable */
+  is_variable_income?: boolean;
+  /** Conservative income estimate for budgeting (p25) */
+  income_floor?: number;
+  /** Income coefficient of variation */
+  income_cv?: number;
   archetype?: string;
   decision_score?: number;
   goals?: {
