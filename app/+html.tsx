@@ -38,9 +38,13 @@ export default function Root({ children }: PropsWithChildren) {
 
         {/* Body scrolling disabled for RN ScrollView */}
         <style dangerouslySetInnerHTML={{ __html: `
-          html, body { height: 100%; }
+          html, body { height: 100%; -webkit-text-size-adjust: 100%; }
           body { overflow: hidden; -webkit-touch-callout: none; }
           #root { display: flex; height: 100%; flex: 1; }
+          /* Prevent iOS auto-zoom on input focus */
+          input, textarea, select { font-size: 16px !important; }
+          /* Prevent double-tap zoom and pinch-zoom on the chat area */
+          html { touch-action: manipulation; }
         ` }} />
       </head>
       <body>{children}</body>

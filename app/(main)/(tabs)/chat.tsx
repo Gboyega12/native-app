@@ -1271,21 +1271,23 @@ export default function Chat() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
-      {/* ── Header ── */}
-      {messages.length > 0 && (
-        <View style={[s.header, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-          <View style={s.headerLeftChat}>
-            <View style={s.chatBocyWrap}>
-              <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
-            </View>
-            <Text style={s.headerTitle}>Bocy</Text>
-            {loading && <ActivityIndicator size="small" color={colors.dim} style={{ marginLeft: 6 }} />}
+      {/* ── Header (always visible to prevent layout shift) ── */}
+      <View style={[s.header, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
+        <View style={s.headerLeftChat}>
+          <View style={s.chatBocyWrap}>
+            <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
           </View>
+          <Text style={s.headerTitle}>Bocy</Text>
+          {loading && <ActivityIndicator size="small" color={colors.dim} style={{ marginLeft: 6 }} />}
+        </View>
+        {messages.length > 0 ? (
           <TouchableOpacity onPress={clearChat} style={s.clearButton} activeOpacity={0.7}>
             <Text style={s.clearText}>New chat</Text>
           </TouchableOpacity>
-        </View>
-      )}
+        ) : (
+          <View />
+        )}
+      </View>
 
       {/* ── Messages ── */}
       <ScrollView
@@ -1663,9 +1665,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.lg,
     paddingTop: spacing.xxl + spacing.sm,
-    paddingBottom: 10,
+    paddingBottom: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
   },
@@ -1703,71 +1705,74 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flex: 1,
   },
   messagesContent: {
-    padding: spacing.lg,
-    paddingTop: spacing.xxl + spacing.lg,
-    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
   },
   suggestedContainer: {
     marginTop: spacing.xxl,
     alignItems: 'center',
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.md,
   },
   suggestedTitle: {
     fontFamily: fonts.heading,
-    fontSize: 24,
+    fontSize: 26,
     color: c.text,
+    marginTop: spacing.sm,
   },
   suggestedSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 15,
     color: c.dim,
-    marginBottom: spacing.lg,
-    marginTop: 8,
+    marginBottom: spacing.xl,
+    marginTop: 10,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   suggestedGrid: {
     width: '100%',
-    gap: spacing.md,
+    gap: 12,
   },
   suggestedButton: {
     backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 100,
-    paddingVertical: 14,
+    paddingVertical: 16,
     paddingHorizontal: spacing.lg,
   },
   suggestedText: {
     fontFamily: fonts.medium,
-    fontSize: 13,
+    fontSize: 14,
     color: c.text2,
     textAlign: 'center',
   },
   bubble: {
-    maxWidth: '80%',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    marginBottom: 10,
+    maxWidth: '82%',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 22,
+    marginBottom: 16,
   },
   userBubble: {
     backgroundColor: c.accent,
     alignSelf: 'flex-end',
-    borderBottomRightRadius: 4,
+    borderBottomRightRadius: 6,
   },
   assistantBubble: {
     backgroundColor: c.surface,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: c.border,
     alignSelf: 'flex-start',
-    borderBottomLeftRadius: 4,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderBottomRightRadius: 18,
+    borderBottomLeftRadius: 6,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderBottomRightRadius: 20,
   },
   bubbleText: {
     fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 15,
+    lineHeight: 23,
   },
   userText: {
     color: c.bg,
@@ -1790,7 +1795,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   actionCardWrapper: {
     alignSelf: 'flex-start',
     maxWidth: '85%',
-    marginBottom: 10,
+    marginBottom: 16,
   },
   errorCardText: {
     fontFamily: fonts.medium,
@@ -1978,8 +1983,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // ── Input row ──
   inputRow: {
     flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
     backgroundColor: c.bg,
@@ -1995,7 +2000,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: 22,
     paddingVertical: 10,
     paddingHorizontal: spacing.md,
-    fontSize: 14,
+    fontSize: 16,
     color: c.text,
   },
   // ── Unified action button (glyph style) ──
@@ -2100,8 +2105,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 6,
-    marginTop: 14,
+    marginBottom: 8,
+    marginTop: 20,
   },
   bocyLabelDot: {
     width: 6,
@@ -2119,11 +2124,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Follow-up suggestion chips ──
   followUpContainer: {
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
+    marginTop: spacing.lg,
+    marginBottom: spacing.md,
   },
   followUpScroll: {
-    gap: 8,
+    gap: 10,
     paddingVertical: 4,
   },
   followUpChip: {
@@ -2131,12 +2136,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 100,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
   },
   followUpChipText: {
     fontFamily: fonts.medium,
-    fontSize: 12,
+    fontSize: 13,
     color: c.text2,
   },
 });

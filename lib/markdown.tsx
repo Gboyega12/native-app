@@ -218,12 +218,12 @@ function Inline({ text }: { text: string }) {
 const createStyles = (c: ThemeColors) => StyleSheet.create({
   paragraph: {
     fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 24,
     color: c.text2,
   },
   paragraphGap: {
-    marginBottom: spacing.sm + 2,
+    marginBottom: spacing.sm + 4,
   },
   bold: {
     fontFamily: fonts.semibold,
@@ -240,28 +240,28 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   listRow: {
     flexDirection: 'row',
-    marginBottom: 4,
+    marginBottom: 6,
     paddingRight: spacing.md,
   },
   bullet: {
     fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 24,
     color: c.accent,
     width: 18,
   },
   listNumber: {
     fontFamily: fonts.medium,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 24,
     color: c.accent,
     width: 22,
   },
   listText: {
     flex: 1,
     fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 24,
     color: c.text2,
   },
   // GIF images
