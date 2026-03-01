@@ -42,6 +42,53 @@ self.addEventListener('activate', (event) => {
   });
 });
 
+// ── Push: display notification from server payload ──
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: 'Bocy', body: event.data.text() };
+  }
+
+  const { title = 'Bocy', body = '', icon, badge, data, tag } = payload;
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: icon || '/assets/images/icon.png',
+      badge: badge || '/assets/images/favicon.png',
+      tag: tag || 'bocy-default',
+      data: data || {},
+      renotify: !!tag,
+    })
+  );
+});
+
+// ── Notification click: focus or open the app ──
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const urlPath = event.notification.data?.url || '/';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      // Focus an existing tab if one is open
+      for (const client of clients) {
+        if (new URL(client.url).origin === self.location.origin) {
+          client.focus();
+          if (urlPath !== '/') client.navigate(urlPath);
+          return;
+        }
+      }
+      // Otherwise open a new window
+      return self.clients.openWindow(urlPath);
+    })
+  );
+});
+
 // ── Fetch: network-first with cache fallback ──
 self.addEventListener('fetch', (event) => {
   const { request } = event;

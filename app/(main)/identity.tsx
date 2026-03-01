@@ -291,7 +291,7 @@ export default function Identity() {
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
       }
-      router.push('/(main)/connect');
+      router.push('/(main)/install-app');
     } catch (err: any) {
       console.warn('[identity] Save failed:', err?.message);
       Alert.alert('Error', 'Could not save. Please try again.');

@@ -298,7 +298,7 @@ export default function Plan() {
 
       const [analysisRes, plansRes, progressRes] = await Promise.all([
         supabase.from('analyses').select('*').eq('user_id', user.id)
-          .order('created_at', { ascending: false }).limit(1).single(),
+          .order('created_at', { ascending: false }).limit(1).maybeSingle(),
         supabase.from('user_plans').select('*').eq('user_id', user.id)
           .eq('status', 'active').order('created_at', { ascending: false }),
         supabase.from('plan_progress').select('*').eq('user_id', user.id),
@@ -489,7 +489,7 @@ export default function Plan() {
         .eq('user_id', uid)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
       if (latest?.id) {
         const dbMoves = (latest.all_moves || []).filter(
           (m: any) => m.action !== moveToDelete.action,

@@ -77,13 +77,13 @@ export default function Home() {
       // Compare stored bank fingerprint with current warning
       const currentFingerprint = connectionWarning.banks.sort().join(',');
       setConnectionDismissed(stored === currentFingerprint);
-    });
+    }).catch(() => {});
   }, [connectionWarning]);
 
   // When connections are healthy, clear the stored dismiss so future warnings are fresh
   useEffect(() => {
     if (connectionWarning === null) {
-      AsyncStorage.removeItem(CONN_DISMISS_KEY);
+      AsyncStorage.removeItem(CONN_DISMISS_KEY).catch(() => {});
     }
   }, [connectionWarning]);
 
@@ -102,19 +102,19 @@ export default function Home() {
     if (!incomeFingerprint) return; // No income events yet — keep current state
     AsyncStorage.getItem(INCOME_DISMISS_KEY).then((stored) => {
       setIncomeDismissed(stored === incomeFingerprint);
-    });
+    }).catch(() => {});
   }, [incomeFingerprint]);
 
   const dismissConnection = () => {
     setConnectionDismissed(true);
     if (connectionWarning) {
-      AsyncStorage.setItem(CONN_DISMISS_KEY, connectionWarning.banks.sort().join(','));
+      AsyncStorage.setItem(CONN_DISMISS_KEY, connectionWarning.banks.sort().join(',')).catch(() => {});
     }
   };
   const dismissIncome = () => {
     setIncomeDismissed(true);
     if (incomeFingerprint) {
-      AsyncStorage.setItem(INCOME_DISMISS_KEY, incomeFingerprint);
+      AsyncStorage.setItem(INCOME_DISMISS_KEY, incomeFingerprint).catch(() => {});
     }
   };
 
@@ -194,7 +194,7 @@ export default function Home() {
   useEffect(() => {
     AsyncStorage.getItem('custom_weekly_limit').then((val) => {
       if (val) setCustomWeeklyLimit(parseFloat(val));
-    });
+    }).catch(() => {});
   }, []);
 
   // Categorise review modal state
@@ -641,7 +641,7 @@ export default function Home() {
             .eq('user_id', user.id)
             .order('created_at', { ascending: false })
             .limit(1)
-            .single();
+            .maybeSingle();
           if (latest?.id) {
             await supabase.from('analyses')
               .update({ all_moves: updatedMoves })
@@ -757,7 +757,7 @@ export default function Home() {
           .from('user_streaks')
           .select('current_streak, longest_streak, last_active_date, total_active_days')
           .eq('user_id', user.id)
-          .single();
+          .maybeSingle();
 
         if (streak) {
           if (streak.last_active_date !== today) {
@@ -814,7 +814,7 @@ export default function Home() {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.warn('[home] Failed to fetch analysis:', error.message);
@@ -841,7 +841,7 @@ export default function Home() {
           .lte('created_at', prevMonthEnd.toISOString())
           .order('created_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
         setPrevSnapshot(prevData ?? null);
       } catch {
         setPrevSnapshot(null);
@@ -860,11 +860,15 @@ export default function Home() {
 
   // Pull-to-refresh handler — force a fresh TrueLayer fetch
   const onRefresh = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setRefreshing(true);
-    invalidateSyncCache();
-    await syncInBackground(user.id, true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      setRefreshing(true);
+      invalidateSyncCache();
+      await syncInBackground(user.id, true);
+    } catch (err: any) {
+      console.warn('[home] onRefresh error:', err?.message);
+    }
     setRefreshing(false);
   }, []);
 
@@ -1110,14 +1114,14 @@ export default function Home() {
     const val = parseFloat(limitInput);
     if (!isNaN(val) && val > 0) {
       setCustomWeeklyLimit(val);
-      AsyncStorage.setItem('custom_weekly_limit', String(val));
+      AsyncStorage.setItem('custom_weekly_limit', String(val)).catch(() => {});
       setShowLimitEditor(false);
       setLimitInput('');
     }
   };
   const resetCustomLimit = () => {
     setCustomWeeklyLimit(null);
-    AsyncStorage.removeItem('custom_weekly_limit');
+    AsyncStorage.removeItem('custom_weekly_limit').catch(() => {});
     setShowLimitEditor(false);
   };
 

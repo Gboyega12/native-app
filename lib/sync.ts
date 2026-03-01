@@ -161,11 +161,15 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   const expiringConnections: { name: string; daysLeft: number }[] = [];
 
   try {
+    const syncController = new AbortController();
+    const syncTimeout = setTimeout(() => syncController.abort(), 15_000);
     const res = await fetch('/api/truelayer/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_id: userId }),
+      signal: syncController.signal,
     });
+    clearTimeout(syncTimeout);
     const data = await res.json();
     if (data.success && data.csv_data) {
       csvData = data.csv_data;
@@ -272,7 +276,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         .from('user_identity')
         .select('*')
         .eq('user_id', userId)
-        .single(),
+        .maybeSingle(),
     ]);
     if (debtRes.data) debtAccountsData = debtRes.data;
     if (idRes.data) identityData = idRes.data;
@@ -302,7 +306,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .from('goals')
       .select('*')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
     goals = goalsData;
   } catch {}
 
@@ -345,14 +349,6 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   };
 
   // ── 6. Upsert to Supabase ──
-  const { data: existingRow } = await supabase
-    .from('analyses')
-    .select('id')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
-
   const fields = {
     archetype: rawAnalysis.archetype,
     decision_score: rawAnalysis.decision_score,
@@ -368,10 +364,22 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     goal_context: rawAnalysis.goal_context,
   };
 
-  if (existingRow?.id) {
-    await supabase.from('analyses').update(fields).eq('id', existingRow.id);
-  } else {
-    await supabase.from('analyses').insert({ user_id: userId, ...fields });
+  try {
+    const { data: existingRow } = await supabase
+      .from('analyses')
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRow?.id) {
+      await supabase.from('analyses').update(fields).eq('id', existingRow.id);
+    } else {
+      await supabase.from('analyses').insert({ user_id: userId, ...fields });
+    }
+  } catch (e: any) {
+    console.warn('[sync] Failed to upsert analysis:', e?.message);
   }
 
   // ── 7. Score snapshot ──
@@ -482,7 +490,7 @@ function buildWeeklyContext(
   // Detect income arrivals this week
   const incomeThisWeek = thisWeekTxs.filter((t) => t.isIncome && t.amount > 0);
   const incomeSources = profile.incomeSources || [];
-  const primarySource = incomeSources.find((s) => s.isSalary) || incomeSources[0];
+  const primarySource = incomeSources.find((s) => s.isSalary) || incomeSources[0] || null;
 
   const recentIncomeEvents: IncomeEvent[] = incomeThisWeek.map((t) => ({
     source: t.merchant || t.description,

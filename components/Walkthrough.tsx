@@ -158,7 +158,7 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
     if (scrollRef?.current) {
       scrollRef.current.scrollTo({ y: 0, animated: true });
     }
-    await AsyncStorage.setItem(WALKTHROUGH_KEY, 'true');
+    try { await AsyncStorage.setItem(WALKTHROUGH_KEY, 'true'); } catch {}
     onDismiss();
   };
 
@@ -269,7 +269,7 @@ export function useWalkthrough() {
         // Small delay so the dashboard has time to render first
         setTimeout(() => setShowWalkthrough(true), 800);
       }
-    });
+    }).catch(() => {});
   }, []);
 
   const dismiss = useCallback(() => {

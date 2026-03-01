@@ -20,6 +20,9 @@ const _listeners: Set<SyncListener> = new Set();
 /** Minimum interval between automatic syncs (30 seconds). */
 const MIN_SYNC_INTERVAL_MS = 30_000;
 
+/** Maximum time the entire sync pipeline may run before we bail out (30 seconds). */
+const SYNC_TIMEOUT_MS = 30_000;
+
 /**
  * Request a bank data sync. If one is already in-flight, returns the
  * existing promise instead of starting a duplicate.
@@ -40,15 +43,29 @@ export async function requestSync(
     return _lastResult;
   }
 
-  _activeSyncPromise = syncBankData(userId)
+  _activeSyncPromise = Promise.race([
+    syncBankData(userId),
+    new Promise<null>((resolve) =>
+      setTimeout(() => {
+        console.warn('[sync-coordinator] sync timed out after', SYNC_TIMEOUT_MS, 'ms');
+        resolve(null);
+      }, SYNC_TIMEOUT_MS),
+    ),
+  ])
     .then((result) => {
-      _lastResult = result;
-      _lastSyncTime = Date.now();
+      if (result) {
+        _lastResult = result;
+        _lastSyncTime = Date.now();
+      }
       // Notify all subscribers
       for (const listener of _listeners) {
         try { listener(result); } catch {}
       }
       return result;
+    })
+    .catch((e) => {
+      console.warn('[sync-coordinator] syncBankData failed:', e?.message || e);
+      return null;
     })
     .finally(() => {
       _activeSyncPromise = null;

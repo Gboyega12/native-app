@@ -18,7 +18,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com https://auth.truelayer.com https://api.truelayer.com https://api.stripe.com; img-src 'self' data: blob: https://*.stripe.com; frame-src https://auth.truelayer.com https://js.stripe.com https://checkout.stripe.com https://billing.stripe.com"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' https://*.supabase.co https://api.anthropic.com https://auth.truelayer.com https://api.truelayer.com https://api.stripe.com https://fcm.googleapis.com https://*.push.services.mozilla.com https://*.notify.windows.com https://*.push.apple.com; img-src 'self' data: blob: https://*.stripe.com; frame-src https://auth.truelayer.com https://js.stripe.com https://checkout.stripe.com https://billing.stripe.com"
         }
       ]
     }

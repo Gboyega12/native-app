@@ -17,16 +17,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.bocy.app",
       "buildNumber": "1",
-      "associatedDomains": [
-        "applinks:bocy.app",
-        "webcredentials:bocy.app"
-      ],
       "infoPlist": {
         "NSCameraUsageDescription": "Bocy needs camera access to scan documents.",
         "NSPhotoLibraryUsageDescription": "Bocy needs photo library access to upload documents.",
         "NSFaceIDUsageDescription": "Bocy uses Face ID to protect your financial data.",
-        "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["fetch", "remote-notification"]
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -49,7 +44,6 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-notifications",
       [
         "expo-build-properties",
         {
