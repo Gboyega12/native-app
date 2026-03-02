@@ -50,8 +50,8 @@ function GifImage({ uri, style }: { uri: string; style: any }) {
       alt: '',
       onError: () => setFailed(true),
       style: {
-        width: style.width ?? 200,
-        height: style.height ?? 150,
+        width: '100%',
+        aspectRatio: '4 / 3',
         borderRadius: style.borderRadius ?? 0,
         objectFit: 'cover',
         display: 'block',
@@ -266,15 +266,15 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   // GIF images
   gifContainer: {
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
     marginBottom: spacing.xs,
     borderRadius: radius.md,
     overflow: 'hidden',
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
   },
   gif: {
-    width: 200,
-    height: 150,
+    width: '100%' as any,
+    aspectRatio: 4 / 3,
     borderRadius: radius.md,
   },
 });
