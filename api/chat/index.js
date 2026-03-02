@@ -485,13 +485,13 @@ async function executeBudgetItem(input, userId) {
 
   const admin = createClient(supabaseUrl, serviceKey);
 
-  const { error } = await admin.from('budget_adjustments').insert({
+  const { data, error } = await admin.from('budget_adjustments').insert({
     user_id: userId,
     description: input.description,
     category: input.category,
     monthly_amount: input.monthly_amount,
     is_essential: input.is_essential,
-  });
+  }).select('id').single();
 
   if (error) {
     return {
@@ -508,6 +508,7 @@ async function executeBudgetItem(input, userId) {
     action: {
       type: 'budget_item_saved',
       data: {
+        id: data.id,
         description: input.description,
         category: input.category,
         monthly_amount: input.monthly_amount,

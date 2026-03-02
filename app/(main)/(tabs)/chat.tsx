@@ -172,11 +172,13 @@ function PlanCard({
   action,
   onApprove,
   onDismiss,
+  onDelete,
   saving,
 }: {
   action: ChatAction;
   onApprove: () => void;
   onDismiss: () => void;
+  onDelete: () => void;
   saving?: boolean;
 }) {
   const { colors } = useTheme();
@@ -184,6 +186,7 @@ function PlanCard({
   const d = action.data;
   const isApproved = action.status === 'approved';
   const isDismissed = action.status === 'dismissed';
+  const isDeleted = action.status === 'deleted';
 
   return (
     <Card
@@ -192,7 +195,7 @@ function PlanCard({
       noShadow
       style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
     >
-      <Text style={s.actionCardLabel}>{isApproved ? 'PLAN ADDED' : 'PLAN SUGGESTED'}</Text>
+      <Text style={s.actionCardLabel}>{isApproved ? 'PLAN ADDED' : isDeleted ? 'PLAN REMOVED' : 'PLAN SUGGESTED'}</Text>
       <Text style={s.actionCardTitle}>{stripMd(d.action)}</Text>
       <View style={s.actionCardStats}>
         {d.target_amount != null && (
@@ -215,10 +218,19 @@ function PlanCard({
         )}
       </View>
       {isApproved ? (
-        <View style={s.approvedBanner}>
-          <Text style={s.approvedBannerText}>{'\u2713'} Added to your plan</Text>
-        </View>
+        <>
+          <View style={s.approvedBanner}>
+            <Text style={s.approvedBannerText}>{'\u2713'} Added to your plan</Text>
+          </View>
+          <TouchableOpacity style={s.removeLink} onPress={onDelete} activeOpacity={0.7}>
+            <Text style={s.removeLinkText}>Remove</Text>
+          </TouchableOpacity>
+        </>
       ) : isDismissed ? (
+        <View style={s.dismissedBanner}>
+          <Text style={s.dismissedBannerText}>Removed from plan</Text>
+        </View>
+      ) : isDeleted ? (
         <View style={s.dismissedBanner}>
           <Text style={s.dismissedBannerText}>Removed from plan</Text>
         </View>
@@ -245,18 +257,19 @@ function PlanCard({
   );
 }
 
-function BudgetItemCard({ action }: { action: ChatAction }) {
+function BudgetItemCard({ action, onDelete }: { action: ChatAction; onDelete: () => void }) {
   const { colors } = useTheme();
   const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
+  const isDeleted = action.status === 'deleted';
   return (
     <Card
       variant="action"
-      borderColor={colors.accent}
+      borderColor={isDeleted ? undefined : colors.accent}
       noShadow
       style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
     >
-      <Text style={s.actionCardLabel}>BUDGET UPDATED</Text>
+      <Text style={s.actionCardLabel}>{isDeleted ? 'BUDGET ITEM REMOVED' : 'BUDGET UPDATED'}</Text>
       <Text style={s.actionCardTitle}>{d.description}</Text>
       <View style={s.actionCardStats}>
         <View style={s.actionStat}>
@@ -274,9 +287,20 @@ function BudgetItemCard({ action }: { action: ChatAction }) {
           </View>
         )}
       </View>
-      <View style={s.approvedBanner}>
-        <Text style={s.approvedBannerText}>{'\u2713'} Added to your budget</Text>
-      </View>
+      {isDeleted ? (
+        <View style={s.dismissedBanner}>
+          <Text style={s.dismissedBannerText}>Removed from budget</Text>
+        </View>
+      ) : (
+        <>
+          <View style={s.approvedBanner}>
+            <Text style={s.approvedBannerText}>{'\u2713'} Added to your budget</Text>
+          </View>
+          <TouchableOpacity style={s.removeLink} onPress={onDelete} activeOpacity={0.7}>
+            <Text style={s.removeLinkText}>Remove</Text>
+          </TouchableOpacity>
+        </>
+      )}
     </Card>
   );
 }
@@ -1008,6 +1032,82 @@ export default function Chat() {
     persistMessages(updated);
   };
 
+  // ── Handle plan deletion (remove an already-approved plan) ──
+
+  const handleDeletePlan = async (msgIndex: number, actionIndex: number) => {
+    const msg = messages[msgIndex];
+    const action = msg?.actions?.[actionIndex];
+    if (!action || action.type !== 'plan_proposed' || action.status !== 'approved') return;
+
+    const planId = action.data.id;
+    let uid = userId;
+    if (!uid) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        uid = user?.id || null;
+      } catch {
+        uid = null;
+      }
+    }
+
+    if (planId && uid) {
+      try {
+        await fetch('/api/plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', plan_id: planId, user_id: uid }),
+        });
+      } catch {
+        // Non-critical — still update UI
+      }
+    }
+
+    const updated = [...messages];
+    const updatedActions = [...(updated[msgIndex].actions || [])];
+    updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'deleted' };
+    updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+    setMessages(updated);
+    persistMessages(updated);
+  };
+
+  // ── Handle budget item deletion ──
+
+  const handleDeleteBudgetItem = async (msgIndex: number, actionIndex: number) => {
+    const msg = messages[msgIndex];
+    const action = msg?.actions?.[actionIndex];
+    if (!action || action.type !== 'budget_item_saved') return;
+
+    const itemId = action.data.id;
+    let uid = userId;
+    if (!uid) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        uid = user?.id || null;
+      } catch {
+        uid = null;
+      }
+    }
+
+    if (itemId && uid) {
+      try {
+        await fetch('/api/plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete_budget_item', budget_item_id: itemId, user_id: uid }),
+        });
+      } catch {
+        // Non-critical — still update UI
+      }
+    }
+
+    const updated = [...messages];
+    const updatedActions = [...(updated[msgIndex].actions || [])];
+    updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'deleted' };
+    updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+    setMessages(updated);
+    persistMessages(updated);
+  };
+
   // ── Handle goal update acceptance ──
 
   const handleAcceptGoalUpdate = async (msgIndex: number, actionIndex: number) => {
@@ -1360,6 +1460,7 @@ export default function Chat() {
                       action={action}
                       onApprove={() => handleApprovePlan(i, j)}
                       onDismiss={() => handleDismissPlan(i, j)}
+                      onDelete={() => handleDeletePlan(i, j)}
                       saving={savingPlan === `${i}-${j}`}
                     />
                   ) : action.type === 'plan_error' ? (
@@ -1373,7 +1474,7 @@ export default function Chat() {
                   ) : action.type === 'override_saved' ? (
                     <OverrideCard action={action} />
                   ) : action.type === 'budget_item_saved' ? (
-                    <BudgetItemCard action={action} />
+                    <BudgetItemCard action={action} onDelete={() => handleDeleteBudgetItem(i, j)} />
                   ) : action.type === 'goal_update_proposed' ? (
                     <GoalUpdateCard
                       action={action}
@@ -1891,6 +1992,15 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 13,
     color: c.muted,
+  },
+  removeLink: {
+    paddingTop: 8,
+    alignItems: 'center',
+  },
+  removeLinkText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.coral,
   },
   viewPlanBanner: {
     backgroundColor: c.accentDim,

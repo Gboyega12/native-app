@@ -271,7 +271,7 @@ export interface ChatAction {
     new_two_year_goal?: string;
     new_target_amount?: number | null;
   };
-  status?: 'pending' | 'approved' | 'dismissed';
+  status?: 'pending' | 'approved' | 'dismissed' | 'deleted';
 }
 
 export interface ChatMessage {
