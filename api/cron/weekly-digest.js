@@ -1,5 +1,5 @@
 // ── Weekly Digest Cron Job ──
-// Runs every Monday at 9am (via Vercel Cron).
+// Runs every Monday at 11pm (via Vercel Cron).
 // Sends a personalized email digest to each user with:
 //   - Decision score + change since last week
 //   - Surplus + change

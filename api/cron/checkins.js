@@ -1,8 +1,8 @@
 // ── Proactive Check-in Cron Job ──
-// Runs daily at 10am (via Vercel Cron).
+// Runs daily at 11pm (via Vercel Cron).
 // Sends a contextual nudge to Pro users. If a specific trigger fires
 // (score drop, spending spike, inactivity, milestone) the message is
-// tailored. Otherwise a general daily check-in is sent so the 10am
+// tailored. Otherwise a general daily check-in is sent so the 11pm
 // notification always arrives.
 //
 // Check-in triggers (in priority order):

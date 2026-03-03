@@ -24,6 +24,74 @@ const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 /** Free users can send this many messages before the paywall gate kicks in */
 const FREE_MESSAGE_LIMIT = 2;
 
+/** Word-count threshold — messages longer than this get split into chunks */
+const CHUNK_WORD_THRESHOLD = 15;
+
+/**
+ * Split a long assistant message into multiple chat-sized chunks.
+ * Splits on paragraph breaks first, then on sentences for any chunk
+ * still over the threshold. This makes AI responses feel like real texts.
+ */
+function splitIntoBubbles(text: string): string[] {
+  if (!text) return [text];
+
+  // Split by double newlines (paragraphs) first
+  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+
+  const chunks: string[] = [];
+  for (const para of paragraphs) {
+    const wordCount = para.split(/\s+/).length;
+    if (wordCount <= CHUNK_WORD_THRESHOLD) {
+      chunks.push(para);
+    } else {
+      // Split long paragraphs on sentence boundaries
+      const sentences = para.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) || [para];
+      let current = '';
+      for (const sentence of sentences) {
+        const combined = current ? current + ' ' + sentence.trim() : sentence.trim();
+        if (combined.split(/\s+/).length > CHUNK_WORD_THRESHOLD && current) {
+          chunks.push(current.trim());
+          current = sentence.trim();
+        } else {
+          current = combined;
+        }
+      }
+      if (current.trim()) chunks.push(current.trim());
+    }
+  }
+
+  return chunks.length > 0 ? chunks : [text];
+}
+
+/**
+ * Speak text aloud using the Web Speech Synthesis API.
+ * Returns a cancel function. Only works on web.
+ */
+function speakText(text: string, onEnd?: () => void): (() => void) {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.speechSynthesis) {
+    onEnd?.();
+    return () => {};
+  }
+
+  // Strip markdown for cleaner speech
+  const clean = text.replace(/[*_~`#>\[\]()]/g, '').replace(/\n+/g, '. ');
+  const utterance = new SpeechSynthesisUtterance(clean);
+  utterance.lang = 'en-GB';
+  utterance.rate = 1.0;
+  utterance.pitch = 1.0;
+
+  utterance.onend = () => onEnd?.();
+  utterance.onerror = () => onEnd?.();
+
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
+
+  return () => {
+    window.speechSynthesis.cancel();
+    onEnd?.();
+  };
+}
+
 // ── Dot-matrix ring (Nothing Phone glyph aesthetic) ──
 // Renders dots positioned in a circle. Used for the voice orb outer ring
 // and the expanding animated rings when listening.
@@ -688,6 +756,28 @@ export default function Chat() {
   const [showTextInput, setShowTextInput] = useState(false);
   const recognitionRef = useRef<any>(null);
   const autoSendRef = useRef(false);
+  const [speakingMsgIdx, setSpeakingMsgIdx] = useState<number | null>(null);
+  const stopSpeechRef = useRef<(() => void) | null>(null);
+
+  // ── TTS support check ──
+  const ttsSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
+    !!window.speechSynthesis;
+
+  const handleSpeak = (msgIndex: number, text: string) => {
+    // If already speaking this message, stop
+    if (speakingMsgIdx === msgIndex) {
+      stopSpeechRef.current?.();
+      stopSpeechRef.current = null;
+      setSpeakingMsgIdx(null);
+      return;
+    }
+    // Stop any current speech
+    stopSpeechRef.current?.();
+
+    setSpeakingMsgIdx(msgIndex);
+    const cancel = speakText(text, () => setSpeakingMsgIdx(null));
+    stopSpeechRef.current = cancel;
+  };
 
   // ── Pre-fill input from plan page navigation ──
   useEffect(() => {
@@ -1618,6 +1708,8 @@ export default function Chat() {
   // ── Clear conversation ──
 
   const clearChat = async () => {
+    stopSpeechRef.current?.();
+    setSpeakingMsgIdx(null);
     setMessages([]);
     setError(null);
     try {
@@ -1791,6 +1883,11 @@ export default function Chat() {
           const isLast = i === messages.length - 1;
           const showLabel = isAssistant && (i === 0 || messages[i - 1]?.role !== 'assistant');
 
+          // Split long assistant messages into multiple bubbles (like real texts)
+          const bubbleChunks = isAssistant && !loading
+            ? splitIntoBubbles(msg.content)
+            : [msg.content];
+
           const bubble = (
             <View key={i}>
               {showLabel && (
@@ -1799,18 +1896,34 @@ export default function Chat() {
                   <Text style={s.bocyLabel}>bocy</Text>
                 </View>
               )}
-              <View
-                style={[
-                  s.bubble,
-                  msg.role === 'user' ? s.userBubble : s.assistantBubble,
-                ]}
-              >
-                {msg.role === 'user' ? (
+
+              {msg.role === 'user' ? (
+                <View style={[s.bubble, s.userBubble]}>
                   <Text style={[s.bubbleText, s.userText]}>{msg.content}</Text>
-                ) : (
-                  <Markdown>{msg.content}</Markdown>
-                )}
-              </View>
+                </View>
+              ) : (
+                <>
+                  {bubbleChunks.map((chunk, ci) => (
+                    <FadeInView key={`${i}-chunk-${ci}`} delay={ci * 300}>
+                      <View style={[s.bubble, s.assistantBubble, ci > 0 && { marginTop: 4 }]}>
+                        <Markdown>{chunk}</Markdown>
+                      </View>
+                    </FadeInView>
+                  ))}
+                  {/* Voice response button */}
+                  {ttsSupported && msg.content && !loading && (
+                    <TouchableOpacity
+                      style={s.ttsButton}
+                      onPress={() => handleSpeak(i, msg.content)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[s.ttsButtonText, speakingMsgIdx === i && s.ttsButtonActive]}>
+                        {speakingMsgIdx === i ? '\u25A0 Stop' : '\u266A Listen'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
 
               {/* Render action cards below assistant messages */}
               {msg.actions?.map((action, j) => (
@@ -2711,6 +2824,28 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.muted,
     letterSpacing: 1.5,
     textTransform: 'uppercase',
+  },
+
+  // ── TTS (voice response) button ──
+  ttsButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginTop: 4,
+    marginBottom: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: c.border,
+    backgroundColor: 'transparent',
+  },
+  ttsButtonText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.muted,
+    letterSpacing: 0.5,
+  },
+  ttsButtonActive: {
+    color: c.green,
   },
 
   // ── Follow-up suggestion chips (horizontal, inline after messages) ──
