@@ -18,7 +18,7 @@ import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
-import Card, { AnimatedCard, AnimGlyph, BreathingBar, ProgressBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, CardDivider, SectionDot, SMOOTH_ANIM } from '@/components/Card';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 
@@ -1421,7 +1421,7 @@ export default function Home() {
           ) : (
             /* ── Weekly budget status (default) ── */
             <AnimGlyph delay={0}>
-              <Card variant="hero" accentBar accentBarColor={weeklyHealthy ? colors.green : colors.coral}>
+              <Card variant="hero">
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.heroLabel}>THIS WEEK</Text>
@@ -1440,13 +1440,13 @@ export default function Home() {
                   </View>
                 </View>
 
-                <ProgressBar
-                  percent={weeklyUsedPct}
-                  color={weeklyHealthy ? colors.green : colors.coral}
-                  height={4}
-                  breathing
-                  style={{ marginTop: 20, marginBottom: 8 }}
-                />
+                <View style={s.safeToSpendBar}>
+                  <BreathingBar
+                    color={weeklyHealthy ? colors.green : colors.coral}
+                    width={`${weeklyUsedPct}%`}
+                    style={s.safeToSpendBarFill}
+                  />
+                </View>
 
                 {/* Top move teaser */}
                 {dashboardMoves.length > 0 && (
@@ -1476,10 +1476,7 @@ export default function Home() {
               {(activePlanMoves.length > 0 || userPlans.length > 0) && (
                 <>
                   <View style={s.moveSectionHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <SectionDot color={colors.green} />
-                      <Text style={s.moveSectionLabel}>IN PROGRESS</Text>
-                    </View>
+                    <Text style={s.moveSectionLabel}>IN PROGRESS</Text>
                   </View>
                   {userPlans.map((plan) => (
                     <Card key={plan.id} variant="active" style={{ marginBottom: spacing.md }}>
@@ -1512,7 +1509,9 @@ export default function Home() {
                               </View>
                               {!isExpanded && steps.length > 0 && (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                                  <ProgressBar percent={Math.round(stepProgress * 100)} color={colors.green} height={3} style={{ flex: 1 }} />
+                                  <View style={{ flex: 1, height: 3, borderRadius: 1.5, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                    <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 1.5, backgroundColor: colors.green }} />
+                                  </View>
                                   <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{doneSteps.length}/{steps.length}</Text>
                                 </View>
                               )}
@@ -1551,10 +1550,7 @@ export default function Home() {
               {opportunityMoves.length > 0 && (
                 <>
                   <View style={s.moveSectionHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                      <SectionDot color={colors.accent} />
-                      <Text style={s.moveSectionLabel}>YOUR MOVES</Text>
-                    </View>
+                    <Text style={s.moveSectionLabel}>YOUR MOVES</Text>
                     <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green }}>
                       {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo potential
                     </Text>
@@ -1674,7 +1670,7 @@ export default function Home() {
                   })}
 
                   {!isPro && opportunityMoves.length > 2 && (
-                    <Card variant="upgrade" accentBar accentBarColor={colors.green} onPress={() => setShowPaywall(true)} style={{ marginBottom: spacing.md, alignItems: 'center' }}>
+                    <Card variant="upgrade" onPress={() => setShowPaywall(true)} style={{ marginBottom: spacing.md, alignItems: 'center' }}>
                       <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>PRO</Text>
                       <Text style={{ fontFamily: fonts.semibold, fontSize: 16, color: colors.text, textAlign: 'center' }}>
                         +{opportunityMoves.length - 2} more moves locked
@@ -1702,10 +1698,7 @@ export default function Home() {
               onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetExpanded(!budgetExpanded); }}
               style={s.collapsedSectionBtn}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <SectionDot color={overallPctUsed > 100 ? colors.coral : colors.accent} />
-                <Text style={s.moveSectionLabel}>BUDGET</Text>
-              </View>
+              <Text style={s.moveSectionLabel}>BUDGET</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: overallPctUsed > 100 ? colors.coral : colors.text2 }}>
                   {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()} / {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
@@ -1715,8 +1708,16 @@ export default function Home() {
             </TouchableOpacity>
 
             {budgetExpanded && (
-              <Card accentBar accentBarColor={overallPctUsed > 100 ? colors.coral : colors.accent} style={{ marginBottom: spacing.md }}>
-                <ProgressBar percent={overallPctUsed} color={overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.green} height={6} style={{ marginBottom: 20 }} />
+              <Card style={{ marginBottom: spacing.md }}>
+                <View style={s.progressTrack}>
+                  <View style={[
+                    s.progressFill,
+                    {
+                      width: `${Math.min(100, overallPctUsed)}%`,
+                      backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.green,
+                    },
+                  ]} />
+                </View>
 
                 <View style={s.sectionBlock}>
                   <View style={s.sectionHeaderRow}>
@@ -1725,7 +1726,15 @@ export default function Home() {
                       {'\u00a3'}{Math.round(periodNonDiscTotal).toLocaleString()} of {'\u00a3'}{Math.round(periodNonDiscBudget).toLocaleString()}
                     </Text>
                   </View>
-                  <ProgressBar percent={essentialsPctUsed} color={essentialsOnTrack ? colors.text2 : colors.coral} height={4} />
+                  <View style={s.progressTrackSmall}>
+                    <View style={[
+                      s.progressFillSmall,
+                      {
+                        width: `${Math.min(100, essentialsPctUsed)}%`,
+                        backgroundColor: essentialsOnTrack ? colors.text2 : colors.coral,
+                      },
+                    ]} />
+                  </View>
                 </View>
 
                 <View style={s.sectionBlock}>
@@ -1735,7 +1744,15 @@ export default function Home() {
                       {'\u00a3'}{Math.round(periodDiscTotal).toLocaleString()} of {'\u00a3'}{Math.round(periodDiscBudget).toLocaleString()}
                     </Text>
                   </View>
-                  <ProgressBar percent={lifestylePctUsed} color={lifestyleOnTrack ? colors.dim : colors.coral} height={4} />
+                  <View style={s.progressTrackSmall}>
+                    <View style={[
+                      s.progressFillSmall,
+                      {
+                        width: `${Math.min(100, lifestylePctUsed)}%`,
+                        backgroundColor: lifestyleOnTrack ? colors.dim : colors.coral,
+                      },
+                    ]} />
+                  </View>
                 </View>
 
                 <View style={[s.sectionBlock, { borderBottomWidth: 0 }]}>
@@ -1765,15 +1782,12 @@ export default function Home() {
             onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setTxCardExpanded(prev => !prev); }}
             style={s.collapsedSectionBtn}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <SectionDot color={colors.dim} />
-              <Text style={s.moveSectionLabel}>TRANSACTIONS</Text>
-            </View>
+            <Text style={s.moveSectionLabel}>TRANSACTIONS</Text>
             <Text style={{ fontSize: 10, color: colors.muted }}>{txCardExpanded ? '\u25B2' : '\u25BC'}</Text>
           </TouchableOpacity>
 
           {txCardExpanded && (
-            <Card style={{ marginBottom: spacing.md }} accentBar={false}>
+            <Card style={{ marginBottom: spacing.md }}>
               {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
                 const key = `nd-${item.category}`;
                 const isExp = expandedCategories.has(key);
