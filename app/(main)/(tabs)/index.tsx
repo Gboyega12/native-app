@@ -200,6 +200,7 @@ export default function Home() {
   const [userPlans, setUserPlans] = useState<any[]>([]);
   const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[] }>>({});
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
+  const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
   const userIdRef = useRef<string | null>(null);
 
@@ -1059,6 +1060,63 @@ export default function Home() {
     await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', key);
   };
 
+  /** Generate actionable steps for user plans */
+  const getPlanSteps = (plan: any): string[] => {
+    const action = (plan.action || '').toLowerCase();
+    if (action.includes('emergency') || action.includes('buffer')) {
+      return [
+        'Set aside your target amount on payday',
+        'Automate it so you don\'t have to think about it',
+        'Bocy will track your buffer progress each month',
+      ];
+    }
+    if (action.includes('debt') || action.includes('credit') || action.includes('pay off')) {
+      return [
+        'List all debts with their interest rates',
+        'Set up minimum payments on all debts',
+        'Direct any extra to the highest-rate debt first',
+        'Bocy will track your debt-free countdown',
+      ];
+    }
+    if (action.includes('save') || action.includes('saving')) {
+      return [
+        'Set up automatic monthly transfer on payday',
+        'Automate it — hands-free saving',
+        'Bocy will update your progress each month',
+      ];
+    }
+    if (action.includes('invest')) {
+      return [
+        'Start with a small monthly amount you won\'t miss',
+        'Set it and forget it — don\'t check daily',
+        'Bocy will flag when to review your approach',
+      ];
+    }
+    if (action.includes('subscript') || action.includes('cancel')) {
+      return [
+        'Review active subscriptions this week',
+        'Cancel the ones you haven\'t used in 30 days',
+        'Bocy will check again next month',
+      ];
+    }
+    return [
+      'Break this goal into a weekly action',
+      'Start with the smallest step this week',
+      'Bocy will check in on your progress',
+    ];
+  };
+
+  const handleRemovePlan = async (planId: string) => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
+    setUserPlans((prev) => prev.filter((p) => p.id !== planId));
+    setExpandedPlan(null);
+    await supabase.from('user_plans').update({ status: 'dismissed' }).eq('id', planId).eq('user_id', uid);
+    // Clean up any progress for this plan
+    await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', `plan-${planId}`);
+  };
+
 
   /** Provider actions for a move */
   const PROVIDER_ACTIONS: Record<string, { label: string; sub?: string; phone?: string; url?: string }[]> = {
@@ -1477,14 +1535,80 @@ export default function Home() {
                   <View style={s.moveSectionHeader}>
                     <Text style={s.moveSectionLabel}>IN PROGRESS</Text>
                   </View>
-                  {userPlans.map((plan) => (
-                    <Card key={plan.id} variant="active" style={{ marginBottom: spacing.md }}>
-                      <Text style={s.moveAction}>{stripMd(plan.action)}</Text>
-                      {plan.monthly_saving != null && (
-                        <Text style={s.moveImpactText}>{'\u00a3'}{plan.monthly_saving}/mo</Text>
-                      )}
-                    </Card>
-                  ))}
+                  {userPlans.map((plan) => {
+                    const isPlanExpanded = expandedPlan === plan.id;
+                    const planKey = `plan-${plan.id}`;
+                    const planSteps = getPlanSteps(plan);
+                    const doneSteps = planProgress[planKey]?.completed_steps || [];
+                    const stepProgress = planSteps.length > 0 ? doneSteps.length / planSteps.length : 0;
+                    const nextStepIdx = planSteps.findIndex((_: string, idx: number) => !doneSteps.includes(idx));
+                    return (
+                      <Card key={plan.id} variant="active" style={{ marginBottom: spacing.md }}>
+                        <TouchableOpacity onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setExpandedPlan(isPlanExpanded ? null : plan.id); }} activeOpacity={0.8}>
+                          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                            <View style={[s.moveBadge, { backgroundColor: colors.accent, borderColor: colors.accent }]}>
+                              <Text style={[s.moveBadgeText, { color: colors.bg }]}>{'\u2713'}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.moveAction}>{stripMd(plan.action)}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}>
+                                {plan.monthly_saving != null && (
+                                  <Text style={s.moveImpactText}>{'\u00a3'}{plan.monthly_saving}/mo</Text>
+                                )}
+                                <Text style={{ fontSize: 10, color: colors.muted }}>{isPlanExpanded ? '\u25B2' : '\u25BC'}</Text>
+                              </View>
+                              {!isPlanExpanded && planSteps.length > 0 && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                                  <View style={{ flex: 1, height: 2, borderRadius: 1, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                    <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 1, backgroundColor: colors.accent }} />
+                                  </View>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{doneSteps.length}/{planSteps.length}</Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                        {isPlanExpanded && (
+                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border }}>
+                            <View style={{ position: 'absolute', top: 8, right: 0 }}>
+                              <ExpandDots count={5} size={2.5} />
+                            </View>
+                            {/* Progress bar */}
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                              <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: colors.accent }} />
+                              </View>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{doneSteps.length}/{planSteps.length} done</Text>
+                            </View>
+                            {/* Step checklist */}
+                            {planSteps.map((step: string, j: number) => {
+                              const isDone = doneSteps.includes(j);
+                              const isNext = j === nextStepIdx;
+                              return (
+                                <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(planKey, j, plan.action)} activeOpacity={0.7}>
+                                  <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: isDone ? colors.accent : colors.dim, backgroundColor: isDone ? colors.accent : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                                    {isDone && <Text style={{ color: colors.bg, fontSize: 12, fontWeight: '700' }}>{'\u2713'}</Text>}
+                                  </View>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: isDone ? colors.muted : colors.text, textDecorationLine: isDone ? 'line-through' : 'none', lineHeight: 20 }}>{stripMd(step)}</Text>
+                                    {isNext && !isDone && <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent, marginTop: 2 }}>Do this next</Text>}
+                                  </View>
+                                </TouchableOpacity>
+                              );
+                            })}
+                            {/* Ask Bocy button */}
+                            <TouchableOpacity style={{ marginTop: 16, paddingVertical: 10, alignItems: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.accent }} onPress={() => router.push('/(main)/(tabs)/chat')} activeOpacity={0.7}>
+                              <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.accent }}>Ask Bocy about this</Text>
+                            </TouchableOpacity>
+                            {/* Delete plan button */}
+                            <TouchableOpacity style={{ marginTop: 10, paddingVertical: 8, alignItems: 'center' }} onPress={() => Alert.alert('Delete plan?', `Remove "${stripMd(plan.action)}" from your plans?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => handleRemovePlan(plan.id) }])} activeOpacity={0.7}>
+                              <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>Delete plan</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </Card>
+                    );
+                  })}
                   {activePlanMoves.map((move, seqIdx) => {
                     const i = move._sortIdx;
                     const isExpanded = expandedMove === i;
