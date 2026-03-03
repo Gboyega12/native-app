@@ -206,6 +206,9 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               <Text style={s.proBadge}>PRO</Text>
               <Text style={s.title}>Upgrade to Bocy Pro</Text>
               <Text style={s.subtitle}>{contextMessage}</Text>
+              <View style={s.trialBadge}>
+                <Text style={s.trialBadgeText}>2 weeks free</Text>
+              </View>
             </View>
 
             {/* Price toggle */}
@@ -266,7 +269,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               {loading ? (
                 <ActivityIndicator size="small" color="#000000" />
               ) : (
-                <Text style={s.upgradeBtnText}>Subscribe</Text>
+                <Text style={s.upgradeBtnText}>Start free trial</Text>
               )}
             </TouchableOpacity>
             {error && (
@@ -275,11 +278,13 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               </View>
             )}
             <Text style={s.legalNote}>
+              Free for 14 days, then{' '}
               {selectedPrice === 'yearly'
                 ? (nativeYearlyPrice || '\u00a379.99') + '/year'
                 : (nativeMonthlyPrice || '\u00a39.99') + '/month'}
               {'. '}Auto-renews. Cancel anytime.{'\n'}
-              Payment will be charged to your Apple ID account at confirmation of purchase. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. You can manage and cancel subscriptions in your Account Settings on the App Store after purchase.
+              No charge during your trial. Cancel before it ends and you won't be billed.
+              {isNative ? ' Payment will be charged to your Apple ID account after the trial period. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. You can manage and cancel subscriptions in your Account Settings on the App Store after purchase.' : ''}
             </Text>
             <View style={s.legalLinks}>
               <TouchableOpacity onPress={() => Linking.openURL('https://www.bocy.io/terms.html')} activeOpacity={0.7}>
@@ -399,6 +404,21 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.text2,
     textAlign: 'center',
     lineHeight: 22,
+  },
+  trialBadge: {
+    backgroundColor: c.accentDim,
+    borderWidth: 1,
+    borderColor: c.accent + '40',
+    borderRadius: 100,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
+    marginTop: spacing.sm,
+  },
+  trialBadgeText: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: c.accent,
+    letterSpacing: 0.3,
   },
 
   // Price toggle

@@ -64,6 +64,16 @@ export default async function handler(req, res) {
       customerId = customer.id;
     }
 
+    // Check if user has had a trial before (prevent repeat trials)
+    const { data: existingTrialSub } = await admin
+      .from('user_subscriptions')
+      .select('id')
+      .eq('user_id', user.id)
+      .not('current_period_end', 'is', null)
+      .maybeSingle();
+
+    const isFirstSubscription = !existingTrialSub;
+
     // Create Checkout Session
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
@@ -74,6 +84,8 @@ export default async function handler(req, res) {
       cancel_url: `${appUrl}/(main)/profile`,
       subscription_data: {
         metadata: { supabase_user_id: user.id },
+        // 14-day free trial for first-time subscribers
+        ...(isFirstSubscription && { trial_period_days: 14 }),
       },
       allow_promotion_codes: true,
     });
