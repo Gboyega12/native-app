@@ -7,11 +7,11 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+const ELEVENLABS_API_KEY = (process.env.ELEVENLABS_API_KEY || '').trim();
 // Default voice: "Rachel" — warm, friendly, natural British female voice
 // Can be overridden via env var with any ElevenLabs voice ID
-const VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
-const MODEL_ID = process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2';
+const VOICE_ID = (process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM').trim();
+const MODEL_ID = (process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2').trim();
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -28,13 +28,20 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('[tts] Missing Supabase config:', { url: !!supabaseUrl, anonKey: !!supabaseAnonKey });
+    return res.status(500).json({ error: 'Server misconfigured' });
+  }
+
   const supabase = createClient(supabaseUrl, supabaseAnonKey);
   const { data: { user }, error: authError } = await supabase.auth.getUser(token);
   if (authError || !user) {
+    console.error('[tts] Auth failed:', authError?.message);
     return res.status(401).json({ error: 'Invalid token' });
   }
 
   if (!ELEVENLABS_API_KEY) {
+    console.error('[tts] ELEVENLABS_API_KEY is not set or empty');
     return res.status(503).json({ error: 'TTS not configured' });
   }
 

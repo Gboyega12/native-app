@@ -89,8 +89,11 @@ function speakText(text: string, onEnd?: () => void, authToken?: string | null):
       },
       body: JSON.stringify({ text: clean }),
     })
-      .then((res) => {
-        if (!res.ok) throw new Error('TTS request failed');
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`TTS ${res.status}: ${body}`);
+        }
         return res.blob();
       })
       .then((blob) => {
@@ -113,6 +116,7 @@ function speakText(text: string, onEnd?: () => void, authToken?: string | null):
         speakWithWebSpeech(text, onEnd);
       });
   } else {
+    console.warn('[TTS] No auth token — using Web Speech API fallback');
     speakWithWebSpeech(text, onEnd);
   }
 
