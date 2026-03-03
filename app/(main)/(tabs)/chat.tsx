@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
+  View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
@@ -164,6 +164,171 @@ function PulseButton({ children, trigger }: { children: React.ReactNode; trigger
   }, [trigger]);
 
   return <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>;
+}
+
+// ── Voice Orb (hero mic button with expanding ring animation) ──
+// Nothing Phone glyph aesthetic: geometric, monochrome, breathing rings.
+
+function VoiceOrb({
+  listening,
+  onPress,
+  disabled,
+}: {
+  listening: boolean;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
+  const scale = useRef(new Animated.Value(1)).current;
+  const ring1 = useRef(new Animated.Value(0)).current;
+  const ring2 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (listening) {
+      // Breathing scale on the orb itself
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(scale, { toValue: 1.06, duration: 800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 1, duration: 800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+      ).start();
+      // Expanding ring 1
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(ring1, { toValue: 1, duration: 1600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(ring1, { toValue: 0, duration: 0, useNativeDriver: true }),
+        ]),
+      ).start();
+      // Expanding ring 2 (offset)
+      setTimeout(() => {
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(ring2, { toValue: 1, duration: 1600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+            Animated.timing(ring2, { toValue: 0, duration: 0, useNativeDriver: true }),
+          ]),
+        ).start();
+      }, 800);
+    } else {
+      scale.stopAnimation();
+      ring1.stopAnimation();
+      ring2.stopAnimation();
+      scale.setValue(1);
+      ring1.setValue(0);
+      ring2.setValue(0);
+    }
+  }, [listening]);
+
+  const handlePressIn = () => {
+    Animated.timing(scale, { toValue: 0.92, duration: 100, useNativeDriver: true }).start();
+  };
+  const handlePressOut = () => {
+    Animated.timing(scale, { toValue: 1, duration: 150, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  };
+
+  return (
+    <View style={s.voiceOrbContainer}>
+      {/* Expanding rings (only visible when listening) */}
+      {listening && (
+        <>
+          <Animated.View
+            style={[
+              s.voiceRing,
+              {
+                borderColor: colors.accent,
+                opacity: ring1.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0] }),
+                transform: [{ scale: ring1.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] }) }],
+              },
+            ]}
+          />
+          <Animated.View
+            style={[
+              s.voiceRing,
+              {
+                borderColor: colors.accent,
+                opacity: ring2.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0] }),
+                transform: [{ scale: ring2.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) }],
+              },
+            ]}
+          />
+        </>
+      )}
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <Pressable
+          style={[s.voiceOrb, listening && s.voiceOrbListening]}
+          onPress={disabled ? undefined : onPress}
+          onPressIn={disabled ? undefined : handlePressIn}
+          onPressOut={disabled ? undefined : handlePressOut}
+          accessibilityRole="button"
+          accessibilityLabel={listening ? 'Stop listening' : 'Start voice input'}
+        >
+          {listening ? (
+            <View style={s.voiceOrbStop} />
+          ) : (
+            <View style={s.voiceOrbMic}>
+              <View style={[s.voiceOrbMicHead, { borderColor: colors.bg }]} />
+              <View style={[s.voiceOrbMicStem, { borderColor: colors.bg }]} />
+            </View>
+          )}
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
+
+// ── Voice Waveform Visualiser ──
+// Animated bars that pulse during active listening. Nothing Phone dot-matrix feel.
+
+const WAVE_BAR_COUNT = 5;
+
+function VoiceWaveform({ active }: { active: boolean }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
+  const bars = useRef(
+    Array.from({ length: WAVE_BAR_COUNT }, () => new Animated.Value(0.3)),
+  ).current;
+
+  useEffect(() => {
+    if (active) {
+      const animations = bars.map((bar, i) =>
+        Animated.loop(
+          Animated.sequence([
+            Animated.delay(i * 100),
+            Animated.timing(bar, { toValue: 1, duration: 300 + Math.random() * 200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+            Animated.timing(bar, { toValue: 0.3, duration: 300 + Math.random() * 200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          ]),
+        ),
+      );
+      animations.forEach((a) => a.start());
+      return () => animations.forEach((a) => a.stop());
+    } else {
+      bars.forEach((bar) => {
+        bar.stopAnimation();
+        bar.setValue(0.3);
+      });
+    }
+  }, [active]);
+
+  if (!active) return null;
+
+  return (
+    <View style={s.waveformRow}>
+      {bars.map((bar, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            s.waveformBar,
+            {
+              transform: [{
+                scaleY: bar.interpolate({ inputRange: [0.3, 1], outputRange: [0.3, 1] }),
+              }],
+              opacity: bar,
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
 }
 
 // ── Inline action cards ──
@@ -433,7 +598,9 @@ export default function Chat() {
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const [listening, setListening] = useState(false);
+  const [showTextInput, setShowTextInput] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const autoSendRef = useRef(false);
 
   // ── Pre-fill input from plan page navigation ──
   useEffect(() => {
@@ -487,9 +654,14 @@ export default function Chat() {
 
     recognition.onend = () => {
       setListening(false);
-      // Clean up any interim markers
-      setInput((prev) => prev.replace(/\u200B/g, ''));
-      setTimeout(() => inputRef.current?.focus(), 100);
+      // Clean up any interim markers, then auto-send if we have a final transcript
+      setInput((prev) => {
+        const cleaned = prev.replace(/\u200B/g, '').trim();
+        if (cleaned) {
+          autoSendRef.current = true;
+        }
+        return cleaned;
+      });
     };
 
     recognition.onerror = () => {
@@ -499,6 +671,14 @@ export default function Chat() {
     setListening(true);
     recognition.start();
   };
+
+  // ── Auto-send after voice recognition completes ──
+  useEffect(() => {
+    if (autoSendRef.current && input.trim() && !listening) {
+      autoSendRef.current = false;
+      sendMessage(input);
+    }
+  }, [input, listening]);
 
   // ── Load context + persisted messages on focus ──
   // Also subscribe to sync completions from other screens so chat stays fresh.
@@ -1371,6 +1551,8 @@ export default function Chat() {
   const freeGateReached = !isPro && userMessageCount >= FREE_MESSAGE_LIMIT;
   const freeMessagesRemaining = isPro ? Infinity : Math.max(0, FREE_MESSAGE_LIMIT - userMessageCount);
 
+  const isEmptyState = messages.length === 0 || (messages.length === 1 && messages[0].role === 'assistant' && paydayActive);
+
   return (
     <KeyboardAvoidingView
       style={s.container}
@@ -1401,38 +1583,114 @@ export default function Chat() {
         style={s.messages}
         contentContainerStyle={[
           s.messagesContent,
+          isEmptyState && s.messagesContentEmpty,
           isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' },
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Show suggestions when empty OR when only the payday auto-nudge is present */}
-        {(messages.length === 0 || (messages.length === 1 && messages[0].role === 'assistant' && paydayActive)) && (
-          <View style={s.suggestedContainer}>
-            {messages.length === 0 && (
-              <>
-                <View style={s.chatBocyHero}>
-                  <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
+        {/* ── Voice-first empty state ── */}
+        {isEmptyState && (
+          <View style={s.voiceHeroContainer}>
+            {/* Payday auto-nudge message if present */}
+            {messages.length === 1 && messages[0].role === 'assistant' && (
+              <FadeInView>
+                <View style={[s.bubble, s.assistantBubble, { marginBottom: spacing.xl, alignSelf: 'center', maxWidth: '90%' }]}>
+                  <Markdown>{messages[0].content}</Markdown>
                 </View>
-                <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Hey, what\u2019s up?'}</Text>
-                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'I\u2019ve got your numbers. Let\u2019s talk money.'}</Text>
-              </>
+              </FadeInView>
             )}
-            <View style={[s.suggestedGrid, isTablet && { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 12 }]}>
-              {suggestedQuestions.map((q, i) => (
-                <TouchableOpacity
-                  key={i}
-                  style={[s.suggestedButton, isTablet && { flexBasis: '48%' as any, flexGrow: 1 }]}
-                  onPress={() => sendMessage(q)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.suggestedText}>{q}</Text>
-                </TouchableOpacity>
-              ))}
+
+            <View style={s.voiceHeroTop}>
+              <Text style={s.voiceHeroTitle}>
+                {paydayActive ? 'Payday check-in' : listening ? 'Listening...' : 'Talk to Bocy'}
+              </Text>
+              <Text style={s.voiceHeroSubtitle}>
+                {listening
+                  ? 'Speak naturally. I\u2019ll send when you\u2019re done.'
+                  : paydayActive
+                    ? 'Tap to speak, or pick a question below'
+                    : 'Tap the mic and ask me anything about your money'}
+              </Text>
             </View>
+
+            {/* Voice Orb — the hero CTA */}
+            <VoiceOrb
+              listening={listening}
+              onPress={voiceSupported ? toggleVoice : () => { setShowTextInput(true); setTimeout(() => inputRef.current?.focus(), 100); }}
+              disabled={loading}
+            />
+
+            {/* Waveform visualiser + live transcript */}
+            <VoiceWaveform active={listening} />
+            {listening && input.trim() !== '' && (
+              <FadeInView>
+                <Text style={s.liveTranscript}>{input.replace(/\u200B/g, '')}</Text>
+              </FadeInView>
+            )}
+
+            {/* Type-instead toggle */}
+            {!listening && (
+              <TouchableOpacity
+                style={s.typeToggle}
+                onPress={() => { setShowTextInput(!showTextInput); if (!showTextInput) setTimeout(() => inputRef.current?.focus(), 100); }}
+                activeOpacity={0.7}
+              >
+                <Text style={s.typeToggleText}>{showTextInput ? 'Hide keyboard' : 'Type instead'}</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* Inline text input (secondary, shown on demand) */}
+            {showTextInput && !listening && (
+              <FadeInView>
+                <View style={s.inlineInputRow}>
+                  <TextInput
+                    ref={inputRef}
+                    style={[s.inlineInput, { height: Math.max(40, Math.min(inputHeight, 100)) }]}
+                    placeholder="Type your question..."
+                    placeholderTextColor={colors.muted}
+                    value={input}
+                    onChangeText={setInput}
+                    onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+                    onSubmitEditing={() => sendMessage(input)}
+                    returnKeyType="send"
+                    multiline
+                    maxLength={1000}
+                    blurOnSubmit
+                  />
+                  {input.trim() ? (
+                    <TouchableOpacity
+                      style={[s.inlineSendBtn, loading && { opacity: 0.3 }]}
+                      onPress={() => sendMessage(input)}
+                      disabled={loading}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.inlineSendIcon}>{'\u2191'}</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              </FadeInView>
+            )}
+
+            {/* Suggested question chips */}
+            {!listening && (
+              <View style={[s.suggestedGrid, { marginTop: spacing.xl }, isTablet && { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 12 }]}>
+                {suggestedQuestions.map((q, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={[s.suggestedButton, isTablet && { flexBasis: '48%' as any, flexGrow: 1 }]}
+                    onPress={() => sendMessage(q)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={s.suggestedText}>{q}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
-        {messages.map((msg, i) => {
+        {/* ── Conversation messages ── */}
+        {!isEmptyState && messages.map((msg, i) => {
           const isAssistant = msg.role === 'assistant';
           const isLast = i === messages.length - 1;
           const showLabel = isAssistant && (i === 0 || messages[i - 1]?.role !== 'assistant');
@@ -1511,7 +1769,7 @@ export default function Chat() {
         )}
 
         {/* Follow-up suggestion chips after last assistant response */}
-        {!loading && !error && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
+        {!isEmptyState && !loading && !error && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
           <View style={s.followUpContainer}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.followUpScroll}>
               {suggestedQuestions.slice(0, 3).map((q, qi) => (
@@ -1529,74 +1787,79 @@ export default function Chat() {
         )}
       </ScrollView>
 
-      {/* ── Input / Gate ── */}
+      {/* ── Input / Gate (only shown in conversation mode, not empty state) ── */}
       <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
-      {freeGateReached ? (
-        <View style={[s.gateRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-          <Text style={s.gateText}>You've used your {FREE_MESSAGE_LIMIT} free messages</Text>
-          <TouchableOpacity
-            style={s.gateBtn}
-            onPress={() => setShowPaywall(true)}
-            activeOpacity={0.8}
-          >
-            <Text style={s.gateBtnText}>Unlock unlimited chat</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
+      {!isEmptyState && (
         <>
-          {!isPro && userMessageCount > 0 && (
-            <View style={[s.freeBadgeRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-              <Text style={s.freeBadgeText}>
-                {freeMessagesRemaining} of {FREE_MESSAGE_LIMIT} free {freeMessagesRemaining === 1 ? 'message' : 'messages'} left
-              </Text>
+          {freeGateReached ? (
+            <View style={[s.gateRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
+              <Text style={s.gateText}>You've used your {FREE_MESSAGE_LIMIT} free messages</Text>
+              <TouchableOpacity
+                style={s.gateBtn}
+                onPress={() => setShowPaywall(true)}
+                activeOpacity={0.8}
+              >
+                <Text style={s.gateBtnText}>Unlock unlimited chat</Text>
+              </TouchableOpacity>
             </View>
-          )}
-          <View style={[s.inputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-            <TextInput
-              ref={inputRef}
-              style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
-              placeholder={listening ? 'Listening...' : 'Ask me anything...'}
-              placeholderTextColor={listening ? colors.green : colors.muted}
-              value={input}
-              onChangeText={setInput}
-              onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
-              onSubmitEditing={() => sendMessage(input)}
-              returnKeyType="send"
-              multiline
-              maxLength={1000}
-              blurOnSubmit
-            />
-            <PulseButton trigger={input.trim() ? 'send' : listening ? 'listening' : 'voice'}>
-              {input.trim() ? (
-                <TouchableOpacity
-                  style={[s.actionButton, loading && s.actionButtonDisabled]}
-                  onPress={() => sendMessage(input)}
-                  disabled={loading}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.actionButtonIcon}>{'\u2191'}</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  style={[s.actionButton, listening && s.actionButtonListening]}
-                  onPress={voiceSupported ? toggleVoice : undefined}
-                  activeOpacity={0.7}
-                  disabled={!voiceSupported}
-                >
-                  <View style={s.glyphRing}>
-                    {listening ? (
-                      <View style={s.glyphStop} />
-                    ) : (
-                      <View style={s.glyphMic}>
-                        <View style={s.glyphMicHead} />
-                        <View style={s.glyphMicStem} />
-                      </View>
-                    )}
-                  </View>
-                </TouchableOpacity>
+          ) : (
+            <>
+              {!isPro && userMessageCount > 0 && (
+                <View style={[s.freeBadgeRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
+                  <Text style={s.freeBadgeText}>
+                    {freeMessagesRemaining} of {FREE_MESSAGE_LIMIT} free {freeMessagesRemaining === 1 ? 'message' : 'messages'} left
+                  </Text>
+                </View>
               )}
-            </PulseButton>
-          </View>
+              {/* Voice-first input bar: mic button prominent, text secondary */}
+              <View style={[s.voiceInputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
+                <TextInput
+                  ref={inputRef}
+                  style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
+                  placeholder={listening ? 'Listening...' : 'Type or tap mic...'}
+                  placeholderTextColor={listening ? colors.green : colors.muted}
+                  value={input}
+                  onChangeText={setInput}
+                  onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+                  onSubmitEditing={() => sendMessage(input)}
+                  returnKeyType="send"
+                  multiline
+                  maxLength={1000}
+                  blurOnSubmit
+                />
+                {/* Waveform in input bar when listening */}
+                {listening && <VoiceWaveform active={listening} />}
+                <PulseButton trigger={input.trim() ? 'send' : listening ? 'listening' : 'voice'}>
+                  {input.trim() ? (
+                    <TouchableOpacity
+                      style={[s.actionButton, loading && s.actionButtonDisabled]}
+                      onPress={() => sendMessage(input)}
+                      disabled={loading}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.actionButtonIcon}>{'\u2191'}</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[s.voiceInputOrb, listening && s.voiceInputOrbListening]}
+                      onPress={voiceSupported ? toggleVoice : undefined}
+                      activeOpacity={0.7}
+                      disabled={!voiceSupported}
+                    >
+                      {listening ? (
+                        <View style={s.glyphStop} />
+                      ) : (
+                        <View style={s.glyphMic}>
+                          <View style={[s.glyphMicHead, { borderColor: colors.bg }]} />
+                          <View style={[s.glyphMicStem, { borderColor: colors.bg }]} />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </PulseButton>
+              </View>
+            </>
+          )}
         </>
       )}
     </KeyboardAvoidingView>
@@ -1816,25 +2079,158 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.lg,
   },
-  suggestedContainer: {
-    marginTop: spacing.xxl,
+  messagesContentEmpty: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  // ── Voice-first hero (empty state) ──
+  voiceHeroContainer: {
     alignItems: 'center',
     paddingHorizontal: spacing.md,
+    paddingBottom: spacing.xl,
   },
-  suggestedTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 26,
-    color: c.text,
-    marginTop: spacing.sm,
-  },
-  suggestedSubtitle: {
-    fontFamily: fonts.regular,
-    fontSize: 15,
-    color: c.dim,
+  voiceHeroTop: {
+    alignItems: 'center',
     marginBottom: spacing.xl,
-    marginTop: 10,
+  },
+  voiceHeroTitle: {
+    fontFamily: fonts.heading,
+    fontSize: 28,
+    color: c.text,
+    textAlign: 'center',
+  },
+  voiceHeroSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.dim,
+    marginTop: 8,
     textAlign: 'center',
     lineHeight: 22,
+    maxWidth: 280,
+  },
+  // ── Voice Orb ──
+  voiceOrbContainer: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  voiceRing: {
+    position: 'absolute',
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: 1.5,
+  },
+  voiceOrb: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: c.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  voiceOrbListening: {
+    backgroundColor: c.green,
+  },
+  voiceOrbStop: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    backgroundColor: c.bg,
+  },
+  voiceOrbMic: {
+    alignItems: 'center',
+  },
+  voiceOrbMicHead: {
+    width: 16,
+    height: 20,
+    borderRadius: 8,
+    borderWidth: 2.5,
+  },
+  voiceOrbMicStem: {
+    width: 24,
+    height: 12,
+    borderBottomLeftRadius: 12,
+    borderBottomRightRadius: 12,
+    borderWidth: 2.5,
+    borderTopWidth: 0,
+    marginTop: -2,
+  },
+  // ── Waveform visualiser ──
+  waveformRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    height: 32,
+    marginBottom: spacing.sm,
+  },
+  waveformBar: {
+    width: 4,
+    height: 28,
+    borderRadius: 2,
+    backgroundColor: c.accent,
+  },
+  // ── Live transcript ──
+  liveTranscript: {
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: c.text2,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    lineHeight: 22,
+  },
+  // ── Type-instead toggle ──
+  typeToggle: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  typeToggleText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.muted,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  // ── Inline text input (empty state) ──
+  inlineInputRow: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 10,
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  inlineInput: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 22,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.md,
+    fontSize: 15,
+    color: c.text,
+  },
+  inlineSendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: c.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inlineSendIcon: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    color: c.bg,
+    marginTop: -1,
   },
   suggestedGrid: {
     width: '100%',
@@ -2096,8 +2492,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.coral,
     marginTop: spacing.xs,
   },
-  // ── Input row ──
-  inputRow: {
+  // ── Voice-first input bar (conversation mode) ──
+  voiceInputRow: {
     flexDirection: 'row',
     paddingVertical: 14,
     paddingHorizontal: 16,
@@ -2139,6 +2535,18 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 20,
     color: c.bg,
     marginTop: -1,
+  },
+  // ── Voice input orb (conversation-mode mic button) ──
+  voiceInputOrb: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: c.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  voiceInputOrbListening: {
+    backgroundColor: c.green,
   },
   // ── Glyph mic icon (Nothing Phone style) ──
   glyphRing: {

@@ -20,6 +20,7 @@ import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
+import InsightModal from '@/components/InsightModal';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -118,6 +119,15 @@ export default function Home() {
     }
   };
 
+  // ── Show insight modal on app open when income arrives ──
+  useEffect(() => {
+    if (weeklyCtx?.incomeArrivedThisWeek && Array.isArray(weeklyCtx?.recentIncomeEvents) && weeklyCtx.recentIncomeEvents.length > 0 && !incomeDismissed) {
+      // Small delay to let the dashboard render first
+      const timer = setTimeout(() => setShowInsightModal(true), 600);
+      return () => clearTimeout(timer);
+    }
+  }, [weeklyCtx?.incomeArrivedThisWeek, incomeDismissed]);
+
   const toggleCategory = (key: string) => {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedCategories((prev) => {
@@ -166,6 +176,7 @@ export default function Home() {
 
   const { isPro } = useSubscription();
   const [showPaywall, setShowPaywall] = useState(false);
+  const [showInsightModal, setShowInsightModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [verifyMove, setVerifyMove] = useState<Move | null>(null);
   const [infoCard, setInfoCard] = useState<string | null>(null);
@@ -2220,6 +2231,31 @@ export default function Home() {
 
       <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
       {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} scrollRef={dashScrollRef} cardPositions={cardPositions} router={router} />}
+
+      {/* ── Income arrival insight modal ── */}
+      {weeklyCtx?.incomeArrivedThisWeek && Array.isArray(weeklyCtx?.recentIncomeEvents) && weeklyCtx.recentIncomeEvents.length > 0 && (
+        <InsightModal
+          visible={showInsightModal}
+          onDismiss={() => { setShowInsightModal(false); dismissIncome(); }}
+          onAction={(prefill) => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: prefill || 'I just got paid. Walk me through what to do first.' } })}
+          type="payday"
+          tag="PAYDAY"
+          title="Income received"
+          body={
+            weeklyCtx.recentIncomeEvents.map((e) =>
+              `\u00a3${Math.round(e?.amount ?? 0).toLocaleString()} from ${e?.source ?? 'unknown'}`
+            ).join(', ') +
+            ' landed this week.' +
+            ((weeklyCtx.committedThisWeek ?? 0) > 0
+              ? ` \u00a3${Math.round(weeklyCtx.committedThisWeek).toLocaleString()} already committed to bills.`
+              : '') +
+            ' Want me to walk you through where it should go?'
+          }
+          actionLabel="Talk to Bocy"
+          actionPrefill="I just got paid. Walk me through what to do first."
+          fingerprint={incomeFingerprint ? `income:${incomeFingerprint}` : undefined}
+        />
+      )}
     </ScrollView>
   );
 }
