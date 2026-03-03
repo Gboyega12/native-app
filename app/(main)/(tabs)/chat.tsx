@@ -569,6 +569,9 @@ function PlanCard({
       variant="action"
       borderColor={isApproved ? colors.accent : undefined}
       noShadow
+      accentBar
+      accentBarColor={isApproved ? colors.green : isDeleted ? colors.coral : colors.accent}
+      dotDecoration={false}
       style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
     >
       <Text style={s.actionCardLabel}>{isApproved ? 'PLAN ADDED' : isDeleted ? 'PLAN REMOVED' : 'PLAN SUGGESTED'}</Text>
@@ -643,6 +646,9 @@ function BudgetItemCard({ action, onDelete }: { action: ChatAction; onDelete: ()
       variant="action"
       borderColor={isDeleted ? undefined : colors.accent}
       noShadow
+      accentBar
+      accentBarColor={isDeleted ? colors.coral : colors.accent}
+      dotDecoration={false}
       style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
     >
       <Text style={s.actionCardLabel}>{isDeleted ? 'BUDGET ITEM REMOVED' : 'BUDGET UPDATED'}</Text>
@@ -689,6 +695,9 @@ function OverrideCard({ action }: { action: ChatAction }) {
     <Card
       variant="action"
       noShadow
+      accentBar
+      accentBarColor={colors.accent}
+      dotDecoration={false}
       style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
     >
       <Text style={s.actionCardLabel}>TRANSACTION UPDATED</Text>
@@ -731,6 +740,9 @@ function GoalUpdateCard({
       variant="action"
       borderColor={isAccepted ? colors.accent : colors.skyDim}
       noShadow
+      accentBar
+      accentBarColor={isAccepted ? colors.green : colors.accent}
+      dotDecoration={false}
       style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
     >
       <Text style={s.goalUpdateLabel}>GOAL CHECK-IN</Text>

@@ -11,6 +11,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
+import { SectionDot } from '@/components/Card';
 import { restorePurchases } from '@/lib/revenuecat';
 import { useWebPush } from '@/lib/web-push';
 
@@ -472,7 +473,10 @@ export default function Profile() {
       <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} />
 
       {/* ── Connected accounts ── */}
-      <Text style={s.sectionLabel}>ACCOUNTS</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <SectionDot color={colors.green} />
+        <Text style={s.sectionLabel}>ACCOUNTS</Text>
+      </View>
 
       {allAccounts.map((bank, i) => {
         const displayName = bank.provider_name || (bank.account_type === 'credit' ? `Credit card ${i + 1}` : `Bank account ${i + 1}`);
@@ -614,7 +618,10 @@ export default function Profile() {
       </Modal>
 
       {/* ── Settings ── */}
-      <Text style={s.sectionLabel}>SETTINGS</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <SectionDot color={colors.accent} />
+        <Text style={s.sectionLabel}>SETTINGS</Text>
+      </View>
 
       <View style={s.groupCard}>
         <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/identity')} activeOpacity={0.7}>
@@ -756,7 +763,10 @@ export default function Profile() {
       )}
 
       {/* ── Feedback + account ── */}
-      <Text style={s.sectionLabel}>SUPPORT</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <SectionDot color={colors.dim} />
+        <Text style={s.sectionLabel}>SUPPORT</Text>
+      </View>
 
       <View style={s.groupCard}>
         <TouchableOpacity style={s.groupRow} onPress={() => Linking.openURL('https://www.bocy.io/privacy.html')} activeOpacity={0.7}>

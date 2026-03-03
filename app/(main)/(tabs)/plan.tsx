@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
-import Card, { AnimGlyph, SMOOTH_ANIM } from '@/components/Card';
+import Card, { AnimGlyph, ProgressBar, SectionDot, SMOOTH_ANIM } from '@/components/Card';
 import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
@@ -732,7 +732,7 @@ export default function Plan() {
           SECTION 1 — YOUR GOAL
           ══════════════════════════════════════════════ */}
       {goalCtx && (
-        <Card variant="active" style={{ marginBottom: spacing.xl }}>
+        <Card variant="active" accentBar accentBarColor={colors.green} style={{ marginBottom: spacing.xl }}>
           <AnimGlyph>
             <Text style={s.trajGoal}>{goalCtx.goalLabel}</Text>
           </AnimGlyph>
@@ -847,7 +847,10 @@ export default function Plan() {
         <>
           <AnimGlyph delay={100}>
             <View style={s.sectionHeader}>
-              <Text style={s.sectionLabel}>IN PROGRESS</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <SectionDot color={colors.green} />
+                <Text style={s.sectionLabel}>IN PROGRESS</Text>
+              </View>
               <Text style={[s.sectionMeta, { color: colors.green }]}>
                 saving {'\u00a3'}{Math.round(activeMonthly + planMonthly)}/mo
               </Text>
@@ -885,9 +888,12 @@ export default function Plan() {
                       </View>
                       {!isPlanExpanded && (
                         <View style={s.miniProgress}>
-                          <View style={s.miniProgressBar}>
-                            <View style={[s.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
-                          </View>
+                          <ProgressBar
+                            percent={Math.round(stepProgress * 100)}
+                            color={colors.green}
+                            height={3}
+                            style={{ flex: 1 }}
+                          />
                           <Text style={s.miniProgressText}>{doneSteps.length}/{planSteps.length}</Text>
                         </View>
                       )}
@@ -903,9 +909,12 @@ export default function Plan() {
                     <View style={s.detailBlock}>
                       <Text style={s.detailLabel}>Action checklist</Text>
                       <View style={s.miniProgress}>
-                        <View style={s.miniProgressBar}>
-                          <View style={[s.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
-                        </View>
+                        <ProgressBar
+                          percent={Math.round(stepProgress * 100)}
+                          color={colors.green}
+                          height={3}
+                          style={{ flex: 1 }}
+                        />
                         <Text style={s.miniProgressText}>{doneSteps.length}/{planSteps.length} done</Text>
                       </View>
                       {planSteps.map((step, j) => {
@@ -1006,9 +1015,12 @@ export default function Plan() {
                         </View>
                         {!isExpanded && steps.length > 0 && (
                           <View style={s.miniProgress}>
-                            <View style={s.miniProgressBar}>
-                              <View style={[s.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
-                            </View>
+                            <ProgressBar
+                              percent={Math.round(stepProgress * 100)}
+                              color={colors.green}
+                              height={3}
+                              style={{ flex: 1 }}
+                            />
                             <Text style={s.miniProgressText}>{doneSteps.length}/{steps.length}</Text>
                           </View>
                         )}
@@ -1032,7 +1044,10 @@ export default function Plan() {
         <>
           <AnimGlyph delay={100}>
             <View style={s.sectionHeader}>
-              <Text style={s.sectionLabel}>YOUR MOVES</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <SectionDot color={colors.accent} />
+                <Text style={s.sectionLabel}>YOUR MOVES</Text>
+              </View>
               <Text style={[s.sectionMeta, { color: colors.green }]}>
                 {'\u00a3'}{Math.round(totalMonthlyImpact - activeMonthly)}/mo potential
               </Text>
@@ -1127,6 +1142,8 @@ export default function Plan() {
           {!isPro && opportunities.length > Math.max(0, FREE_MOVE_LIMIT - activeMoves.length) && (
             <Card
               variant="upgrade"
+              accentBar
+              accentBarColor={colors.green}
               onPress={() => setShowPaywall(true)}
               style={{ marginBottom: spacing.md, alignItems: 'center' }}
             >
@@ -1206,9 +1223,12 @@ export default function Plan() {
             <Text style={s.detailLabel}>Action checklist</Text>
             {isActive && (
               <View style={s.miniProgress}>
-                <View style={s.miniProgressBar}>
-                  <View style={[s.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
-                </View>
+                <ProgressBar
+                  percent={Math.round(stepProgress * 100)}
+                  color={colors.green}
+                  height={3}
+                  style={{ flex: 1 }}
+                />
                 <Text style={s.miniProgressText}>{doneSteps.length}/{steps.length} done</Text>
               </View>
             )}

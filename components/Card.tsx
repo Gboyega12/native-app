@@ -1,8 +1,9 @@
 // ── Card component system ──
 // Reusable card primitives with variants, press feedback, and entrance animations.
 // Nothing OS design language: border-defined, minimal shadows, monochrome-first.
+// Enhanced with accent bars, dot-matrix decorations, and refined depth.
 
-import { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Animated, Easing,
   Platform, LayoutAnimation, type ViewStyle, type TextStyle,
@@ -36,6 +37,12 @@ type CardProps = {
   noShadow?: boolean;
   /** Test ID for testing */
   testID?: string;
+  /** Show accent bar at top of card */
+  accentBar?: boolean;
+  /** Custom accent bar color (defaults to variant color) */
+  accentBarColor?: string;
+  /** Show dot-matrix decoration in corner */
+  dotDecoration?: boolean;
 };
 
 export default function Card({
@@ -47,6 +54,9 @@ export default function Card({
   style,
   noShadow,
   testID,
+  accentBar,
+  accentBarColor,
+  dotDecoration,
 }: CardProps) {
   const { colors, isDark } = useTheme();
   const scaleAnim = useRef(new Animated.Value(1)).current;
@@ -54,6 +64,13 @@ export default function Card({
   const shadow = noShadow ? {} : isDark ? cardShadow.dark : cardShadow.light;
 
   const variantStyles = getVariantStyles(colors, variant, borderColor);
+
+  // Auto-enable accent bar for hero and highlight variants
+  const showAccentBar = accentBar ?? (variant === 'hero' || variant === 'highlight');
+  const barColor = accentBarColor || getAccentBarColor(colors, variant);
+
+  // Auto-enable dot decoration for hero variant
+  const showDots = dotDecoration ?? (variant === 'hero');
 
   const handlePressIn = useCallback(() => {
     Animated.timing(scaleAnim, {
@@ -80,6 +97,13 @@ export default function Card({
     ...(Array.isArray(style) ? style : style ? [style] : []),
   ];
 
+  const decorations = (
+    <>
+      {showAccentBar && <AccentBar color={barColor} />}
+      {showDots && <DotGrid color={barColor} />}
+    </>
+  );
+
   if (onPress) {
     return (
       <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
@@ -92,6 +116,7 @@ export default function Card({
           testID={testID}
           style={cardStyle}
         >
+          {decorations}
           {children}
         </Pressable>
       </Animated.View>
@@ -104,8 +129,94 @@ export default function Card({
       testID={testID}
       style={cardStyle}
     >
+      {decorations}
       {children}
     </View>
+  );
+}
+
+// ── AccentBar ──
+// Thin colored line at the top edge of a card. Sits inside the card's
+// border-radius for a clean inset look. Nothing Phone glyph strip aesthetic.
+function AccentBar({ color }: { color: string }) {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 2,
+        backgroundColor: color,
+        opacity: 0.6,
+      }}
+    />
+  );
+}
+
+// ── DotGrid ──
+// A small 3x3 dot-matrix pattern in the top-right corner of cards.
+// Pure Nothing Phone glyph aesthetic — decorative only.
+function DotGrid({ color }: { color: string }) {
+  const dots = useMemo(() => {
+    const grid: { row: number; col: number }[] = [];
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        grid.push({ row: r, col: c });
+      }
+    }
+    return grid;
+  }, []);
+
+  return (
+    <View style={dotGridStyles.container}>
+      {dots.map(({ row, col }) => (
+        <View
+          key={`${row}-${col}`}
+          style={[
+            dotGridStyles.dot,
+            {
+              top: row * 6,
+              right: col * 6,
+              backgroundColor: color,
+              opacity: (row + col) % 2 === 0 ? 0.25 : 0.12,
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
+const dotGridStyles = StyleSheet.create({
+  container: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    width: 14,
+    height: 14,
+  },
+  dot: {
+    position: 'absolute',
+    width: 2,
+    height: 2,
+    borderRadius: 1,
+  },
+});
+
+// ── SectionDot ──
+// Inline dot accent for section headers. Adds a small colored dot
+// before text to create visual rhythm.
+export function SectionDot({ color }: { color: string }) {
+  return (
+    <View style={{
+      width: 5,
+      height: 5,
+      borderRadius: 2.5,
+      backgroundColor: color,
+      marginRight: 8,
+      opacity: 0.7,
+    }} />
   );
 }
 
@@ -155,6 +266,9 @@ export function AnimatedCard({
   accessibilityLabel,
   style,
   noShadow,
+  accentBar,
+  accentBarColor,
+  dotDecoration,
 }: CardProps & { delay?: number }) {
   const anim = useRef(new Animated.Value(0)).current;
 
@@ -186,6 +300,9 @@ export function AnimatedCard({
         accessibilityLabel={accessibilityLabel}
         style={style}
         noShadow={noShadow}
+        accentBar={accentBar}
+        accentBarColor={accentBarColor}
+        dotDecoration={dotDecoration}
       >
         {children}
       </Card>
@@ -246,6 +363,45 @@ export function BreathingBar({ color, width: barWidth, style }: { color: string;
   );
 }
 
+// ── ProgressBar ──
+// Refined progress bar with rounded caps and optional breathing animation.
+export function ProgressBar({
+  percent,
+  color,
+  trackColor,
+  height = 4,
+  breathing,
+  style,
+}: {
+  percent: number;
+  color: string;
+  trackColor?: string;
+  height?: number;
+  breathing?: boolean;
+  style?: ViewStyle;
+}) {
+  const { colors } = useTheme();
+  const clampedPct = Math.max(0, Math.min(100, percent));
+  const r = height / 2;
+
+  return (
+    <View style={[
+      { height, borderRadius: r, backgroundColor: trackColor || colors.mintDim, overflow: 'hidden' as const },
+      style,
+    ]}>
+      {breathing ? (
+        <BreathingBar
+          color={color}
+          width={`${clampedPct}%`}
+          style={{ height: '100%', borderRadius: r }}
+        />
+      ) : (
+        <View style={{ width: `${clampedPct}%`, height: '100%', borderRadius: r, backgroundColor: color }} />
+      )}
+    </View>
+  );
+}
+
 // ── InfoBox ──
 // Expandable info tooltip within cards.
 export function InfoBox({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
@@ -276,6 +432,19 @@ export function InfoIcon({ expanded, onPress }: { expanded: boolean; onPress: ()
   );
 }
 
+// ── Divider ──
+// Subtle horizontal line for separating card sections.
+export function CardDivider({ color, spacing: gap }: { color?: string; spacing?: number }) {
+  const { colors } = useTheme();
+  return (
+    <View style={{
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: color || colors.mintDim,
+      marginVertical: gap ?? 16,
+    }} />
+  );
+}
+
 // ── Variant style resolver ──
 function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: string): ViewStyle {
   const base: ViewStyle = {
@@ -301,6 +470,17 @@ function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: st
       return { ...base, padding: spacing.md, borderRadius: radius.md };
     default:
       return base;
+  }
+}
+
+// ── Accent bar color resolver ──
+function getAccentBarColor(c: ThemeColors, variant: CardVariant): string {
+  switch (variant) {
+    case 'hero': return c.green;
+    case 'highlight': return c.accent;
+    case 'error': return c.coral;
+    case 'upgrade': return c.green;
+    default: return c.accent;
   }
 }
 

@@ -118,6 +118,7 @@ export const radius = {
 
 // ── Card elevation shadows ──
 // Platform-aware shadows for card depth. Nothing OS style: subtle, diffused.
+// Three tiers: sm (subtle), md (standard cards), lg (hero/modals).
 export const cardShadow = {
   dark: {
     shadowColor: '#000',
@@ -132,6 +133,21 @@ export const cardShadow = {
     shadowOpacity: 0.08,
     shadowRadius: 10,
     elevation: 4,
+  },
+  // Elevated variant for hero cards and modals
+  darkElevated: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  lightElevated: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
   },
 } as const;
 

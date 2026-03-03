@@ -18,7 +18,7 @@ import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
-import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, ProgressBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, CardDivider, SectionDot, SMOOTH_ANIM } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 
@@ -1398,10 +1398,13 @@ export default function Home() {
               CARD — SAFE TO SPEND (compact)
               ══════════════════════════════════════════════ */}
           <View onLayout={(e) => { cardPositions.current.safeToSpend = e.nativeEvent.layout.y; }}>
-          <Card>
+          <Card accentBar accentBarColor={weeklyHealthy ? colors.green : colors.coral}>
             <AnimGlyph delay={100}>
               <View style={s.cardTitleRow}>
-                <Text style={s.cardTitle}>Safe to spend</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <SectionDot color={weeklyHealthy ? colors.green : colors.coral} />
+                  <Text style={s.cardTitle}>Safe to spend</Text>
+                </View>
                 <TouchableOpacity
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   onPress={() => {
@@ -1426,13 +1429,13 @@ export default function Home() {
             </AnimGlyph>
 
             {/* Progress bar with breathing animation */}
-            <View style={s.safeToSpendBar}>
-              <BreathingBar
-                color={weeklyHealthy ? colors.green : colors.coral}
-                width={`${weeklyUsedPct}%`}
-                style={s.safeToSpendBarFill}
-              />
-            </View>
+            <ProgressBar
+              percent={weeklyUsedPct}
+              color={weeklyHealthy ? colors.green : colors.coral}
+              height={4}
+              breathing
+              style={{ marginBottom: 16 }}
+            />
 
             {/* Spent vs budget row */}
             <View style={s.safeToSpendRow}>
@@ -1577,7 +1580,7 @@ export default function Home() {
               CARD — YOUR BUDGET REALITY (summary only)
               ══════════════════════════════════════════════ */}
           <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; }}>
-          <Card>
+          <Card accentBar accentBarColor={overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.accent}>
             {/* Info icon for budget card */}
             <View style={s.cardTitleRow}>
               <View style={{ flex: 1 }} />
@@ -1627,20 +1630,20 @@ export default function Home() {
             </View>
 
             {/* Overall progress bar */}
-            <View style={s.progressTrack}>
-              <View style={[
-                s.progressFill,
-                {
-                  width: `${Math.min(100, overallPctUsed)}%`,
-                  backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.green,
-                },
-              ]} />
-            </View>
+            <ProgressBar
+              percent={overallPctUsed}
+              color={overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.green}
+              height={6}
+              style={{ marginTop: 20, marginBottom: 32 }}
+            />
 
             {/* Essentials section */}
             <View style={s.sectionBlock}>
               <View style={s.sectionHeaderRow}>
-                <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <SectionDot color={essentialsOnTrack ? colors.green : colors.coral} />
+                  <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
+                </View>
                 <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.green : colors.coral }]}>
                   {essentialsOnTrack ? '\u2713 On track' : '\u26A0 Over budget'}
                 </Text>
@@ -1651,21 +1654,20 @@ export default function Home() {
                 </Text>
                 <Text style={s.sectionBudget}>of {'\u00a3'}{Math.round(periodNonDiscBudget).toLocaleString()} budget</Text>
               </View>
-              <View style={s.progressTrackSmall}>
-                <View style={[
-                  s.progressFillSmall,
-                  {
-                    width: `${Math.min(100, essentialsPctUsed)}%`,
-                    backgroundColor: essentialsOnTrack ? colors.text2 : colors.coral,
-                  },
-                ]} />
-              </View>
+              <ProgressBar
+                percent={essentialsPctUsed}
+                color={essentialsOnTrack ? colors.text2 : colors.coral}
+                height={4}
+              />
             </View>
 
             {/* Lifestyle section */}
             <View style={s.sectionBlock}>
               <View style={s.sectionHeaderRow}>
-                <Text style={[s.sectionLabel, { color: colors.text2 }]}>Lifestyle</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <SectionDot color={lifestyleOnTrack ? colors.green : colors.coral} />
+                  <Text style={[s.sectionLabel, { color: colors.text2 }]}>Lifestyle</Text>
+                </View>
                 <Text style={[s.sectionStatus, { color: lifestyleOnTrack ? colors.green : colors.coral }]}>
                   {lifestyleOnTrack ? '\u2713 On track' : '\u26A0 Over budget'}
                 </Text>
@@ -1676,15 +1678,11 @@ export default function Home() {
                 </Text>
                 <Text style={s.sectionBudget}>of {'\u00a3'}{Math.round(periodDiscBudget).toLocaleString()} budget</Text>
               </View>
-              <View style={s.progressTrackSmall}>
-                <View style={[
-                  s.progressFillSmall,
-                  {
-                    width: `${Math.min(100, lifestylePctUsed)}%`,
-                    backgroundColor: lifestyleOnTrack ? colors.dim : colors.coral,
-                  },
-                ]} />
-              </View>
+              <ProgressBar
+                percent={lifestylePctUsed}
+                color={lifestyleOnTrack ? colors.dim : colors.coral}
+                height={4}
+              />
             </View>
 
             {/* Remaining breakdown — prioritized by your plan */}
@@ -1736,7 +1734,7 @@ export default function Home() {
           </Card>
 
           {/* ── Transactions card ── */}
-          <Card style={{ marginTop: spacing.md }}>
+          <Card style={{ marginTop: spacing.md }} accentBar={false}>
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={() => {
