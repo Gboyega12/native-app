@@ -93,9 +93,17 @@ export default async function handler(req, res) {
         const current = snapshots[0];
         const previous = snapshots.length > 1 ? snapshots[1] : null;
 
-        // Get user name
+        // Get user info (name + email fallback for Google OAuth users)
         const { data: { user } } = await admin.auth.admin.getUserById(pref.user_id);
         const name = user?.user_metadata?.full_name?.split(' ')[0] || '';
+        const recipientEmail = pref.email
+          || user?.email
+          || user?.user_metadata?.email
+          || user?.identities?.[0]?.identity_data?.email;
+        if (!recipientEmail) {
+          results.skipped++;
+          continue;
+        }
 
         // Get last activity
         const { data: lastChat } = await admin
@@ -201,7 +209,7 @@ export default async function handler(req, res) {
             'Authorization': `Bearer ${cronSecret || ''}`,
           },
           body: JSON.stringify({
-            to: pref.email,
+            to: recipientEmail,
             subject: 'Bocy has a suggestion for you',
             html,
             push_body: message,

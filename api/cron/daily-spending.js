@@ -178,9 +178,17 @@ export default async function handler(req, res) {
           message = `You spent \u00a3${spentToday} today. ` + message;
         }
 
-        // Get user name
+        // Get user info (name + email fallback for Google OAuth users)
         const { data: { user } } = await admin.auth.admin.getUserById(pref.user_id);
         const name = user?.user_metadata?.full_name?.split(' ')[0] || '';
+        const recipientEmail = pref.email
+          || user?.email
+          || user?.user_metadata?.email
+          || user?.identities?.[0]?.identity_data?.email;
+        if (!recipientEmail) {
+          results.skipped++;
+          continue;
+        }
 
         // Build email
         const BRAND = '#00d4aa';
@@ -222,7 +230,7 @@ export default async function handler(req, res) {
             'Authorization': `Bearer ${cronSecret || ''}`,
           },
           body: JSON.stringify({
-            to: pref.email,
+            to: recipientEmail,
             subject: usedPct <= 75
               ? `\u00a3${remaining} left this week — you're on track`
               : usedPct <= 100

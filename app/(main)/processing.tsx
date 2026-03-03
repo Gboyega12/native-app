@@ -544,12 +544,17 @@ function ProcessingInner() {
           }
 
           // ── Auto-create notification preferences if first analysis ──
+          // Google OAuth users may have email in user_metadata instead of
+          // the top-level field, so check both locations.
           try {
             const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (authUser?.email) {
+            const userEmail = authUser?.email
+              || authUser?.user_metadata?.email
+              || authUser?.identities?.[0]?.identity_data?.email;
+            if (userEmail) {
               await supabase.from('notification_preferences').upsert({
                 user_id: user.id,
-                email: authUser.email,
+                email: userEmail,
                 weekly_digest: true,
                 milestone_alerts: true,
                 checkin_prompts: true,
