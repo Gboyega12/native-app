@@ -526,8 +526,8 @@ function VoiceOrb({
       {/* Expanding dot-matrix rings (visible when listening) */}
       {listening && (
         <>
-          <DotRing size={96} count={28} dotSize={2.5} color={colors.green} animated animValue={ring1} />
-          <DotRing size={96} count={22} dotSize={2} color={colors.green} animated animValue={ring2} />
+          <DotRing size={120} count={20} dotSize={2.5} color={colors.green} animated animValue={ring1} />
+          <DotRing size={108} count={18} dotSize={2} color={colors.green} animated animValue={ring2} />
         </>
       )}
       {/* Static outer dot ring — breathes when idle */}
