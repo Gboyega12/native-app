@@ -89,7 +89,6 @@ export default function Profile() {
   const [showUpgradeSuccess, setShowUpgradeSuccess] = useState(upgraded === 'true');
   const [notifPrefs, setNotifPrefs] = useState({
     weekly_digest: true,
-    milestone_alerts: true,
     checkin_prompts: true,
     achievement_alerts: true,
   });
@@ -164,13 +163,12 @@ export default function Profile() {
       try {
         const { data: prefs } = await supabase
           .from('notification_preferences')
-          .select('weekly_digest, milestone_alerts, checkin_prompts, achievement_alerts')
+          .select('weekly_digest, checkin_prompts, achievement_alerts')
           .eq('user_id', user.id)
           .maybeSingle();
         if (prefs) {
           setNotifPrefs({
             weekly_digest: prefs.weekly_digest ?? true,
-            milestone_alerts: prefs.milestone_alerts ?? true,
             checkin_prompts: prefs.checkin_prompts ?? true,
             achievement_alerts: prefs.achievement_alerts ?? true,
           });
@@ -662,7 +660,6 @@ export default function Profile() {
               { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Score & spending recap every Monday', pro: false },
               { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Bocy flags things that need attention', pro: true },
               { key: 'achievement_alerts' as const, label: 'Achievements', desc: 'Celebrate milestones', pro: true },
-              { key: 'milestone_alerts' as const, label: 'Score changes', desc: 'Alert on significant shifts', pro: false },
             ]).map((item, idx) => (
               <View key={item.key}>
                 {idx > 0 && <View style={s.groupDivider} />}
