@@ -24,6 +24,103 @@ const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 /** Free users can send this many messages before the paywall gate kicks in */
 const FREE_MESSAGE_LIMIT = 2;
 
+// ── Dot-matrix ring (Nothing Phone glyph aesthetic) ──
+// Renders dots positioned in a circle. Used for the voice orb outer ring
+// and the expanding animated rings when listening.
+
+function DotRing({
+  size,
+  count = 20,
+  dotSize = 2.5,
+  color,
+  animated,
+  animValue,
+}: {
+  size: number;
+  count?: number;
+  dotSize?: number;
+  color: string;
+  animated?: boolean;
+  animValue?: Animated.Value;
+}) {
+  const r = size / 2;
+  const dots = useMemo(
+    () =>
+      Array.from({ length: count }).map((_, i) => {
+        const angle = (i / count) * 2 * Math.PI - Math.PI / 2;
+        return {
+          x: r + Math.cos(angle) * (r - dotSize) - dotSize / 2,
+          y: r + Math.sin(angle) * (r - dotSize) - dotSize / 2,
+        };
+      }),
+    [size, count, dotSize],
+  );
+
+  const containerStyle: any = {
+    width: size,
+    height: size,
+    position: 'absolute' as const,
+  };
+  if (animated && animValue) {
+    containerStyle.opacity = animValue.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
+    containerStyle.transform = [{ scale: animValue.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] }) }];
+  }
+
+  const Container = animated ? Animated.View : View;
+  return (
+    <Container style={containerStyle}>
+      {dots.map((d, i) => (
+        <View
+          key={i}
+          style={{
+            position: 'absolute',
+            left: d.x,
+            top: d.y,
+            width: dotSize,
+            height: dotSize,
+            borderRadius: dotSize / 2,
+            backgroundColor: color,
+          }}
+        />
+      ))}
+    </Container>
+  );
+}
+
+// ── Dot-matrix microphone glyph ──
+// A tiny mic icon built from dots — Nothing Phone LED dot style.
+
+const MIC_GLYPH: number[][] = [
+  [0, 1, 0],
+  [1, 0, 1],
+  [1, 0, 1],
+  [0, 1, 0],
+  [1, 0, 1],
+  [0, 1, 0],
+];
+
+function DotMic({ dotSize = 3.5, gap = 2, color }: { dotSize?: number; gap?: number; color: string }) {
+  return (
+    <View style={{ alignItems: 'center' }}>
+      {MIC_GLYPH.map((row, r) => (
+        <View key={r} style={{ flexDirection: 'row', gap }}>
+          {row.map((v, c) => (
+            <View
+              key={c}
+              style={{
+                width: dotSize,
+                height: dotSize,
+                borderRadius: dotSize / 2,
+                backgroundColor: v ? color : 'transparent',
+              }}
+            />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // ── Suggested questions (contextual) ──
 
 function getContextualQuestions(analysis: Analysis | null, goals: Goals | null, paydayActive?: boolean): string[] {
@@ -166,8 +263,8 @@ function PulseButton({ children, trigger }: { children: React.ReactNode; trigger
   return <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>;
 }
 
-// ── Voice Orb (hero mic button with expanding ring animation) ──
-// Nothing Phone glyph aesthetic: geometric, monochrome, breathing rings.
+// ── Voice Orb (hero mic button with dot-matrix ring animation) ──
+// Nothing Phone glyph aesthetic: dots arranged in circles, breathing, geometric.
 
 function VoiceOrb({
   listening,
@@ -183,39 +280,46 @@ function VoiceOrb({
   const scale = useRef(new Animated.Value(1)).current;
   const ring1 = useRef(new Animated.Value(0)).current;
   const ring2 = useRef(new Animated.Value(0)).current;
+  const dotPulse = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (listening) {
-      // Breathing scale on the orb itself
+      // Breathing scale
       Animated.loop(
         Animated.sequence([
-          Animated.timing(scale, { toValue: 1.06, duration: 800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(scale, { toValue: 1, duration: 800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 1.04, duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
         ]),
       ).start();
-      // Expanding ring 1
+      // Inner dot pulse
       Animated.loop(
         Animated.sequence([
-          Animated.timing(ring1, { toValue: 1, duration: 1600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(dotPulse, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(dotPulse, { toValue: 0, duration: 600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+      ).start();
+      // Expanding dot ring 1
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(ring1, { toValue: 1, duration: 2000, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
           Animated.timing(ring1, { toValue: 0, duration: 0, useNativeDriver: true }),
         ]),
       ).start();
-      // Expanding ring 2 (offset)
+      // Expanding dot ring 2 (offset)
       setTimeout(() => {
         Animated.loop(
           Animated.sequence([
-            Animated.timing(ring2, { toValue: 1, duration: 1600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+            Animated.timing(ring2, { toValue: 1, duration: 2000, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
             Animated.timing(ring2, { toValue: 0, duration: 0, useNativeDriver: true }),
           ]),
         ).start();
-      }, 800);
+      }, 1000);
     } else {
-      scale.stopAnimation();
-      ring1.stopAnimation();
-      ring2.stopAnimation();
+      [scale, ring1, ring2, dotPulse].forEach((a) => a.stopAnimation());
       scale.setValue(1);
       ring1.setValue(0);
       ring2.setValue(0);
+      dotPulse.setValue(0);
     }
   }, [listening]);
 
@@ -226,33 +330,19 @@ function VoiceOrb({
     Animated.timing(scale, { toValue: 1, duration: 150, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
   };
 
+  const activeColor = listening ? colors.green : colors.accent;
+
   return (
     <View style={s.voiceOrbContainer}>
-      {/* Expanding rings (only visible when listening) */}
+      {/* Expanding dot-matrix rings (visible when listening) */}
       {listening && (
         <>
-          <Animated.View
-            style={[
-              s.voiceRing,
-              {
-                borderColor: colors.accent,
-                opacity: ring1.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0] }),
-                transform: [{ scale: ring1.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] }) }],
-              },
-            ]}
-          />
-          <Animated.View
-            style={[
-              s.voiceRing,
-              {
-                borderColor: colors.accent,
-                opacity: ring2.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0] }),
-                transform: [{ scale: ring2.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) }],
-              },
-            ]}
-          />
+          <DotRing size={96} count={28} dotSize={2.5} color={colors.green} animated animValue={ring1} />
+          <DotRing size={96} count={22} dotSize={2} color={colors.green} animated animValue={ring2} />
         </>
       )}
+      {/* Static outer dot ring */}
+      <DotRing size={96} count={24} dotSize={listening ? 3 : 2.5} color={activeColor} />
       <Animated.View style={{ transform: [{ scale }] }}>
         <Pressable
           style={[s.voiceOrb, listening && s.voiceOrbListening]}
@@ -263,12 +353,11 @@ function VoiceOrb({
           accessibilityLabel={listening ? 'Stop listening' : 'Start voice input'}
         >
           {listening ? (
-            <View style={s.voiceOrbStop} />
+            <Animated.View style={{ opacity: dotPulse.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }}>
+              <View style={s.voiceOrbStop} />
+            </Animated.View>
           ) : (
-            <View style={s.voiceOrbMic}>
-              <View style={[s.voiceOrbMicHead, { borderColor: colors.bg }]} />
-              <View style={[s.voiceOrbMicStem, { borderColor: colors.bg }]} />
-            </View>
+            <DotMic dotSize={4} gap={2.5} color={colors.bg} />
           )}
         </Pressable>
       </Animated.View>
@@ -277,34 +366,34 @@ function VoiceOrb({
 }
 
 // ── Voice Waveform Visualiser ──
-// Animated bars that pulse during active listening. Nothing Phone dot-matrix feel.
+// Pulsing dots that breathe during active listening. Nothing Phone dot-matrix feel.
 
-const WAVE_BAR_COUNT = 5;
+const WAVE_DOT_COUNT = 7;
 
 function VoiceWaveform({ active }: { active: boolean }) {
   const { colors } = useTheme();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const bars = useRef(
-    Array.from({ length: WAVE_BAR_COUNT }, () => new Animated.Value(0.3)),
+  const dots = useRef(
+    Array.from({ length: WAVE_DOT_COUNT }, () => new Animated.Value(0.4)),
   ).current;
 
   useEffect(() => {
     if (active) {
-      const animations = bars.map((bar, i) =>
+      const animations = dots.map((dot, i) =>
         Animated.loop(
           Animated.sequence([
-            Animated.delay(i * 100),
-            Animated.timing(bar, { toValue: 1, duration: 300 + Math.random() * 200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-            Animated.timing(bar, { toValue: 0.3, duration: 300 + Math.random() * 200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+            Animated.delay(i * 80),
+            Animated.timing(dot, { toValue: 1, duration: 250 + Math.random() * 200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+            Animated.timing(dot, { toValue: 0.4, duration: 250 + Math.random() * 200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
           ]),
         ),
       );
       animations.forEach((a) => a.start());
       return () => animations.forEach((a) => a.stop());
     } else {
-      bars.forEach((bar) => {
-        bar.stopAnimation();
-        bar.setValue(0.3);
+      dots.forEach((dot) => {
+        dot.stopAnimation();
+        dot.setValue(0.4);
       });
     }
   }, [active]);
@@ -313,16 +402,14 @@ function VoiceWaveform({ active }: { active: boolean }) {
 
   return (
     <View style={s.waveformRow}>
-      {bars.map((bar, i) => (
+      {dots.map((dot, i) => (
         <Animated.View
           key={i}
           style={[
-            s.waveformBar,
+            s.waveformDot,
             {
-              transform: [{
-                scaleY: bar.interpolate({ inputRange: [0.3, 1], outputRange: [0.3, 1] }),
-              }],
-              opacity: bar,
+              transform: [{ scale: dot.interpolate({ inputRange: [0.4, 1], outputRange: [0.5, 1.4] }) }],
+              opacity: dot,
             },
           ]}
         />
@@ -1594,96 +1681,105 @@ export default function Chat() {
             {/* Payday auto-nudge message if present */}
             {messages.length === 1 && messages[0].role === 'assistant' && (
               <FadeInView>
-                <View style={[s.bubble, s.assistantBubble, { marginBottom: spacing.xl, alignSelf: 'center', maxWidth: '90%' }]}>
+                <View style={[s.bubble, s.assistantBubble, { marginBottom: spacing.lg, alignSelf: 'center', maxWidth: '90%' }]}>
                   <Markdown>{messages[0].content}</Markdown>
                 </View>
               </FadeInView>
             )}
 
-            <View style={s.voiceHeroTop}>
-              <Text style={s.voiceHeroTitle}>
-                {paydayActive ? 'Payday check-in' : listening ? 'Listening...' : 'Talk to Bocy'}
-              </Text>
-              <Text style={s.voiceHeroSubtitle}>
-                {listening
-                  ? 'Speak naturally. I\u2019ll send when you\u2019re done.'
-                  : paydayActive
-                    ? 'Tap to speak, or pick a question below'
-                    : 'Tap the mic and ask me anything about your money'}
-              </Text>
+            {/* Center content: orb + title */}
+            <View style={s.voiceHeroCenter}>
+              <View style={s.voiceHeroTop}>
+                <Text style={s.voiceHeroTitle}>
+                  {paydayActive ? 'Payday check-in' : listening ? 'Listening\u2026' : 'Talk to Bocy'}
+                </Text>
+                <Text style={s.voiceHeroSubtitle}>
+                  {listening
+                    ? 'Speak naturally. I\u2019ll send when you\u2019re done.'
+                    : paydayActive
+                      ? 'Tap to speak, or pick a question below'
+                      : 'Tap the mic \u2022 ask anything about your money'}
+                </Text>
+              </View>
+
+              {/* Voice Orb — the hero CTA */}
+              <VoiceOrb
+                listening={listening}
+                onPress={voiceSupported ? toggleVoice : () => { setShowTextInput(true); setTimeout(() => inputRef.current?.focus(), 100); }}
+                disabled={loading}
+              />
+
+              {/* Waveform visualiser + live transcript */}
+              <VoiceWaveform active={listening} />
+              {listening && input.trim() !== '' && (
+                <FadeInView>
+                  <Text style={s.liveTranscript}>{input.replace(/\u200B/g, '')}</Text>
+                </FadeInView>
+              )}
+
+              {/* Type-instead toggle */}
+              {!listening && (
+                <TouchableOpacity
+                  style={s.typeToggle}
+                  onPress={() => { setShowTextInput(!showTextInput); if (!showTextInput) setTimeout(() => inputRef.current?.focus(), 100); }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.typeToggleText}>{showTextInput ? 'Hide keyboard' : 'Type instead'}</Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Inline text input (secondary, shown on demand) */}
+              {showTextInput && !listening && (
+                <FadeInView>
+                  <View style={s.inlineInputRow}>
+                    <TextInput
+                      ref={inputRef}
+                      style={[s.inlineInput, { height: Math.max(40, Math.min(inputHeight, 100)) }]}
+                      placeholder="Type your question..."
+                      placeholderTextColor={colors.muted}
+                      value={input}
+                      onChangeText={setInput}
+                      onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+                      onSubmitEditing={() => sendMessage(input)}
+                      returnKeyType="send"
+                      multiline
+                      maxLength={1000}
+                      blurOnSubmit
+                    />
+                    {input.trim() ? (
+                      <TouchableOpacity
+                        style={[s.inlineSendBtn, loading && { opacity: 0.3 }]}
+                        onPress={() => sendMessage(input)}
+                        disabled={loading}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={s.inlineSendIcon}>{'\u2191'}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </FadeInView>
+              )}
             </View>
 
-            {/* Voice Orb — the hero CTA */}
-            <VoiceOrb
-              listening={listening}
-              onPress={voiceSupported ? toggleVoice : () => { setShowTextInput(true); setTimeout(() => inputRef.current?.focus(), 100); }}
-              disabled={loading}
-            />
-
-            {/* Waveform visualiser + live transcript */}
-            <VoiceWaveform active={listening} />
-            {listening && input.trim() !== '' && (
-              <FadeInView>
-                <Text style={s.liveTranscript}>{input.replace(/\u200B/g, '')}</Text>
-              </FadeInView>
-            )}
-
-            {/* Type-instead toggle */}
+            {/* ── Horizontal suggestion pills (pinned at bottom) ── */}
             {!listening && (
-              <TouchableOpacity
-                style={s.typeToggle}
-                onPress={() => { setShowTextInput(!showTextInput); if (!showTextInput) setTimeout(() => inputRef.current?.focus(), 100); }}
-                activeOpacity={0.7}
-              >
-                <Text style={s.typeToggleText}>{showTextInput ? 'Hide keyboard' : 'Type instead'}</Text>
-              </TouchableOpacity>
-            )}
-
-            {/* Inline text input (secondary, shown on demand) */}
-            {showTextInput && !listening && (
-              <FadeInView>
-                <View style={s.inlineInputRow}>
-                  <TextInput
-                    ref={inputRef}
-                    style={[s.inlineInput, { height: Math.max(40, Math.min(inputHeight, 100)) }]}
-                    placeholder="Type your question..."
-                    placeholderTextColor={colors.muted}
-                    value={input}
-                    onChangeText={setInput}
-                    onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
-                    onSubmitEditing={() => sendMessage(input)}
-                    returnKeyType="send"
-                    multiline
-                    maxLength={1000}
-                    blurOnSubmit
-                  />
-                  {input.trim() ? (
+              <View style={s.suggestedContainer}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={s.suggestedScroll}
+                >
+                  {suggestedQuestions.map((q, i) => (
                     <TouchableOpacity
-                      style={[s.inlineSendBtn, loading && { opacity: 0.3 }]}
-                      onPress={() => sendMessage(input)}
-                      disabled={loading}
+                      key={i}
+                      style={s.suggestedChip}
+                      onPress={() => sendMessage(q)}
                       activeOpacity={0.7}
                     >
-                      <Text style={s.inlineSendIcon}>{'\u2191'}</Text>
+                      <Text style={s.suggestedChipText}>{q}</Text>
                     </TouchableOpacity>
-                  ) : null}
-                </View>
-              </FadeInView>
-            )}
-
-            {/* Suggested question chips */}
-            {!listening && (
-              <View style={[s.suggestedGrid, { marginTop: spacing.xl }, isTablet && { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 12 }]}>
-                {suggestedQuestions.map((q, i) => (
-                  <TouchableOpacity
-                    key={i}
-                    style={[s.suggestedButton, isTablet && { flexBasis: '48%' as any, flexGrow: 1 }]}
-                    onPress={() => sendMessage(q)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={s.suggestedText}>{q}</Text>
-                  </TouchableOpacity>
-                ))}
+                  ))}
+                </ScrollView>
               </View>
             )}
           </View>
@@ -1849,10 +1945,7 @@ export default function Chat() {
                       {listening ? (
                         <View style={s.glyphStop} />
                       ) : (
-                        <View style={s.glyphMic}>
-                          <View style={[s.glyphMicHead, { borderColor: colors.bg }]} />
-                          <View style={[s.glyphMicStem, { borderColor: colors.bg }]} />
-                        </View>
+                        <DotMic dotSize={2.5} gap={1.5} color={colors.bg} />
                       )}
                     </TouchableOpacity>
                   )}
@@ -2025,30 +2118,31 @@ function buildHouseholdCashflow(
 }
 
 // ── Styles ──
+// Nothing Phone OS aesthetic: dot-matrix glyphs, monochrome, geometric minimalism.
 
 const createStyles = (c: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: c.bg,
   },
+  // ── Header — clean, borderless, floating ──
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xxl + spacing.sm,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: c.border,
+    paddingBottom: 12,
+    borderBottomWidth: 0,
   },
   headerLeftChat: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   chatBocyWrap: {
-    width: 26,
-    height: 26,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2056,77 +2150,84 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginBottom: spacing.md,
   },
   headerTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    color: c.text,
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: c.dim,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   clearButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: 5,
+    paddingHorizontal: 14,
     borderRadius: 100,
-    backgroundColor: c.accentDim,
+    borderWidth: 1,
+    borderColor: c.border,
+    backgroundColor: 'transparent',
   },
   clearText: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: c.text2,
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.dim,
+    letterSpacing: 0.5,
   },
   messages: {
     flex: 1,
   },
   messagesContent: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
+    paddingTop: spacing.sm,
     paddingBottom: spacing.lg,
   },
   messagesContentEmpty: {
     flexGrow: 1,
-    justifyContent: 'center',
   },
-  // ── Voice-first hero (empty state) ──
+  // ── Voice-first hero (empty state) — flex layout for bottom pinning ──
   voiceHeroContainer: {
+    flex: 1,
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    paddingBottom: spacing.xl,
+    justifyContent: 'flex-end',
+  },
+  voiceHeroCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
   },
   voiceHeroTop: {
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: spacing.xl + spacing.sm,
   },
   voiceHeroTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 28,
+    fontFamily: fonts.mono,
+    fontSize: 22,
     color: c.text,
     textAlign: 'center',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
   },
   voiceHeroSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 14,
-    color: c.dim,
-    marginTop: 8,
+    fontSize: 13,
+    color: c.muted,
+    marginTop: 10,
     textAlign: 'center',
-    lineHeight: 22,
-    maxWidth: 280,
+    lineHeight: 20,
+    maxWidth: 260,
+    letterSpacing: 0.3,
   },
-  // ── Voice Orb ──
+  // ── Voice Orb — dot-matrix ring with inner glyph ──
   voiceOrbContainer: {
-    width: 120,
-    height: 120,
+    width: 140,
+    height: 140,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.md,
-  },
-  voiceRing: {
-    position: 'absolute',
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    borderWidth: 1.5,
+    marginBottom: spacing.lg,
   },
   voiceOrb: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: c.accent,
     justifyContent: 'center',
     alignItems: 'center',
@@ -2135,43 +2236,25 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     backgroundColor: c.green,
   },
   voiceOrbStop: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 18,
+    height: 18,
+    borderRadius: 3,
     backgroundColor: c.bg,
   },
-  voiceOrbMic: {
-    alignItems: 'center',
-  },
-  voiceOrbMicHead: {
-    width: 16,
-    height: 20,
-    borderRadius: 8,
-    borderWidth: 2.5,
-  },
-  voiceOrbMicStem: {
-    width: 24,
-    height: 12,
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
-    borderWidth: 2.5,
-    borderTopWidth: 0,
-    marginTop: -2,
-  },
-  // ── Waveform visualiser ──
+  // ── Waveform visualiser — pulsing dots ──
   waveformRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    height: 32,
+    gap: 6,
+    height: 28,
     marginBottom: spacing.sm,
   },
-  waveformBar: {
-    width: 4,
-    height: 28,
-    borderRadius: 2,
-    backgroundColor: c.accent,
+  waveformDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: c.green,
   },
   // ── Live transcript ──
   liveTranscript: {
@@ -2192,9 +2275,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   typeToggleText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: c.muted,
-    letterSpacing: 0.5,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
   // ── Inline text input (empty state) ──
@@ -2209,10 +2292,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   inlineInput: {
     flex: 1,
     fontFamily: fonts.regular,
-    backgroundColor: c.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: 22,
+    borderRadius: 24,
     paddingVertical: 10,
     paddingHorizontal: spacing.md,
     fontSize: 15,
@@ -2232,45 +2315,52 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.bg,
     marginTop: -1,
   },
-  suggestedGrid: {
+  // ── Horizontal suggestion pills (pinned at bottom of empty state) ──
+  suggestedContainer: {
     width: '100%',
-    gap: 12,
+    paddingBottom: spacing.lg,
+    paddingTop: spacing.md,
   },
-  suggestedButton: {
-    backgroundColor: c.surface,
+  suggestedScroll: {
+    gap: 10,
+    paddingHorizontal: spacing.sm,
+  },
+  suggestedChip: {
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 100,
-    paddingVertical: 16,
-    paddingHorizontal: spacing.lg,
-  },
-  suggestedText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
-    color: c.text2,
-    textAlign: 'center',
-  },
-  bubble: {
-    maxWidth: '82%',
-    paddingVertical: 14,
+    paddingVertical: 10,
     paddingHorizontal: 18,
-    borderRadius: 22,
-    marginBottom: 16,
+    backgroundColor: 'transparent',
+  },
+  suggestedChipText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.text2,
+    letterSpacing: 0.3,
+  },
+  // ── Chat bubbles — sleek, minimal ──
+  bubble: {
+    maxWidth: '80%',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginBottom: 12,
   },
   userBubble: {
     backgroundColor: c.accent,
     alignSelf: 'flex-end',
-    borderBottomRightRadius: 6,
+    borderBottomRightRadius: 4,
   },
   assistantBubble: {
-    backgroundColor: c.surface,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
     borderColor: c.border,
     alignSelf: 'flex-start',
-    borderBottomLeftRadius: 6,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
+    borderBottomLeftRadius: 4,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderBottomRightRadius: 18,
   },
   bubbleText: {
     fontFamily: fonts.regular,
@@ -2284,21 +2374,21 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   dotsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     paddingVertical: 2,
     paddingHorizontal: 2,
   },
   dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: c.green,
   },
   // ── Action cards ──
   actionCardWrapper: {
     alignSelf: 'flex-start',
     maxWidth: '85%',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   errorCardText: {
     fontFamily: fonts.medium,
@@ -2307,11 +2397,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 20,
   },
   actionCardLabel: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.mono,
     fontSize: 10,
-    letterSpacing: 1,
-    color: c.accent,
+    letterSpacing: 1.5,
+    color: c.dim,
     marginBottom: spacing.xs,
+    textTransform: 'uppercase',
   },
   actionCardTitle: {
     fontFamily: fonts.semibold,
@@ -2334,10 +2425,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.accent,
   },
   actionStatLabel: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.dim,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.muted,
     marginTop: 2,
+    letterSpacing: 0.5,
   },
   actionCardButtons: {
     flexDirection: 'row',
@@ -2438,11 +2530,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   // ── Goal update card ──
   goalUpdateLabel: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.mono,
     fontSize: 10,
-    letterSpacing: 1,
+    letterSpacing: 1.5,
     color: c.sky,
     marginBottom: spacing.xs,
+    textTransform: 'uppercase',
   },
   goalUpdateReason: {
     fontFamily: fonts.medium,
@@ -2492,11 +2585,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.coral,
     marginTop: spacing.xs,
   },
-  // ── Voice-first input bar (conversation mode) ──
+  // ── Voice-first input bar (conversation mode) — sleek, borderless ──
   voiceInputRow: {
     flexDirection: 'row',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
     backgroundColor: c.bg,
@@ -2506,20 +2599,20 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   input: {
     flex: 1,
     fontFamily: fonts.regular,
-    backgroundColor: c.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: 22,
+    borderRadius: 24,
     paddingVertical: 10,
     paddingHorizontal: spacing.md,
-    fontSize: 16,
+    fontSize: 15,
     color: c.text,
   },
   // ── Unified action button (glyph style) ──
   actionButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: c.accent,
     justifyContent: 'center',
     alignItems: 'center',
@@ -2532,15 +2625,15 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   actionButtonIcon: {
     fontFamily: fonts.semibold,
-    fontSize: 20,
+    fontSize: 18,
     color: c.bg,
     marginTop: -1,
   },
-  // ── Voice input orb (conversation-mode mic button) ──
+  // ── Voice input orb (conversation-mode mic button — dot glyph) ──
   voiceInputOrb: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: c.accent,
     justifyContent: 'center',
     alignItems: 'center',
@@ -2548,33 +2641,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   voiceInputOrbListening: {
     backgroundColor: c.green,
   },
-  // ── Glyph mic icon (Nothing Phone style) ──
-  glyphRing: {
-    width: 22,
-    height: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  glyphMic: {
-    alignItems: 'center',
-  },
-  glyphMicHead: {
-    width: 8,
-    height: 10,
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: c.bg,
-  },
-  glyphMicStem: {
-    width: 12,
-    height: 6,
-    borderBottomLeftRadius: 6,
-    borderBottomRightRadius: 6,
-    borderWidth: 1.5,
-    borderTopWidth: 0,
-    borderColor: c.bg,
-    marginTop: -1,
-  },
+  // ── Glyph stop icon ──
   glyphStop: {
     width: 10,
     height: 10,
@@ -2582,7 +2649,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     backgroundColor: c.bg,
   },
 
-  // ── Free tier gate (replaces input after limit reached) ──
+  // ── Free tier gate ──
   gateRow: {
     padding: spacing.md,
     paddingBottom: spacing.lg,
@@ -2629,43 +2696,44 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 8,
-    marginTop: 20,
+    marginBottom: 6,
+    marginTop: 16,
   },
   bocyLabelDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: c.green,
   },
   bocyLabel: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: c.dim,
-    letterSpacing: 1,
+    color: c.muted,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
 
-  // ── Follow-up suggestion chips ──
+  // ── Follow-up suggestion chips (horizontal, inline after messages) ──
   followUpContainer: {
-    marginTop: spacing.lg,
-    marginBottom: spacing.md,
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
   },
   followUpScroll: {
-    gap: 10,
+    gap: 8,
     paddingVertical: 4,
   },
   followUpChip: {
-    backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 100,
-    paddingVertical: 12,
-    paddingHorizontal: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: 'transparent',
   },
   followUpChipText: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
+    fontFamily: fonts.mono,
+    fontSize: 12,
     color: c.text2,
+    letterSpacing: 0.2,
   },
 });
