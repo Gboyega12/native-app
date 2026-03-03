@@ -17,7 +17,6 @@ import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
-import Paywall from '@/components/Paywall';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
@@ -174,8 +173,7 @@ export default function Home() {
     return d >= monday;
   };
 
-  const { isPro } = useSubscription();
-  const [showPaywall, setShowPaywall] = useState(false);
+  const { isTrial, trialDaysLeft } = useSubscription();
   const [showInsightModal, setShowInsightModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [verifyMove, setVerifyMove] = useState<Move | null>(null);
@@ -1555,7 +1553,7 @@ export default function Home() {
                       {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo potential
                     </Text>
                   </View>
-                  {(isPro ? opportunityMoves : opportunityMoves.slice(0, 2)).map((move, seqIdx) => {
+                  {opportunityMoves.map((move, seqIdx) => {
                     const i = move._sortIdx;
                     const isExpanded = expandedMove === i;
                     const moveKey = `move-${i}`;
@@ -1669,20 +1667,6 @@ export default function Home() {
                     );
                   })}
 
-                  {!isPro && opportunityMoves.length > 2 && (
-                    <Card variant="upgrade" onPress={() => setShowPaywall(true)} style={{ marginBottom: spacing.md, alignItems: 'center' }}>
-                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>PRO</Text>
-                      <Text style={{ fontFamily: fonts.semibold, fontSize: 16, color: colors.text, textAlign: 'center' }}>
-                        +{opportunityMoves.length - 2} more moves locked
-                      </Text>
-                      <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.dim, textAlign: 'center', marginTop: 4, marginBottom: 12 }}>
-                        Unlock your full action plan
-                      </Text>
-                      <View style={[s.heroCta, { paddingVertical: 12 }]}>
-                        <Text style={[s.heroCtaText, { fontSize: 13 }]}>See plans</Text>
-                      </View>
-                    </Card>
-                  )}
                 </>
               )}
             </>
@@ -2148,7 +2132,6 @@ export default function Home() {
         </>
       )}
 
-      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
       {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} scrollRef={dashScrollRef} cardPositions={cardPositions} router={router} />}
 
       {/* ── Income arrival insight modal ── */}

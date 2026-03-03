@@ -11,8 +11,6 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import Card, { AnimGlyph, SMOOTH_ANIM } from '@/components/Card';
 import { useResponsive } from '@/lib/responsive';
-import { useSubscription } from '@/lib/subscription';
-import Paywall from '@/components/Paywall';
 import type { Analysis, Move, GoalTrajectory, IncomeSource } from '@/lib/types';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -198,17 +196,13 @@ function confirmAction(title: string, message: string, onConfirm: () => void) {
   }
 }
 
-/** Number of moves visible on the free tier */
-const FREE_MOVE_LIMIT = 2;
 
 export default function Plan() {
   const router = useRouter();
   const { highlight, highlightAction } = useLocalSearchParams<{ highlight?: string; highlightAction?: string }>();
-  const { isPro } = useSubscription();
   const { colors } = useTheme();
   const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const [showPaywall, setShowPaywall] = useState(false);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [userPlans, setUserPlans] = useState<UserPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -629,8 +623,6 @@ export default function Plan() {
         </Pressable>
       </Modal>
 
-      {/* ── Paywall ── */}
-      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
 
       {/* ── Income context strip ── */}
       {monthlyIncome > 0 && (
@@ -1040,7 +1032,7 @@ export default function Plan() {
           </AnimGlyph>
 
           {/* Individual opportunity cards */}
-          {(isPro ? opportunities : opportunities.slice(0, Math.max(0, FREE_MOVE_LIMIT - activeMoves.length))).map(({ move, index: i }, seqIdx) => {
+          {opportunities.map(({ move, index: i }, seqIdx) => {
             const isExpanded = expanded === i;
             const isHighlighted = highlightIdx === i;
             const moveKey = `move-${i}`;
@@ -1123,25 +1115,6 @@ export default function Plan() {
             );
           })}
 
-          {/* ── Upgrade CTA for free users ── */}
-          {!isPro && opportunities.length > Math.max(0, FREE_MOVE_LIMIT - activeMoves.length) && (
-            <Card
-              variant="upgrade"
-              onPress={() => setShowPaywall(true)}
-              style={{ marginBottom: spacing.md, alignItems: 'center' }}
-            >
-              <Text style={s.upgradeBadge}>PRO</Text>
-              <Text style={s.upgradeTitle}>
-                +{opportunities.length - Math.max(0, FREE_MOVE_LIMIT - activeMoves.length)} more moves locked
-              </Text>
-              <Text style={s.upgradeSubtitle}>
-                Unlock your full action plan with step-by-step guidance
-              </Text>
-              <View style={s.upgradeBtn}>
-                <Text style={s.upgradeBtnText}>See plans</Text>
-              </View>
-            </Card>
-          )}
         </>
       )}
 

@@ -13,12 +13,12 @@ import { purchasePackage, getOffering, restorePurchases } from '@/lib/revenuecat
 import { useSubscription } from '@/lib/subscription';
 
 const FEATURES = [
-  { label: 'All moves unlocked', desc: 'Full step-by-step execution plans for every recommendation' },
-  { label: 'AI chat', desc: 'Unlimited personalised financial guidance from Bocy' },
-  { label: 'Unlimited re-analyses', desc: 'Re-analyse your finances whenever you need' },
-  { label: 'Weekly digest', desc: 'Surplus trends, spending breakdown, move progress every Monday' },
+  { label: 'Personalised action plan', desc: 'Step-by-step moves ranked by impact on your finances' },
+  { label: 'AI chat with Bocy', desc: 'Unlimited personalised financial guidance whenever you need it' },
+  { label: 'Automatic bank sync', desc: 'Always up to date, even when you\u2019re not looking' },
   { label: 'Smart check-ins', desc: 'Alerts for spending spikes, stale plans, and milestones' },
-  { label: 'Achievements', desc: 'Track streaks, milestones, and financial progress' },
+  { label: 'Goal projections', desc: 'See when you\u2019ll hit your target with Monte Carlo forecasting' },
+  { label: 'Weekly digest', desc: 'Surplus trends, spending breakdown, move progress every Monday' },
 ];
 
 interface PaywallProps {
@@ -30,7 +30,7 @@ interface PaywallProps {
 export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   const { colors } = useTheme();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const { refresh: refreshTier } = useSubscription();
+  const { refresh: refreshTier, isTrial, trialDaysLeft } = useSubscription();
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,11 +74,10 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     return () => window.removeEventListener('pageshow', reset);
   }, []);
 
-  const contextMessage = feature === 'chat'
-    ? 'Unlock AI chat to get personalised insights on your finances.'
-    : feature === 'moves'
-    ? 'Unlock all moves to see your full action plan with step-by-step guidance.'
-    : 'Get the full Bocy experience.';
+  const trialExpired = !isTrial;
+  const contextMessage = trialExpired
+    ? 'Your free trial has ended. Subscribe to keep using Bocy.'
+    : 'Your personal finance companion, always in your corner.';
 
   const showError = (msg: string) => {
     setError(msg);
@@ -181,17 +180,19 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={s.overlay} onPress={onClose}>
+      <Pressable style={s.overlay} onPress={trialExpired ? undefined : onClose}>
         <Pressable style={s.sheet} onPress={() => {}}>
-          {/* Close icon */}
-          <TouchableOpacity
-            style={s.closeIcon}
-            onPress={onClose}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            activeOpacity={0.6}
-          >
-            <Text style={s.closeIconText}>{'\u2715'}</Text>
-          </TouchableOpacity>
+          {/* Close icon — hidden when trial expired (hard gate) */}
+          {!trialExpired && (
+            <TouchableOpacity
+              style={s.closeIcon}
+              onPress={onClose}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              activeOpacity={0.6}
+            >
+              <Text style={s.closeIconText}>{'\u2715'}</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Drag indicator */}
           <View style={s.dragIndicator} />
@@ -203,12 +204,23 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
           >
             {/* Header */}
             <View style={s.header}>
-              <Text style={s.proBadge}>PRO</Text>
-              <Text style={s.title}>Upgrade to Bocy Pro</Text>
-              <Text style={s.subtitle}>{contextMessage}</Text>
-              <View style={s.trialBadge}>
-                <Text style={s.trialBadgeText}>2 weeks free</Text>
-              </View>
+              {trialExpired ? (
+                <>
+                  <Text style={s.title}>Subscribe to Bocy</Text>
+                  <Text style={s.subtitle}>{contextMessage}</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={s.proBadge}>PRO</Text>
+                  <Text style={s.title}>Subscribe to Bocy</Text>
+                  <Text style={s.subtitle}>{contextMessage}</Text>
+                  <View style={s.trialBadge}>
+                    <Text style={s.trialBadgeText}>
+                      {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left on trial
+                    </Text>
+                  </View>
+                </>
+              )}
             </View>
 
             {/* Price toggle */}
@@ -269,7 +281,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               {loading ? (
                 <ActivityIndicator size="small" color="#000000" />
               ) : (
-                <Text style={s.upgradeBtnText}>Start free trial</Text>
+                <Text style={s.upgradeBtnText}>Subscribe</Text>
               )}
             </TouchableOpacity>
             {error && (
@@ -278,13 +290,11 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               </View>
             )}
             <Text style={s.legalNote}>
-              Free for 14 days, then{' '}
               {selectedPrice === 'yearly'
                 ? (nativeYearlyPrice || '\u00a379.99') + '/year'
                 : (nativeMonthlyPrice || '\u00a39.99') + '/month'}
-              {'. '}Auto-renews. Cancel anytime.{'\n'}
-              No charge during your trial. Cancel before it ends and you won't be billed.
-              {isNative ? ' Payment will be charged to your Apple ID account after the trial period. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. You can manage and cancel subscriptions in your Account Settings on the App Store after purchase.' : ''}
+              {'. '}Auto-renews. Cancel anytime.
+              {isNative ? '\nPayment will be charged to your Apple ID account at confirmation of purchase. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. You can manage and cancel subscriptions in your Account Settings on the App Store after purchase.' : ''}
             </Text>
             <View style={s.legalLinks}>
               <TouchableOpacity onPress={() => Linking.openURL('https://www.bocy.io/terms.html')} activeOpacity={0.7}>
@@ -312,10 +322,12 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               </TouchableOpacity>
             )}
 
-            {/* Dismiss */}
-            <TouchableOpacity style={s.closeBtn} onPress={onClose} activeOpacity={0.7}>
-              <Text style={s.closeBtnText}>Maybe later</Text>
-            </TouchableOpacity>
+            {/* Dismiss — only shown during trial */}
+            {!trialExpired && (
+              <TouchableOpacity style={s.closeBtn} onPress={onClose} activeOpacity={0.7}>
+                <Text style={s.closeBtnText}>Maybe later</Text>
+              </TouchableOpacity>
+            )}
           </ScrollView>
         </Pressable>
       </Pressable>

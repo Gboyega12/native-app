@@ -74,7 +74,7 @@ function getProviderInitial(name: string) {
 export default function Profile() {
   const router = useRouter();
   const { connected, upgraded } = useLocalSearchParams<{ connected?: string; upgraded?: string }>();
-  const { tier, isPro, status, billingInterval, currentPeriodEnd, cancelAtPeriodEnd, refresh: refreshTier } = useSubscription();
+  const { isActive, isTrial, isSubscribed, trialDaysLeft, billingInterval, currentPeriodEnd, cancelAtPeriodEnd, refresh: refreshTier } = useSubscription();
   const { colors, isDark, toggleTheme } = useTheme();
   const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
@@ -332,13 +332,7 @@ export default function Profile() {
     setRestoringPurchases(false);
   };
 
-  const PRO_ONLY_NOTIFS: (keyof typeof notifPrefs)[] = ['checkin_prompts', 'achievement_alerts'];
-
   const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
-    if (!isPro && PRO_ONLY_NOTIFS.includes(key)) {
-      setShowPaywall(true);
-      return;
-    }
     const newVal = !notifPrefs[key];
     setNotifPrefs((prev) => ({ ...prev, [key]: newVal }));
     try {
@@ -448,17 +442,22 @@ export default function Profile() {
           <Text style={s.userName}>{name.split(' ')[0] || 'User'}</Text>
           <Text style={s.userEmail}>{email}</Text>
           <View style={s.tierRow}>
-            <View style={[s.tierBadge, isPro && s.tierBadgePro]}>
-              <Text style={[s.tierBadgeText, isPro && s.tierBadgeTextPro]}>
-                {isPro ? 'PRO' : 'FREE'}
+            <View style={[s.tierBadge, isSubscribed ? s.tierBadgePro : isTrial ? s.tierBadgeTrial : undefined]}>
+              <Text style={[s.tierBadgeText, isSubscribed ? s.tierBadgeTextPro : isTrial ? s.tierBadgeTextTrial : undefined]}>
+                {isSubscribed ? 'PRO' : isTrial ? 'TRIAL' : 'EXPIRED'}
               </Text>
             </View>
-            {isPro && currentPeriodEnd && !cancelAtPeriodEnd && (
+            {isTrial && (
+              <Text style={s.tierMeta}>
+                {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left
+              </Text>
+            )}
+            {isSubscribed && currentPeriodEnd && !cancelAtPeriodEnd && (
               <Text style={s.tierMeta}>
                 renews {currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
               </Text>
             )}
-            {isPro && cancelAtPeriodEnd && (
+            {isSubscribed && cancelAtPeriodEnd && (
               <Text style={[s.tierMeta, { color: colors.amber }]}>
                 cancels {currentPeriodEnd ? currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'soon'}
               </Text>
@@ -657,35 +656,28 @@ export default function Profile() {
           <>
             <View style={s.groupDivider} />
             {([
-              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Score & spending recap every Monday', pro: false },
-              { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Bocy flags things that need attention', pro: true },
-              { key: 'achievement_alerts' as const, label: 'Achievements', desc: 'Celebrate milestones', pro: true },
+              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Score & spending recap every Monday' },
+              { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Bocy flags things that need attention' },
+              { key: 'achievement_alerts' as const, label: 'Achievements', desc: 'Celebrate milestones' },
             ]).map((item, idx) => (
               <View key={item.key}>
                 {idx > 0 && <View style={s.groupDivider} />}
                 <View style={s.notifRow}>
                   <View style={s.notifInfo}>
                     <View style={s.notifLabelRow}>
-                      <Text style={[s.notifLabel, item.pro && !isPro && s.notifLabelLocked]}>{item.label}</Text>
-                      {item.pro && !isPro && <Text style={s.proBadge}>PRO</Text>}
+                      <Text style={s.notifLabel}>{item.label}</Text>
                     </View>
                     <Text style={s.notifDesc}>{item.desc}</Text>
                   </View>
                   <Switch
-                    value={item.pro && !isPro ? false : notifPrefs[item.key]}
+                    value={notifPrefs[item.key]}
                     onValueChange={() => toggleNotifPref(item.key)}
                     trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-                    thumbColor={(item.pro && !isPro) ? colors.thumbOff : (notifPrefs[item.key] ? colors.green : colors.thumbOff)}
-                    disabled={item.pro && !isPro}
+                    thumbColor={notifPrefs[item.key] ? colors.green : colors.thumbOff}
                   />
                 </View>
               </View>
             ))}
-            {!isPro && (
-              <TouchableOpacity style={s.notifUpgrade} onPress={() => setShowPaywall(true)} activeOpacity={0.7}>
-                <Text style={s.notifUpgradeText}>Unlock all with Pro</Text>
-              </TouchableOpacity>
-            )}
             {webPush.supported && (
               <>
                 <View style={s.groupDivider} />
@@ -719,10 +711,10 @@ export default function Profile() {
       </View>
 
       {/* ── Subscription management ── */}
-      {!isPro && (
+      {!isSubscribed && (
         <>
           <TouchableOpacity style={s.upgradeBtn} onPress={() => setShowPaywall(true)} activeOpacity={0.8}>
-            <Text style={s.upgradeBtnText}>Upgrade to Pro</Text>
+            <Text style={s.upgradeBtnText}>{isTrial ? 'Subscribe now' : 'Subscribe'}</Text>
           </TouchableOpacity>
           {(Platform.OS === 'ios' || Platform.OS === 'android') && (
             <TouchableOpacity
@@ -740,14 +732,12 @@ export default function Profile() {
           )}
         </>
       )}
-      {isPro && (
+      {isSubscribed && (
         <TouchableOpacity style={s.manageSubBtn} onPress={handleManageSubscription} disabled={portalLoading} activeOpacity={0.7}>
           {portalLoading ? (
             <ActivityIndicator size="small" color={colors.accent} />
           ) : (
-            <Text style={s.manageSubBtnText}>
-              {status === 'past_due' ? 'Update payment method' : 'Manage subscription'}
-            </Text>
+            <Text style={s.manageSubBtnText}>Manage subscription</Text>
           )}
         </TouchableOpacity>
       )}
@@ -826,8 +816,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: 100, paddingVertical: 3, paddingHorizontal: 10,
   },
   tierBadgePro: { backgroundColor: c.greenDim, borderColor: c.green + '40' },
+  tierBadgeTrial: { backgroundColor: c.accentDim, borderColor: c.accent + '40' },
   tierBadgeText: { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: c.dim },
   tierBadgeTextPro: { color: c.green },
+  tierBadgeTextTrial: { color: c.accent },
   tierMeta: { fontFamily: fonts.regular, fontSize: 12, color: c.dim },
 
   // ── Section labels ──

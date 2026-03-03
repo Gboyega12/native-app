@@ -50,17 +50,23 @@ export default async function handler(req, res) {
 
     for (const pref of prefs) {
       try {
-        // Only send check-ins to Pro subscribers
+        // Send check-ins to active subscribers and trial users
         const { data: subRow } = await admin
           .from('user_subscriptions')
           .select('tier, status')
           .eq('user_id', pref.user_id)
           .eq('status', 'active')
-          .single();
+          .maybeSingle();
 
-        if (subRow?.tier !== 'pro') {
-          results.skipped++;
-          continue;
+        const isSubscribed = subRow?.tier === 'pro';
+
+        // If not subscribed, check if still in 14-day trial
+        if (!isSubscribed) {
+          const { data: { user: authUser } } = await admin.auth.admin.getUserById(pref.user_id);
+          if (!authUser) { results.skipped++; continue; }
+          const created = new Date(authUser.created_at);
+          const trialEnd = new Date(created.getTime() + 14 * 24 * 60 * 60 * 1000);
+          if (new Date() >= trialEnd) { results.skipped++; continue; }
         }
 
         // Check if we already sent a check-in today (1-per-day limit)

@@ -9,8 +9,6 @@ import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coo
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
-import { useSubscription } from '@/lib/subscription';
-import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import Card from '@/components/Card';
@@ -21,8 +19,6 @@ import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 
-/** Free users can send this many messages before the paywall gate kicks in */
-const FREE_MESSAGE_LIMIT = 2;
 
 /** Word-count threshold — messages longer than this get split into chunks */
 const CHUNK_WORD_THRESHOLD = 15;
@@ -839,11 +835,9 @@ function GoalUpdateCard({
 export default function Chat() {
   const router = useRouter();
   const { prefill } = useLocalSearchParams<{ prefill?: string }>();
-  const { isPro } = useSubscription();
   const { colors } = useTheme();
   const { maxContentWidth, isTablet } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const [showPaywall, setShowPaywall] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [inputHeight, setInputHeight] = useState(40);
@@ -1660,12 +1654,6 @@ export default function Chat() {
   const sendMessage = async (text: string) => {
     if (!text.trim() || loading) return;
 
-    // Gate free users after they've used their teaser messages
-    if (!isPro && messages.filter((m) => m.role === 'user').length >= FREE_MESSAGE_LIMIT) {
-      setShowPaywall(true);
-      return;
-    }
-
     const userMsg: ChatMessage = { role: 'user', content: text.trim() };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
@@ -1832,11 +1820,6 @@ export default function Chat() {
 
   const paydayActive = !!context.payday_context?.incomeArrivedThisWeek;
   const suggestedQuestions = getContextualQuestions(analysis, goals, paydayActive, context.payday_context);
-
-  // ── Free tier: count user messages for gate ──
-  const userMessageCount = messages.filter((m) => m.role === 'user').length;
-  const freeGateReached = !isPro && userMessageCount >= FREE_MESSAGE_LIMIT;
-  const freeMessagesRemaining = isPro ? Infinity : Math.max(0, FREE_MESSAGE_LIMIT - userMessageCount);
 
   const isEmptyState = messages.length === 0 || (messages.length === 1 && messages[0].role === 'assistant' && paydayActive);
 
@@ -2104,32 +2087,11 @@ export default function Chat() {
         )}
       </ScrollView>
 
-      {/* ── Input / Gate (only shown in conversation mode, not empty state) ── */}
-      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
+      {/* ── Input (only shown in conversation mode, not empty state) ── */}
       {!isEmptyState && (
         <>
-          {freeGateReached ? (
-            <View style={[s.gateRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-              <Text style={s.gateText}>You've used your {FREE_MESSAGE_LIMIT} free messages</Text>
-              <TouchableOpacity
-                style={s.gateBtn}
-                onPress={() => setShowPaywall(true)}
-                activeOpacity={0.8}
-              >
-                <Text style={s.gateBtnText}>Unlock unlimited chat</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              {!isPro && userMessageCount > 0 && (
-                <View style={[s.freeBadgeRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-                  <Text style={s.freeBadgeText}>
-                    {freeMessagesRemaining} of {FREE_MESSAGE_LIMIT} free {freeMessagesRemaining === 1 ? 'message' : 'messages'} left
-                  </Text>
-                </View>
-              )}
               {/* Voice-first input bar: mic button prominent, text secondary */}
-              <View style={[s.voiceInputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
+              <View style={[s.voiceInputRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
                 <TextInput
                   ref={inputRef}
                   style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
@@ -2173,7 +2135,6 @@ export default function Chat() {
                 </PulseButton>
               </View>
             </>
-          )}
         </>
       )}
     </KeyboardAvoidingView>
