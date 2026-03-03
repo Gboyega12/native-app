@@ -1,14 +1,16 @@
 // ── Proactive Check-in Cron Job ──
 // Runs daily at 10am (via Vercel Cron).
-// Evaluates each user's data to determine if Bocy should reach out with
-// a contextual nudge. Sends via email now, push notification when on app stores.
+// Sends a contextual nudge to Pro users. If a specific trigger fires
+// (score drop, spending spike, inactivity, milestone) the message is
+// tailored. Otherwise a general daily check-in is sent so the 10am
+// notification always arrives.
 //
-// Check-in triggers:
-//   1. Plan stale: User has moves but hasn't opened app in 3+ days
-//   2. Score drop: Decision score dropped 5+ since last snapshot
-//   3. Spending spike: A category jumped 30%+ vs. last period
-//   4. Subscription reminder: Active sub audit move not started after 7 days
-//   5. Milestone approaching: Close to a savings/debt goal
+// Check-in triggers (in priority order):
+//   1. Score drop: Decision score dropped 5+ since last snapshot
+//   2. Spending spike: A category jumped 30%+ vs. last period
+//   3. Plan stale: User has moves but hasn't opened app in 3+ days
+//   4. Milestone approaching: Close to a savings/debt goal
+//   5. Fallback: General daily score summary (always fires)
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -28,7 +30,7 @@ export default async function handler(req, res) {
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
-  const results = { sent: 0, skipped: 0 };
+  const results = { sent: 0, skipped: 0, failed: 0, errors: [] };
 
   try {
     // Get users with check-in prompts enabled
@@ -42,8 +44,9 @@ export default async function handler(req, res) {
     }
 
     const now = new Date();
-    const threeDaysAgo = new Date(now);
-    threeDaysAgo.setDate(now.getDate() - 3);
+    // Cooldown: don't send if we already sent a check-in today
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
 
     for (const pref of prefs) {
       try {
@@ -60,13 +63,13 @@ export default async function handler(req, res) {
           continue;
         }
 
-        // Check if we already sent a check-in in the last 3 days
+        // Check if we already sent a check-in today (1-per-day limit)
         const { data: recentNotif } = await admin
           .from('notification_log')
           .select('id')
           .eq('user_id', pref.user_id)
           .eq('notification_type', 'checkin')
-          .gte('sent_at', threeDaysAgo.toISOString())
+          .gte('sent_at', todayStart.toISOString())
           .limit(1);
 
         if (recentNotif && recentNotif.length > 0) {
@@ -156,9 +159,17 @@ export default async function handler(req, res) {
           message = `You're at a ${Math.round(current.savings_rate)}% savings rate — just a small push from hitting 10%. That's a major milestone. Let's see what can get you there.`;
         }
 
+        // Fallback: if no specific condition triggered, send a general daily
+        // check-in so the 10am notification always arrives for Pro users.
         if (!message) {
-          results.skipped++;
-          continue;
+          const score = current.decision_score;
+          if (score >= 70) {
+            message = `Your score is ${score} — your finances are in a strong position. Let's keep the momentum going. Want to see if there's a new move worth trying?`;
+          } else if (score >= 50) {
+            message = `Your score is sitting at ${score}. There's room to grow — want to take a quick look at what could push it higher this week?`;
+          } else {
+            message = `Your score is at ${score}. A few targeted moves could start turning things around. Want to take a look?`;
+          }
         }
 
         // Send check-in email
@@ -183,7 +194,7 @@ export default async function handler(req, res) {
   </div>
 </div></body></html>`;
 
-        await fetch(`${appUrl}/api/notifications/send`, {
+        const sendRes = await fetch(`${appUrl}/api/notifications/send`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -199,10 +210,19 @@ export default async function handler(req, res) {
           }),
         });
 
-        results.sent++;
+        const sendData = await sendRes.json();
+        if (sendData.success) {
+          results.sent++;
+        } else if (sendData.skipped) {
+          results.skipped++;
+        } else {
+          results.failed++;
+          results.errors.push({ user_id: pref.user_id, error: sendData.error });
+        }
       } catch (userErr) {
         console.warn(`[checkins] Failed for user ${pref.user_id}:`, userErr?.message);
-        results.skipped++;
+        results.failed++;
+        results.errors.push({ user_id: pref.user_id, error: userErr?.message });
       }
     }
 

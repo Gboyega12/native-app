@@ -31,7 +31,7 @@ export default async function handler(req, res) {
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
-  const results = { sent: 0, skipped: 0 };
+  const results = { sent: 0, skipped: 0, failed: 0, errors: [] };
 
   try {
     // Get users with check-in prompts enabled (spending updates use the same preference)
@@ -215,7 +215,7 @@ export default async function handler(req, res) {
 </div></body></html>`;
 
         // Send notification via multi-channel endpoint
-        await fetch(`${appUrl}/api/notifications/send`, {
+        const sendRes = await fetch(`${appUrl}/api/notifications/send`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -235,10 +235,19 @@ export default async function handler(req, res) {
           }),
         });
 
-        results.sent++;
+        const sendData = await sendRes.json();
+        if (sendData.success) {
+          results.sent++;
+        } else if (sendData.skipped) {
+          results.skipped++;
+        } else {
+          results.failed++;
+          results.errors.push({ user_id: pref.user_id, error: sendData.error });
+        }
       } catch (userErr) {
         console.warn(`[daily-spending] Failed for user ${pref.user_id}:`, userErr?.message);
-        results.skipped++;
+        results.failed++;
+        results.errors.push({ user_id: pref.user_id, error: userErr?.message });
       }
     }
 
