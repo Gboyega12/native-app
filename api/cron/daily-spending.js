@@ -1,5 +1,5 @@
 // ── Daily Spending Nudge Cron Job ──
-// Runs daily at 11pm (via Vercel Cron).
+// Runs daily at 12 noon (via Vercel Cron).
 // Sends a contextual spending update based on real transaction data:
 //   - How much the user has spent today and this week
 //   - How much of their weekly budget remains

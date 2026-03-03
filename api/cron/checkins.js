@@ -1,8 +1,8 @@
 // ── Proactive Check-in Cron Job ──
-// Runs daily at 11pm (via Vercel Cron).
+// Runs daily at 12 noon (via Vercel Cron).
 // Sends a contextual nudge to Pro users. If a specific trigger fires
 // (score drop, spending spike, inactivity, milestone) the message is
-// tailored. Otherwise a general daily check-in is sent so the 11pm
+// tailored. Otherwise a general daily check-in is sent so the 12 noon
 // notification always arrives.
 //
 // Check-in triggers (in priority order):
@@ -160,7 +160,7 @@ export default async function handler(req, res) {
         }
 
         // Fallback: if no specific condition triggered, send a general daily
-        // check-in so the 10am notification always arrives for Pro users.
+        // check-in so the 12 noon notification always arrives for Pro users.
         if (!message) {
           const score = current.decision_score;
           if (score >= 70) {

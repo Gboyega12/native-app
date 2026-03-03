@@ -64,32 +64,84 @@ function splitIntoBubbles(text: string): string[] {
 }
 
 /**
- * Speak text aloud using the Web Speech Synthesis API.
+ * Speak text aloud using ElevenLabs TTS (via /api/tts proxy).
+ * Falls back to Web Speech Synthesis if ElevenLabs is unavailable.
  * Returns a cancel function. Only works on web.
  */
-function speakText(text: string, onEnd?: () => void): (() => void) {
-  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.speechSynthesis) {
+function speakText(text: string, onEnd?: () => void, authToken?: string | null): (() => void) {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') {
     onEnd?.();
     return () => {};
   }
 
-  // Strip markdown for cleaner speech
+  let cancelled = false;
+  let audio: HTMLAudioElement | null = null;
+
+  // Try ElevenLabs first, fall back to Web Speech API
+  if (authToken) {
+    const clean = text.replace(/[*_~`#>\[\]()]/g, '').replace(/\n+/g, '. ');
+
+    fetch('/api/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ text: clean }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('TTS request failed');
+        return res.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        audio = new Audio(url);
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          onEnd?.();
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          onEnd?.();
+        };
+        audio.play();
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Fallback to Web Speech API
+        speakWithWebSpeech(text, onEnd);
+      });
+  } else {
+    speakWithWebSpeech(text, onEnd);
+  }
+
+  return () => {
+    cancelled = true;
+    if (audio) {
+      audio.pause();
+      audio.src = '';
+    }
+    window.speechSynthesis?.cancel();
+    onEnd?.();
+  };
+}
+
+/** Fallback: Web Speech Synthesis API (robotic but works without API key) */
+function speakWithWebSpeech(text: string, onEnd?: () => void) {
+  if (!window.speechSynthesis) {
+    onEnd?.();
+    return;
+  }
   const clean = text.replace(/[*_~`#>\[\]()]/g, '').replace(/\n+/g, '. ');
   const utterance = new SpeechSynthesisUtterance(clean);
   utterance.lang = 'en-GB';
   utterance.rate = 1.0;
   utterance.pitch = 1.0;
-
   utterance.onend = () => onEnd?.();
   utterance.onerror = () => onEnd?.();
-
   window.speechSynthesis.cancel();
   window.speechSynthesis.speak(utterance);
-
-  return () => {
-    window.speechSynthesis.cancel();
-    onEnd?.();
-  };
 }
 
 // ── Dot-matrix ring (Nothing Phone glyph aesthetic) ──
@@ -759,11 +811,11 @@ export default function Chat() {
   const [speakingMsgIdx, setSpeakingMsgIdx] = useState<number | null>(null);
   const stopSpeechRef = useRef<(() => void) | null>(null);
 
-  // ── TTS support check ──
+  // ── TTS support check (ElevenLabs uses Audio API; Web Speech API is fallback) ──
   const ttsSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
-    !!window.speechSynthesis;
+    (typeof Audio !== 'undefined' || !!window.speechSynthesis);
 
-  const handleSpeak = (msgIndex: number, text: string) => {
+  const handleSpeak = async (msgIndex: number, text: string) => {
     // If already speaking this message, stop
     if (speakingMsgIdx === msgIndex) {
       stopSpeechRef.current?.();
@@ -774,8 +826,12 @@ export default function Chat() {
     // Stop any current speech
     stopSpeechRef.current?.();
 
+    // Get auth token for ElevenLabs TTS proxy
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token || null;
+
     setSpeakingMsgIdx(msgIndex);
-    const cancel = speakText(text, () => setSpeakingMsgIdx(null));
+    const cancel = speakText(text, () => setSpeakingMsgIdx(null), token);
     stopSpeechRef.current = cancel;
   };
 
