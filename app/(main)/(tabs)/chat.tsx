@@ -2134,7 +2134,6 @@ export default function Chat() {
                   )}
                 </PulseButton>
               </View>
-            </>
         </>
       )}
     </KeyboardAvoidingView>
