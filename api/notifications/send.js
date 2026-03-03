@@ -11,7 +11,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const VAPID_PUBLIC = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY;
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:notifications@bocy.app';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:notifications@updates.bocy.io';
 
 if (VAPID_PUBLIC && VAPID_PRIVATE) {
   webPush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
@@ -64,7 +64,7 @@ export default async function handler(req, res) {
         'Authorization': `Bearer ${resendKey}`,
       },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'Bocy <notifications@bocy.app>',
+        from: process.env.EMAIL_FROM || 'Bocy <notifications@updates.bocy.io>',
         to: [to],
         subject,
         html,
