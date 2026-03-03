@@ -212,11 +212,11 @@ function DotRing({
 
 const MIC_GLYPH: number[][] = [
   [0, 1, 0],
-  [1, 0, 1],
-  [1, 0, 1],
+  [1, 1, 1],
+  [1, 1, 1],
   [0, 1, 0],
-  [1, 0, 1],
   [0, 1, 0],
+  [1, 1, 1],
 ];
 
 function DotMic({ dotSize = 3.5, gap = 2, color }: { dotSize?: number; gap?: number; color: string }) {

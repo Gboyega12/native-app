@@ -431,16 +431,18 @@ export default function Plan() {
     const uid = userIdRef.current;
     if (!uid) return;
 
-    try {
-      await fetch('/api/plans', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'dismiss', plan_id: planId, user_id: uid }),
-      });
-    } catch {}
-
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
+
+    try {
+      await supabase
+        .from('user_plans')
+        .delete()
+        .eq('id', planId)
+        .eq('user_id', uid);
+    } catch (err: any) {
+      console.warn('[plan] Failed to delete plan:', err?.message);
+    }
   };
 
   const handleDeleteRecommendation = async (sortedIndex: number) => {
