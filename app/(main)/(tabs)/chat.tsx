@@ -449,6 +449,24 @@ function VoiceOrb({
   const ring1 = useRef(new Animated.Value(0)).current;
   const ring2 = useRef(new Animated.Value(0)).current;
   const dotPulse = useRef(new Animated.Value(0)).current;
+  const idlePulse = useRef(new Animated.Value(0)).current;
+
+  // Slow stoic idle pulse — draws the eye without being aggressive
+  useEffect(() => {
+    if (listening) {
+      idlePulse.stopAnimation();
+      idlePulse.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idlePulse, { toValue: 1, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(idlePulse, { toValue: 0, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [listening]);
 
   useEffect(() => {
     if (listening) {
@@ -500,6 +518,9 @@ function VoiceOrb({
 
   const activeColor = listening ? colors.green : colors.accent;
 
+  const idleScale = listening ? 1 : idlePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
+  const idleGlow = listening ? 1 : idlePulse.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
+
   return (
     <View style={s.voiceOrbContainer}>
       {/* Expanding dot-matrix rings (visible when listening) */}
@@ -509,9 +530,11 @@ function VoiceOrb({
           <DotRing size={96} count={22} dotSize={2} color={colors.green} animated animValue={ring2} />
         </>
       )}
-      {/* Static outer dot ring */}
-      <DotRing size={96} count={24} dotSize={listening ? 3 : 2.5} color={activeColor} />
-      <Animated.View style={{ transform: [{ scale }] }}>
+      {/* Static outer dot ring — breathes when idle */}
+      <Animated.View style={{ position: 'absolute', transform: [{ scale: idleScale as any }], opacity: idleGlow as any }}>
+        <DotRing size={96} count={24} dotSize={listening ? 3 : 2.5} color={activeColor} />
+      </Animated.View>
+      <Animated.View style={{ transform: [{ scale }, ...(listening ? [] : [{ scale: idleScale as any }])] }}>
         <Pressable
           style={[s.voiceOrb, listening && s.voiceOrbListening]}
           onPress={disabled ? undefined : onPress}
@@ -1870,18 +1893,20 @@ export default function Chat() {
               </FadeInView>
             )}
 
-            {/* Center content: orb + title */}
+            {/* Center content: orb + hint */}
             <View style={s.voiceHeroCenter}>
               <View style={s.voiceHeroTop}>
-                <Text style={s.voiceHeroTitle}>
-                  {paydayActive ? 'Payday check-in' : listening ? 'Listening\u2026' : 'Talk to Bocy'}
-                </Text>
+                {(paydayActive || listening) && (
+                  <Text style={s.voiceHeroTitle}>
+                    {paydayActive ? 'Payday check-in' : 'Listening\u2026'}
+                  </Text>
+                )}
                 <Text style={s.voiceHeroSubtitle}>
                   {listening
                     ? 'Speak naturally. I\u2019ll send when you\u2019re done.'
                     : paydayActive
                       ? 'Tap to speak, or pick a question below'
-                      : 'Tap the mic \u2022 ask anything about your money'}
+                      : 'Tap the mic \u2022 ask anything'}
                 </Text>
               </View>
 

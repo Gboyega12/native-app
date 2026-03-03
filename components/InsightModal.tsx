@@ -45,7 +45,7 @@ export default function InsightModal({
   tag,
   title,
   body,
-  actionLabel = 'Talk to Bocy',
+  actionLabel = 'Ask Bocy',
   actionPrefill,
   fingerprint,
 }: InsightModalProps) {

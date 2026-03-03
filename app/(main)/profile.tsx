@@ -131,7 +131,8 @@ export default function Profile() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      setName(user.user_metadata?.full_name || '');
+      const rawFullName = user.user_metadata?.full_name || '';
+      setName(rawFullName.split(' ').map((w: string) => w ? w.charAt(0).toUpperCase() + w.slice(1) : '').join(' '));
       setEmail(user.email || '');
       setUserId(user.id);
 

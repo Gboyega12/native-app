@@ -276,6 +276,60 @@ export function InfoIcon({ expanded, onPress }: { expanded: boolean; onPress: ()
   );
 }
 
+// ── ExpandDots ──
+// Dotted glyph micro-animation: a small cluster of dots that scatter
+// outward and fade when a collapsed card expands. Nothing Phone LED aesthetic.
+export function ExpandDots({ color, count = 5, size = 3 }: { color?: string; count?: number; size?: number }) {
+  const { colors } = useTheme();
+  const dotColor = color || colors.accent;
+  const anims = useRef(
+    Array.from({ length: count }, () => ({
+      opacity: new Animated.Value(0),
+      x: new Animated.Value(0),
+      y: new Animated.Value(0),
+    })),
+  ).current;
+
+  useEffect(() => {
+    // Each dot fades in then scatters outward and fades out
+    const animations = anims.map((dot, i) => {
+      const angle = (i / count) * 2 * Math.PI + Math.random() * 0.4;
+      const dist = 8 + Math.random() * 10;
+      return Animated.sequence([
+        Animated.delay(i * 30),
+        Animated.parallel([
+          Animated.sequence([
+            Animated.timing(dot.opacity, { toValue: 1, duration: 120, useNativeDriver: true }),
+            Animated.timing(dot.opacity, { toValue: 0, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          ]),
+          Animated.timing(dot.x, { toValue: Math.cos(angle) * dist, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(dot.y, { toValue: Math.sin(angle) * dist, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        ]),
+      ]);
+    });
+    Animated.parallel(animations).start();
+  }, []);
+
+  return (
+    <View style={{ width: size * 3, height: size * 3, alignItems: 'center', justifyContent: 'center' }}>
+      {anims.map((dot, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: dotColor,
+            opacity: dot.opacity,
+            transform: [{ translateX: dot.x }, { translateY: dot.y }],
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
 // ── Variant style resolver ──
 function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: string): ViewStyle {
   const base: ViewStyle = {
@@ -309,10 +363,10 @@ function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: st
 const styles = StyleSheet.create({
   base: {
     borderRadius: 20,
-    padding: 24,
-    paddingTop: 28,
-    paddingBottom: 28,
-    marginBottom: 14,
+    padding: 28,
+    paddingTop: 32,
+    paddingBottom: 32,
+    marginBottom: 16,
     overflow: 'hidden' as const,
   },
   title: {

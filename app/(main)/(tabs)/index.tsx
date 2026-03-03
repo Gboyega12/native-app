@@ -17,7 +17,7 @@ import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
-import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 
@@ -786,7 +786,8 @@ export default function Home() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoading(false); return; }
 
-      setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
+      const rawName = user.user_metadata?.full_name?.split(' ')[0] || '';
+      setUserName(rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1) : '');
       userIdRef.current = user.id;
 
       // ── Record daily streak ──
@@ -1011,7 +1012,7 @@ export default function Home() {
 
   // ── Plan handlers (merged from plan page) ──
   const effortOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
-  const effortColor = (e: string) => e === 'low' ? colors.lavender : e === 'medium' ? colors.dim : colors.text2;
+  const effortColor = (e: string) => e === 'low' ? colors.lavender : e === 'medium' ? colors.dim : colors.green;
   const effortLabel = (e: string) => e === 'low' ? 'Quick win' : e === 'medium' ? 'Some effort' : 'Big move';
 
   const togglePlanStep = (key: string, stepIndex: number, moveAction: string) => {
@@ -1412,7 +1413,7 @@ export default function Home() {
                     router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: 'I just got paid. Walk me through what to do.' } });
                   }}
                 >
-                  <Text style={s.heroCtaText}>Talk to Bocy about this</Text>
+                  <Text style={s.heroCtaText}>Ask Bocy about this</Text>
                 </TouchableOpacity>
               </Card>
             </AnimGlyph>
@@ -1448,14 +1449,14 @@ export default function Home() {
 
                 {/* Top move teaser */}
                 {dashboardMoves.length > 0 && (
-                  <View style={{ marginTop: 20, paddingTop: 20, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 8 }}>
+                  <View style={{ marginTop: 24, paddingTop: 24, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
                       #1 MOVE
                     </Text>
-                    <Text style={{ fontFamily: fonts.medium, fontSize: 15, color: colors.text, lineHeight: 22 }}>
+                    <Text style={{ fontFamily: fonts.medium, fontSize: 15, color: colors.text, lineHeight: 24 }}>
                       {stripMd(dashboardMoves[0].action)}
                     </Text>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.text2, marginTop: 6, letterSpacing: 0.3 }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green, marginTop: 8, letterSpacing: 0.3 }}>
                       +{'\u00a3'}{(dashboardMoves[0].annualImpact || 0).toLocaleString()}/yr
                     </Text>
                   </View>
@@ -1501,12 +1502,12 @@ export default function Home() {
                             </View>
                             <View style={{ flex: 1 }}>
                               <Text style={s.moveAction}>{stripMd(move.action)}</Text>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}>
                                 <Text style={s.moveImpactText}>{'\u00a3'}{move.monthlyImpact}/mo</Text>
                                 <Text style={{ fontSize: 10, color: colors.muted }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                               </View>
                               {!isExpanded && steps.length > 0 && (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
                                   <View style={{ flex: 1, height: 2, borderRadius: 1, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
                                     <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 1, backgroundColor: colors.accent }} />
                                   </View>
@@ -1518,6 +1519,9 @@ export default function Home() {
                         </TouchableOpacity>
                         {isExpanded && (
                           <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border }}>
+                            <View style={{ position: 'absolute', top: 8, right: 0 }}>
+                              <ExpandDots count={5} size={2.5} />
+                            </View>
                             {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
                             {steps.map((step: string, j: number) => {
                               const isDone = doneSteps.includes(j);
@@ -1549,7 +1553,7 @@ export default function Home() {
                 <>
                   <View style={s.moveSectionHeader}>
                     <Text style={s.moveSectionLabel}>YOUR MOVES</Text>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.dim, letterSpacing: 0.3 }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green, letterSpacing: 0.3 }}>
                       {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo potential
                     </Text>
                   </View>
@@ -1562,12 +1566,12 @@ export default function Home() {
                       <Card key={`opp-${i}`} variant="default" style={{ marginBottom: spacing.md }}>
                         <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
                           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                            <View style={s.moveBadge}>
-                              <Text style={s.moveBadgeText}>{seqIdx + 1}</Text>
+                            <View style={[s.moveBadge, seqIdx === 0 && { borderColor: colors.green }]}>
+                              <Text style={[s.moveBadgeText, seqIdx === 0 && { color: colors.green }]}>{seqIdx + 1}</Text>
                             </View>
                             <View style={{ flex: 1 }}>
                               <Text style={s.moveAction}>{stripMd(move.action)}</Text>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}>
                                 <Text style={s.moveImpactText}>{'\u00a3'}{move.monthlyImpact}/mo</Text>
                                 <View style={[s.effortPill, { backgroundColor: `${effortColor(move.effort)}15` }]}>
                                   <Text style={[s.effortPillText, { color: effortColor(move.effort) }]}>{effortLabel(move.effort)}</Text>
@@ -1575,7 +1579,7 @@ export default function Home() {
                                 <Text style={{ fontSize: 10, color: colors.muted, marginLeft: 'auto' }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                               </View>
                               {!isExpanded && move.merchants && move.merchants.length > 0 && (
-                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
                                   {move.merchants.slice(0, 3).map((m: string, j: number) => (
                                     <View key={j} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 100, paddingVertical: 2, paddingHorizontal: 8 }}>
                                       <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.text2 }}>{m}</Text>
@@ -1594,18 +1598,21 @@ export default function Home() {
                         )}
 
                         {isExpanded && (
-                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border }}>
-                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
+                          <View style={{ marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderTopColor: colors.border }}>
+                            <View style={{ position: 'absolute', top: 12, right: 0 }}>
+                              <ExpandDots count={5} size={2.5} />
+                            </View>
+                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 24, marginBottom: 20 }}>{stripMd(move.strategy)}</Text>}
 
-                            <TouchableOpacity style={[s.heroCta, { marginBottom: 16, paddingVertical: 12 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
+                            <TouchableOpacity style={[s.heroCta, { marginBottom: 20, paddingVertical: 12 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
                               <Text style={s.heroCtaText}>Start this move</Text>
                             </TouchableOpacity>
 
                             {move.merchants && move.merchants.length > 0 && (
-                              <View style={{ marginBottom: 16 }}>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 8 }}>WHERE YOUR MONEY GOES</Text>
+                              <View style={{ marginBottom: 20 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 12 }}>WHERE YOUR MONEY GOES</Text>
                                 {move.merchants.map((m: string, j: number) => (
-                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 }}>
+                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 }}>
                                     <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.accent }} />
                                     <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2 }}>{m}</Text>
                                   </View>
@@ -1614,32 +1621,32 @@ export default function Home() {
                             )}
 
                             {(move.steps || []).length > 0 && (
-                              <View style={{ marginBottom: 16 }}>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 8 }}>STEPS</Text>
+                              <View style={{ marginBottom: 20 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 12 }}>STEPS</Text>
                                 {(move.steps || []).map((step: string, j: number) => (
-                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.dim, width: 22, textAlign: 'center' }}>{j + 1}</Text>
-                                    <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 }}>{stripMd(step)}</Text>
+                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.dim, width: 24, textAlign: 'center' }}>{j + 1}</Text>
+                                    <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 24 }}>{stripMd(step)}</Text>
                                   </View>
                                 ))}
                               </View>
                             )}
 
                             {move.effect && (
-                              <View style={{ marginBottom: 16 }}>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 8 }}>OUTCOME</Text>
-                                <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 22 }}>{stripMd(move.effect)}</Text>
+                              <View style={{ marginBottom: 20 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 10 }}>OUTCOME</Text>
+                                <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 24 }}>{stripMd(move.effect)}</Text>
                               </View>
                             )}
 
-                            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-                              <View style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, alignItems: 'center' }}>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.text, letterSpacing: -0.5 }}>{'\u00a3'}{move.monthlyImpact || 0}</Text>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, marginTop: 4, letterSpacing: 1, textTransform: 'uppercase' }}>per month</Text>
+                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                              <View style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, alignItems: 'center' }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.green, letterSpacing: -0.5 }}>{'\u00a3'}{move.monthlyImpact || 0}</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, marginTop: 6, letterSpacing: 1, textTransform: 'uppercase' }}>per month</Text>
                               </View>
-                              <View style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, alignItems: 'center' }}>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.text, letterSpacing: -0.5 }}>{'\u00a3'}{move.annualImpact || 0}</Text>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, marginTop: 4, letterSpacing: 1, textTransform: 'uppercase' }}>per year</Text>
+                              <View style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, alignItems: 'center' }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.green, letterSpacing: -0.5 }}>{'\u00a3'}{move.annualImpact || 0}</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, marginTop: 6, letterSpacing: 1, textTransform: 'uppercase' }}>per year</Text>
                               </View>
                             </View>
 
@@ -1693,6 +1700,9 @@ export default function Home() {
 
             {budgetExpanded && (
               <Card style={{ marginBottom: spacing.md }}>
+                <View style={{ position: 'absolute', top: 16, right: 20, zIndex: 1 }}>
+                  <ExpandDots count={6} size={3} />
+                </View>
                 <View style={s.progressTrack}>
                   <View style={[
                     s.progressFill,
@@ -1706,7 +1716,7 @@ export default function Home() {
                 <View style={s.sectionBlock}>
                   <View style={s.sectionHeaderRow}>
                     <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
-                    <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.text2 : colors.coral }]}>
+                    <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.green : colors.coral }]}>
                       {'\u00a3'}{Math.round(periodNonDiscTotal).toLocaleString()} of {'\u00a3'}{Math.round(periodNonDiscBudget).toLocaleString()}
                     </Text>
                   </View>
@@ -1742,7 +1752,7 @@ export default function Home() {
                 <View style={[s.sectionBlock, { borderBottomWidth: 0 }]}>
                   <View style={s.sectionHeaderRow}>
                     <Text style={[s.sectionLabel, { color: colors.text2 }]}>Remaining</Text>
-                    <Text style={[s.sectionStatus, { color: periodRemaining > 0 ? colors.text2 : colors.coral }]}>
+                    <Text style={[s.sectionStatus, { color: periodRemaining > 0 ? colors.green : colors.coral }]}>
                       {'\u00a3'}{Math.round(periodRemaining).toLocaleString()}
                     </Text>
                   </View>
@@ -1750,9 +1760,9 @@ export default function Home() {
 
                 {/* Period toggle */}
                 <View style={[s.periodToggleRow, { marginBottom: 0, marginTop: 8 }]}>
-                  {(['month', 'week'] as const).map((p) => (
+                  {(['year', 'month', 'week'] as const).map((p) => (
                     <TouchableOpacity key={p} style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]} onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod(p); }}>
-                      <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>{p === 'month' ? 'Monthly' : 'Weekly'}</Text>
+                      <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>{p === 'year' ? 'Annual' : p === 'month' ? 'Monthly' : 'Weekly'}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -1772,6 +1782,9 @@ export default function Home() {
 
           {txCardExpanded && (
             <Card style={{ marginBottom: spacing.md }}>
+              <View style={{ position: 'absolute', top: 16, right: 20, zIndex: 1 }}>
+                <ExpandDots count={6} size={3} />
+              </View>
               {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
                 const key = `nd-${item.category}`;
                 const isExp = expandedCategories.has(key);
@@ -1784,15 +1797,22 @@ export default function Home() {
                       </View>
                       <Text style={[s.dataValue, { color: colors.text }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
                     </TouchableOpacity>
-                    {isExp && item.txs.map((tx, j) => (
-                      <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'essential' }); setRecatTarget(''); setRecatEssential(true); }} activeOpacity={0.7}>
-                        <View style={s.txLeft}>
-                          <Text style={s.txMerchant}>{tx.merchant}</Text>
-                          <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                    {isExp && (
+                      <>
+                        <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
+                          <ExpandDots count={4} size={2} />
                         </View>
-                        <Text style={[s.txAmount, { color: colors.text2 }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
-                      </TouchableOpacity>
-                    ))}
+                        {item.txs.map((tx, j) => (
+                          <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'essential' }); setRecatTarget(''); setRecatEssential(true); }} activeOpacity={0.7}>
+                            <View style={s.txLeft}>
+                              <Text style={s.txMerchant}>{tx.merchant}</Text>
+                              <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                            </View>
+                            <Text style={[s.txAmount, { color: colors.text2 }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </>
+                    )}
                   </View>
                 );
               })}
@@ -1808,15 +1828,22 @@ export default function Home() {
                       </View>
                       <Text style={[s.dataValue, { color: colors.dim }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
                     </TouchableOpacity>
-                    {isExp && item.txs.map((tx, j) => (
-                      <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'lifestyle' }); setRecatTarget(''); setRecatEssential(false); }} activeOpacity={0.7}>
-                        <View style={s.txLeft}>
-                          <Text style={s.txMerchant}>{tx.merchant}</Text>
-                          <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                    {isExp && (
+                      <>
+                        <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
+                          <ExpandDots count={4} size={2} />
                         </View>
-                        <Text style={[s.txAmount, { color: colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
-                      </TouchableOpacity>
-                    ))}
+                        {item.txs.map((tx, j) => (
+                          <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'lifestyle' }); setRecatTarget(''); setRecatEssential(false); }} activeOpacity={0.7}>
+                            <View style={s.txLeft}>
+                              <Text style={s.txMerchant}>{tx.merchant}</Text>
+                              <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                            </View>
+                            <Text style={[s.txAmount, { color: colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </>
+                    )}
                   </View>
                 );
               })}
@@ -2153,7 +2180,7 @@ export default function Home() {
               : '') +
             ' Want me to walk you through where it should go?'
           }
-          actionLabel="Talk to Bocy"
+          actionLabel="Ask Bocy"
           actionPrefill="I just got paid. Walk me through what to do first."
           fingerprint={incomeFingerprint ? `income:${incomeFingerprint}` : undefined}
         />
@@ -2312,24 +2339,25 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.medium,
     fontSize: 15,
     color: c.text,
-    lineHeight: 22,
+    lineHeight: 24,
   },
   moveImpactText: {
     fontFamily: fonts.mono,
     fontSize: 12,
     color: c.text2,
     letterSpacing: 0.3,
+    marginTop: 2,
   },
   moveBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: c.border,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: spacing.sm,
+    marginRight: spacing.md,
     marginTop: 2,
   },
   moveBadgeText: {
@@ -2374,8 +2402,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 18,
-    marginTop: 20,
+    paddingVertical: 20,
+    marginTop: 24,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
   },
@@ -3083,7 +3111,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: 1.5,
   },
   sectionBlock: {
-    paddingVertical: 18,
+    paddingVertical: 20,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
   },
@@ -3313,8 +3341,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 14,
-    minHeight: 48,
+    paddingVertical: 16,
+    minHeight: 52,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
   },
@@ -3324,7 +3352,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   dataRowLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
   catArrow: {
     fontFamily: fonts.mono,
@@ -3370,7 +3398,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
   },
@@ -3379,7 +3407,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   txLeft: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 16,
   },
   txMerchant: {
     fontFamily: fonts.regular,
