@@ -526,13 +526,13 @@ function VoiceOrb({
       {/* Expanding dot-matrix rings (visible when listening) */}
       {listening && (
         <>
-          <DotRing size={120} count={20} dotSize={2.5} color={colors.green} animated animValue={ring1} />
-          <DotRing size={108} count={18} dotSize={2} color={colors.green} animated animValue={ring2} />
+          <DotRing size={100} count={20} dotSize={2.5} color={colors.green} animated animValue={ring1} />
+          <DotRing size={90} count={18} dotSize={2} color={colors.green} animated animValue={ring2} />
         </>
       )}
-      {/* Static outer dot ring — breathes when idle */}
+      {/* Static outer dot ring — breathes when idle, sits tight against orb */}
       <Animated.View style={{ position: 'absolute', transform: [{ scale: idleScale as any }], opacity: idleGlow as any }}>
-        <DotRing size={96} count={24} dotSize={listening ? 3 : 2.5} color={activeColor} />
+        <DotRing size={82} count={24} dotSize={listening ? 3 : 2.5} color={activeColor} />
       </Animated.View>
       <Animated.View style={{ transform: [{ scale }, ...(listening ? [] : [{ scale: idleScale as any }])] }}>
         <Pressable
@@ -2424,8 +2424,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   // ── Voice Orb — dot-matrix ring with inner glyph ──
   voiceOrbContainer: {
-    width: 140,
-    height: 140,
+    width: 120,
+    height: 120,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.lg,

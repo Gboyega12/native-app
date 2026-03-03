@@ -432,14 +432,23 @@ export default function Plan() {
     if (!uid) return;
 
     LayoutAnimation.configureNext(SMOOTH_ANIM);
+    setExpandedPlan(null);
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
 
     try {
-      await supabase
+      // Mark as dismissed (consistent with home screen) so it won't reload
+      const { error } = await supabase
         .from('user_plans')
-        .delete()
+        .update({ status: 'dismissed' })
         .eq('id', planId)
         .eq('user_id', uid);
+
+      if (error) {
+        console.warn('[plan] Failed to dismiss plan:', error.message);
+      }
+
+      // Clean up any progress for this plan
+      await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', `plan-${planId}`);
     } catch (err: any) {
       console.warn('[plan] Failed to delete plan:', err?.message);
     }
