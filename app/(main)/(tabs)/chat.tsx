@@ -107,9 +107,9 @@ function speakText(text: string, onEnd?: () => void, authToken?: string | null):
         };
         audio.play();
       })
-      .catch(() => {
+      .catch((err) => {
         if (cancelled) return;
-        // Fallback to Web Speech API
+        console.warn('[TTS] ElevenLabs unavailable, falling back to Web Speech API:', err?.message);
         speakWithWebSpeech(text, onEnd);
       });
   } else {
