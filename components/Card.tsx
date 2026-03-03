@@ -239,7 +239,7 @@ export function BreathingBar({ color, width: barWidth, style }: { color: string;
     ).start();
   }, []);
 
-  const opacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
+  const opacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0.95] });
 
   return (
     <Animated.View style={[style, { width: barWidth, backgroundColor: color, opacity }]} />
@@ -286,15 +286,16 @@ function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: st
 
   switch (variant) {
     case 'hero':
-      return { ...base, borderColor: borderColor || (c.green + '40') };
+      // Monochrome hero — elevated by accent border, no green tint
+      return { ...base, borderColor: borderColor || c.accent, borderWidth: 1.5 };
     case 'active':
       return { ...base, borderColor: borderColor || c.accentDim };
     case 'highlight':
-      return { ...base, borderColor: borderColor || c.accent, borderWidth: 2 };
+      return { ...base, borderColor: borderColor || c.accent, borderWidth: 1.5 };
     case 'error':
       return { ...base, backgroundColor: c.coralDim, borderColor: borderColor || c.coral };
     case 'upgrade':
-      return { ...base, borderColor: borderColor || c.greenDim };
+      return { ...base, borderColor: borderColor || c.accentDim };
     case 'action':
       return { ...base, backgroundColor: c.surface, borderColor: borderColor || c.accentDim };
     case 'compact':
@@ -307,19 +308,19 @@ function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: st
 // ── Shared styles ──
 const styles = StyleSheet.create({
   base: {
-    borderRadius: 24,
-    padding: 28,
-    paddingTop: 32,
-    paddingBottom: 32,
-    marginBottom: 16,
+    borderRadius: 20,
+    padding: 24,
+    paddingTop: 28,
+    paddingBottom: 28,
+    marginBottom: 14,
     overflow: 'hidden' as const,
   },
   title: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    letterSpacing: 1.5,
+    fontSize: 11,
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   titleRow: {
     flexDirection: 'row',

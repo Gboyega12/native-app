@@ -117,27 +117,27 @@ export const radius = {
 };
 
 // ── Card elevation shadows ──
-// Platform-aware shadows for card depth. Nothing OS style: subtle, diffused.
+// Platform-aware shadows for card depth. Nothing OS style: barely-there, diffused.
 export const cardShadow = {
   dark: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 3,
   },
   light: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 2,
   },
 } as const;
 
 // ── Animation tokens ──
 export const animation = {
-  press: { scale: 0.975, duration: 120 },
-  entrance: { duration: 500, stagger: 60 },
-  expand: { duration: 280 },
+  press: { scale: 0.985, duration: 140 },
+  entrance: { duration: 420, stagger: 50 },
+  expand: { duration: 260 },
 } as const;

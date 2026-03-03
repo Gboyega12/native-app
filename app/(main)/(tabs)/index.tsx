@@ -1011,7 +1011,7 @@ export default function Home() {
 
   // ── Plan handlers (merged from plan page) ──
   const effortOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
-  const effortColor = (e: string) => e === 'low' ? colors.lavender : e === 'medium' ? colors.dim : colors.green;
+  const effortColor = (e: string) => e === 'low' ? colors.lavender : e === 'medium' ? colors.dim : colors.text2;
   const effortLabel = (e: string) => e === 'low' ? 'Quick win' : e === 'medium' ? 'Some effort' : 'Big move';
 
   const togglePlanStep = (key: string, stepIndex: number, moveAction: string) => {
@@ -1302,7 +1302,7 @@ export default function Home() {
           </View>
           <View>
             <Text style={s.greeting}>
-              {userName || 'Hey'}
+              Hi, {userName || 'there'}
             </Text>
             {syncing ? (
               <Text style={s.syncText}>Syncing...</Text>
@@ -1380,11 +1380,11 @@ export default function Home() {
                   ).join(' + ')}{' '}received
                 </Text>
 
-                <View style={{ marginTop: 20, gap: 12 }}>
+                <View style={{ marginTop: 24, gap: 14 }}>
                   {(weeklyCtx.committedThisWeek ?? 0) > 0 && (
                     <View style={s.focusSplitRow}>
                       <Text style={s.focusSplitLabel}>Bills & essentials</Text>
-                      <Text style={[s.focusSplitValue, { color: colors.coral }]}>
+                      <Text style={[s.focusSplitValue, { color: colors.dim }]}>
                         -{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek ?? 0).toLocaleString()}
                       </Text>
                     </View>
@@ -1392,12 +1392,12 @@ export default function Home() {
                   {moves.length > 0 && moves[0].monthlyImpact > 0 && (
                     <View style={s.focusSplitRow}>
                       <Text style={s.focusSplitLabel}>{stripMd(moves[0].action)}</Text>
-                      <Text style={[s.focusSplitValue, { color: colors.green }]}>
+                      <Text style={[s.focusSplitValue, { color: colors.text2 }]}>
                         {'\u00a3'}{Math.round(moves[0].monthlyImpact / 4.33).toLocaleString()}/wk
                       </Text>
                     </View>
                   )}
-                  <View style={[s.focusSplitRow, { borderTopWidth: 1, borderTopColor: colors.mintDim, paddingTop: 12 }]}>
+                  <View style={[s.focusSplitRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 14 }]}>
                     <Text style={[s.focusSplitLabel, { fontFamily: fonts.semibold, color: colors.text }]}>Safe to spend</Text>
                     <Text style={[s.focusSplitValue, { fontFamily: fonts.mono, fontSize: 20, color: weeklyHealthy ? colors.text : colors.coral }]}>
                       {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}/wk
@@ -1406,7 +1406,7 @@ export default function Home() {
                 </View>
 
                 <TouchableOpacity
-                  style={[s.heroCta, { marginTop: 24 }]}
+                  style={[s.heroCta, { marginTop: 28 }]}
                   onPress={() => {
                     dismissIncome();
                     router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: 'I just got paid. Walk me through what to do.' } });
@@ -1423,7 +1423,7 @@ export default function Home() {
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.heroLabel}>THIS WEEK</Text>
-                    <Text style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 40 }]}>
+                    <Text style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 38 }]}>
                       {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
                     </Text>
                     <Text style={s.safeToSpendLabel}>left to spend</Text>
@@ -1438,9 +1438,9 @@ export default function Home() {
                   </View>
                 </View>
 
-                <View style={s.safeToSpendBar}>
+                <View style={[s.safeToSpendBar, { marginTop: 4 }]}>
                   <BreathingBar
-                    color={weeklyHealthy ? colors.green : colors.coral}
+                    color={weeklyHealthy ? colors.accent : colors.coral}
                     width={`${weeklyUsedPct}%`}
                     style={s.safeToSpendBarFill}
                   />
@@ -1448,14 +1448,14 @@ export default function Home() {
 
                 {/* Top move teaser */}
                 {dashboardMoves.length > 0 && (
-                  <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.mintDim }}>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>
+                  <View style={{ marginTop: 20, paddingTop: 20, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 8 }}>
                       #1 MOVE
                     </Text>
                     <Text style={{ fontFamily: fonts.medium, fontSize: 15, color: colors.text, lineHeight: 22 }}>
                       {stripMd(dashboardMoves[0].action)}
                     </Text>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.green, marginTop: 4 }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.text2, marginTop: 6, letterSpacing: 0.3 }}>
                       +{'\u00a3'}{(dashboardMoves[0].annualImpact || 0).toLocaleString()}/yr
                     </Text>
                   </View>
@@ -1496,7 +1496,7 @@ export default function Home() {
                       <Card key={`active-${i}`} variant="active" style={{ marginBottom: spacing.md }}>
                         <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
                           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
-                            <View style={[s.moveBadge, { backgroundColor: colors.green, borderColor: colors.green }]}>
+                            <View style={[s.moveBadge, { backgroundColor: colors.accent, borderColor: colors.accent }]}>
                               <Text style={[s.moveBadgeText, { color: colors.bg }]}>{'\u2713'}</Text>
                             </View>
                             <View style={{ flex: 1 }}>
@@ -1507,8 +1507,8 @@ export default function Home() {
                               </View>
                               {!isExpanded && steps.length > 0 && (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
-                                  <View style={{ flex: 1, height: 3, borderRadius: 1.5, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
-                                    <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 1.5, backgroundColor: colors.green }} />
+                                  <View style={{ flex: 1, height: 2, borderRadius: 1, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                    <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 1, backgroundColor: colors.accent }} />
                                   </View>
                                   <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{doneSteps.length}/{steps.length}</Text>
                                 </View>
@@ -1517,12 +1517,12 @@ export default function Home() {
                           </View>
                         </TouchableOpacity>
                         {isExpanded && (
-                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.mintDim }}>
+                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border }}>
                             {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
                             {steps.map((step: string, j: number) => {
                               const isDone = doneSteps.includes(j);
                               return (
-                                <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.mintDim }} onPress={() => togglePlanStep(moveKey, j, move.action)} activeOpacity={0.7}>
+                                <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(moveKey, j, move.action)} activeOpacity={0.7}>
                                   <View style={[s.checkbox, isDone && s.checkboxDone]}>
                                     {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
                                   </View>
@@ -1549,7 +1549,7 @@ export default function Home() {
                 <>
                   <View style={s.moveSectionHeader}>
                     <Text style={s.moveSectionLabel}>YOUR MOVES</Text>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.dim, letterSpacing: 0.3 }}>
                       {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo potential
                     </Text>
                   </View>
@@ -1594,7 +1594,7 @@ export default function Home() {
                         )}
 
                         {isExpanded && (
-                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.mintDim }}>
+                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border }}>
                             {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
 
                             <TouchableOpacity style={[s.heroCta, { marginBottom: 16, paddingVertical: 12 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
@@ -1617,7 +1617,7 @@ export default function Home() {
                               <View style={{ marginBottom: 16 }}>
                                 <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 8 }}>STEPS</Text>
                                 {(move.steps || []).map((step: string, j: number) => (
-                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.mintDim }}>
+                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
                                     <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.dim, width: 22, textAlign: 'center' }}>{j + 1}</Text>
                                     <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 }}>{stripMd(step)}</Text>
                                   </View>
@@ -1632,14 +1632,14 @@ export default function Home() {
                               </View>
                             )}
 
-                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-                              <View style={{ flex: 1, backgroundColor: colors.mintDim, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, alignItems: 'center' }}>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.green }}>{'\u00a3'}{move.monthlyImpact || 0}</Text>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.dim, marginTop: 2 }}>per month</Text>
+                            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                              <View style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, alignItems: 'center' }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.text, letterSpacing: -0.5 }}>{'\u00a3'}{move.monthlyImpact || 0}</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, marginTop: 4, letterSpacing: 1, textTransform: 'uppercase' }}>per month</Text>
                               </View>
-                              <View style={{ flex: 1, backgroundColor: colors.mintDim, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, alignItems: 'center' }}>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.green }}>{'\u00a3'}{move.annualImpact || 0}</Text>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.dim, marginTop: 2 }}>per year</Text>
+                              <View style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 14, alignItems: 'center' }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.text, letterSpacing: -0.5 }}>{'\u00a3'}{move.annualImpact || 0}</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, marginTop: 4, letterSpacing: 1, textTransform: 'uppercase' }}>per year</Text>
                               </View>
                             </View>
 
@@ -1684,10 +1684,10 @@ export default function Home() {
             >
               <Text style={s.moveSectionLabel}>BUDGET</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: overallPctUsed > 100 ? colors.coral : colors.text2 }}>
+                <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: overallPctUsed > 100 ? colors.coral : colors.dim, letterSpacing: 0.3 }}>
                   {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()} / {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
                 </Text>
-                <Text style={{ fontSize: 10, color: colors.muted }}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
+                <Text style={{ fontSize: 9, color: colors.muted }}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
               </View>
             </TouchableOpacity>
 
@@ -1698,7 +1698,7 @@ export default function Home() {
                     s.progressFill,
                     {
                       width: `${Math.min(100, overallPctUsed)}%`,
-                      backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.green,
+                      backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.accent,
                     },
                   ]} />
                 </View>
@@ -1706,7 +1706,7 @@ export default function Home() {
                 <View style={s.sectionBlock}>
                   <View style={s.sectionHeaderRow}>
                     <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
-                    <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.green : colors.coral }]}>
+                    <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.text2 : colors.coral }]}>
                       {'\u00a3'}{Math.round(periodNonDiscTotal).toLocaleString()} of {'\u00a3'}{Math.round(periodNonDiscBudget).toLocaleString()}
                     </Text>
                   </View>
@@ -1724,7 +1724,7 @@ export default function Home() {
                 <View style={s.sectionBlock}>
                   <View style={s.sectionHeaderRow}>
                     <Text style={[s.sectionLabel, { color: colors.text2 }]}>Lifestyle</Text>
-                    <Text style={[s.sectionStatus, { color: lifestyleOnTrack ? colors.green : colors.coral }]}>
+                    <Text style={[s.sectionStatus, { color: lifestyleOnTrack ? colors.dim : colors.coral }]}>
                       {'\u00a3'}{Math.round(periodDiscTotal).toLocaleString()} of {'\u00a3'}{Math.round(periodDiscBudget).toLocaleString()}
                     </Text>
                   </View>
@@ -1742,7 +1742,7 @@ export default function Home() {
                 <View style={[s.sectionBlock, { borderBottomWidth: 0 }]}>
                   <View style={s.sectionHeaderRow}>
                     <Text style={[s.sectionLabel, { color: colors.text2 }]}>Remaining</Text>
-                    <Text style={[s.sectionStatus, { color: periodRemaining > 0 ? colors.green : colors.coral }]}>
+                    <Text style={[s.sectionStatus, { color: periodRemaining > 0 ? colors.text2 : colors.coral }]}>
                       {'\u00a3'}{Math.round(periodRemaining).toLocaleString()}
                     </Text>
                   </View>
@@ -2067,7 +2067,7 @@ export default function Home() {
 
                 {aiSuggesting && (
                   <View style={s.aiSuggestBar}>
-                    <ActivityIndicator color={colors.green} size="small" />
+                    <ActivityIndicator color={colors.accent} size="small" />
                     <Text style={s.aiSuggestText}>Analysing merchants...</Text>
                   </View>
                 )}
@@ -2170,9 +2170,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     backgroundColor: c.bg,
   },
   scroll: {
-    padding: 24,
-    paddingTop: 68,
-    paddingBottom: 80,
+    padding: 20,
+    paddingTop: 64,
+    paddingBottom: 100,
   },
   loadingContainer: {
     flex: 1,
@@ -2186,50 +2186,49 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 36,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
   },
   bocyHeaderWrap: {
-    width: 32,
-    height: 32,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   greeting: {
-    fontFamily: fonts.mono,
-    fontSize: 22,
+    fontFamily: fonts.medium,
+    fontSize: 18,
     color: c.text,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    letterSpacing: -0.2,
   },
   menuButton: {
     padding: 10,
-    gap: 4,
+    gap: 5,
     minWidth: 44,
     minHeight: 44,
     justifyContent: 'center',
     alignItems: 'flex-end',
   },
   menuLine: {
-    width: 20,
+    width: 18,
     height: 1.5,
     backgroundColor: c.text,
     borderRadius: 1,
   },
   menuLineShort: {
-    width: 12,
+    width: 10,
     backgroundColor: c.dim,
   },
   syncText: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    color: c.dim,
-    marginTop: 6,
-    letterSpacing: 0.5,
+    fontSize: 9,
+    color: c.muted,
+    marginTop: 4,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
   },
 
@@ -2284,13 +2283,13 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   focusSplitLabel: {
     fontFamily: fonts.regular,
-    fontSize: 14,
-    color: c.text2,
+    fontSize: 13,
+    color: c.dim,
     flex: 1,
   },
   focusSplitValue: {
     fontFamily: fonts.mono,
-    fontSize: 15,
+    fontSize: 14,
     letterSpacing: -0.3,
   },
 
@@ -2299,14 +2298,14 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginTop: spacing.xl,
-    marginBottom: spacing.md,
+    marginTop: 32,
+    marginBottom: 14,
   },
   moveSectionLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    letterSpacing: 2,
-    color: c.text2,
+    fontSize: 10,
+    letterSpacing: 2.5,
+    color: c.muted,
     textTransform: 'uppercase',
   },
   moveAction: {
@@ -2317,16 +2316,17 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   moveImpactText: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    color: c.green,
+    fontSize: 12,
+    color: c.text2,
+    letterSpacing: 0.3,
   },
   moveBadge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: c.mintDim,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: c.accentDim,
+    borderColor: c.border,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: spacing.sm,
@@ -2334,8 +2334,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   moveBadgeText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.dim,
+    fontSize: 10,
+    color: c.muted,
   },
   checkbox: {
     width: 22,
@@ -2349,8 +2349,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
   },
   checkboxDone: {
-    backgroundColor: c.green,
-    borderColor: c.green,
+    backgroundColor: c.accent,
+    borderColor: c.accent,
   },
   checkmark: {
     fontFamily: fonts.semibold,
@@ -2374,27 +2374,27 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 16,
-    marginTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
+    paddingVertical: 18,
+    marginTop: 20,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
   },
 
   // ── Empty State ──
   emptyState: {
-    marginTop: spacing.xxl,
+    marginTop: 64,
     alignItems: 'center',
   },
   emptyBocyWrap: {
-    marginBottom: spacing.lg,
+    marginBottom: 32,
   },
   emptyTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 18,
+    fontFamily: fonts.medium,
+    fontSize: 17,
     color: c.text,
     textAlign: 'center',
     marginBottom: spacing.sm,
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
   },
   emptyDesc: {
     fontFamily: fonts.regular,
@@ -2402,12 +2402,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.dim,
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: spacing.xl,
-    paddingHorizontal: spacing.md,
+    marginBottom: 40,
+    paddingHorizontal: spacing.lg,
   },
   ctaButton: {
     backgroundColor: c.accent,
-    paddingVertical: 16,
+    paddingVertical: 15,
     paddingHorizontal: spacing.xl,
     borderRadius: 100,
     alignItems: 'center',
@@ -2415,25 +2415,25 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   ctaText: {
     fontFamily: fonts.semibold,
-    fontSize: 15,
+    fontSize: 14,
     color: c.bg,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
 
   cardTitle: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    color: c.text2,
-    letterSpacing: 1.5,
+    fontSize: 11,
+    color: c.muted,
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   cardSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 13,
     color: c.dim,
-    lineHeight: 22,
-    marginBottom: 28,
+    lineHeight: 20,
+    marginBottom: 24,
   },
   noDataText: {
     fontFamily: fonts.regular,
@@ -2468,7 +2468,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginTop: 10,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: c.mintDim,
+    borderColor: c.border,
   },
   infoBoxText: {
     fontFamily: fonts.regular,
@@ -2504,41 +2504,41 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   heroLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.green,
-    letterSpacing: 2,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 2.5,
     textTransform: 'uppercase',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   heroAction: {
     fontFamily: fonts.semibold,
-    fontSize: 22,
+    fontSize: 20,
     color: c.text,
-    lineHeight: 30,
-    letterSpacing: -0.3,
+    lineHeight: 28,
+    letterSpacing: -0.4,
   },
   heroMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginTop: 12,
+    marginTop: 14,
   },
   heroImpact: {
     fontFamily: fonts.mono,
-    fontSize: 18,
-    color: c.green,
+    fontSize: 16,
+    color: c.text,
   },
   heroStrategy: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: c.dim,
     lineHeight: 20,
-    marginTop: 16,
+    marginTop: 18,
   },
   heroActions: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 24,
+    marginTop: 28,
   },
   heroCta: {
     flex: 2,
@@ -2549,9 +2549,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   heroCtaText: {
     fontFamily: fonts.semibold,
-    fontSize: 15,
+    fontSize: 14,
     color: c.bg,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   heroSecondary: {
     flex: 1,
@@ -2564,29 +2564,29 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   heroSecondaryText: {
     fontFamily: fonts.semibold,
-    fontSize: 14,
+    fontSize: 13,
     color: c.dim,
   },
   heroMore: {
     alignItems: 'center',
     paddingTop: 20,
-    marginTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
+    marginTop: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
   },
   heroMoreText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: c.green,
-    letterSpacing: 0.5,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
 
   // ── Card 1: Move items (kept for modals) ──
   moveItemFull: {
     paddingVertical: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
   },
   moveTitle: {
     fontFamily: fonts.medium,
@@ -2602,8 +2602,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   moveImpact: {
     fontFamily: fonts.mono,
-    fontSize: 14,
-    color: c.green,
+    fontSize: 13,
+    color: c.text2,
+    letterSpacing: 0.3,
   },
   effortPill: {
     borderRadius: 100,
@@ -2680,40 +2681,40 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     marginTop: 4,
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
   },
   viewAllText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: c.text,
-    letterSpacing: 0.5,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
 
   // ── Card 2: Income ──
   bigNumberWrap: {
     alignItems: 'center',
-    paddingVertical: 24,
-    paddingBottom: 32,
+    paddingVertical: 28,
+    paddingBottom: 36,
   },
   bigNumber: {
     fontFamily: fonts.mono,
-    fontSize: 52,
+    fontSize: 48,
     color: c.text,
     letterSpacing: -2,
   },
   bigNumberLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: c.muted,
-    marginTop: 8,
-    letterSpacing: 1,
+    marginTop: 10,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
   divider: {
-    height: 1,
-    backgroundColor: c.mintDim,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: c.border,
     marginBottom: 4,
   },
   sourceCard: {
@@ -2808,33 +2809,33 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // ── Card 3: Safe to Spend ──
   safeToSpendHero: {
     alignItems: 'center',
-    paddingVertical: 24,
-    paddingBottom: 28,
+    paddingVertical: 28,
+    paddingBottom: 32,
   },
   safeToSpendAmount: {
     fontFamily: fonts.mono,
-    fontSize: 48,
+    fontSize: 44,
     color: c.text,
     letterSpacing: -2,
   },
   safeToSpendLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: c.muted,
-    marginTop: 8,
-    letterSpacing: 1,
+    marginTop: 10,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
   safeToSpendBar: {
-    height: 4,
-    borderRadius: 2,
+    height: 3,
+    borderRadius: 1.5,
     backgroundColor: c.mintDim,
     overflow: 'hidden',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   safeToSpendBarFill: {
     height: '100%',
-    borderRadius: 2,
+    borderRadius: 1.5,
   },
   safeToSpendRow: {
     flexDirection: 'row',
@@ -2842,23 +2843,23 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   safeToSpendMeta: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: c.text2,
+    fontSize: 11,
+    color: c.dim,
     letterSpacing: 0.3,
   },
 
   // ── Breakdown section ──
   breakdownSection: {
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
+    marginTop: 24,
+    paddingTop: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
   },
   breakdownTitle: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.dim,
-    letterSpacing: 1,
+    fontSize: 10,
+    color: c.muted,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
     marginBottom: 14,
   },
@@ -2884,23 +2885,25 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.text,
   },
   breakdownDivider: {
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
     marginTop: 6,
     paddingTop: 10,
   },
   breakdownAdaptive: {
-    backgroundColor: c.greenDim,
+    backgroundColor: c.mintDim,
     borderRadius: 10,
     padding: 12,
     marginTop: 10,
     marginBottom: 6,
+    borderWidth: 1,
+    borderColor: c.border,
   },
   breakdownAdaptiveLabel: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: c.green,
-    letterSpacing: 0.8,
+    color: c.text2,
+    letterSpacing: 1,
     textTransform: 'uppercase',
     marginBottom: 8,
   },
@@ -3003,19 +3006,19 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   expandHint: {
     fontFamily: fonts.regular,
-    fontSize: 12,
+    fontSize: 11,
     color: c.muted,
     marginTop: 2,
   },
   expandToggle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: c.mintDim,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -3023,27 +3026,27 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   expandToggleText: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    color: c.dim,
+    fontSize: 9,
+    color: c.muted,
   },
   periodToggleRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
     marginBottom: 28,
   },
   periodBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
     borderRadius: 100,
     borderWidth: 1,
     borderColor: c.border,
   },
   periodBtnText: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: c.muted,
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
   },
   periodTotalRow: {
     alignItems: 'center',
@@ -3051,36 +3054,36 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   periodTotalAmount: {
     fontFamily: fonts.mono,
-    fontSize: 28,
+    fontSize: 26,
     letterSpacing: -0.5,
     textAlign: 'center',
   },
   periodTotalOf: {
     fontFamily: fonts.regular,
-    fontSize: 16,
+    fontSize: 15,
     color: c.dim,
   },
   periodTotalLabel: {
     fontFamily: fonts.regular,
-    fontSize: 13,
-    color: c.dim,
+    fontSize: 12,
+    color: c.muted,
     marginTop: 6,
     textAlign: 'center',
   },
   progressTrack: {
-    height: 6,
-    borderRadius: 3,
+    height: 3,
+    borderRadius: 1.5,
     backgroundColor: c.mintDim,
     overflow: 'hidden',
-    marginTop: 20,
-    marginBottom: 32,
+    marginTop: 16,
+    marginBottom: 28,
   },
   progressFill: {
-    height: 6,
-    borderRadius: 3,
+    height: 3,
+    borderRadius: 1.5,
   },
   sectionBlock: {
-    paddingVertical: 20,
+    paddingVertical: 18,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
   },
@@ -3088,11 +3091,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   sectionLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
+    fontFamily: fonts.medium,
+    fontSize: 14,
   },
   sectionStatus: {
     fontFamily: fonts.mono,
@@ -3107,22 +3110,22 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   sectionSpent: {
     fontFamily: fonts.mono,
-    fontSize: 18,
+    fontSize: 16,
   },
   sectionBudget: {
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 12,
     color: c.dim,
   },
   progressTrackSmall: {
-    height: 4,
-    borderRadius: 2,
+    height: 2,
+    borderRadius: 1,
     backgroundColor: c.mintDim,
     overflow: 'hidden',
   },
   progressFillSmall: {
-    height: 4,
-    borderRadius: 2,
+    height: 2,
+    borderRadius: 1,
   },
   allocationList: {
     marginTop: 12,
@@ -3230,8 +3233,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   budgetBar: {
     flexDirection: 'row',
-    height: 4,
-    borderRadius: 2,
+    height: 3,
+    borderRadius: 1.5,
     overflow: 'hidden',
     marginTop: 8,
     marginBottom: 32,
@@ -3253,18 +3256,18 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   summaryAmount: {
     fontFamily: fonts.mono,
-    fontSize: 20,
+    fontSize: 18,
   },
   summaryLabel: {
     fontFamily: fonts.regular,
-    fontSize: 12,
-    color: c.text2,
+    fontSize: 11,
+    color: c.dim,
     marginTop: 8,
   },
   summaryPct: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.dim,
+    fontSize: 10,
+    color: c.muted,
     marginTop: 4,
     letterSpacing: 0.5,
   },
@@ -3312,8 +3315,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     minHeight: 48,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
   },
   dataRowLast: {
     borderBottomWidth: 0,
@@ -3368,8 +3371,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
   },
   txRowLast: {
     borderBottomWidth: 0,
@@ -3434,9 +3437,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   viewTransactionsText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: c.accent,
-    letterSpacing: 0.5,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
 
@@ -3456,12 +3459,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   subsLinkText: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: c.green,
+    color: c.text,
   },
   subsLinkArrow: {
     fontFamily: fonts.regular,
     fontSize: 18,
-    color: c.green,
+    color: c.text2,
   },
 
   // ── Card 5: Debt accounts ──
@@ -3489,8 +3492,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
   },
   debtRowLast: {
     borderBottomWidth: 0,
@@ -3797,9 +3800,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Income arrival alert ──
   incomeAlert: {
-    backgroundColor: c.greenDim,
+    backgroundColor: c.mintDim,
     borderWidth: 1,
-    borderColor: 'rgba(0,212,170,0.25)',
+    borderColor: c.border,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.md,
@@ -3813,13 +3816,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   incomeAlertTitle: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: c.green,
+    color: c.text,
   },
   incomeAlertDismiss: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: c.green,
-    opacity: 0.5,
+    color: c.muted,
     paddingLeft: 8,
   },
   incomeAlertText: {
@@ -3831,7 +3833,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   incomeAlertBudget: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: c.green,
+    color: c.text,
     marginTop: 6,
   },
 
@@ -3886,8 +3888,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginBottom: spacing.sm,
   },
   catReviewRowDone: {
-    borderColor: c.green + '40',
-    backgroundColor: c.greenDim,
+    borderColor: c.accentDim,
+    backgroundColor: c.mintDim,
   },
   catReviewRowHeader: {
     flexDirection: 'row',
@@ -3912,7 +3914,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginLeft: spacing.sm,
   },
   catReviewDone: {
-    backgroundColor: c.green,
+    backgroundColor: c.accent,
     margin: spacing.md,
     marginTop: 0,
     paddingVertical: 14,
@@ -3934,12 +3936,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: c.border,
-    backgroundColor: c.greenDim,
+    backgroundColor: c.mintDim,
   },
   aiSuggestText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: c.green,
+    color: c.text2,
     letterSpacing: 0.3,
   },
 });
