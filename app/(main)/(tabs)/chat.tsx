@@ -247,7 +247,7 @@ function DotMic({ dotSize = 3.5, gap = 2, color }: { dotSize?: number; gap?: num
 
 // ── Suggested questions (contextual) ──
 
-function getContextualQuestions(analysis: Analysis | null, goals: Goals | null, paydayActive?: boolean): string[] {
+function getContextualQuestions(analysis: Analysis | null, goals: Goals | null, paydayActive?: boolean, paydayContext?: any): string[] {
   if (!analysis) {
     return [
       'What can Bocy help me with?',
@@ -255,51 +255,99 @@ function getContextualQuestions(analysis: Analysis | null, goals: Goals | null, 
     ];
   }
 
-  // Payday mode: prioritise allocation-focused questions
-  if (paydayActive) {
-    const questions: string[] = [];
-    questions.push('I just got paid. Walk me through what to do first.');
-    questions.push('How much can I safely spend this week?');
+  const moves = analysis.all_moves || [];
+  const income = analysis.monthly_income ?? 0;
+  const spending = analysis.monthly_spending ?? 0;
+  const surplus = analysis.surplus ?? 0;
+  const topMove = moves[0];
 
-    const moves = analysis.all_moves || [];
-    if (moves.length > 0) {
-      questions.push('Am I on track with my plan?');
+  // Payday mode: hyper-specific allocation questions
+  if (paydayActive) {
+    const incomeEvents = paydayContext?.incomeEvents || [];
+    const questions: string[] = [];
+
+    if (incomeEvents.length > 0) {
+      const payAmount = incomeEvents.reduce((s: number, e: any) => s + (e?.amount ?? 0), 0);
+      const paySource = incomeEvents[0]?.source || 'your employer';
+      questions.push(`Split my \u00a3${Math.round(payAmount).toLocaleString()} from ${paySource} for me.`);
+
+      const committed = paydayContext?.committedThisWeek ?? 0;
+      if (committed > 0) {
+        questions.push(`\u00a3${Math.round(committed).toLocaleString()} is committed to bills \u2014 what's left?`);
+      } else {
+        questions.push('How much should I set aside for bills this week?');
+      }
     } else {
-      questions.push('Help me set up a budget for this pay period.');
+      questions.push('I just got paid. Walk me through what to do.');
+      questions.push('How much can I safely spend this week?');
+    }
+
+    if (topMove) {
+      const action = (topMove.action || '').replace(/\*\*/g, '');
+      questions.push(`Can I put more towards "${action.length > 40 ? action.slice(0, 37) + '...' : action}"?`);
     }
 
     if (goals?.one_year_goal) {
       const goalName = goals.one_year_goal.replace(/_/g, ' ');
-      questions.push(`How does this pay cycle move me closer to ${goalName}?`);
+      questions.push(`How does this pay move me closer to ${goalName}?`);
     } else {
-      questions.push('What should I do with any leftover money?');
+      questions.push('What should I do with the leftover?');
     }
 
     return questions;
   }
 
+  // Default mode: specific, data-driven starters
   const questions: string[] = [];
-  questions.push('What happens if I follow my full action plan?');
 
-  const patterns = analysis.behavioral_patterns || [];
-  if (patterns.some((p: string) => p.toLowerCase().includes('debt'))) {
-    questions.push('Should I focus on debt or savings first?');
-  } else {
-    questions.push('How can I optimise my savings rate?');
+  // #1: Top move — specific action with real amount
+  if (topMove) {
+    const action = (topMove.action || '').replace(/\*\*/g, '');
+    const impact = topMove.annualImpact || (topMove.monthlyImpact || 0) * 12;
+    if (impact > 0) {
+      questions.push(`How do I save \u00a3${Math.round(impact).toLocaleString()}/yr by "${action.length > 30 ? action.slice(0, 27) + '...' : action}"?`);
+    } else {
+      questions.push(`Walk me through: ${action.length > 45 ? action.slice(0, 42) + '...' : action}`);
+    }
   }
 
-  const moves = analysis.all_moves || [];
-  if (moves.some((m: { action?: string }) => m.action?.toLowerCase().includes('subscription'))) {
-    questions.push('Which subscriptions should I cut first?');
+  // #2: Spending insight — specific category or subscription
+  const subMove = moves.find((m: any) => m.action?.toLowerCase().includes('subscription'));
+  if (subMove?.merchants?.length) {
+    const count = subMove.merchants.length;
+    const names = subMove.merchants.slice(0, 2).join(' and ');
+    questions.push(`Do I actually need ${names}${count > 2 ? ` and ${count - 2} more` : ''}?`);
+  } else if (surplus < 0) {
+    questions.push(`I'm \u00a3${Math.round(Math.abs(surplus)).toLocaleString()}/mo over budget \u2014 where do I cut?`);
+  } else if (spending > 0) {
+    questions.push(`I spend \u00a3${Math.round(spending).toLocaleString()}/mo \u2014 is that reasonable?`);
   } else {
     questions.push('Where are my biggest spending leaks?');
   }
 
-  if (goals?.one_year_goal) {
+  // #3: Goal-specific or debt-specific
+  const patterns = analysis.behavioral_patterns || [];
+  if (patterns.some((p: string) => p.toLowerCase().includes('debt'))) {
+    questions.push('Should I clear debt or build savings first?');
+  } else if (goals?.one_year_goal) {
     const goalName = goals.one_year_goal.replace(/_/g, ' ');
-    questions.push(`How fast can I reach my ${goalName} goal?`);
+    const target = goals.target_amount;
+    if (target) {
+      questions.push(`How fast can I hit \u00a3${Math.round(target).toLocaleString()} for ${goalName}?`);
+    } else {
+      questions.push(`Am I on track for ${goalName}?`);
+    }
   } else {
-    questions.push('What financial goal should I set first?');
+    questions.push('What should my first financial goal be?');
+  }
+
+  // #4: Actionable nudge
+  if (moves.length > 1) {
+    questions.push(`If I follow all ${moves.length} moves, what happens?`);
+  } else if (surplus > 100) {
+    questions.push(`I have \u00a3${Math.round(surplus).toLocaleString()}/mo spare \u2014 invest or save?`);
+  } else {
+    questions.push('How can I make my money work harder?');
   }
 
   return questions;
@@ -1795,7 +1843,7 @@ export default function Chat() {
   };
 
   const paydayActive = !!context.payday_context?.incomeArrivedThisWeek;
-  const suggestedQuestions = getContextualQuestions(analysis, goals, paydayActive);
+  const suggestedQuestions = getContextualQuestions(analysis, goals, paydayActive, context.payday_context);
 
   // ── Free tier: count user messages for gate ──
   const userMessageCount = messages.filter((m) => m.role === 'user').length;

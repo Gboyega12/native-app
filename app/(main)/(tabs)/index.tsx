@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
   LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Pressable,
-  RefreshControl,
+  RefreshControl, Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
@@ -197,6 +197,13 @@ export default function Home() {
 
   // Previous month snapshot for real income comparison
   const [prevSnapshot, setPrevSnapshot] = useState<{ monthly_spending: number; monthly_income: number } | null>(null);
+
+  // ── Plan data (merged from plan page) ──
+  const [userPlans, setUserPlans] = useState<any[]>([]);
+  const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[] }>>({});
+  const [expandedMove, setExpandedMove] = useState<number | null>(null);
+  const [budgetExpanded, setBudgetExpanded] = useState(false);
+  const userIdRef = useRef<string | null>(null);
 
   // Custom weekly spending limit
   const [customWeeklyLimit, setCustomWeeklyLimit] = useState<number | null>(null);
@@ -782,6 +789,7 @@ export default function Home() {
       if (!user) { setLoading(false); return; }
 
       setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
+      userIdRef.current = user.id;
 
       // ── Record daily streak ──
       try {
@@ -835,6 +843,28 @@ export default function Home() {
         ]);
         if (adjRes.data) adjustments = adjRes.data;
         if (debtRes.data) setDebtAccounts(debtRes.data);
+      } catch {}
+
+      // Fetch user plans + progress (merged from plan page)
+      try {
+        const [plansRes, progressRes] = await Promise.all([
+          supabase.from('user_plans').select('*').eq('user_id', user.id)
+            .eq('status', 'active').order('created_at', { ascending: false }),
+          supabase.from('plan_progress').select('*').eq('user_id', user.id),
+        ]);
+        setUserPlans(plansRes.data || []);
+        const progressMap: Record<string, any> = {};
+        for (const row of (progressRes.data || [])) {
+          if (!row.move_key.startsWith('dismissed-')) {
+            progressMap[row.move_key] = {
+              move_key: row.move_key,
+              move_action: row.move_action,
+              approved: row.approved,
+              completed_steps: row.completed_steps || [],
+            };
+          }
+        }
+        setPlanProgress(progressMap);
       } catch {}
 
       // Fetch the latest persisted analysis from Supabase.
@@ -979,6 +1009,77 @@ export default function Home() {
       console.warn('[home] Background sync failed:', err?.message);
     }
     setSyncing(false);
+  };
+
+  // ── Plan handlers (merged from plan page) ──
+  const effortOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  const effortColor = (e: string) => e === 'low' ? colors.lavender : e === 'medium' ? colors.dim : colors.green;
+  const effortLabel = (e: string) => e === 'low' ? 'Quick win' : e === 'medium' ? 'Some effort' : 'Big move';
+
+  const togglePlanStep = (key: string, stepIndex: number, moveAction: string) => {
+    setPlanProgress((prev) => {
+      const row = prev[key] || { move_key: key, move_action: moveAction, approved: true, completed_steps: [] };
+      const steps = [...row.completed_steps];
+      const idx = steps.indexOf(stepIndex);
+      if (idx >= 0) steps.splice(idx, 1); else steps.push(stepIndex);
+      const updated = { ...row, completed_steps: steps };
+      // Persist
+      const uid = userIdRef.current;
+      if (uid) {
+        supabase.from('plan_progress').upsert({
+          user_id: uid, move_key: key, move_action: moveAction,
+          approved: updated.approved, completed_steps: steps,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,move_key' }).then(() => {});
+      }
+      return { ...prev, [key]: updated };
+    });
+  };
+
+  const handleStartMove = async (index: number, move: Move) => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const key = `move-${index}`;
+    if (planProgress[key]?.approved) return;
+    const row = { move_key: key, move_action: move.action, approved: true, completed_steps: [] as number[] };
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
+    setPlanProgress((prev) => ({ ...prev, [key]: row }));
+    await supabase.from('plan_progress').upsert({
+      user_id: uid, move_key: key, move_action: move.action,
+      approved: true, completed_steps: [],
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,move_key' });
+  };
+
+  const handleStopMove = async (index: number) => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const key = `move-${index}`;
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
+    setPlanProgress((prev) => { const u = { ...prev }; delete u[key]; return u; });
+    await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', key);
+  };
+
+
+  /** Provider actions for a move */
+  const PROVIDER_ACTIONS: Record<string, { label: string; sub?: string; phone?: string; url?: string }[]> = {
+    debt: [
+      { label: 'Call StepChange', sub: 'Free debt help', phone: '0800 138 1111' },
+      { label: 'Visit StepChange', url: 'https://www.stepchange.org' },
+    ],
+    buffer: [{ label: 'Compare savings accounts', url: 'https://www.bocy.io/savings-comparison.html' }],
+    savings: [{ label: 'Compare savings rates', url: 'https://www.bocy.io/savings-comparison.html' }],
+    invest: [{ label: 'Compare ISAs', url: 'https://www.bocy.io/isa-comparison.html' }],
+  };
+
+  const getProviderActions = (move: Move) => {
+    const a = (move.action || '').toLowerCase();
+    const cat = move.category || '';
+    if (cat === 'debt' || a.includes('debt')) return PROVIDER_ACTIONS.debt;
+    if (cat === 'buffer' || a.includes('buffer') || a.includes('emergency')) return PROVIDER_ACTIONS.buffer;
+    if (cat === 'savings' || a.includes('saving')) return PROVIDER_ACTIONS.savings;
+    if (cat === 'invest' || a.includes('invest')) return PROVIDER_ACTIONS.invest;
+    return [];
   };
 
   if (loading) {
@@ -1167,6 +1268,17 @@ export default function Home() {
     setShowLimitEditor(false);
   };
 
+  // ── Sorted moves for inline display ──
+  const sortedMoves: (Move & { _sortIdx: number })[] = moves
+    .map((m, i) => ({ ...m, _sortIdx: i }))
+    .sort((a, b) => (effortOrder[a.effort] ?? 2) - (effortOrder[b.effort] ?? 2));
+  const activePlanMoves = sortedMoves.filter((_, i) => planProgress[`move-${sortedMoves[i]._sortIdx}`]?.approved);
+  const opportunityMoves = sortedMoves.filter((_, i) => !planProgress[`move-${sortedMoves[i]._sortIdx}`]?.approved);
+
+  // ── Focus card type: what matters right now? ──
+  const isPayday = !!weeklyCtx?.incomeArrivedThisWeek && !incomeDismissed;
+  const focusType: 'payday' | 'budget' | 'move' = isPayday ? 'payday' : 'budget';
+
   return (
     <ScrollView
       ref={dashScrollRef}
@@ -1184,7 +1296,7 @@ export default function Home() {
         />
       }
     >
-      {/* ── Header with Bocy ── */}
+      {/* ── Header ── */}
       <View style={s.headerRow}>
         <View style={s.headerLeft}>
           <View style={s.bocyHeaderWrap}>
@@ -1192,12 +1304,12 @@ export default function Home() {
           </View>
           <View>
             <Text style={s.greeting}>
-              Hello, {userName || 'there'}
+              {userName || 'Hey'}
             </Text>
             {syncing ? (
-              <Text style={s.syncText}>Syncing latest transactions...</Text>
+              <Text style={s.syncText}>Syncing...</Text>
             ) : lastSynced > 0 ? (
-              <Text style={s.syncText}>Updated {formatTimeAgo(lastSynced)}</Text>
+              <Text style={s.syncText}>{formatTimeAgo(lastSynced)}</Text>
             ) : null}
           </View>
         </View>
@@ -1211,47 +1323,26 @@ export default function Home() {
         </TouchableOpacity>
       </View>
 
-      {/* ── Connection warning banner ── */}
+      {/* ── Connection warning ── */}
       {connectionWarning && !connectionDismissed && (
         <View style={s.connectionBanner}>
-          <TouchableOpacity
-            style={s.connectionBannerBody}
-            onPress={() => router.push('/(main)/connect')}
-            activeOpacity={0.8}
-          >
+          <TouchableOpacity style={s.connectionBannerBody} onPress={() => router.push('/(main)/connect')} activeOpacity={0.8}>
             <View style={{ flex: 1 }}>
-              {connectionWarning.message === 'expiring' ? (
-                connectionWarning.banks.map((bank, idx) => (
-                  <Text key={idx} style={s.connectionBannerText}>
-                    {bank} {'\u2014'} reconnect soon
-                  </Text>
-                ))
-              ) : connectionWarning.banks.length > 0 ? (
-                connectionWarning.banks.map((bank, idx) => (
-                  <Text key={idx} style={s.connectionBannerText}>
-                    Reconnect {bank}
-                  </Text>
-                ))
-              ) : connectionWarning.message === 'fallback' ? (
-                <Text style={s.connectionBannerText}>Using cached data {'\u2014'} pull to refresh</Text>
-              ) : (
-                <Text style={s.connectionBannerText}>A bank connection has expired {'\u2014'} tap to reconnect</Text>
-              )}
+              {connectionWarning.banks.length > 0
+                ? connectionWarning.banks.map((bank, idx) => (
+                    <Text key={idx} style={s.connectionBannerText}>Reconnect {bank}</Text>
+                  ))
+                : <Text style={s.connectionBannerText}>Bank connection needs attention</Text>}
             </View>
-            <Text style={s.connectionBannerAction}>{connectionWarning.message === 'expiring' ? 'Renew' : 'Fix'}</Text>
+            <Text style={s.connectionBannerAction}>Fix</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={s.bannerDismiss}
-            onPress={dismissConnection}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
+          <TouchableOpacity style={s.bannerDismiss} onPress={dismissConnection} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Text style={s.bannerDismissX}>{'\u2715'}</Text>
           </TouchableOpacity>
         </View>
       )}
 
       {!analysis ? (
-        /* ── Empty State ── */
         <View style={s.emptyState}>
           <View style={s.emptyBocyWrap}>
             <BocyFace mood="neutral" size="lg" breathing />
@@ -1260,10 +1351,7 @@ export default function Home() {
           <Text style={s.emptyDesc}>
             Connect your bank account so Bocy can analyse your transactions and find the most impactful action you can take right now.
           </Text>
-          <TouchableOpacity
-            style={s.ctaButton}
-            onPress={() => router.push('/(main)/connect')}
-          >
+          <TouchableOpacity style={s.ctaButton} onPress={() => router.push('/(main)/connect')}>
             <Text style={s.ctaText}>Connect your bank</Text>
           </TouchableOpacity>
         </View>
@@ -1271,653 +1359,472 @@ export default function Home() {
         <>
           {/* ── Unresolved transactions nudge ── */}
           {unresolvedTxCount > 0 && (
-            <TouchableOpacity
-              style={s.reviewBanner}
-              onPress={() => { setCatAssignments({}); setShowCatReview(true); }}
-              activeOpacity={0.7}
-            >
+            <TouchableOpacity style={s.reviewBanner} onPress={() => { setCatAssignments({}); setShowCatReview(true); }} activeOpacity={0.7}>
               <Text style={s.reviewBannerText}>
-                {unresolvedTxCount} transaction{unresolvedTxCount !== 1 ? 's' : ''} couldn't be categorised.{' '}
-                <Text style={s.reviewBannerLink}>Tell me what they are</Text>
+                {unresolvedTxCount} uncategorised transaction{unresolvedTxCount !== 1 ? 's' : ''}.{' '}
+                <Text style={s.reviewBannerLink}>Fix now</Text>
               </Text>
             </TouchableOpacity>
           )}
 
-          {/* ── Income arrival alert ── */}
-          {weeklyCtx?.incomeArrivedThisWeek && Array.isArray(weeklyCtx?.recentIncomeEvents) && weeklyCtx.recentIncomeEvents.length > 0 && !incomeDismissed && (
+          {/* ══════════════════════════════════════════════
+              FOCUS CARD — one contextual card
+              ══════════════════════════════════════════════ */}
+          <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
+          {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
+            /* ── Payday split ── */
             <AnimGlyph delay={0}>
-              <View style={s.incomeAlert}>
-                <View style={s.incomeAlertHeader}>
-                  <Text style={s.incomeAlertTitle}>Income received</Text>
-                  <TouchableOpacity
-                    onPress={dismissIncome}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Text style={s.incomeAlertDismiss}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={s.incomeAlertText}>
+              <Card variant="hero">
+                <Text style={s.heroLabel}>PAYDAY</Text>
+                <Text style={s.heroAction}>
                   {weeklyCtx.recentIncomeEvents.map((e) =>
-                    `\u00a3${Math.round(e?.amount ?? 0).toLocaleString()} from ${e?.source ?? 'unknown'}`
-                  ).join(', ')}
-                  {' '}landed this week.
-                  {(weeklyCtx.committedThisWeek ?? 0) > 0
-                    ? ` \u00a3${Math.round(weeklyCtx.committedThisWeek).toLocaleString()} already committed to bills & essentials.`
-                    : ''}
+                    `\u00a3${Math.round(e?.amount ?? 0).toLocaleString()}`
+                  ).join(' + ')}{' '}received
                 </Text>
-                <Text style={s.incomeAlertBudget}>
-                  Safe to spend: {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}/week{customWeeklyLimit !== null ? ' (your limit)' : ''}
-                </Text>
-              </View>
-            </AnimGlyph>
-          )}
 
-          {/* ══════════════════════════════════════════════
-              HERO — YOUR #1 MOVE
-              ══════════════════════════════════════════════ */}
-          {dashboardMoves.length > 0 ? (() => {
-            const heroMove = dashboardMoves[0];
-            return (
-              <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
-              <AnimGlyph delay={0}>
-                <Card
-                  variant="hero"
-                  accessibilityLabel={`Your number one move: ${heroMove.action}, saves ${heroMove.annualImpact} pounds per year`}
-                >
-                  <Text style={s.heroLabel}>Your #1 move</Text>
-
-                  <Text style={s.heroAction}>
-                    {stripMd(heroMove.action)}
-                  </Text>
-
-                  {/* Impact + effort */}
-                  <View style={s.heroMeta}>
-                    <Text style={s.heroImpact}>
-                      +{'\u00a3'}{(heroMove.annualImpact || 0).toLocaleString()}/yr
-                    </Text>
-                    {heroMove.effort && (
-                      <View style={s.effortPill}>
-                        <Text style={s.effortPillText}>
-                          {heroMove.effort}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {/* Strategy — the WHY */}
-                  {heroMove.strategy ? (
-                    <Text style={s.heroStrategy}>
-                      {stripMd(heroMove.strategy)}
-                    </Text>
-                  ) : null}
-
-                  {/* CTA */}
-                  <View style={s.heroActions}>
-                    <TouchableOpacity
-                      style={s.heroCta}
-                      onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlightAction: heroMove.action } })}
-                    >
-                      <Text style={s.heroCtaText}>Take action</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={s.heroSecondary}
-                      onPress={() => setVerifyMove(heroMove)}
-                    >
-                      <Text style={s.heroSecondaryText}>Details</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* More insights teaser */}
-                  {dashboardMoves.length > 1 && (
-                    <TouchableOpacity
-                      style={s.heroMore}
-                      onPress={() => router.push('/(main)/(tabs)/plan')}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={s.heroMoreText}>
-                        +{dashboardMoves.length - 1} more insight{dashboardMoves.length - 1 !== 1 ? 's' : ''} {'\u203A'}
+                <View style={{ marginTop: 20, gap: 12 }}>
+                  {(weeklyCtx.committedThisWeek ?? 0) > 0 && (
+                    <View style={s.focusSplitRow}>
+                      <Text style={s.focusSplitLabel}>Bills & essentials</Text>
+                      <Text style={[s.focusSplitValue, { color: colors.coral }]}>
+                        -{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek ?? 0).toLocaleString()}
                       </Text>
-                    </TouchableOpacity>
+                    </View>
                   )}
-                </Card>
-              </AnimGlyph>
-              </View>
-            );
-          })() : (
-            <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
-            <Card variant="hero">
-              <Text style={s.heroLabel}>Your #1 move</Text>
-              <Text style={s.noDataText}>
-                No actionable insights yet. Connect your bank so Bocy can find your most impactful financial move.
-              </Text>
-            </Card>
-            </View>
-          )}
-
-          {/* ══════════════════════════════════════════════
-              CARD — SAFE TO SPEND (compact)
-              ══════════════════════════════════════════════ */}
-          <View onLayout={(e) => { cardPositions.current.safeToSpend = e.nativeEvent.layout.y; }}>
-          <Card accentBar accentBarColor={weeklyHealthy ? colors.green : colors.coral}>
-            <AnimGlyph delay={100}>
-              <View style={s.cardTitleRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <SectionDot color={weeklyHealthy ? colors.green : colors.coral} />
-                  <Text style={s.cardTitle}>Safe to spend</Text>
+                  {moves.length > 0 && moves[0].monthlyImpact > 0 && (
+                    <View style={s.focusSplitRow}>
+                      <Text style={s.focusSplitLabel}>{stripMd(moves[0].action)}</Text>
+                      <Text style={[s.focusSplitValue, { color: colors.green }]}>
+                        {'\u00a3'}{Math.round(moves[0].monthlyImpact / 4.33).toLocaleString()}/wk
+                      </Text>
+                    </View>
+                  )}
+                  <View style={[s.focusSplitRow, { borderTopWidth: 1, borderTopColor: colors.mintDim, paddingTop: 12 }]}>
+                    <Text style={[s.focusSplitLabel, { fontFamily: fonts.semibold, color: colors.text }]}>Safe to spend</Text>
+                    <Text style={[s.focusSplitValue, { fontFamily: fonts.mono, fontSize: 20, color: weeklyHealthy ? colors.text : colors.coral }]}>
+                      {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}/wk
+                    </Text>
+                  </View>
                 </View>
+
                 <TouchableOpacity
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  style={[s.heroCta, { marginTop: 24 }]}
                   onPress={() => {
-                    LayoutAnimation.configureNext(SMOOTH_ANIM);
-                    setBreakdownExpanded(!breakdownExpanded);
+                    dismissIncome();
+                    router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: 'I just got paid. Walk me through what to do.' } });
                   }}
                 >
-                  <Text style={s.infoIcon}>{breakdownExpanded ? '\u2715' : 'i'}</Text>
+                  <Text style={s.heroCtaText}>Talk to Bocy about this</Text>
                 </TouchableOpacity>
-              </View>
+              </Card>
             </AnimGlyph>
-            <Text style={s.cardSubtitle}>Your weekly lifestyle allowance</Text>
-
-            {/* Big remaining number */}
-            <AnimGlyph delay={150}>
-              <View style={s.safeToSpendHero}>
-                <Text style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }]}>
-                  {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
-                </Text>
-                <Text style={s.safeToSpendLabel}>left this week</Text>
-              </View>
-            </AnimGlyph>
-
-            {/* Progress bar with breathing animation */}
-            <ProgressBar
-              percent={weeklyUsedPct}
-              color={weeklyHealthy ? colors.green : colors.coral}
-              height={4}
-              breathing
-              style={{ marginBottom: 16 }}
-            />
-
-            {/* Spent vs budget row */}
-            <View style={s.safeToSpendRow}>
-              <View>
-                <Text style={s.safeToSpendMeta}>
-                  {'\u00a3'}{Math.round(spentThisWeek).toLocaleString()} spent
-                </Text>
-              </View>
-              <View>
-                <Text style={s.safeToSpendMeta}>
-                  {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()} budget
-                  {customWeeklyLimit !== null ? ' (custom)' : ''}
-                </Text>
-              </View>
-            </View>
-
-            {/* ── Detailed breakdown (expandable) ── */}
-            {breakdownExpanded && (
-              <View style={s.breakdownSection}>
-                <Text style={s.breakdownTitle}>How this is calculated</Text>
-
-                <View style={s.breakdownRow}>
-                  <Text style={s.breakdownLabel}>Monthly income{isVariableIncome ? ' (avg)' : ''}</Text>
-                  <Text style={s.breakdownValue}>{'\u00a3'}{Math.round(income).toLocaleString()}</Text>
-                </View>
-                {isVariableIncome && (
-                  <View style={s.breakdownRow}>
-                    <Text style={[s.breakdownLabel, { color: colors.amber || colors.coral }]}>Budget based on</Text>
-                    <Text style={[s.breakdownValue, { color: colors.amber || colors.coral }]}>{'\u00a3'}{Math.round(incomeFloor).toLocaleString()}/mo</Text>
-                  </View>
-                )}
-                <View style={s.breakdownRow}>
-                  <Text style={s.breakdownLabel}>Essentials</Text>
-                  <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}</Text>
-                </View>
-                <View style={s.breakdownRow}>
-                  <Text style={s.breakdownLabel}>Lifestyle spending</Text>
-                  <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(discTotal).toLocaleString()}</Text>
-                </View>
-                <View style={[s.breakdownRow, s.breakdownDivider]}>
-                  <Text style={[s.breakdownLabel, s.breakdownBold]}>Unallocated</Text>
-                  <Text style={[s.breakdownValue, s.breakdownBold]}>{'\u00a3'}{Math.round(leftToDecide).toLocaleString()}/mo</Text>
-                </View>
-                <View style={s.breakdownRow}>
-                  <Text style={s.breakdownLabel}>{'\u00f7'} 4.33 weeks</Text>
-                  <Text style={s.breakdownValue}>{'\u00a3'}{Math.round(staticWeeklyBudget).toLocaleString()}/wk</Text>
-                </View>
-
-                {weeklyCtx?.incomeArrivedThisWeek && Array.isArray(weeklyCtx?.recentIncomeEvents) && (
-                  <>
-                    <View style={s.breakdownAdaptive}>
-                      <Text style={s.breakdownAdaptiveLabel}>Adaptive adjustment</Text>
-                      {weeklyCtx.recentIncomeEvents.map((e, i) => (
-                        <View key={i} style={s.breakdownRow}>
-                          <Text style={s.breakdownLabel}>Income: {e?.source ?? 'unknown'}</Text>
-                          <Text style={[s.breakdownValue, { color: colors.green }]}>+{'\u00a3'}{Math.round(e?.amount ?? 0).toLocaleString()}</Text>
-                        </View>
-                      ))}
-                      {(weeklyCtx.committedThisWeek ?? 0) > 0 && (
-                        <View style={s.breakdownRow}>
-                          <Text style={s.breakdownLabel}>Committed payments</Text>
-                          <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek ?? 0).toLocaleString()}</Text>
-                        </View>
-                      )}
-                      <View style={s.breakdownRow}>
-                        <Text style={[s.breakdownLabel, s.breakdownBold]}>Adaptive budget</Text>
-                        <Text style={[s.breakdownValue, s.breakdownBold]}>{'\u00a3'}{Math.round(weeklyCtx.adaptiveBudget ?? 0).toLocaleString()}/wk</Text>
-                      </View>
-                    </View>
-                  </>
-                )}
-
-                <View style={[s.breakdownRow, s.breakdownDivider]}>
-                  <Text style={s.breakdownLabel}>Spent this week</Text>
-                  <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(spentThisWeek).toLocaleString()}</Text>
-                </View>
-                <View style={s.breakdownRow}>
-                  <Text style={[s.breakdownLabel, s.breakdownBold]}>Safe to spend</Text>
-                  <Text style={[s.breakdownValue, s.breakdownBold, !weeklyHealthy && { color: colors.coral }]}>{'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}</Text>
-                </View>
-
-                {customWeeklyLimit !== null && (
-                  <View style={s.breakdownRow}>
-                    <Text style={[s.breakdownLabel, { color: colors.text2 }]}>Your custom limit</Text>
-                    <Text style={[s.breakdownValue, { color: colors.text2 }]}>{'\u00a3'}{Math.round(customWeeklyLimit).toLocaleString()}/wk</Text>
-                  </View>
-                )}
-
-                {/* Adjust button */}
-                <View style={s.breakdownActions}>
-                  <TouchableOpacity
-                    style={s.adjustBtn}
-                    onPress={() => {
-                      setLimitInput(String(Math.round(weeklyBudget)));
-                      setShowLimitEditor(true);
-                    }}
-                  >
-                    <Text style={s.adjustBtnText}>
-                      {customWeeklyLimit !== null ? 'Change limit' : 'Set my own limit'}
+          ) : (
+            /* ── Weekly budget status (default) ── */
+            <AnimGlyph delay={0}>
+              <Card variant="hero" accentBar accentBarColor={weeklyHealthy ? colors.green : colors.coral}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.heroLabel}>THIS WEEK</Text>
+                    <Text style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 40 }]}>
+                      {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
                     </Text>
-                  </TouchableOpacity>
-                  {customWeeklyLimit !== null && (
-                    <TouchableOpacity style={s.resetBtn} onPress={resetCustomLimit}>
-                      <Text style={s.resetBtnText}>Reset</Text>
-                    </TouchableOpacity>
-                  )}
+                    <Text style={s.safeToSpendLabel}>left to spend</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={s.safeToSpendMeta}>
+                      {'\u00a3'}{Math.round(spentThisWeek).toLocaleString()} spent
+                    </Text>
+                    <Text style={[s.safeToSpendMeta, { marginTop: 4 }]}>
+                      of {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}
+                    </Text>
+                  </View>
                 </View>
 
-                {/* Inline limit editor */}
-                {showLimitEditor && (
-                  <View style={s.limitEditor}>
-                    <Text style={s.limitEditorLabel}>Weekly spending limit</Text>
-                    <View style={s.limitEditorRow}>
-                      <Text style={s.limitEditorCurrency}>{'\u00a3'}</Text>
-                      <TextInput
-                        style={s.limitEditorInput}
-                        keyboardType="numeric"
-                        value={limitInput}
-                        onChangeText={setLimitInput}
-                        placeholder={String(Math.round(calculatedWeeklyBudget))}
-                        placeholderTextColor={colors.muted}
-                        autoFocus
-                      />
-                      <TouchableOpacity style={s.limitEditorSave} onPress={saveCustomLimit}>
-                        <Text style={s.limitEditorSaveText}>Save</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={s.limitEditorCancel} onPress={() => setShowLimitEditor(false)}>
-                        <Text style={s.limitEditorCancelText}>Cancel</Text>
-                      </TouchableOpacity>
-                    </View>
-                    <Text style={s.limitEditorHint}>
-                      Max: {'\u00a3'}{Math.round(calculatedWeeklyBudget).toLocaleString()}/wk (based on your unallocated income)
+                <ProgressBar
+                  percent={weeklyUsedPct}
+                  color={weeklyHealthy ? colors.green : colors.coral}
+                  height={4}
+                  breathing
+                  style={{ marginTop: 20, marginBottom: 8 }}
+                />
+
+                {/* Top move teaser */}
+                {dashboardMoves.length > 0 && (
+                  <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.mintDim }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 6 }}>
+                      #1 MOVE
+                    </Text>
+                    <Text style={{ fontFamily: fonts.medium, fontSize: 15, color: colors.text, lineHeight: 22 }}>
+                      {stripMd(dashboardMoves[0].action)}
+                    </Text>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.green, marginTop: 4 }}>
+                      +{'\u00a3'}{(dashboardMoves[0].annualImpact || 0).toLocaleString()}/yr
                     </Text>
                   </View>
                 )}
-              </View>
-            )}
-          </Card>
+              </Card>
+            </AnimGlyph>
+          )}
           </View>
 
           {/* ══════════════════════════════════════════════
-              CARD — YOUR BUDGET REALITY (summary only)
+              YOUR MOVES — inline from Plan page
               ══════════════════════════════════════════════ */}
-          <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; }}>
-          <Card accentBar accentBarColor={overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.accent}>
-            {/* Info icon for budget card */}
-            <View style={s.cardTitleRow}>
-              <View style={{ flex: 1 }} />
-              <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'budget' ? null : 'budget')}>
-                <Text style={s.infoIcon}>i</Text>
-              </TouchableOpacity>
-            </View>
-            {infoCard === 'budget' && (
-              <View style={s.infoBox}>
-                <Text style={s.infoBoxText}>
-                  Spending tracked against your typical budget. Essentials and Lifestyle budgets are based on your average spending patterns. The remaining amount shows what's earmarked for your goals.
-                </Text>
-              </View>
-            )}
-
-            {/* Header */}
-            <View style={[s.budgetHeaderRow, { justifyContent: 'center' }]}>
-              <Text style={[s.cardTitle, { marginBottom: 0 }]}>Your budget reality</Text>
-            </View>
-
-            {/* Period toggle */}
-            <View style={s.periodToggleRow}>
-              {(['year', 'month', 'week'] as const).map((p) => (
-                <TouchableOpacity
-                  key={p}
-                  style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]}
-                  onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod(p); }}
-                >
-                  <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>
-                    {p === 'year' ? 'This year' : p === 'month' ? 'This month' : 'This week'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Overall spend vs income */}
-            <View style={s.periodTotalRow}>
-              <Text style={[s.periodTotalAmount, { color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
-                {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
-                <Text style={s.periodTotalOf}> of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}{isVariableIncome ? '*' : ''}</Text>
-              </Text>
-              <Text style={s.periodTotalLabel}>
-                {overallPctUsed > 100
-                  ? `Over budget by \u00a3${Math.round(periodSpendTotal - periodIncome).toLocaleString()}`
-                  : `${overallPctUsed}% of ${periodAdj} income spent`}
-              </Text>
-            </View>
-
-            {/* Overall progress bar */}
-            <ProgressBar
-              percent={overallPctUsed}
-              color={overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.green}
-              height={6}
-              style={{ marginTop: 20, marginBottom: 32 }}
-            />
-
-            {/* Essentials section */}
-            <View style={s.sectionBlock}>
-              <View style={s.sectionHeaderRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <SectionDot color={essentialsOnTrack ? colors.green : colors.coral} />
-                  <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
-                </View>
-                <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.green : colors.coral }]}>
-                  {essentialsOnTrack ? '\u2713 On track' : '\u26A0 Over budget'}
-                </Text>
-              </View>
-              <View style={s.sectionAmountRow}>
-                <Text style={[s.sectionSpent, { color: colors.text }]}>
-                  {'\u00a3'}{Math.round(periodNonDiscTotal).toLocaleString()}
-                </Text>
-                <Text style={s.sectionBudget}>of {'\u00a3'}{Math.round(periodNonDiscBudget).toLocaleString()} budget</Text>
-              </View>
-              <ProgressBar
-                percent={essentialsPctUsed}
-                color={essentialsOnTrack ? colors.text2 : colors.coral}
-                height={4}
-              />
-            </View>
-
-            {/* Lifestyle section */}
-            <View style={s.sectionBlock}>
-              <View style={s.sectionHeaderRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <SectionDot color={lifestyleOnTrack ? colors.green : colors.coral} />
-                  <Text style={[s.sectionLabel, { color: colors.text2 }]}>Lifestyle</Text>
-                </View>
-                <Text style={[s.sectionStatus, { color: lifestyleOnTrack ? colors.green : colors.coral }]}>
-                  {lifestyleOnTrack ? '\u2713 On track' : '\u26A0 Over budget'}
-                </Text>
-              </View>
-              <View style={s.sectionAmountRow}>
-                <Text style={[s.sectionSpent, { color: colors.text2 }]}>
-                  {'\u00a3'}{Math.round(periodDiscTotal).toLocaleString()}
-                </Text>
-                <Text style={s.sectionBudget}>of {'\u00a3'}{Math.round(periodDiscBudget).toLocaleString()} budget</Text>
-              </View>
-              <ProgressBar
-                percent={lifestylePctUsed}
-                color={lifestyleOnTrack ? colors.dim : colors.coral}
-                height={4}
-              />
-            </View>
-
-            {/* Remaining breakdown — prioritized by your plan */}
-            <View style={[s.sectionBlock, { borderBottomWidth: 0 }]}>
-              <View style={s.sectionHeaderRow}>
-                <Text style={[s.sectionLabel, { color: colors.text2 }]}>Remaining</Text>
-                <Text style={[s.sectionSpent, { color: periodRemaining > 0 ? colors.green : colors.coral }]}>
-                  {'\u00a3'}{Math.round(periodRemaining).toLocaleString()}
-                </Text>
-              </View>
-              {isPro ? (<>
-                {moveAllocations.length > 0 && (
-                  <View style={s.allocationList}>
-                    <Text style={s.allocationHeading}>Based on your plan</Text>
-                    {moveAllocations.map((alloc, idx) => (
-                      <View key={idx} style={s.allocationItem}>
-                        <View style={s.allocationItemTop}>
-                          <Text style={s.allocationRank}>#{alloc.priority}</Text>
-                          <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(alloc.amount).toLocaleString()}{periodSuffix}</Text>
-                        </View>
-                        <Text style={s.allocationLabel}>{alloc.label}</Text>
-                      </View>
-                    ))}
+          {(activePlanMoves.length > 0 || userPlans.length > 0 || opportunityMoves.length > 0) && (
+            <>
+              {/* Active moves */}
+              {(activePlanMoves.length > 0 || userPlans.length > 0) && (
+                <>
+                  <View style={s.moveSectionHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <SectionDot color={colors.green} />
+                      <Text style={s.moveSectionLabel}>IN PROGRESS</Text>
+                    </View>
                   </View>
-                )}
-                <View style={s.allocationUnallocated}>
-                  <Text style={s.allocationUnallocatedLabel}>Unallocated</Text>
-                  <Text style={[s.allocationUnallocatedAmount, { color: freeToSpend > 0 ? colors.text : colors.muted }]}>
-                    {'\u00a3'}{Math.round(freeToSpend).toLocaleString()}
-                  </Text>
-                </View>
-                {moveAllocations.length === 0 && periodRemaining > 0 && (
-                  <Text style={s.allocationHint}>Check your Plan tab to see where this could go.</Text>
-                )}
-              </>) : (
-                <TouchableOpacity onPress={() => setShowPaywall(true)} style={s.allocationUpgrade}>
-                  <Text style={s.allocationUpgradeText}>Upgrade to see where your remaining money should go based on your plan</Text>
-                  <Text style={[s.allocationUpgradeBtn, { color: colors.accent }]}>See my plan {'\u2192'}</Text>
-                </TouchableOpacity>
+                  {userPlans.map((plan) => (
+                    <Card key={plan.id} variant="active" style={{ marginBottom: spacing.md }}>
+                      <Text style={s.moveAction}>{stripMd(plan.action)}</Text>
+                      {plan.monthly_saving != null && (
+                        <Text style={s.moveImpactText}>{'\u00a3'}{plan.monthly_saving}/mo</Text>
+                      )}
+                    </Card>
+                  ))}
+                  {activePlanMoves.map((move, seqIdx) => {
+                    const i = move._sortIdx;
+                    const isExpanded = expandedMove === i;
+                    const moveKey = `move-${i}`;
+                    const steps = move.steps || [];
+                    const doneSteps = planProgress[moveKey]?.completed_steps || [];
+                    const stepProgress = steps.length > 0 ? doneSteps.length / steps.length : 0;
+                    const nextStepIdx = steps.findIndex((_: string, idx: number) => !doneSteps.includes(idx));
+                    return (
+                      <Card key={`active-${i}`} variant="active" style={{ marginBottom: spacing.md }}>
+                        <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
+                          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                            <View style={[s.moveBadge, { backgroundColor: colors.green, borderColor: colors.green }]}>
+                              <Text style={[s.moveBadgeText, { color: colors.bg }]}>{'\u2713'}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.moveAction}>{stripMd(move.action)}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                <Text style={s.moveImpactText}>{'\u00a3'}{move.monthlyImpact}/mo</Text>
+                                <Text style={{ fontSize: 10, color: colors.muted }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                              </View>
+                              {!isExpanded && steps.length > 0 && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                                  <ProgressBar percent={Math.round(stepProgress * 100)} color={colors.green} height={3} style={{ flex: 1 }} />
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{doneSteps.length}/{steps.length}</Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                        {isExpanded && (
+                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.mintDim }}>
+                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
+                            {steps.map((step: string, j: number) => {
+                              const isDone = doneSteps.includes(j);
+                              return (
+                                <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.mintDim }} onPress={() => togglePlanStep(moveKey, j, move.action)} activeOpacity={0.7}>
+                                  <View style={[s.checkbox, isDone && s.checkboxDone]}>
+                                    {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
+                                  </View>
+                                  <Text style={[s.checklistText, isDone && s.checklistTextDone]}>{stripMd(step)}</Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                            <TouchableOpacity style={[s.heroCta, { marginTop: 16, paddingVertical: 12 }]} onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } })}>
+                              <Text style={s.heroCtaText}>Ask Bocy about this</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={{ marginTop: 12, alignItems: 'center', paddingVertical: 8 }} onPress={() => handleStopMove(i)}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.coral }}>Remove from plan</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </Card>
+                    );
+                  })}
+                </>
               )}
-            </View>
 
-            {isVariableIncome && (
-              <Text style={s.variableIncomeFootnote}>
-                *Conservative estimate based on {'\u00a3'}{Math.round(incomeFloor / periodDivisor).toLocaleString()}{periodSuffix}
-              </Text>
-            )}
+              {/* Opportunity moves */}
+              {opportunityMoves.length > 0 && (
+                <>
+                  <View style={s.moveSectionHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <SectionDot color={colors.accent} />
+                      <Text style={s.moveSectionLabel}>YOUR MOVES</Text>
+                    </View>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green }}>
+                      {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo potential
+                    </Text>
+                  </View>
+                  {(isPro ? opportunityMoves : opportunityMoves.slice(0, 2)).map((move, seqIdx) => {
+                    const i = move._sortIdx;
+                    const isExpanded = expandedMove === i;
+                    const moveKey = `move-${i}`;
+                    const providerActions = getProviderActions(move);
+                    return (
+                      <Card key={`opp-${i}`} variant="default" style={{ marginBottom: spacing.md }}>
+                        <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
+                          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                            <View style={s.moveBadge}>
+                              <Text style={s.moveBadgeText}>{seqIdx + 1}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.moveAction}>{stripMd(move.action)}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                <Text style={s.moveImpactText}>{'\u00a3'}{move.monthlyImpact}/mo</Text>
+                                <View style={[s.effortPill, { backgroundColor: `${effortColor(move.effort)}15` }]}>
+                                  <Text style={[s.effortPillText, { color: effortColor(move.effort) }]}>{effortLabel(move.effort)}</Text>
+                                </View>
+                                <Text style={{ fontSize: 10, color: colors.muted, marginLeft: 'auto' }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                              </View>
+                              {!isExpanded && move.merchants && move.merchants.length > 0 && (
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                                  {move.merchants.slice(0, 3).map((m: string, j: number) => (
+                                    <View key={j} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 100, paddingVertical: 2, paddingHorizontal: 8 }}>
+                                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.text2 }}>{m}</Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
 
-          </Card>
+                        {!isExpanded && (
+                          <TouchableOpacity style={[s.heroCta, { marginTop: 12, paddingVertical: 10 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
+                            <Text style={[s.heroCtaText, { fontSize: 13 }]}>Start this move</Text>
+                          </TouchableOpacity>
+                        )}
 
-          {/* ── Transactions card ── */}
-          <Card style={{ marginTop: spacing.md }} accentBar={false}>
+                        {isExpanded && (
+                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.mintDim }}>
+                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
+
+                            <TouchableOpacity style={[s.heroCta, { marginBottom: 16, paddingVertical: 12 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
+                              <Text style={s.heroCtaText}>Start this move</Text>
+                            </TouchableOpacity>
+
+                            {move.merchants && move.merchants.length > 0 && (
+                              <View style={{ marginBottom: 16 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 8 }}>WHERE YOUR MONEY GOES</Text>
+                                {move.merchants.map((m: string, j: number) => (
+                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 }}>
+                                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.accent }} />
+                                    <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2 }}>{m}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+
+                            {(move.steps || []).length > 0 && (
+                              <View style={{ marginBottom: 16 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 8 }}>STEPS</Text>
+                                {(move.steps || []).map((step: string, j: number) => (
+                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.mintDim }}>
+                                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.dim, width: 22, textAlign: 'center' }}>{j + 1}</Text>
+                                    <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 }}>{stripMd(step)}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+
+                            {move.effect && (
+                              <View style={{ marginBottom: 16 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 8 }}>OUTCOME</Text>
+                                <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 22 }}>{stripMd(move.effect)}</Text>
+                              </View>
+                            )}
+
+                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
+                              <View style={{ flex: 1, backgroundColor: colors.mintDim, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, alignItems: 'center' }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.green }}>{'\u00a3'}{move.monthlyImpact || 0}</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.dim, marginTop: 2 }}>per month</Text>
+                              </View>
+                              <View style={{ flex: 1, backgroundColor: colors.mintDim, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 12, alignItems: 'center' }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.green }}>{'\u00a3'}{move.annualImpact || 0}</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.dim, marginTop: 2 }}>per year</Text>
+                              </View>
+                            </View>
+
+                            {providerActions.length > 0 && (
+                              <View style={{ gap: 8, marginBottom: 12 }}>
+                                {providerActions.map((pa, j) => (
+                                  <TouchableOpacity key={j} style={{ borderWidth: 1, borderColor: colors.accentDim, borderRadius: 100, paddingVertical: 12, alignItems: 'center' }} onPress={() => pa.url ? Linking.openURL(pa.url) : pa.phone ? Linking.openURL(`tel:${pa.phone}`) : null}>
+                                    <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.text }}>{pa.label}</Text>
+                                    {pa.sub && <Text style={{ fontFamily: fonts.regular, fontSize: 10, color: colors.dim, marginTop: 2 }}>{pa.sub}</Text>}
+                                  </TouchableOpacity>
+                                ))}
+                              </View>
+                            )}
+
+                            <TouchableOpacity style={{ borderWidth: 1, borderColor: colors.accentDim, borderRadius: 100, paddingVertical: 12, alignItems: 'center', marginBottom: 8 }} onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } })}>
+                              <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.text }}>Ask Bocy about this</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity style={{ alignItems: 'center', paddingVertical: 8 }} onPress={() => handleDeleteMove(move)}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.coral }}>Delete</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </Card>
+                    );
+                  })}
+
+                  {!isPro && opportunityMoves.length > 2 && (
+                    <Card variant="upgrade" accentBar accentBarColor={colors.green} onPress={() => setShowPaywall(true)} style={{ marginBottom: spacing.md, alignItems: 'center' }}>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>PRO</Text>
+                      <Text style={{ fontFamily: fonts.semibold, fontSize: 16, color: colors.text, textAlign: 'center' }}>
+                        +{opportunityMoves.length - 2} more moves locked
+                      </Text>
+                      <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.dim, textAlign: 'center', marginTop: 4, marginBottom: 12 }}>
+                        Unlock your full action plan
+                      </Text>
+                      <View style={[s.heroCta, { paddingVertical: 12 }]}>
+                        <Text style={[s.heroCtaText, { fontSize: 13 }]}>See plans</Text>
+                      </View>
+                    </Card>
+                  )}
+                </>
+              )}
+            </>
+          )}
+
+          {/* ══════════════════════════════════════════════
+              BUDGET — collapsed by default
+              ══════════════════════════════════════════════ */}
+          {/* ── Budget overview — collapsed by default ── */}
+          <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; }}>
             <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={() => {
-                LayoutAnimation.configureNext(SMOOTH_ANIM);
-                setTxCardExpanded(prev => !prev);
-              }}
-              style={s.txCardHeader}
+              activeOpacity={0.8}
+              onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetExpanded(!budgetExpanded); }}
+              style={s.collapsedSectionBtn}
             >
-              <Text style={s.txCardTitle}>Transactions</Text>
-              <Text style={s.txCardChevron}>{txCardExpanded ? '\u25B2' : '\u25BC'}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <SectionDot color={overallPctUsed > 100 ? colors.coral : colors.accent} />
+                <Text style={s.moveSectionLabel}>BUDGET</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: overallPctUsed > 100 ? colors.coral : colors.text2 }}>
+                  {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()} / {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
+                </Text>
+                <Text style={{ fontSize: 10, color: colors.muted }}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
+              </View>
             </TouchableOpacity>
 
-            {txCardExpanded && (<>
-            {/* Essentials breakdown */}
-            <View style={s.breakdownHeaderRow}>
-              <Text style={s.breakdownHeader}>ESSENTIALS</Text>
-              <TouchableOpacity
-                style={s.addItemBtn}
-                onPress={() => {
-                  LayoutAnimation.configureNext(SMOOTH_ANIM);
-                  setAddItemEssential(true);
-                  setAddItemError('');
-                  setShowAddItem(true);
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
-                <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
-              </TouchableOpacity>
-            </View>
-            {periodNonDiscData.filter(d => d.count > 0).length === 0 && (
-              <Text style={s.noDataText}>No essential spending {periodThisLabel}.</Text>
-            )}
-            {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
-              const key = `nd-${item.category}`;
-              const isExpanded = expandedCategories.has(key);
-              const catOnTrack = item.total <= item.budget * 1.05;
-              const visibleItems = periodNonDiscData.filter(d => d.count > 0);
-              return (
-                <View key={i}>
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => toggleCategory(key)}
-                    style={[s.dataRow, i === visibleItems.length - 1 && !isExpanded && s.dataRowLast]}
-                  >
-                    <View style={s.dataRowLeft}>
-                      <Text style={[s.catArrow, { color: colors.text }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
-                      <View style={s.catInfo}>
-                        <Text style={s.dataLabel}>{item.category}</Text>
-                        <Text style={s.dataMeta}>
-                          {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={s.dataRowRight}>
-                      <Text style={[s.dataValue, { color: catOnTrack ? colors.text : colors.coral }]}>
-                        {'\u00a3'}{Math.round(item.total).toLocaleString()}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  {isExpanded && item.txs.length > 0 && (
-                    <View style={s.txDropdown}>
-                      {item.txs.map((tx, j) => (
-                        <TouchableOpacity
-                          key={j}
-                          style={[s.txRow, j === item.txs.length - 1 && s.txRowLast]}
-                          onLongPress={() => {
-                            setRecatTx({ tx, catKey: item.category, section: 'essential' });
-                            setRecatTarget('');
-                            setRecatEssential(true);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <View style={s.txLeft}>
-                            <Text style={s.txMerchant}>{tx.merchant}</Text>
-                            <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                          </View>
-                          <View style={s.txRightCol}>
-                            <Text style={[s.txAmount, { color: colors.text2 }]}>
-                              {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
-                            </Text>
-                            <Text style={s.txRecatHint}>Hold to move</Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                  {isExpanded && item.txs.length === 0 && (
-                    <View style={s.txDropdown}>
-                      <Text style={s.txEmpty}>No transactions {periodThisLabel}</Text>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
+            {budgetExpanded && (
+              <Card accentBar accentBarColor={overallPctUsed > 100 ? colors.coral : colors.accent} style={{ marginBottom: spacing.md }}>
+                <ProgressBar percent={overallPctUsed} color={overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.green} height={6} style={{ marginBottom: 20 }} />
 
-            {/* Lifestyle breakdown */}
-            <View style={[s.breakdownHeaderRow, { marginTop: 28 }]}>
-              <Text style={s.breakdownHeader}>LIFESTYLE</Text>
-              <TouchableOpacity
-                style={s.addItemBtn}
-                onPress={() => {
-                  LayoutAnimation.configureNext(SMOOTH_ANIM);
-                  setAddItemEssential(false);
-                  setAddItemError('');
-                  setShowAddItem(true);
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
-                <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
-              </TouchableOpacity>
-            </View>
-            {periodDiscData.filter(d => d.count > 0).length === 0 && (
-              <Text style={s.noDataText}>No lifestyle spending {periodThisLabel}.</Text>
-            )}
-            {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
-              const key = `d-${item.category}`;
-              const isExpanded = expandedCategories.has(key);
-              const catOnTrack = item.total <= item.budget * 1.05;
-              const visibleItems = periodDiscData.filter(d => d.count > 0);
-              return (
-                <View key={i}>
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => toggleCategory(key)}
-                    style={[s.dataRow, i === visibleItems.length - 1 && !isExpanded && s.dataRowLast]}
-                  >
-                    <View style={s.dataRowLeft}>
-                      <Text style={[s.catArrow, { color: colors.dim }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
-                      <View style={s.catInfo}>
-                        <Text style={s.dataLabel}>{item.category}</Text>
-                        <Text style={s.dataMeta}>
-                          {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={s.dataRowRight}>
-                      <Text style={[s.dataValue, { color: catOnTrack ? colors.dim : colors.coral }]}>
-                        {'\u00a3'}{Math.round(item.total).toLocaleString()}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  {isExpanded && item.txs.length > 0 && (
-                    <View style={s.txDropdown}>
-                      {item.txs.map((tx, j) => (
-                        <TouchableOpacity
-                          key={j}
-                          style={[s.txRow, j === item.txs.length - 1 && s.txRowLast]}
-                          onLongPress={() => {
-                            setRecatTx({ tx, catKey: item.category, section: 'lifestyle' });
-                            setRecatTarget('');
-                            setRecatEssential(false);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <View style={s.txLeft}>
-                            <Text style={s.txMerchant}>{tx.merchant}</Text>
-                            <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                          </View>
-                          <View style={s.txRightCol}>
-                            <Text style={[s.txAmount, { color: colors.dim }]}>
-                              {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
-                            </Text>
-                            <Text style={s.txRecatHint}>Hold to move</Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                  {isExpanded && item.txs.length === 0 && (
-                    <View style={s.txDropdown}>
-                      <Text style={s.txEmpty}>No transactions {periodThisLabel}</Text>
-                    </View>
-                  )}
+                <View style={s.sectionBlock}>
+                  <View style={s.sectionHeaderRow}>
+                    <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
+                    <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.green : colors.coral }]}>
+                      {'\u00a3'}{Math.round(periodNonDiscTotal).toLocaleString()} of {'\u00a3'}{Math.round(periodNonDiscBudget).toLocaleString()}
+                    </Text>
+                  </View>
+                  <ProgressBar percent={essentialsPctUsed} color={essentialsOnTrack ? colors.text2 : colors.coral} height={4} />
                 </View>
-              );
-            })}
 
-            <Text style={s.cardFooter}>Tap any category to expand · Hold a transaction to re-categorize</Text>
-            </>)}
-          </Card>
+                <View style={s.sectionBlock}>
+                  <View style={s.sectionHeaderRow}>
+                    <Text style={[s.sectionLabel, { color: colors.text2 }]}>Lifestyle</Text>
+                    <Text style={[s.sectionStatus, { color: lifestyleOnTrack ? colors.green : colors.coral }]}>
+                      {'\u00a3'}{Math.round(periodDiscTotal).toLocaleString()} of {'\u00a3'}{Math.round(periodDiscBudget).toLocaleString()}
+                    </Text>
+                  </View>
+                  <ProgressBar percent={lifestylePctUsed} color={lifestyleOnTrack ? colors.dim : colors.coral} height={4} />
+                </View>
+
+                <View style={[s.sectionBlock, { borderBottomWidth: 0 }]}>
+                  <View style={s.sectionHeaderRow}>
+                    <Text style={[s.sectionLabel, { color: colors.text2 }]}>Remaining</Text>
+                    <Text style={[s.sectionStatus, { color: periodRemaining > 0 ? colors.green : colors.coral }]}>
+                      {'\u00a3'}{Math.round(periodRemaining).toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Period toggle */}
+                <View style={[s.periodToggleRow, { marginBottom: 0, marginTop: 8 }]}>
+                  {(['month', 'week'] as const).map((p) => (
+                    <TouchableOpacity key={p} style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]} onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod(p); }}>
+                      <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>{p === 'month' ? 'Monthly' : 'Weekly'}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </Card>
+            )}
           </View>
+
+          {/* ── Transactions — collapsed by default ── */}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setTxCardExpanded(prev => !prev); }}
+            style={s.collapsedSectionBtn}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <SectionDot color={colors.dim} />
+              <Text style={s.moveSectionLabel}>TRANSACTIONS</Text>
+            </View>
+            <Text style={{ fontSize: 10, color: colors.muted }}>{txCardExpanded ? '\u25B2' : '\u25BC'}</Text>
+          </TouchableOpacity>
+
+          {txCardExpanded && (
+            <Card style={{ marginBottom: spacing.md }} accentBar={false}>
+              {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
+                const key = `nd-${item.category}`;
+                const isExp = expandedCategories.has(key);
+                return (
+                  <View key={`nd-${i}`}>
+                    <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
+                      <View style={s.dataRowLeft}>
+                        <Text style={[s.catArrow, { color: colors.text }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
+                        <Text style={s.dataLabel}>{item.category}</Text>
+                      </View>
+                      <Text style={[s.dataValue, { color: colors.text }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
+                    </TouchableOpacity>
+                    {isExp && item.txs.map((tx, j) => (
+                      <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'essential' }); setRecatTarget(''); setRecatEssential(true); }} activeOpacity={0.7}>
+                        <View style={s.txLeft}>
+                          <Text style={s.txMerchant}>{tx.merchant}</Text>
+                          <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                        </View>
+                        <Text style={[s.txAmount, { color: colors.text2 }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                );
+              })}
+              {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
+                const key = `d-${item.category}`;
+                const isExp = expandedCategories.has(key);
+                return (
+                  <View key={`d-${i}`}>
+                    <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
+                      <View style={s.dataRowLeft}>
+                        <Text style={[s.catArrow, { color: colors.dim }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
+                        <Text style={s.dataLabel}>{item.category}</Text>
+                      </View>
+                      <Text style={[s.dataValue, { color: colors.dim }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
+                    </TouchableOpacity>
+                    {isExp && item.txs.map((tx, j) => (
+                      <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'lifestyle' }); setRecatTarget(''); setRecatEssential(false); }} activeOpacity={0.7}>
+                        <View style={s.txLeft}>
+                          <Text style={s.txMerchant}>{tx.merchant}</Text>
+                          <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                        </View>
+                        <Text style={[s.txAmount, { color: colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                );
+              })}
+              <Text style={s.cardFooter}>Hold a transaction to re-categorise</Text>
+            </Card>
+          )}
 
           {/* Add budget item modal */}
           <Modal visible={showAddItem} transparent animationType="fade" onRequestClose={() => { setAddItemError(''); setShowAddItem(false); }}>
@@ -2370,6 +2277,110 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 14,
     color: c.amber,
     opacity: 0.6,
+  },
+
+  // ── Focus card split rows ──
+  focusSplitRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  focusSplitLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+    flex: 1,
+  },
+  focusSplitValue: {
+    fontFamily: fonts.mono,
+    fontSize: 15,
+    letterSpacing: -0.3,
+  },
+
+  // ── Moves section ──
+  moveSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginTop: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  moveSectionLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 2,
+    color: c.text2,
+    textTransform: 'uppercase',
+  },
+  moveAction: {
+    fontFamily: fonts.medium,
+    fontSize: 15,
+    color: c.text,
+    lineHeight: 22,
+  },
+  moveImpactText: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: c.green,
+  },
+  moveBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: c.mintDim,
+    borderWidth: 1,
+    borderColor: c.accentDim,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.sm,
+    marginTop: 2,
+  },
+  moveBadgeText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.dim,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: c.accentDim,
+    marginRight: spacing.sm,
+    marginTop: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxDone: {
+    backgroundColor: c.green,
+    borderColor: c.green,
+  },
+  checkmark: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: c.bg,
+  },
+  checklistText: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+    lineHeight: 22,
+  },
+  checklistTextDone: {
+    textDecorationLine: 'line-through',
+    color: c.muted,
+  },
+
+  // ── Collapsed section button ──
+  collapsedSectionBtn: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    marginTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: c.mintDim,
   },
 
   // ── Empty State ──
