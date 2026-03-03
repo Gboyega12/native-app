@@ -97,6 +97,7 @@ export default async function handler(req, res) {
       await admin.from('notification_log').insert({
         user_id,
         notification_type: tag || 'web_push',
+        recipient_email: 'web_push',
         subject: title,
         status: sent > 0 ? 'sent' : 'failed',
         error_message: sent > 0 ? null : 'All subscriptions failed',

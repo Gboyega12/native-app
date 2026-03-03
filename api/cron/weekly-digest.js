@@ -133,6 +133,10 @@ export default async function handler(req, res) {
         const scoreChange = prevSnapshot ? analysis.decision_score - prevSnapshot.decision_score : 0;
         const surplusChange = prevSnapshot ? analysis.surplus - prevSnapshot.surplus : 0;
 
+        // Build push notification body — concise summary for web push
+        const scoreArrow = scoreChange >= 0 ? '\u2191' : '\u2193';
+        const pushBody = `Score: ${analysis.decision_score} (${scoreArrow}${Math.abs(scoreChange)}). Surplus: \u00a3${Math.round(analysis.surplus)}. ${movesCompleted}/${allMoves.length} moves done.${topMove ? ` Top move: ${topMove.action}` : ''}`;
+
         // Use the send endpoint
         const sendRes = await fetch(`${appUrl}/api/notifications/send`, {
           method: 'POST',
@@ -142,7 +146,7 @@ export default async function handler(req, res) {
           },
           body: JSON.stringify({
             to: pref.email,
-            subject: `Your score: ${analysis.decision_score} ${scoreChange >= 0 ? '\u2191' : '\u2193'}${Math.abs(scoreChange)} — Bocy Weekly`,
+            subject: `Your score: ${analysis.decision_score} ${scoreArrow}${Math.abs(scoreChange)} — Bocy Weekly`,
             html: buildDigestHtml({
               name,
               decisionScore: analysis.decision_score,
@@ -160,6 +164,7 @@ export default async function handler(req, res) {
               newAchievements: newAchievementDefs,
               streakDays: streakRow?.current_streak || 0,
             }),
+            push_body: pushBody,
             user_id: pref.user_id,
             notification_type: 'weekly_digest',
           }),

@@ -1098,6 +1098,12 @@ export default function Chat() {
       } catch {
         // Non-critical — still update UI
       }
+
+      // Invalidate sync cache and re-sync so the budget reflects the deletion
+      invalidateSyncCache();
+      requestSync(uid, true).then((syncResult) => {
+        if (syncResult?.analysis) setAnalysis(syncResult.analysis);
+      }).catch(() => {});
     }
 
     const updated = [...messages];

@@ -229,6 +229,7 @@ export default async function handler(req, res) {
               ? `\u00a3${remaining} left of your \u00a3${weeklyBudget} weekly budget`
               : `Over budget this week — let's rebalance`,
             html,
+            push_body: message,
             user_id: pref.user_id,
             notification_type: 'daily_spending',
           }),

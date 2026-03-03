@@ -193,6 +193,7 @@ export default async function handler(req, res) {
             to: pref.email,
             subject: 'Bocy has a suggestion for you',
             html,
+            push_body: message,
             user_id: pref.user_id,
             notification_type: 'checkin',
           }),
