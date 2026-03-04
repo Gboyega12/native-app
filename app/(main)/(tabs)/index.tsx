@@ -1112,9 +1112,36 @@ export default function Home() {
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
     setExpandedPlan(null);
-    await supabase.from('user_plans').update({ status: 'dismissed' }).eq('id', planId).eq('user_id', uid);
+
+    try {
+      // Use the API endpoint (service-role key) so RLS doesn't block the delete
+      const res = await fetch('/api/plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', plan_id: planId, user_id: uid }),
+      });
+      if (!res.ok) throw new Error('API delete failed');
+    } catch {
+      // Fallback: delete directly via Supabase client (works on native)
+      try {
+        const { error } = await supabase
+          .from('user_plans')
+          .update({ status: 'dismissed' })
+          .eq('id', planId)
+          .eq('user_id', uid);
+
+        if (error) {
+          await supabase.from('user_plans').delete().eq('id', planId).eq('user_id', uid);
+        }
+      } catch (err: any) {
+        console.warn('[home] Failed to delete plan:', err?.message);
+      }
+    }
+
     // Clean up any progress for this plan
-    await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', `plan-${planId}`);
+    try {
+      await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', `plan-${planId}`);
+    } catch {}
   };
 
 

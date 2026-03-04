@@ -446,24 +446,34 @@ export default function Plan() {
     setUserPlans((prev) => prev.filter((p) => p.id !== planId));
 
     try {
-      // Mark as dismissed (consistent with home screen) so it won't reload
-      const { error } = await supabase
-        .from('user_plans')
-        .update({ status: 'dismissed' })
-        .eq('id', planId)
-        .eq('user_id', uid);
+      // Use the API endpoint (service-role key) so RLS doesn't block the delete
+      const res = await fetch('/api/plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', plan_id: planId, user_id: uid }),
+      });
+      if (!res.ok) throw new Error('API delete failed');
+    } catch {
+      // Fallback: delete directly via Supabase client (works on native)
+      try {
+        const { error } = await supabase
+          .from('user_plans')
+          .update({ status: 'dismissed' })
+          .eq('id', planId)
+          .eq('user_id', uid);
 
-      if (error) {
-        console.warn('[plan] Dismiss failed, trying hard delete:', error.message);
-        // Fallback: hard delete if status update fails (e.g. RLS issue)
-        await supabase.from('user_plans').delete().eq('id', planId).eq('user_id', uid);
+        if (error) {
+          await supabase.from('user_plans').delete().eq('id', planId).eq('user_id', uid);
+        }
+      } catch (err: any) {
+        console.warn('[plan] Failed to delete plan:', err?.message);
       }
-
-      // Clean up any progress for this plan
-      await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', `plan-${planId}`);
-    } catch (err: any) {
-      console.warn('[plan] Failed to delete plan:', err?.message);
     }
+
+    // Clean up any progress for this plan
+    try {
+      await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', `plan-${planId}`);
+    } catch {}
   };
 
   const handleDeleteRecommendation = async (sortedIndex: number) => {
