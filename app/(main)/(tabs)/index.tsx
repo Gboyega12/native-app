@@ -208,6 +208,7 @@ export default function Home() {
   // Custom weekly spending limit
   const [customWeeklyLimit, setCustomWeeklyLimit] = useState<number | null>(null);
   const [showLimitEditor, setShowLimitEditor] = useState(false);
+  const [showWeeklyInfo, setShowWeeklyInfo] = useState(false);
   const [limitInput, setLimitInput] = useState('');
   const [breakdownExpanded, setBreakdownExpanded] = useState(false);
   const [budgetPeriod, setBudgetPeriod] = useState<'year' | 'month' | 'week'>('month');
@@ -1511,7 +1512,19 @@ export default function Home() {
               <Card variant="hero">
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.heroLabel}>THIS WEEK</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={s.heroLabel}>THIS WEEK</Text>
+                      <TouchableOpacity
+                        onPress={() => setShowWeeklyInfo(true)}
+                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="How is this calculated?"
+                      >
+                        <View style={s.infoIconSmall}>
+                          <Text style={s.infoIconSmallText}>?</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
                     <Text style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 38 }]}>
                       {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
                     </Text>
@@ -1521,9 +1534,19 @@ export default function Home() {
                     <Text style={s.safeToSpendMeta}>
                       {'\u00a3'}{Math.round(spentThisWeek).toLocaleString()} spent
                     </Text>
-                    <Text style={[s.safeToSpendMeta, { marginTop: 4 }]}>
-                      of {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}
-                    </Text>
+                    <TouchableOpacity
+                      onPress={() => { setLimitInput(customWeeklyLimit ? String(customWeeklyLimit) : String(Math.round(calculatedWeeklyBudget))); setShowLimitEditor(true); }}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel="Set custom weekly spending limit"
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                        <Text style={[s.safeToSpendMeta, { textDecorationLine: 'underline', textDecorationStyle: 'dotted' }]}>
+                          of {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}
+                        </Text>
+                        <Text style={{ fontSize: 8, color: colors.dim }}>{'\u270E'}</Text>
+                      </View>
+                    </TouchableOpacity>
                   </View>
                 </View>
 
@@ -2421,6 +2444,110 @@ export default function Home() {
           fingerprint={incomeFingerprint ? `income:${incomeFingerprint}` : undefined}
         />
       )}
+
+      {/* ── Weekly info explainability modal ── */}
+      <Modal visible={showWeeklyInfo} transparent animationType="fade" onRequestClose={() => setShowWeeklyInfo(false)}>
+        <Pressable style={s.modalOverlay} onPress={() => setShowWeeklyInfo(false)}>
+          <Pressable style={s.modalContent} onPress={() => {}}>
+            <Text style={s.modalTag}>HOW IT WORKS</Text>
+            <Text style={s.modalTitle}>Your weekly budget</Text>
+
+            <View style={s.modalDotSep}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <View key={i} style={[s.modalDot, { backgroundColor: colors.border }]} />
+              ))}
+            </View>
+
+            <Text style={s.modalBody}>
+              This is how much you can freely spend this week without touching your essentials or goals. It updates automatically every Monday.
+            </Text>
+
+            <View style={s.modalBreakdown}>
+              <View style={s.modalBreakdownRow}>
+                <Text style={s.modalBreakdownLabel}>Monthly income</Text>
+                <Text style={s.modalBreakdownValue}>{'\u00a3'}{Math.round(income).toLocaleString()}</Text>
+              </View>
+              <View style={s.modalBreakdownRow}>
+                <Text style={s.modalBreakdownLabel}>Essentials</Text>
+                <Text style={[s.modalBreakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}</Text>
+              </View>
+              <View style={s.modalBreakdownRow}>
+                <Text style={s.modalBreakdownLabel}>Lifestyle budget</Text>
+                <Text style={[s.modalBreakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(discTotal).toLocaleString()}</Text>
+              </View>
+              <View style={[s.modalBreakdownRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, marginTop: 4 }]}>
+                <Text style={[s.modalBreakdownLabel, { fontFamily: fonts.semibold, color: colors.text }]}>Unallocated monthly</Text>
+                <Text style={[s.modalBreakdownValue, { fontFamily: fonts.semibold, color: colors.text }]}>{'\u00a3'}{Math.round(leftToDecide).toLocaleString()}</Text>
+              </View>
+              <View style={s.modalBreakdownRow}>
+                <Text style={s.modalBreakdownLabel}>{'\u00f7'} 4.33 weeks</Text>
+                <Text style={[s.modalBreakdownValue, { color: colors.green }]}>{'\u00a3'}{Math.round(calculatedWeeklyBudget).toLocaleString()}/wk</Text>
+              </View>
+              {customWeeklyLimit !== null && (
+                <View style={s.modalBreakdownRow}>
+                  <Text style={[s.modalBreakdownLabel, { color: colors.accent }]}>Your custom limit</Text>
+                  <Text style={[s.modalBreakdownValue, { color: colors.accent }]}>{'\u00a3'}{Math.round(customWeeklyLimit).toLocaleString()}/wk</Text>
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={s.modalCloseBtn}
+              onPress={() => setShowWeeklyInfo(false)}
+              activeOpacity={0.8}
+            >
+              <Text style={s.modalCloseBtnText}>Got it</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Custom weekly limit editor modal ── */}
+      <Modal visible={showLimitEditor} transparent animationType="fade" onRequestClose={() => setShowLimitEditor(false)}>
+        <Pressable style={s.modalOverlay} onPress={() => setShowLimitEditor(false)}>
+          <Pressable style={s.modalContent} onPress={() => {}}>
+            <Text style={s.modalTag}>SET YOUR LIMIT</Text>
+            <Text style={s.modalTitle}>Weekly spending target</Text>
+
+            <Text style={[s.modalBody, { marginBottom: spacing.lg }]}>
+              Set what you want to spend per week after essentials are covered. This can't exceed your calculated budget of {'\u00a3'}{Math.round(calculatedWeeklyBudget).toLocaleString()}/wk.
+            </Text>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: spacing.lg }}>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 24, color: colors.text }}>{'\u00a3'}</Text>
+              <TextInput
+                style={s.limitEditorInput}
+                value={limitInput}
+                onChangeText={setLimitInput}
+                keyboardType="numeric"
+                placeholder={String(Math.round(calculatedWeeklyBudget))}
+                placeholderTextColor={colors.muted}
+                autoFocus
+                selectTextOnFocus
+              />
+              <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.dim }}>/wk</Text>
+            </View>
+
+            <TouchableOpacity
+              style={s.modalCloseBtn}
+              onPress={saveCustomLimit}
+              activeOpacity={0.8}
+            >
+              <Text style={s.modalCloseBtnText}>Set limit</Text>
+            </TouchableOpacity>
+
+            {customWeeklyLimit !== null && (
+              <TouchableOpacity
+                style={s.modalResetBtn}
+                onPress={resetCustomLimit}
+                activeOpacity={0.7}
+              >
+                <Text style={s.modalResetBtnText}>Reset to auto ({'\u00a3'}{Math.round(calculatedWeeklyBudget)}/wk)</Text>
+              </TouchableOpacity>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -4261,5 +4388,110 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 11,
     color: c.text2,
     letterSpacing: 0.3,
+  },
+
+  // ── Info icon (small) on hero card ──
+  infoIconSmall: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: c.dim,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  infoIconSmallText: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: c.dim,
+    marginTop: -1,
+  },
+
+  // ── Weekly info / limit modals ──
+  modalTag: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.muted,
+    letterSpacing: 3,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+  },
+  modalDotSep: {
+    flexDirection: 'row',
+    gap: 6,
+    marginVertical: spacing.md,
+  },
+  modalDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+  },
+  modalBody: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+    lineHeight: 22,
+    marginBottom: spacing.lg,
+  },
+  modalBreakdown: {
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    gap: 10,
+  },
+  modalBreakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalBreakdownLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.text2,
+  },
+  modalBreakdownValue: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: c.text2,
+    letterSpacing: 0.3,
+  },
+  modalCloseBtn: {
+    backgroundColor: c.accent,
+    paddingVertical: 14,
+    borderRadius: 100,
+    alignItems: 'center',
+  },
+  modalCloseBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: c.bg,
+    letterSpacing: 0.2,
+  },
+  modalResetBtn: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginTop: spacing.sm,
+  },
+  modalResetBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.dim,
+    letterSpacing: 0.3,
+  },
+  limitEditorInput: {
+    flex: 1,
+    fontFamily: fonts.mono,
+    fontSize: 28,
+    color: c.text,
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    letterSpacing: -0.5,
   },
 });

@@ -444,20 +444,20 @@ function findLabel(screenIdx: number, key: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: spacing.xl, paddingTop: spacing.xxl + spacing.md, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
-  summaryScroll: { padding: spacing.xl, paddingTop: spacing.xxl + spacing.md, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
+  scroll: { padding: spacing.xl + 4, paddingTop: spacing.xxl + spacing.lg, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
+  summaryScroll: { padding: spacing.xl + 4, paddingTop: spacing.xxl + spacing.lg, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
 
   // ── Progress ──
   progressRow: {
     flexDirection: 'row',
     gap: 4,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xl,
     justifyContent: 'center',
   },
   progressDot: {
     width: 24,
-    height: 4,
-    borderRadius: 2,
+    height: 3,
+    borderRadius: 1.5,
     backgroundColor: colors.muted,
   },
   progressDotActive: {
@@ -465,29 +465,31 @@ const styles = StyleSheet.create({
   },
 
   // ── Back ──
-  backBtn: { marginBottom: spacing.md },
-  backText: { fontFamily: fonts.medium, fontSize: 14, color: colors.accent },
+  backBtn: { marginBottom: spacing.lg },
+  backText: { fontFamily: fonts.mono, fontSize: 12, color: colors.accent, letterSpacing: 0.5 },
 
   // ── Question ──
   question: {
     fontFamily: fonts.heading,
-    fontSize: 22,
+    fontSize: 24,
     color: colors.text,
     marginBottom: spacing.xs,
+    lineHeight: 32,
+    letterSpacing: -0.3,
   },
   hint: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.dim,
-    marginBottom: spacing.xl,
-    lineHeight: 19,
+    marginBottom: spacing.xl + spacing.sm,
+    lineHeight: 20,
   },
 
   // ── Card grid ──
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: CARD_GAP,
+    gap: CARD_GAP + 2,
   },
   card: {
     flexBasis: '48%',
@@ -495,10 +497,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1.5,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    borderRadius: radius.lg,
+    padding: spacing.md + 2,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.md + 2,
     position: 'relative',
   },
   cardSelected: {
@@ -508,11 +510,11 @@ const styles = StyleSheet.create({
   cardIcon: {
     width: 36,
     height: 36,
-    borderRadius: 10,
+    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.04)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.sm + 2,
   },
   cardIconSelected: {
     backgroundColor: colors.accent,
@@ -529,7 +531,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: colors.text,
-    marginBottom: 3,
+    marginBottom: 4,
   },
   cardLabelSelected: {
     color: colors.accent,
@@ -538,7 +540,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 11,
     color: colors.dim,
-    lineHeight: 15,
+    lineHeight: 16,
   },
   checkbox: {
     position: 'absolute',
@@ -546,7 +548,7 @@ const styles = StyleSheet.create({
     right: 10,
     width: 20,
     height: 20,
-    borderRadius: 4,
+    borderRadius: 6,
     borderWidth: 1.5,
     borderColor: colors.muted,
     justifyContent: 'center',
@@ -583,34 +585,36 @@ const styles = StyleSheet.create({
   // ── Summary ──
   summaryTitle: {
     fontFamily: fonts.heading,
-    fontSize: 24,
+    fontSize: 26,
     color: colors.text,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
+    letterSpacing: -0.3,
   },
   summarySubtitle: {
     fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
-    marginBottom: spacing.xl,
-    lineHeight: 20,
+    marginBottom: spacing.xl + spacing.sm,
+    lineHeight: 22,
   },
   summaryCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.sm + 2,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   summaryLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.dim,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
     width: 90,
   },
   summaryValue: {
@@ -623,14 +627,14 @@ const styles = StyleSheet.create({
 
   // ── Bottom area ──
   bottomArea: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xxl,
-    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.xl + 4,
+    paddingBottom: spacing.xxl + spacing.sm,
+    paddingTop: spacing.md,
   },
   button: {
     backgroundColor: colors.accent,
     paddingVertical: 16,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
   },
   buttonDisabled: {
@@ -640,15 +644,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
+    letterSpacing: 0.2,
   },
   skipBtn: {
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     marginBottom: spacing.xs,
   },
   skipText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
+    fontFamily: fonts.mono,
+    fontSize: 12,
     color: colors.dim,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
 });

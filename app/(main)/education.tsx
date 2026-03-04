@@ -14,13 +14,15 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 const SLIDES = [
   {
     illustration: 'scan' as const,
-    title: "This isn't a budgeting app",
+    tag: 'PHILOSOPHY',
+    title: "This isn't a\nbudgeting app",
     body: "Bocy looks at your whole financial picture, not just what you spend. It finds the one move that'll make the biggest difference right now.",
     accent: colors.accent,
   },
   {
     illustration: 'plan' as const,
-    title: 'See it. Rank it. Do it.',
+    tag: 'METHOD',
+    title: 'See it. Rank it.\nDo it.',
     bullets: [
       { label: 'See', detail: 'your income, spending, and patterns in one place' },
       { label: 'Rank', detail: 'every opportunity by how much it actually helps' },
@@ -30,7 +32,8 @@ const SLIDES = [
   },
   {
     illustration: 'personal' as const,
-    title: 'Built around your life',
+    tag: 'PERSONALISED',
+    title: 'Built around\nyour life',
     body: "Everyone's situation is different. Whether you're a freelancer, a parent, or just starting out, Bocy adapts to what matters to you.",
     cta: "Let's get to know you",
     accent: colors.green,
@@ -83,8 +86,18 @@ export default function Education() {
           />
         </View>
 
+        {/* Tag */}
+        <Text style={[styles.tag, { color: slide.accent }]}>{slide.tag}</Text>
+
         {/* Title */}
         <Text style={styles.title}>{slide.title}</Text>
+
+        {/* Dot separator */}
+        <View style={styles.dotSeparator}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <View key={i} style={[styles.dot, { backgroundColor: slide.accent + '40' }]} />
+          ))}
+        </View>
 
         {/* Body or bullets */}
         {slide.body && <Text style={styles.body}>{slide.body}</Text>}
@@ -113,7 +126,7 @@ export default function Education() {
             <View
               key={i}
               style={[
-                styles.dot,
+                styles.progressDot,
                 i === current && [styles.dotActive, { backgroundColor: slide.accent }],
               ]}
             />
@@ -138,7 +151,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.xl + 4,
     maxWidth: 640,
     alignSelf: 'center' as const,
     width: '100%',
@@ -148,13 +161,17 @@ const styles = StyleSheet.create({
     top: spacing.xxl + spacing.sm,
     right: spacing.xl,
     zIndex: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   skipText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
+    fontFamily: fonts.mono,
+    fontSize: 12,
     color: colors.dim,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   content: {
     flex: 1,
@@ -162,15 +179,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bocyHero: {
-    marginBottom: spacing.xl,
+    marginBottom: spacing.xl + spacing.sm,
     alignItems: 'center',
+  },
+  tag: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 3,
+    textTransform: 'uppercase',
+    marginBottom: spacing.md,
   },
   title: {
     fontFamily: fonts.heading,
-    fontSize: 28,
+    fontSize: 30,
     color: colors.text,
     textAlign: 'center',
-    marginBottom: spacing.lg,
+    lineHeight: 38,
+    letterSpacing: -0.3,
+  },
+  dotSeparator: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+    marginVertical: spacing.lg,
+  },
+  dot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
   },
   body: {
     fontFamily: fonts.regular,
@@ -184,12 +220,12 @@ const styles = StyleSheet.create({
   bullets: {
     width: '100%',
     paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
+    marginTop: spacing.xs,
   },
   bulletRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: spacing.xl,
+    marginBottom: spacing.xl + spacing.xs,
   },
   bulletDot: {
     width: 28,
@@ -211,37 +247,37 @@ const styles = StyleSheet.create({
   bulletLabel: {
     fontFamily: fonts.semibold,
     fontSize: 16,
-    marginBottom: 2,
+    marginBottom: 4,
   },
   bulletDetail: {
     fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.text2,
-    lineHeight: 20,
+    lineHeight: 22,
   },
   bottomArea: {
-    paddingBottom: spacing.xxl,
+    paddingBottom: spacing.xxl + spacing.sm,
     alignItems: 'center',
   },
   dots: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.lg + spacing.xs,
   },
-  dot: {
+  progressDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: colors.muted,
   },
   dotActive: {
-    width: 24,
+    width: 28,
     borderRadius: 4,
   },
   button: {
     width: '100%',
     paddingVertical: 16,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
     backgroundColor: colors.accent,
   },
@@ -249,5 +285,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
+    letterSpacing: 0.2,
   },
 });
