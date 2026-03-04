@@ -18,7 +18,8 @@ export type NotificationType =
   | 'weekly_digest'
   | 'checkin'
   | 'daily_spending'
-  | 'income_arrival';
+  | 'income_arrival'
+  | 'achievement';
 
 export type NotificationChannel = 'email' | 'push' | 'in_app';
 
