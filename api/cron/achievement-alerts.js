@@ -260,16 +260,16 @@ function buildAchievementHtml(msg, name) {
   const BORDER = '#1F1F1F';
   const DIM = '#999999';
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><style>body{margin:0;padding:0;background:${BG};font-family:-apple-system,sans-serif;color:#fff;}</style></head><body>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><style>body{margin:0;padding:0;background:${BG};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;}</style></head><body>
 <div style="max-width:520px;margin:0 auto;padding:32px 24px;">
   <div style="text-align:center;margin-bottom:24px;"><span style="font-size:24px;font-weight:800;">B</span> <span style="color:${DIM};font-size:14px;">Bocy</span></div>
   <div style="background:${SURFACE};border:1px solid ${BRAND}40;border-radius:14px;padding:32px 24px;text-align:center;margin-bottom:16px;">
-    <p style="font-size:12px;color:${BRAND};text-transform:uppercase;letter-spacing:2px;margin:0 0 16px;">Milestone</p>
-    <h2 style="font-size:22px;margin:0 0 12px;">${msg.headline}</h2>
-    <p style="font-size:16px;line-height:24px;color:${DIM};margin:0;">${msg.detail}</p>
+    <p style="font-size:10px;color:${BRAND};text-transform:uppercase;letter-spacing:2px;margin:0 0 16px;">Milestone</p>
+    <h2 style="font-size:18px;margin:0 0 12px;">${msg.headline}</h2>
+    <p style="font-size:14px;line-height:22px;color:${DIM};margin:0;">${msg.detail}</p>
   </div>
-  <div style="text-align:center;margin-top:24px;padding-top:24px;border-top:1px solid ${BORDER};">
-    <p style="color:${DIM};font-size:12px;">You're receiving this because you have a Bocy account.<br>To manage notifications, visit your <a href="${appUrl}/profile?section=notifications" style="color:${DIM};">notification settings</a>.</p>
+  <div style="text-align:center;margin-top:32px;padding-top:24px;border-top:1px solid ${BORDER};">
+    <p style="color:${DIM};font-size:12px;">You're receiving this because you have a Bocy account.<br>To manage or turn off email notifications, visit your <a href="${appUrl}/profile?section=notifications" style="color:${DIM};">notification settings</a> in the app.</p>
   </div>
 </div></body></html>`;
 }

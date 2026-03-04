@@ -252,16 +252,7 @@ export default async function handler(req, res) {
                   body: JSON.stringify({
                     to: prefs.email,
                     subject: `£${Math.round(incomeAmount).toLocaleString()} received from ${incomeSource}`,
-                    html: `<div style="font-family: -apple-system, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 24px; background: #0A0A0A; color: #fff;">
-                      <div style="background: #141414; border: 1px solid #1F1F1F; border-radius: 14px; padding: 24px;">
-                        <p style="font-size: 10px; color: #999; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 16px;">PAYDAY</p>
-                        <h2 style="font-size: 18px; margin: 0 0 12px;">£${Math.round(incomeAmount).toLocaleString()} received</h2>
-                        <p style="font-size: 14px; color: #ccc; line-height: 22px; margin: 0 0 12px;">Hey ${userName}, income from <strong style="color: #fff;">${incomeSource}</strong> just landed.</p>
-                        <hr style="border: none; border-top: 1px solid #1F1F1F; margin: 20px 0;">
-                        <p style="font-size: 14px; color: #999;">Open Bocy to see where it should go.</p>
-                        <div style="margin-top: 20px;"><a href="${appUrl}" style="display: inline-block; background: #00d4aa; color: #000; padding: 12px 28px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 14px;">See your plan</a></div>
-                      </div>
-                    </div>`,
+                    html: `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><style>body{margin:0;padding:0;background:#0A0A0A;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;}</style></head><body><div style="max-width:520px;margin:0 auto;padding:32px 24px;"><div style="text-align:center;margin-bottom:24px;"><span style="font-size:24px;font-weight:800;">B</span> <span style="color:#999;font-size:14px;">Bocy</span></div><div style="background:#141414;border:1px solid #1F1F1F;border-radius:14px;padding:24px;"><p style="font-size:10px;color:#00d4aa;letter-spacing:2px;text-transform:uppercase;margin:0 0 16px;">PAYDAY</p><h2 style="font-size:18px;margin:0 0 12px;">£${Math.round(incomeAmount).toLocaleString()} received</h2><p style="font-size:14px;line-height:22px;margin:0 0 12px;">Hey ${userName}, income from <strong>${incomeSource}</strong> just landed.</p><hr style="border:none;border-top:1px solid #1F1F1F;margin:20px 0;"><p style="font-size:14px;color:#999;">Open Bocy to see where it should go.</p><div style="text-align:center;margin-top:20px;"><a href="${appUrl}" style="display:inline-block;background:#00d4aa;color:#0A0A0A;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px;">See your plan</a></div></div><div style="text-align:center;margin-top:32px;padding-top:24px;border-top:1px solid #1F1F1F;"><p style="color:#999;font-size:12px;">You're receiving this because you have a Bocy account.<br>To manage or turn off email notifications, visit your <a href="${appUrl}/profile?section=notifications" style="color:#999;">notification settings</a> in the app.</p></div></div></body></html>`,
                     user_id: row.user_id,
                     notification_type: 'income_arrival',
                     push_body: `£${Math.round(incomeAmount).toLocaleString()} from ${incomeSource} just landed. Open Bocy to see where it should go.`,

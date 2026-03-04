@@ -242,7 +242,7 @@ function buildDigestHtml(data) {
         <p style="font-size:14px;line-height:22px;color:${DIM};margin:0;">You've worked through every move in your plan. Nice work.</p>
       </div>`;
 
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><style>body{margin:0;padding:0;background:${BG};font-family:-apple-system,sans-serif;color:#fff;}</style></head><body>
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><style>body{margin:0;padding:0;background:${BG};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;}</style></head><body>
 <div style="max-width:520px;margin:0 auto;padding:32px 24px;">
   <div style="text-align:center;margin-bottom:24px;"><span style="font-size:24px;font-weight:800;">B</span> <span style="color:${DIM};font-size:14px;">Bocy</span></div>
   <h2 style="font-size:18px;margin:0 0 16px;">Hi ${data.name || 'there'}, here's your week</h2>
