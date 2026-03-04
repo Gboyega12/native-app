@@ -669,16 +669,16 @@ function PlanCard({
           <View style={s.approvedBanner}>
             <Text style={s.approvedBannerText}>{'\u2713'} Added to your plan</Text>
           </View>
-          <TouchableOpacity style={s.removeLink} onPress={onDelete} activeOpacity={0.7}>
+          <TouchableOpacity style={s.removeLink} onPress={onDelete} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Remove this plan">
             <Text style={s.removeLinkText}>Remove</Text>
           </TouchableOpacity>
         </>
       ) : isDismissed ? (
-        <View style={s.dismissedBanner}>
+        <View style={s.dismissedBanner} accessibilityLabel="Plan removed">
           <Text style={s.dismissedBannerText}>Removed from plan</Text>
         </View>
       ) : isDeleted ? (
-        <View style={s.dismissedBanner}>
+        <View style={s.dismissedBanner} accessibilityLabel="Plan removed">
           <Text style={s.dismissedBannerText}>Removed from plan</Text>
         </View>
       ) : (
@@ -688,6 +688,9 @@ function PlanCard({
             onPress={onApprove}
             activeOpacity={0.8}
             disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Add this plan to your active plans"
+            accessibilityState={{ disabled: saving }}
           >
             {saving ? (
               <ActivityIndicator size="small" color={colors.bg} />
@@ -695,7 +698,7 @@ function PlanCard({
               <Text style={s.approveBtnText}>Add to plan</Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity style={s.dismissBtn} onPress={onDismiss} activeOpacity={0.8}>
+          <TouchableOpacity style={s.dismissBtn} onPress={onDismiss} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Dismiss this plan suggestion">
             <Text style={s.dismissBtnText}>Dismiss</Text>
           </TouchableOpacity>
         </View>
@@ -743,7 +746,7 @@ function BudgetItemCard({ action, onDelete }: { action: ChatAction; onDelete: ()
           <View style={s.approvedBanner}>
             <Text style={s.approvedBannerText}>{'\u2713'} Added to your budget</Text>
           </View>
-          <TouchableOpacity style={s.removeLink} onPress={onDelete} activeOpacity={0.7}>
+          <TouchableOpacity style={s.removeLink} onPress={onDelete} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Remove this budget item">
             <Text style={s.removeLinkText}>Remove</Text>
           </TouchableOpacity>
         </>
@@ -1520,90 +1523,122 @@ export default function Chat() {
 
   // ── Handle plan deletion (remove an already-approved plan) ──
 
-  const handleDeletePlan = async (msgIndex: number, actionIndex: number) => {
+  const handleDeletePlan = (msgIndex: number, actionIndex: number) => {
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'plan_proposed' || action.status !== 'approved') return;
 
-    const planId = action.data.id;
-    let uid = userId;
-    if (!uid) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        uid = user?.id || null;
-      } catch {
-        uid = null;
-      }
-    }
-
-    if (planId && uid) {
-      try {
-        const res = await fetch('/api/plans', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'delete', plan_id: planId, user_id: uid }),
-        });
-        if (!res.ok) throw new Error('API delete failed');
-      } catch {
-        // Fallback: delete directly via Supabase client (works on native)
+    const doDelete = async () => {
+      const planId = action.data.id;
+      let uid = userId;
+      if (!uid) {
         try {
-          await supabase.from('user_plans').delete().eq('id', planId).eq('user_id', uid);
+          const { data: { user } } = await supabase.auth.getUser();
+          uid = user?.id || null;
         } catch {
-          // Non-critical — still update UI
+          uid = null;
         }
       }
-    }
 
-    const updated = [...messages];
-    const updatedActions = [...(updated[msgIndex].actions || [])];
-    updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'deleted' };
-    updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
-    setMessages(updated);
-    persistMessages(updated);
+      if (planId && uid) {
+        try {
+          const res = await fetch('/api/plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'delete', plan_id: planId, user_id: uid }),
+          });
+          if (!res.ok) throw new Error('API delete failed');
+        } catch {
+          // Fallback: delete directly via Supabase client (works on native)
+          try {
+            await supabase.from('user_plans').delete().eq('id', planId).eq('user_id', uid);
+          } catch {
+            // Non-critical — still update UI
+          }
+        }
+      }
+
+      const updated = [...messages];
+      const updatedActions = [...(updated[msgIndex].actions || [])];
+      updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'deleted' };
+      updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+      setMessages(updated);
+      persistMessages(updated);
+    };
+
+    if (Platform.OS === 'web') {
+      const ok = window.confirm('Remove this plan?\n\nIt will be removed from your active plans.');
+      if (ok) doDelete();
+    } else {
+      Alert.alert(
+        'Remove plan?',
+        'It will be removed from your active plans.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', style: 'destructive', onPress: doDelete },
+        ],
+      );
+    }
   };
 
   // ── Handle budget item deletion ──
 
-  const handleDeleteBudgetItem = async (msgIndex: number, actionIndex: number) => {
+  const handleDeleteBudgetItem = (msgIndex: number, actionIndex: number) => {
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'budget_item_saved') return;
 
-    const itemId = action.data.id;
-    let uid = userId;
-    if (!uid) {
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        uid = user?.id || null;
-      } catch {
-        uid = null;
-      }
-    }
-
-    if (itemId && uid) {
-      try {
-        await fetch('/api/plans', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'delete_budget_item', budget_item_id: itemId, user_id: uid }),
-        });
-      } catch {
-        // Non-critical — still update UI
+    const doDelete = async () => {
+      const itemId = action.data.id;
+      let uid = userId;
+      if (!uid) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          uid = user?.id || null;
+        } catch {
+          uid = null;
+        }
       }
 
-      // Invalidate sync cache and re-sync so the budget reflects the deletion
-      invalidateSyncCache();
-      requestSync(uid, true).then((syncResult) => {
-        if (syncResult?.analysis) setAnalysis(syncResult.analysis);
-      }).catch(() => {});
-    }
+      if (itemId && uid) {
+        try {
+          await fetch('/api/plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'delete_budget_item', budget_item_id: itemId, user_id: uid }),
+          });
+        } catch {
+          // Non-critical — still update UI
+        }
 
-    const updated = [...messages];
-    const updatedActions = [...(updated[msgIndex].actions || [])];
-    updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'deleted' };
-    updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
-    setMessages(updated);
-    persistMessages(updated);
+        // Invalidate sync cache and re-sync so the budget reflects the deletion
+        invalidateSyncCache();
+        requestSync(uid, true).then((syncResult) => {
+          if (syncResult?.analysis) setAnalysis(syncResult.analysis);
+        }).catch(() => {});
+      }
+
+      const updated = [...messages];
+      const updatedActions = [...(updated[msgIndex].actions || [])];
+      updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'deleted' };
+      updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+      setMessages(updated);
+      persistMessages(updated);
+    };
+
+    if (Platform.OS === 'web') {
+      const ok = window.confirm('Remove this budget item?\n\nIt will be removed from your budget.');
+      if (ok) doDelete();
+    } else {
+      Alert.alert(
+        'Remove budget item?',
+        'It will be removed from your budget.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', style: 'destructive', onPress: doDelete },
+        ],
+      );
+    }
   };
 
   // ── Handle goal update acceptance ──
@@ -2706,6 +2741,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   removeLink: {
     paddingTop: 8,
     alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   removeLinkText: {
     fontFamily: fonts.regular,

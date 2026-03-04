@@ -973,6 +973,8 @@ export default function Plan() {
                         `Remove "${stripMd(plan.action)}" from your plans?`,
                         () => handleRemovePlan(plan.id),
                       )}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete plan: ${stripMd(plan.action)}`}
                     >
                       <Text style={s.removeText}>Delete plan</Text>
                     </TouchableOpacity>
@@ -1348,6 +1350,8 @@ export default function Plan() {
             <TouchableOpacity
               style={s.removeButton}
               onPress={() => handleStopMove(i)}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${stripMd(move.action)} from plan`}
             >
               <Text style={s.removeText}>Remove from plan</Text>
             </TouchableOpacity>
@@ -1359,6 +1363,8 @@ export default function Plan() {
               `Permanently remove "${stripMd(move.action)}"?`,
               () => handleDeleteRecommendation(i),
             )}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete recommendation: ${stripMd(move.action)}`}
           >
             <Text style={s.deleteBtnText}>Delete</Text>
           </TouchableOpacity>
@@ -2018,6 +2024,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 100,
     alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   removeText: {
     fontFamily: fonts.mono,
@@ -2032,6 +2040,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 100,
     alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   deleteBtnText: {
     fontFamily: fonts.mono,

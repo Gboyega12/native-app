@@ -194,9 +194,16 @@ export default function Profile() {
           ),
         );
     if (!confirmed) return;
-    await supabase.from('bank_data').delete().eq('id', bankId);
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setConnectedBanks((prev) => prev.filter((b) => b.id !== bankId));
+    try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setConnectedBanks((prev) => prev.filter((b) => b.id !== bankId));
+      const { error } = await supabase.from('bank_data').delete().eq('id', bankId);
+      if (error) {
+        console.warn('[profile] Remove bank failed:', error.message);
+      }
+    } catch (err: any) {
+      console.warn('[profile] Remove bank error:', err?.message);
+    }
   };
 
   const handleRemoveDebtAccount = async (debtId: string, label: string) => {
@@ -213,9 +220,16 @@ export default function Profile() {
           ),
         );
     if (!confirmed) return;
-    await supabase.from('debt_accounts').delete().eq('id', debtId);
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setDebtAccounts((prev) => prev.filter((d) => d.id !== debtId));
+    try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setDebtAccounts((prev) => prev.filter((d) => d.id !== debtId));
+      const { error } = await supabase.from('debt_accounts').delete().eq('id', debtId);
+      if (error) {
+        console.warn('[profile] Remove debt account failed:', error.message);
+      }
+    } catch (err: any) {
+      console.warn('[profile] Remove debt account error:', err?.message);
+    }
   };
 
   const handleAddAccount = () => {
@@ -497,6 +511,9 @@ export default function Profile() {
                 <TouchableOpacity
                   onPress={() => handleRemoveBank(bank.id, displayName)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${displayName} account`}
+                  style={s.accountRemoveBtn}
                 >
                   <Text style={s.accountRemove}>Remove</Text>
                 </TouchableOpacity>
@@ -535,6 +552,9 @@ export default function Profile() {
               <TouchableOpacity
                 onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${d.account_name} account`}
+                style={s.accountRemoveBtn}
               >
                 <Text style={s.accountRemove}>Remove</Text>
               </TouchableOpacity>
@@ -768,14 +788,14 @@ export default function Profile() {
 
         <View style={s.groupDivider} />
 
-        <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7}>
+        <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Sign out of your account">
           <Text style={s.groupRowLabel}>Sign out</Text>
           <Text style={s.groupRowChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
         <View style={s.groupDivider} />
 
-        <TouchableOpacity style={s.groupRow} onPress={handleDeleteAccount} activeOpacity={0.7}>
+        <TouchableOpacity style={s.groupRow} onPress={handleDeleteAccount} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Delete your account permanently">
           <Text style={[s.groupRowLabel, { color: colors.coral }]}>Delete account</Text>
           <Text style={[s.groupRowChevron, { color: colors.coral }]}>{'\u203A'}</Text>
         </TouchableOpacity>
@@ -840,6 +860,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   accountMeta: { fontFamily: fonts.regular, fontSize: 12, color: c.dim, marginTop: 2 },
   accountAction: { paddingVertical: 4, paddingHorizontal: 10 },
   accountActionText: { fontFamily: fonts.semibold, fontSize: 12 },
+  accountRemoveBtn: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
   accountRemove: { fontFamily: fonts.regular, fontSize: 12, color: c.muted },
 
   // ── Empty + add ──

@@ -236,7 +236,7 @@ export default function Home() {
 
   // Categorise review modal state
   const [showCatReview, setShowCatReview] = useState(false);
-  const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean }>>({});
+  const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean; aiSuggested?: boolean }>>({});
   const [savingCatReview, setSavingCatReview] = useState(false);
   const [aiSuggesting, setAiSuggesting] = useState(false);
 
@@ -442,13 +442,13 @@ export default function Home() {
 
         if (cancelled || !data.success || !data.classifications) return;
 
-        const suggestions: Record<string, { category: string; isEssential: boolean }> = {};
+        const suggestions: Record<string, { category: string; isEssential: boolean; aiSuggested?: boolean }> = {};
         for (const cls of data.classifications) {
           const group = unresolvedGroups[cls.index];
           if (!group) continue;
           const category = mapClaudeCategory(cls.category);
           if (category === 'Other') continue;
-          suggestions[group.key] = { category, isEssential: ESSENTIAL_CATS.has(category) };
+          suggestions[group.key] = { category, isEssential: ESSENTIAL_CATS.has(category), aiSuggested: true };
         }
         setCatAssignments((prev) => {
           const merged = { ...suggestions };
@@ -1381,30 +1381,32 @@ export default function Home() {
       }
     >
       {/* ── Header ── */}
-      <View style={s.headerRow}>
-        <View style={s.headerLeft}>
-          <View style={s.bocyHeaderWrap}>
-            <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
-          </View>
-          <View>
-            <Text style={s.greeting}>
+      <View style={s.headerWrap}>
+        <View style={s.headerRow}>
+          <View style={s.headerLeft}>
+            <View style={s.bocyHeaderWrap} accessibilityLabel="Bocy mascot">
+              <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
+            </View>
+            <Text style={s.greeting} accessibilityRole="header">
               Hi, {userName || 'there'}
             </Text>
-            {syncing ? (
-              <Text style={s.syncText}>Syncing...</Text>
-            ) : lastSynced > 0 ? (
-              <Text style={s.syncText}>{formatTimeAgo(lastSynced)}</Text>
-            ) : null}
           </View>
+          <TouchableOpacity
+            style={s.menuButton}
+            onPress={() => router.push('/(main)/profile')}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile menu"
+          >
+            <View style={s.menuLine} />
+            <View style={[s.menuLine, s.menuLineShort]} />
+            <View style={s.menuLine} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={s.menuButton}
-          onPress={() => router.push('/(main)/profile')}
-        >
-          <View style={s.menuLine} />
-          <View style={[s.menuLine, s.menuLineShort]} />
-          <View style={s.menuLine} />
-        </TouchableOpacity>
+        {(syncing || lastSynced > 0) && (
+          <Text style={s.syncText}>
+            {syncing ? 'Syncing...' : formatTimeAgo(lastSynced)}
+          </Text>
+        )}
       </View>
 
       {/* ── Connection warning ── */}
@@ -1628,7 +1630,24 @@ export default function Home() {
                               <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.accent }}>Ask Bocy about this</Text>
                             </TouchableOpacity>
                             {/* Delete plan button */}
-                            <TouchableOpacity style={{ marginTop: 10, paddingVertical: 8, alignItems: 'center' }} onPress={() => Alert.alert('Delete plan?', `Remove "${stripMd(plan.action)}" from your plans?`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => handleRemovePlan(plan.id) }])} activeOpacity={0.7}>
+                            <TouchableOpacity
+                              style={{ marginTop: 10, paddingVertical: 8, alignItems: 'center', minHeight: 44, justifyContent: 'center' }}
+                              onPress={() => {
+                                const title = 'Delete plan?';
+                                const msg = `Remove "${stripMd(plan.action)}" from your plans?`;
+                                if (Platform.OS === 'web') {
+                                  if (window.confirm(`${title}\n\n${msg}`)) handleRemovePlan(plan.id);
+                                } else {
+                                  Alert.alert(title, msg, [
+                                    { text: 'Cancel', style: 'cancel' },
+                                    { text: 'Delete', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
+                                  ]);
+                                }
+                              }}
+                              activeOpacity={0.7}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Delete plan: ${stripMd(plan.action)}`}
+                            >
                               <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>Delete plan</Text>
                             </TouchableOpacity>
                           </View>
@@ -1816,7 +1835,12 @@ export default function Home() {
                               <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.text }}>Ask Bocy about this</Text>
                             </TouchableOpacity>
 
-                            <TouchableOpacity style={{ alignItems: 'center', paddingVertical: 8 }} onPress={() => handleDeleteMove(move)}>
+                            <TouchableOpacity
+                              style={{ alignItems: 'center', paddingVertical: 8, minHeight: 44, justifyContent: 'center' }}
+                              onPress={() => handleDeleteMove(move)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Delete recommendation: ${stripMd(move.action)}`}
+                            >
                               <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.coral }}>Delete</Text>
                             </TouchableOpacity>
                           </View>
@@ -2238,7 +2262,13 @@ export default function Home() {
                           : 'Tap a category for each merchant'}
                     </Text>
                   </View>
-                  <TouchableOpacity onPress={() => setShowCatReview(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <TouchableOpacity
+                    onPress={() => setShowCatReview(false)}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close categorisation modal"
+                    style={s.catReviewCloseBtn}
+                  >
                     <Text style={s.catReviewClose}>{'\u2715'}</Text>
                   </TouchableOpacity>
                 </View>
@@ -2253,12 +2283,26 @@ export default function Home() {
                 <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
                   {unresolvedGroups.map((group) => {
                     const assigned = catAssignments[group.key];
+                    const isAiSuggested = assigned?.aiSuggested === true;
                     return (
-                      <View key={group.key} style={[s.catReviewRow, assigned && s.catReviewRowDone]}>
+                      <View
+                        key={group.key}
+                        style={[
+                          s.catReviewRow,
+                          assigned && s.catReviewRowDone,
+                          isAiSuggested && s.catReviewRowAi,
+                        ]}
+                        accessibilityLabel={`${group.label}, ${group.txs.length} transactions, ${assigned ? `categorised as ${assigned.category}` : 'not yet categorised'}${isAiSuggested ? ', AI suggested' : ''}`}
+                      >
                         <View style={s.catReviewRowHeader}>
-                          <Text style={s.catReviewMerchant} numberOfLines={1}>
-                            {assigned ? '\u2713 ' : ''}{group.label}
-                          </Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.catReviewMerchant} numberOfLines={1}>
+                              {assigned ? '\u2713 ' : ''}{group.label}
+                            </Text>
+                            {isAiSuggested && (
+                              <Text style={s.aiSuggestedLabel}>Bocy suggested</Text>
+                            )}
+                          </View>
                           <Text style={s.catReviewAmount}>
                             {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
                           </Text>
@@ -2271,9 +2315,11 @@ export default function Home() {
                               onPress={() => {
                                 setCatAssignments((prev) => ({
                                   ...prev,
-                                  [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat) },
+                                  [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat), aiSuggested: false },
                                 }));
                               }}
+                              accessibilityRole="button"
+                              accessibilityLabel={`${cat}${assigned?.category === cat ? ', selected' : ''}`}
                             >
                               <Text style={[
                                 s.categoryChipText,
@@ -2292,6 +2338,9 @@ export default function Home() {
                   style={[s.catReviewDone, Object.keys(catAssignments).length === 0 && s.modalSaveDisabled]}
                   onPress={saveCatReview}
                   disabled={savingCatReview || Object.keys(catAssignments).length === 0}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Save ${Object.keys(catAssignments).length} categorised transactions`}
+                  accessibilityState={{ disabled: savingCatReview || Object.keys(catAssignments).length === 0 }}
                 >
                   {savingCatReview ? (
                     <ActivityIndicator color={colors.bg} size="small" />
@@ -2360,11 +2409,13 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
 
   // ── Header ──
+  headerWrap: {
+    marginBottom: 36,
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 36,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -2405,9 +2456,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 9,
     color: c.muted,
-    marginTop: 4,
+    marginTop: 6,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
+    marginLeft: 40,
   },
 
   // ── Connection warning banner ──
@@ -4049,11 +4101,16 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.dim,
     marginTop: 4,
   },
+  catReviewCloseBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   catReviewClose: {
     fontFamily: fonts.medium,
     fontSize: 18,
     color: c.muted,
-    padding: 4,
   },
   catReviewList: {
     padding: spacing.md,
@@ -4069,6 +4126,18 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   catReviewRowDone: {
     borderColor: c.accentDim,
     backgroundColor: c.mintDim,
+  },
+  catReviewRowAi: {
+    borderColor: c.green,
+    borderLeftWidth: 3,
+  },
+  aiSuggestedLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: c.green,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase' as const,
+    marginTop: 2,
   },
   catReviewRowHeader: {
     flexDirection: 'row',
