@@ -187,6 +187,93 @@ export default async function handler(req, res) {
         }
 
         await admin.from('bank_data').update(updateFields).eq('id', row.id);
+
+        // ── Income arrival detection & notification ──
+        // Check if any large credits arrived this week that look like salary/income
+        try {
+          const now = new Date();
+          const dayOfWeek = now.getDay();
+          const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+          const weekStart = new Date(now);
+          weekStart.setDate(now.getDate() - mondayOffset);
+          weekStart.setHours(0, 0, 0, 0);
+          const weekStartStr = weekStart.toISOString().split('T')[0];
+
+          // Salary-like patterns in description
+          const SALARY_PATTERNS = /\b(salary|wages|payroll|payday|stipend|pension|net pay|direct deposit|pay from|monthly pay)\b/i;
+          const EMPLOYER_PATTERNS = /\b(ltd|plc|limited|inc|corp|llp|group|holdings|council|nhs|university)\b/i;
+          const TRANSFER_PATTERNS = /\b(faster payment|bank transfer|transfer from|transfer to)\b/i;
+          const PERSON_TITLE = /^(mr|mrs|miss|ms|dr)\s/i;
+
+          // Find income-like transactions from this week
+          const incomeCredits = result.csvLines.filter((line) => {
+            const parts = line.split(',');
+            if (parts.length < 3) return false;
+            const date = parts[0];
+            const desc = parts.slice(1, -1).join(',');
+            const amount = parseFloat(parts[parts.length - 1]);
+            if (!date || date < weekStartStr || amount < 100) return false; // Min £100 credit
+            if (TRANSFER_PATTERNS.test(desc) || PERSON_TITLE.test(desc.trim())) return false;
+            return SALARY_PATTERNS.test(desc) || EMPLOYER_PATTERNS.test(desc);
+          });
+
+          if (incomeCredits.length > 0) {
+            // Check we haven't already notified for this week
+            const { data: recentLog } = await admin
+              .from('notification_log')
+              .select('id')
+              .eq('user_id', row.user_id)
+              .eq('notification_type', 'income_arrival')
+              .gte('sent_at', weekStartStr)
+              .limit(1);
+
+            if (!recentLog || recentLog.length === 0) {
+              // Get user preferences & profile
+              const [{ data: prefs }, { data: profile }] = await Promise.all([
+                admin.from('notification_preferences').select('email, checkin_prompts').eq('user_id', row.user_id).single(),
+                admin.from('profiles').select('full_name').eq('id', row.user_id).single(),
+              ]);
+
+              if (prefs?.email && prefs?.checkin_prompts !== false) {
+                const topIncome = incomeCredits[0].split(',');
+                const incomeAmount = parseFloat(topIncome[topIncome.length - 1]);
+                const incomeSource = topIncome.slice(1, -1).join(',').trim();
+                const userName = (profile?.full_name || '').split(' ')[0] || 'there';
+
+                const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bocy.io';
+                const notifyEndpoint = `${appUrl.replace(/\/$/, '')}/api/notifications/send`;
+
+                await fetch(notifyEndpoint, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${cronSecret}`,
+                  },
+                  body: JSON.stringify({
+                    to: prefs.email,
+                    subject: `£${Math.round(incomeAmount).toLocaleString()} received from ${incomeSource}`,
+                    html: `<div style="font-family: -apple-system, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 24px; background: #0A0A0A; color: #fff;">
+                      <div style="background: #141414; border: 1px solid #1F1F1F; border-radius: 14px; padding: 24px;">
+                        <p style="font-size: 10px; color: #999; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 16px;">PAYDAY</p>
+                        <h2 style="font-size: 18px; margin: 0 0 12px;">£${Math.round(incomeAmount).toLocaleString()} received</h2>
+                        <p style="font-size: 14px; color: #ccc; line-height: 22px; margin: 0 0 12px;">Hey ${userName}, income from <strong style="color: #fff;">${incomeSource}</strong> just landed.</p>
+                        <hr style="border: none; border-top: 1px solid #1F1F1F; margin: 20px 0;">
+                        <p style="font-size: 14px; color: #999;">Open Bocy to see where it should go.</p>
+                        <div style="margin-top: 20px;"><a href="${appUrl}" style="display: inline-block; background: #00d4aa; color: #000; padding: 12px 28px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 14px;">See your plan</a></div>
+                      </div>
+                    </div>`,
+                    user_id: row.user_id,
+                    notification_type: 'income_arrival',
+                    push_body: `£${Math.round(incomeAmount).toLocaleString()} from ${incomeSource} just landed. Open Bocy to see where it should go.`,
+                  }),
+                }).catch((e) => console.warn('[bank-sync] Income notification failed:', e?.message));
+              }
+            }
+          }
+        } catch (notifErr) {
+          // Non-critical — don't fail the sync
+          console.warn('[bank-sync] Income notification check failed:', notifErr?.message);
+        }
       }
     }
 

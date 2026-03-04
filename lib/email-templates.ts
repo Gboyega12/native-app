@@ -231,3 +231,33 @@ export function scoreChangeEmail(
     html: baseLayout(content, `Your decision score went from ${oldScore} to ${newScore}.`, appUrl),
   };
 }
+
+// ── Income Arrival ──
+
+export interface IncomeArrivalData {
+  name: string;
+  source: string;
+  amount: number;
+  weeklyBudget: number;
+  appUrl: string;
+}
+
+export function incomeArrivalEmail(data: IncomeArrivalData): { subject: string; html: string } {
+  const content = `
+    <div class="card">
+      <p class="dim small" style="letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px;">PAYDAY</p>
+      <h2>£${Math.round(data.amount).toLocaleString()} received</h2>
+      <p>Hey ${data.name}, income from <strong>${data.source}</strong> just landed in your account.</p>
+      <hr class="divider">
+      <p class="dim">Your safe-to-spend this week is <strong style="color: ${TEXT_COLOR};">£${Math.round(data.weeklyBudget).toLocaleString()}</strong> after essentials.</p>
+      <div style="margin-top: 20px;">
+        <a href="${data.appUrl}" class="btn btn-green">See where it should go</a>
+      </div>
+    </div>
+  `;
+
+  return {
+    subject: `£${Math.round(data.amount).toLocaleString()} received from ${data.source}`,
+    html: baseLayout(content, `Income received: £${Math.round(data.amount).toLocaleString()} from ${data.source}`, data.appUrl),
+  };
+}

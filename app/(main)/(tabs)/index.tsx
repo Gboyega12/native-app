@@ -1512,8 +1512,8 @@ export default function Home() {
               <Card variant="hero">
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Text style={s.heroLabel}>THIS WEEK</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                      <Text style={[s.heroLabel, { marginBottom: 0 }]}>THIS WEEK</Text>
                       <TouchableOpacity
                         onPress={() => setShowWeeklyInfo(true)}
                         hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}

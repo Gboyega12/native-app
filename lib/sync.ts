@@ -493,10 +493,21 @@ function buildWeeklyContext(
   // Find transactions that landed this week
   const thisWeekTxs = txs.filter((t) => new Date(t.date) >= weekStart);
 
-  // Detect income arrivals this week
-  const incomeThisWeek = thisWeekTxs.filter((t) => t.isIncome && t.amount > 0);
+  // Detect income arrivals this week — only from recognised income sources, not transfers
   const incomeSources = profile.incomeSources || [];
   const primarySource = incomeSources.find((s) => s.isSalary) || incomeSources[0] || null;
+
+  // Filter: must be flagged isIncome, positive amount, NOT a transfer,
+  // and must match a known income source (by name or amount pattern)
+  const incomeThisWeek = thisWeekTxs.filter((t) => {
+    if (!t.isIncome || t.amount <= 0 || t.isTransfer) return false;
+    // Must match a recognised income source
+    const txLabel = (t.merchant || t.description || '').toLowerCase();
+    return incomeSources.some((s) =>
+      txLabel.includes(s.source.toLowerCase()) ||
+      (s.isSalary && t.amount >= s.avgAmount * 0.7)
+    );
+  });
 
   const recentIncomeEvents: IncomeEvent[] = incomeThisWeek.map((t) => ({
     source: t.merchant || t.description,
