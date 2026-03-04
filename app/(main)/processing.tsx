@@ -556,10 +556,7 @@ function ProcessingInner() {
                 user_id: user.id,
                 email: userEmail,
                 weekly_digest: true,
-                milestone_alerts: true,
                 checkin_prompts: true,
-                score_updates: true,
-                achievement_alerts: true,
               }, { onConflict: 'user_id' });
             }
           } catch (prefErr: any) {

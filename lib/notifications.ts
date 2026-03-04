@@ -2,7 +2,7 @@
 // Handles push token registration (via expo-notifications) and email delivery (Resend).
 //
 // Architecture:
-//   1. Email        — Resend API for weekly digests, milestones, check-ins
+//   1. Email        — Resend API for weekly digests, check-ins, spending, income
 //   2. Push         — expo-notifications for real-time alerts on mobile
 //   3. In-app       — Proactive chat messages from Bocy
 //
@@ -16,20 +16,16 @@ import { supabase } from '@/lib/supabase';
 
 export type NotificationType =
   | 'weekly_digest'
-  | 'milestone'
   | 'checkin'
-  | 'score_change'
-  | 'achievement';
+  | 'daily_spending'
+  | 'income_arrival';
 
 export type NotificationChannel = 'email' | 'push' | 'in_app';
 
 export interface NotificationPreferences {
   user_id: string;
   weekly_digest: boolean;
-  milestone_alerts: boolean;
   checkin_prompts: boolean;
-  score_updates: boolean;
-  achievement_alerts: boolean;
   email: string;
   push_token?: string | null;
   created_at?: string;

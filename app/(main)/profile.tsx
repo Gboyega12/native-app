@@ -90,7 +90,6 @@ export default function Profile() {
   const [notifPrefs, setNotifPrefs] = useState({
     weekly_digest: true,
     checkin_prompts: true,
-    achievement_alerts: true,
   });
   const [notifExpanded, setNotifExpanded] = useState(false);
   const [userId, setUserId] = useState<string | undefined>();
@@ -164,14 +163,13 @@ export default function Profile() {
       try {
         const { data: prefs } = await supabase
           .from('notification_preferences')
-          .select('weekly_digest, checkin_prompts, achievement_alerts')
+          .select('weekly_digest, checkin_prompts')
           .eq('user_id', user.id)
           .maybeSingle();
         if (prefs) {
           setNotifPrefs({
             weekly_digest: prefs.weekly_digest ?? true,
             checkin_prompts: prefs.checkin_prompts ?? true,
-            achievement_alerts: prefs.achievement_alerts ?? true,
           });
         }
       } catch {}
@@ -677,9 +675,8 @@ export default function Profile() {
           <>
             <View style={s.groupDivider} />
             {([
-              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Score & spending recap every Monday' },
-              { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Bocy flags things that need attention' },
-              { key: 'achievement_alerts' as const, label: 'Achievements', desc: 'Celebrate milestones' },
+              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Top moves & spending recap every Monday' },
+              { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Spending updates, nudges & income alerts' },
             ]).map((item, idx) => (
               <View key={item.key}>
                 {idx > 0 && <View style={s.groupDivider} />}

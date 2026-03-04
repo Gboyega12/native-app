@@ -87,8 +87,6 @@ export interface WeeklyDigestData {
 }
 
 export function weeklyDigestEmail(data: WeeklyDigestData): { subject: string; html: string } {
-  const scoreColor = data.scoreChange > 0 ? BRAND_COLOR : data.scoreChange < 0 ? '#E05252' : TEXT_DIM;
-  const scoreArrow = data.scoreChange > 0 ? '\u2191' : data.scoreChange < 0 ? '\u2193' : '\u2192';
   const surplusColor = data.surplusChange > 0 ? BRAND_COLOR : data.surplusChange < 0 ? '#E05252' : TEXT_DIM;
 
   const achievementHtml = data.newAchievements.length > 0
@@ -106,70 +104,56 @@ export function weeklyDigestEmail(data: WeeklyDigestData): { subject: string; ht
       </div>`
     : '';
 
-  const moveHtml = data.topMove
-    ? `<div class="card">
-        <h2>Your top move</h2>
-        <p>${data.topMove}</p>
-        <p class="green" style="font-weight: 600;">\u00a3${Math.round(data.topMoveImpact * 12).toLocaleString()}/year impact</p>
+  // Hero section: top move (actionable) or fallback
+  const heroHtml = data.topMove
+    ? `<div class="card" style="border-color: ${BRAND_COLOR}40;">
+        <h2>Your top move this week</h2>
+        <p style="font-size: 16px;">${data.topMove}</p>
+        <p class="green" style="font-weight: 700; font-size: 20px;">\u00a3${Math.round(data.topMoveImpact * 12).toLocaleString()}/year impact</p>
         <div class="center" style="margin-top: 16px;">
           <a href="${data.appUrl}" class="btn-green btn">Open in Bocy</a>
         </div>
       </div>`
-    : '';
+    : `<div class="card">
+        <h2>All moves completed!</h2>
+        <p class="dim">You've worked through every move in your plan. Nice work.</p>
+      </div>`;
 
   const content = `
+    <h2>Hi ${data.name || 'there'}, here's your week</h2>
+    ${heroHtml}
     <div class="card">
-      <h2>Hi ${data.name || 'there'}, here's your week</h2>
-      <div class="center" style="padding: 16px 0;">
-        <div class="metric">
-          <div class="metric-value">${data.decisionScore}</div>
-          <div class="metric-label">Score <span style="color: ${scoreColor};">${scoreArrow}${Math.abs(data.scoreChange)}</span></div>
-        </div>
+      <div class="center" style="padding: 8px 0;">
         <div class="metric">
           <div class="metric-value">\u00a3${Math.round(data.surplus).toLocaleString()}</div>
           <div class="metric-label">Surplus <span style="color: ${surplusColor};">${data.surplusChange >= 0 ? '+' : ''}\u00a3${Math.round(data.surplusChange).toLocaleString()}</span></div>
         </div>
-      </div>
-      <div class="score-bar">
-        <div class="score-fill" style="width: ${data.decisionScore}%; background: ${BRAND_COLOR};"></div>
+        <div class="metric">
+          <div class="metric-value">${data.movesCompleted}/${data.totalMoves}</div>
+          <div class="metric-label">Moves done</div>
+        </div>
       </div>
       <hr class="divider">
       <p>
-        <strong>Top spending:</strong> ${data.topCategory} at \u00a3${Math.round(data.topCategoryAmount).toLocaleString()}/mo<br>
-        <strong>Moves completed:</strong> ${data.movesCompleted} of ${data.totalMoves}
+        <strong>Top spending:</strong> ${data.topCategory} at \u00a3${Math.round(data.topCategoryAmount).toLocaleString()}/mo
         ${data.streakDays > 0 ? `<br><strong>Active days:</strong> ${data.streakDays} day streak` : ''}
       </p>
     </div>
     ${achievementHtml}
-    ${moveHtml}
   `;
 
-  return {
-    subject: `Your score: ${data.decisionScore} ${scoreArrow}${Math.abs(data.scoreChange)} — Bocy Weekly`,
-    html: baseLayout(content, `Decision score: ${data.decisionScore}. ${data.surplus >= 0 ? `\u00a3${Math.round(data.surplus)} surplus.` : `\u00a3${Math.round(Math.abs(data.surplus))} deficit.`}`, data.appUrl),
-  };
-}
+  // Subject leads with action, not score
+  const subject = data.topMove
+    ? `${data.topMove.slice(0, 50)} — \u00a3${Math.round(data.topMoveImpact * 12).toLocaleString()}/yr impact`
+    : `\u00a3${Math.round(data.surplus).toLocaleString()} surplus this month — Bocy Weekly`;
 
-// ── Achievement Unlocked ──
-
-export function achievementEmail(name: string, achievement: Achievement, appUrl: string): { subject: string; html: string } {
-  const content = `
-    <div class="card center">
-      <div class="achievement-badge" style="width: 56px; height: 56px; line-height: 56px; font-size: 24px; margin: 0 auto 16px auto; display: block;">
-        ${achievement.icon}
-      </div>
-      <h2>Achievement unlocked</h2>
-      <p style="font-size: 18px; font-weight: 600; color: ${BRAND_COLOR}; margin-bottom: 4px;">${achievement.name}</p>
-      <p class="dim">${achievement.description}</p>
-      <div style="margin-top: 20px;">
-        <a href="${appUrl}" class="btn">View in Bocy</a>
-      </div>
-    </div>
-  `;
+  const preheader = data.topMove
+    ? `Top move: ${data.topMove.slice(0, 80)}`
+    : `${data.surplus >= 0 ? `\u00a3${Math.round(data.surplus)} surplus.` : `\u00a3${Math.round(Math.abs(data.surplus))} deficit.`}`;
 
   return {
-    subject: `${achievement.name} unlocked — ${achievement.description}`,
-    html: baseLayout(content, `You earned: ${achievement.name} — ${achievement.description}`, appUrl),
+    subject,
+    html: baseLayout(content, preheader, data.appUrl),
   };
 }
 
@@ -193,42 +177,6 @@ export function checkinEmail(name: string, message: string, appUrl: string): { s
   return {
     subject: 'Bocy has a suggestion for you',
     html: baseLayout(content, message.slice(0, 100), appUrl),
-  };
-}
-
-// ── Score Change Alert ──
-
-export function scoreChangeEmail(
-  name: string,
-  oldScore: number,
-  newScore: number,
-  verdict: string,
-  appUrl: string,
-): { subject: string; html: string } {
-  const delta = newScore - oldScore;
-  const improved = delta > 0;
-  const color = improved ? BRAND_COLOR : '#E05252';
-  const arrow = improved ? '\u2191' : '\u2193';
-
-  const content = `
-    <div class="card center">
-      <h2>Your decision score ${improved ? 'improved' : 'changed'}</h2>
-      <div style="font-size: 48px; font-weight: 800; letter-spacing: -2px; color: ${color};">
-        ${oldScore} ${arrow} ${newScore}
-      </div>
-      <div class="score-bar" style="margin: 16px 0;">
-        <div class="score-fill" style="width: ${newScore}%; background: ${color};"></div>
-      </div>
-      <p class="dim">${verdict}</p>
-      <div style="margin-top: 20px;">
-        <a href="${appUrl}" class="btn">See what changed</a>
-      </div>
-    </div>
-  `;
-
-  return {
-    subject: `Score ${arrow} ${Math.abs(delta)} — now ${newScore} (${verdict})`,
-    html: baseLayout(content, `Your decision score went from ${oldScore} to ${newScore}.`, appUrl),
   };
 }
 

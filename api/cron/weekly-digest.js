@@ -1,10 +1,10 @@
 // ── Weekly Digest Cron Job ──
 // Runs every Monday at 12 noon (via Vercel Cron).
 // Sends a personalized email digest to each user with:
-//   - Decision score + change since last week
+//   - Top recommended move + annual £ impact (hero section)
+//   - Move progress
 //   - Surplus + change
 //   - Top spending category
-//   - Move progress
 //   - New achievements
 //   - Streak count
 //
@@ -143,9 +143,15 @@ export default async function handler(req, res) {
         const scoreChange = prevSnapshot ? analysis.decision_score - prevSnapshot.decision_score : 0;
         const surplusChange = prevSnapshot ? analysis.surplus - prevSnapshot.surplus : 0;
 
-        // Build push notification body — concise summary for web push
-        const scoreArrow = scoreChange >= 0 ? '\u2191' : '\u2193';
-        const pushBody = `Score: ${analysis.decision_score} (${scoreArrow}${Math.abs(scoreChange)}). Surplus: \u00a3${Math.round(analysis.surplus)}. ${movesCompleted}/${allMoves.length} moves done.${topMove ? ` Top move: ${topMove.action}` : ''}`;
+        // Build push notification body — lead with actionable info
+        const pushBody = topMove
+          ? `Top move: ${topMove.action} — £${Math.round(topMove.monthlyImpact * 12).toLocaleString()}/yr. ${movesCompleted}/${allMoves.length} moves done. Surplus: £${Math.round(analysis.surplus)}.`
+          : `${movesCompleted}/${allMoves.length} moves done. Surplus: £${Math.round(analysis.surplus)}.`;
+
+        // Build subject line — lead with top move or surplus
+        const subject = topMove
+          ? `${topMove.action} could save £${Math.round(topMove.monthlyImpact * 12).toLocaleString()}/yr — Bocy Weekly`
+          : `£${Math.round(analysis.surplus).toLocaleString()} surplus this month — Bocy Weekly`;
 
         // Use the send endpoint
         const sendRes = await fetch(`${appUrl}/api/notifications/send`, {
@@ -156,7 +162,7 @@ export default async function handler(req, res) {
           },
           body: JSON.stringify({
             to: recipientEmail,
-            subject: `Your score: ${analysis.decision_score} ${scoreArrow}${Math.abs(scoreChange)} — Bocy Weekly`,
+            subject,
             html: buildDigestHtml({
               name,
               decisionScore: analysis.decision_score,
@@ -210,8 +216,6 @@ function buildDigestHtml(data) {
   const BORDER = '#1F1F1F';
   const DIM = '#999999';
 
-  const scoreColor = data.scoreChange > 0 ? BRAND : data.scoreChange < 0 ? '#E05252' : DIM;
-  const scoreArrow = data.scoreChange > 0 ? '\u2191' : data.scoreChange < 0 ? '\u2193' : '\u2192';
   const surplusColor = data.surplusChange > 0 ? BRAND : data.surplusChange < 0 ? '#E05252' : DIM;
 
   const achievements = data.newAchievements.length > 0
@@ -226,37 +230,41 @@ function buildDigestHtml(data) {
       </div>`
     : '';
 
+  // Hero section: top move (actionable) or fallback to surplus summary
+  const heroSection = data.topMove
+    ? `<div style="background:${SURFACE};border:1px solid ${BRAND}40;border-radius:14px;padding:24px;margin-bottom:16px;">
+        <h2 style="font-size:18px;margin:0 0 12px;">Your top move this week</h2>
+        <p style="font-size:16px;line-height:24px;margin:0 0 12px;">${data.topMove}</p>
+        <p style="color:${BRAND};font-weight:700;font-size:20px;margin:0;">\u00a3${Math.round(data.topMoveImpact * 12).toLocaleString()}/year impact</p>
+      </div>`
+    : `<div style="background:${SURFACE};border:1px solid ${BORDER};border-radius:14px;padding:24px;margin-bottom:16px;">
+        <h2 style="font-size:18px;margin:0 0 12px;">All moves completed!</h2>
+        <p style="font-size:14px;line-height:22px;color:${DIM};margin:0;">You've worked through every move in your plan. Nice work.</p>
+      </div>`;
+
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><style>body{margin:0;padding:0;background:${BG};font-family:-apple-system,sans-serif;color:#fff;}</style></head><body>
 <div style="max-width:520px;margin:0 auto;padding:32px 24px;">
   <div style="text-align:center;margin-bottom:24px;"><span style="font-size:24px;font-weight:800;">B</span> <span style="color:${DIM};font-size:14px;">Bocy</span></div>
+  <h2 style="font-size:18px;margin:0 0 16px;">Hi ${data.name || 'there'}, here's your week</h2>
+  ${heroSection}
   <div style="background:${SURFACE};border:1px solid ${BORDER};border-radius:14px;padding:24px;margin-bottom:16px;">
-    <h2 style="font-size:18px;margin:0 0 16px;">Hi ${data.name || 'there'}, here's your week</h2>
-    <div style="text-align:center;padding:16px 0;">
-      <div style="display:inline-block;text-align:center;padding:0 16px;">
-        <div style="font-size:28px;font-weight:700;">${data.decisionScore}</div>
-        <div style="font-size:11px;color:${DIM};text-transform:uppercase;">Score <span style="color:${scoreColor};">${scoreArrow}${Math.abs(data.scoreChange)}</span></div>
-      </div>
+    <div style="text-align:center;padding:8px 0;">
       <div style="display:inline-block;text-align:center;padding:0 16px;">
         <div style="font-size:28px;font-weight:700;">\u00a3${Math.round(data.surplus).toLocaleString()}</div>
         <div style="font-size:11px;color:${DIM};text-transform:uppercase;">Surplus <span style="color:${surplusColor};">${data.surplusChange >= 0 ? '+' : ''}\u00a3${Math.round(data.surplusChange).toLocaleString()}</span></div>
       </div>
+      <div style="display:inline-block;text-align:center;padding:0 16px;">
+        <div style="font-size:28px;font-weight:700;">${data.movesCompleted}/${data.totalMoves}</div>
+        <div style="font-size:11px;color:${DIM};text-transform:uppercase;">Moves done</div>
+      </div>
     </div>
-    <div style="height:6px;background:${BORDER};border-radius:3px;margin:8px 0;">
-      <div style="height:6px;width:${data.decisionScore}%;background:${BRAND};border-radius:3px;"></div>
-    </div>
-    <hr style="border:none;border-top:1px solid ${BORDER};margin:20px 0;">
-    <p style="font-size:14px;line-height:22px;">
-      <strong>Top spending:</strong> ${data.topCategory} at \u00a3${Math.round(data.topCategoryAmount).toLocaleString()}/mo<br>
-      <strong>Moves completed:</strong> ${data.movesCompleted} of ${data.totalMoves}
+    <hr style="border:none;border-top:1px solid ${BORDER};margin:16px 0;">
+    <p style="font-size:14px;line-height:22px;margin:0;">
+      <strong>Top spending:</strong> ${data.topCategory} at \u00a3${Math.round(data.topCategoryAmount).toLocaleString()}/mo
       ${data.streakDays > 0 ? `<br><strong>Active days:</strong> ${data.streakDays} day streak` : ''}
     </p>
   </div>
   ${achievements}
-  ${data.topMove ? `<div style="background:${SURFACE};border:1px solid ${BORDER};border-radius:14px;padding:24px;margin-bottom:16px;">
-    <h2 style="font-size:18px;margin:0 0 12px;">Your top move</h2>
-    <p style="font-size:14px;line-height:22px;">${data.topMove}</p>
-    <p style="color:${BRAND};font-weight:600;">\u00a3${Math.round(data.topMoveImpact * 12).toLocaleString()}/year impact</p>
-  </div>` : ''}
   <div style="text-align:center;margin-top:24px;padding-top:24px;border-top:1px solid ${BORDER};">
     <p style="color:${DIM};font-size:12px;">You're receiving this because you have a Bocy account.<br>To manage or turn off email notifications, visit your <a href="${appUrl}/profile?section=notifications" style="color:${DIM};">notification settings</a> in the app.</p>
   </div>
