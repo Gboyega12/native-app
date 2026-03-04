@@ -180,6 +180,10 @@ function DotRing({
     width: size,
     height: size,
     position: 'absolute' as const,
+    left: '50%',
+    top: '50%',
+    marginLeft: -size / 2,
+    marginTop: -size / 2,
   };
   if (animated && animValue) {
     containerStyle.opacity = animValue.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
@@ -531,7 +535,7 @@ function VoiceOrb({
         </>
       )}
       {/* Static outer dot ring — breathes when idle, sits tight against orb */}
-      <Animated.View style={{ position: 'absolute', transform: [{ scale: idleScale as any }], opacity: idleGlow as any }}>
+      <Animated.View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, transform: [{ scale: idleScale as any }], opacity: idleGlow as any }}>
         <DotRing size={82} count={24} dotSize={listening ? 3 : 2.5} color={activeColor} />
       </Animated.View>
       <Animated.View style={{ transform: [{ scale }, ...(listening ? [] : [{ scale: idleScale as any }])] }}>
@@ -1534,13 +1538,19 @@ export default function Chat() {
 
     if (planId && uid) {
       try {
-        await fetch('/api/plans', {
+        const res = await fetch('/api/plans', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'delete', plan_id: planId, user_id: uid }),
         });
+        if (!res.ok) throw new Error('API delete failed');
       } catch {
-        // Non-critical — still update UI
+        // Fallback: delete directly via Supabase client (works on native)
+        try {
+          await supabase.from('user_plans').delete().eq('id', planId).eq('user_id', uid);
+        } catch {
+          // Non-critical — still update UI
+        }
       }
     }
 

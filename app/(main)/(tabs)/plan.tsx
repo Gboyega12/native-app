@@ -428,7 +428,17 @@ export default function Plan() {
   };
 
   const handleRemovePlan = async (planId: string) => {
-    const uid = userIdRef.current;
+    let uid = userIdRef.current;
+    if (!uid) {
+      // Fallback: try fetching the user if ref wasn't set
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        uid = user?.id || null;
+        if (uid) userIdRef.current = uid;
+      } catch {
+        uid = null;
+      }
+    }
     if (!uid) return;
 
     LayoutAnimation.configureNext(SMOOTH_ANIM);
@@ -444,7 +454,9 @@ export default function Plan() {
         .eq('user_id', uid);
 
       if (error) {
-        console.warn('[plan] Failed to dismiss plan:', error.message);
+        console.warn('[plan] Dismiss failed, trying hard delete:', error.message);
+        // Fallback: hard delete if status update fails (e.g. RLS issue)
+        await supabase.from('user_plans').delete().eq('id', planId).eq('user_id', uid);
       }
 
       // Clean up any progress for this plan
