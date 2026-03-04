@@ -202,6 +202,7 @@ export default function Home() {
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
+  const [showAllMoves, setShowAllMoves] = useState(false);
   const userIdRef = useRef<string | null>(null);
 
   // Custom weekly spending limit
@@ -1553,6 +1554,13 @@ export default function Home() {
           )}
           </View>
 
+          {/* Dot separator */}
+          <View style={s.dotSeparator}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <View key={i} style={[s.dot, { backgroundColor: colors.border }]} />
+            ))}
+          </View>
+
           {/* ══════════════════════════════════════════════
               YOUR MOVES — inline from Plan page
               ══════════════════════════════════════════════ */}
@@ -1727,7 +1735,7 @@ export default function Home() {
                       {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo potential
                     </Text>
                   </View>
-                  {opportunityMoves.map((move, seqIdx) => {
+                  {(showAllMoves ? opportunityMoves : opportunityMoves.slice(0, 2)).map((move, seqIdx) => {
                     const i = move._sortIdx;
                     const isExpanded = expandedMove === i;
                     const moveKey = `move-${i}`;
@@ -1849,10 +1857,31 @@ export default function Home() {
                     );
                   })}
 
+                  {/* View more button for progressive disclosure */}
+                  {!showAllMoves && opportunityMoves.length > 2 && (
+                    <TouchableOpacity
+                      style={s.viewMoreBtn}
+                      onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setShowAllMoves(true); }}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`View ${opportunityMoves.length - 2} more moves`}
+                    >
+                      <Text style={s.viewMoreText}>View {opportunityMoves.length - 2} more moves</Text>
+                      <Text style={s.viewMoreArrow}>{'\u25BC'}</Text>
+                    </TouchableOpacity>
+                  )}
+
                 </>
               )}
             </>
           )}
+
+          {/* Dot separator */}
+          <View style={s.dotSeparator}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <View key={i} style={[s.dot, { backgroundColor: colors.border }]} />
+            ))}
+          </View>
 
           {/* ══════════════════════════════════════════════
               BUDGET — collapsed by default
@@ -1943,6 +1972,13 @@ export default function Home() {
                 </View>
               </Card>
             )}
+          </View>
+
+          {/* Dot separator */}
+          <View style={s.dotSeparator}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <View key={i} style={[s.dot, { backgroundColor: colors.border }]} />
+            ))}
           </View>
 
           {/* ── Transactions — collapsed by default ── */}
@@ -2397,9 +2433,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     backgroundColor: c.bg,
   },
   scroll: {
-    padding: 20,
-    paddingTop: 64,
-    paddingBottom: 100,
+    padding: 24,
+    paddingTop: 68,
+    paddingBottom: 120,
   },
   loadingContainer: {
     flex: 1,
@@ -2410,7 +2446,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Header ──
   headerWrap: {
-    marginBottom: 36,
+    marginBottom: 40,
   },
   headerRow: {
     flexDirection: 'row',
@@ -2466,11 +2502,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   connectionBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: spacing.md,
     marginBottom: spacing.lg,
-    paddingVertical: 10,
-    paddingLeft: 14,
-    paddingRight: 6,
+    paddingVertical: 12,
+    paddingLeft: 16,
+    paddingRight: 8,
     backgroundColor: c.amberDim,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -2523,18 +2558,32 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     letterSpacing: -0.3,
   },
 
+  // ── Dot separator ──
+  dotSeparator: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  dot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+  },
+
   // ── Moves section ──
   moveSectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginTop: 32,
-    marginBottom: 14,
+    marginTop: 36,
+    marginBottom: 18,
   },
   moveSectionLabel: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    letterSpacing: 2.5,
+    letterSpacing: 3,
     color: c.muted,
     textTransform: 'uppercase',
   },
@@ -2566,6 +2615,29 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   moveBadgeText: {
     fontFamily: fonts.mono,
     fontSize: 10,
+    color: c.muted,
+  },
+  viewMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.lg,
+    borderStyle: 'dashed',
+  },
+  viewMoreText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  viewMoreArrow: {
+    fontSize: 9,
     color: c.muted,
   },
   checkbox: {
@@ -2605,10 +2677,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 20,
-    marginTop: 24,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: c.border,
+    paddingVertical: 22,
+    marginTop: 8,
   },
 
   // ── Empty State ──
@@ -2737,15 +2807,15 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 10,
     color: c.dim,
-    letterSpacing: 2.5,
+    letterSpacing: 3,
     textTransform: 'uppercase',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   heroAction: {
     fontFamily: fonts.semibold,
     fontSize: 20,
     color: c.text,
-    lineHeight: 28,
+    lineHeight: 30,
     letterSpacing: -0.4,
   },
   heroMeta: {
@@ -3040,8 +3110,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // ── Card 3: Safe to Spend ──
   safeToSpendHero: {
     alignItems: 'center',
-    paddingVertical: 28,
-    paddingBottom: 32,
+    paddingVertical: 32,
+    paddingBottom: 36,
   },
   safeToSpendAmount: {
     fontFamily: fonts.mono,

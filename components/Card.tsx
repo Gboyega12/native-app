@@ -362,11 +362,11 @@ function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: st
 // ── Shared styles ──
 const styles = StyleSheet.create({
   base: {
-    borderRadius: 20,
+    borderRadius: 22,
     padding: 28,
     paddingTop: 32,
     paddingBottom: 32,
-    marginBottom: 16,
+    marginBottom: 18,
     overflow: 'hidden' as const,
   },
   title: {

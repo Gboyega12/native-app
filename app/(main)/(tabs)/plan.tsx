@@ -217,6 +217,7 @@ export default function Plan() {
   const [showInfo, setShowInfo] = useState(false);
   const [incomeExpanded, setIncomeExpanded] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showAllMoves, setShowAllMoves] = useState(false);
   const itemYPositions = useRef<Record<number, number>>({});
 
   // Handle deep-link: store target action for resolution after data loads
@@ -865,6 +866,13 @@ export default function Plan() {
         </Card>
       )}
 
+      {/* Dot separator */}
+      <View style={s.dotSeparator}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <View key={i} style={[s.dotItem, { backgroundColor: colors.border }]} />
+        ))}
+      </View>
+
       {/* ══════════════════════════════════════════════
           SECTION 2 — ACTIVE MOVES
           ══════════════════════════════════════════════ */}
@@ -1052,6 +1060,13 @@ export default function Plan() {
         </>
       )}
 
+      {/* Dot separator */}
+      <View style={s.dotSeparator}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <View key={i} style={[s.dotItem, { backgroundColor: colors.border }]} />
+        ))}
+      </View>
+
       {/* ══════════════════════════════════════════════
           SECTION 3 — OPPORTUNITIES
           ══════════════════════════════════════════════ */}
@@ -1067,7 +1082,7 @@ export default function Plan() {
           </AnimGlyph>
 
           {/* Individual opportunity cards */}
-          {opportunities.map(({ move, index: i }, seqIdx) => {
+          {(showAllMoves ? opportunities : opportunities.slice(0, 2)).map(({ move, index: i }, seqIdx) => {
             const isExpanded = expanded === i;
             const isHighlighted = highlightIdx === i;
             const moveKey = `move-${i}`;
@@ -1149,6 +1164,20 @@ export default function Plan() {
               </View>
             );
           })}
+
+          {/* View more button for progressive disclosure */}
+          {!showAllMoves && opportunities.length > 2 && (
+            <TouchableOpacity
+              style={s.viewMoreBtn}
+              onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setShowAllMoves(true); }}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`View ${opportunities.length - 2} more moves`}
+            >
+              <Text style={s.viewMoreText}>View {opportunities.length - 2} more moves</Text>
+              <Text style={s.viewMoreArrow}>{'\u25BC'}</Text>
+            </TouchableOpacity>
+          )}
 
         </>
       )}
@@ -1380,7 +1409,7 @@ export default function Plan() {
 
 const createStyles = (c: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: c.bg },
-  scroll: { padding: spacing.lg, paddingTop: spacing.xxl + spacing.xl, paddingBottom: spacing.xxl + spacing.lg },
+  scroll: { padding: spacing.lg, paddingTop: spacing.xxl + spacing.xl, paddingBottom: spacing.xxl + spacing.xxl },
   loadingContainer: { flex: 1, backgroundColor: c.bg, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: { flex: 1, backgroundColor: c.bg, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
   emptyTitle: { fontFamily: fonts.medium, fontSize: 18, color: c.text, marginBottom: spacing.sm },
@@ -1633,18 +1662,32 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginTop: 2,
   },
 
+  // ── Dot separator ──
+  dotSeparator: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  dotItem: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+  },
+
   // ── Section headers ──
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginTop: spacing.xxl,
-    marginBottom: spacing.md,
+    marginTop: spacing.xxl + spacing.sm,
+    marginBottom: spacing.lg,
   },
   sectionLabel: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    letterSpacing: 2,
+    letterSpacing: 2.5,
     color: c.text2,
     textTransform: 'uppercase',
   },
@@ -2111,6 +2154,31 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   incomeStripChevron: {
     fontSize: 10,
     color: c.dim,
+  },
+
+  // ── Progressive disclosure ──
+  viewMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.lg,
+    borderStyle: 'dashed',
+  },
+  viewMoreText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  viewMoreArrow: {
+    fontSize: 9,
+    color: c.muted,
   },
 
   // ── Quick start on collapsed cards ──
