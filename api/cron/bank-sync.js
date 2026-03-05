@@ -174,6 +174,7 @@ export default async function handler(req, res) {
 
   const admin = createClient(supabaseUrl, serviceKey);
   const results = { refreshed: 0, failed: 0, expired: 0, total: 0 };
+  const refreshedUserIds = new Set();
 
   try {
     // Get all TrueLayer connections with valid refresh tokens
@@ -226,6 +227,7 @@ export default async function handler(req, res) {
         }
 
         results.refreshed++;
+        refreshedUserIds.add(row.user_id);
 
         // Update the bank_data row with fresh data.
         // Guard: never overwrite stored CSV with empty data.
@@ -322,8 +324,36 @@ export default async function handler(req, res) {
       }
     }
 
-    console.log(`[bank-sync] Refreshed ${results.refreshed}/${results.total} connections (${results.expired} expired, ${results.failed} failed)`);
-    return res.json({ success: true, ...results });
+    // ── Re-enrich analyses for users whose data was refreshed ──
+    // Without this, the analyses row stays stale until the user opens the app.
+    const usersToEnrich = [...refreshedUserIds];
+
+    let enriched = 0;
+    if (usersToEnrich.length > 0) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bocy.io';
+      const enrichEndpoint = `${appUrl.replace(/\/$/, '')}/api/enrich`;
+
+      for (const uid of usersToEnrich) {
+        try {
+          const enrichRes = await fetch(enrichEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${cronSecret}`,
+            },
+            body: JSON.stringify({ user_id: uid }),
+          });
+          const enrichData = await enrichRes.json();
+          if (enrichData.success) enriched++;
+          else console.warn(`[bank-sync] Enrich failed for ${uid}:`, enrichData.reason || enrichData.error);
+        } catch (e) {
+          console.warn(`[bank-sync] Enrich request failed for ${uid}:`, e?.message);
+        }
+      }
+    }
+
+    console.log(`[bank-sync] Refreshed ${results.refreshed}/${results.total} connections (${results.expired} expired, ${results.failed} failed), enriched ${enriched}/${usersToEnrich.length} users`);
+    return res.json({ success: true, ...results, enriched });
   } catch (err) {
     console.error('[bank-sync] Cron failed:', err?.message);
     return res.status(500).json({ success: false, error: err?.message });

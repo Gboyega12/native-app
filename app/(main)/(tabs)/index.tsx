@@ -56,6 +56,9 @@ export default function Home() {
   const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<number>(0);
+  const [latestTxDate, setLatestTxDate] = useState<string | null>(null);
+  const [syncDataSource, setSyncDataSource] = useState<'truelayer' | 'fallback' | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [connectionWarning, setConnectionWarning] = useState<{ message: string; banks: string[] } | null>(null);
   const [connectionDismissed, setConnectionDismissed] = useState(false);
   const [incomeDismissed, setIncomeDismissed] = useState(false);
@@ -941,9 +944,18 @@ export default function Home() {
   const syncInBackground = async (userId: string, force: boolean = false) => {
     try {
       setSyncing(true);
+      setSyncError(null);
 
       const result = await requestSync(userId, force);
-      if (!result) { setSyncing(false); return; }
+      if (!result) {
+        setSyncing(false);
+        setSyncError('Sync returned no data — pull down to retry');
+        return;
+      }
+
+      // Track data freshness
+      setSyncDataSource(result.dataSource);
+      if (result.latestTransactionDate) setLatestTxDate(result.latestTransactionDate);
 
       // Surface connection issues to the user
       if (result.connectionIssues?.length > 0) {
@@ -956,7 +968,15 @@ export default function Home() {
           setConnectionWarning({ message: 'sync_failed', banks: [] });
         }
       } else if (result.dataSource === 'fallback') {
-        setConnectionWarning({ message: 'fallback', banks: [] });
+        // Check how stale the fallback data is
+        const txAge = result.latestTransactionDate
+          ? Math.floor((Date.now() - new Date(result.latestTransactionDate).getTime()) / (1000 * 60 * 60 * 24))
+          : 999;
+        if (txAge >= 2) {
+          setConnectionWarning({ message: 'stale_data', banks: [] });
+        } else {
+          setConnectionWarning({ message: 'fallback', banks: [] });
+        }
       } else if (result.expiringConnections?.length > 0) {
         // Proactive warning: connections approaching 90-day consent expiry
         const expiringBanks = result.expiringConnections.map(
@@ -966,6 +986,14 @@ export default function Home() {
       } else {
         // All connections synced OK — clear warning
         setConnectionWarning(null);
+      }
+
+      // Warn if data is stale (latest transaction > 2 days old)
+      if (result.latestTransactionDate) {
+        const txAge = Math.floor((Date.now() - new Date(result.latestTransactionDate).getTime()) / (1000 * 60 * 60 * 24));
+        if (txAge >= 2) {
+          setSyncError(`Transactions are ${txAge} days old — pull down to retry`);
+        }
       }
 
       // Update debt accounts: merge synced with any manual debts
@@ -1011,6 +1039,7 @@ export default function Home() {
       setLastSynced(getLastSyncTime());
     } catch (err: any) {
       console.warn('[home] Background sync failed:', err?.message);
+      setSyncError('Sync failed — pull down to retry');
     }
     setSyncing(false);
   };
@@ -1406,9 +1435,9 @@ export default function Home() {
             <View style={s.menuLine} />
           </TouchableOpacity>
         </View>
-        {(syncing || lastSynced > 0) && (
-          <Text style={s.syncText}>
-            {syncing ? 'Syncing...' : formatTimeAgo(lastSynced)}
+        {(syncing || lastSynced > 0 || syncError) && (
+          <Text style={[s.syncText, syncError && !syncing ? { color: colors.coral } : undefined]}>
+            {syncing ? 'Syncing...' : syncError ? syncError : `Synced ${formatTimeAgo(lastSynced)}${syncDataSource === 'fallback' ? ' (cached)' : ''}`}
           </Text>
         )}
       </View>
@@ -1418,10 +1447,14 @@ export default function Home() {
         <View style={s.connectionBanner}>
           <TouchableOpacity style={s.connectionBannerBody} onPress={() => router.push('/(main)/connect')} activeOpacity={0.8}>
             <View style={{ flex: 1 }}>
-              {connectionWarning.banks.length > 0
+              {connectionWarning.message === 'stale_data'
+                ? <Text style={s.connectionBannerText}>Transactions haven't updated in days — try reconnecting</Text>
+                : connectionWarning.banks.length > 0
                 ? connectionWarning.banks.map((bank, idx) => (
                     <Text key={idx} style={s.connectionBannerText}>Reconnect {bank}</Text>
                   ))
+                : connectionWarning.message === 'sync_failed'
+                ? <Text style={s.connectionBannerText}>Bank sync failed — try again later</Text>
                 : <Text style={s.connectionBannerText}>Bank connection needs attention</Text>}
             </View>
             <Text style={s.connectionBannerAction}>Fix</Text>
@@ -1559,6 +1592,22 @@ export default function Home() {
                     style={s.safeToSpendBarFill}
                   />
                 </View>
+
+                {/* Data freshness indicator */}
+                {latestTxDate && (
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: (() => {
+                    const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
+                    return txAge >= 2 ? colors.coral : colors.muted;
+                  })(), letterSpacing: 0.5, marginTop: 10 }}>
+                    {(() => {
+                      const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
+                      if (txAge === 0) return 'Transactions up to date';
+                      if (txAge === 1) return 'Latest transaction: yesterday';
+                      return `Latest transaction: ${txAge} days ago`;
+                    })()}
+                    {syncDataSource === 'fallback' ? ' (using cached data)' : ''}
+                  </Text>
+                )}
 
                 {/* Top move teaser */}
                 {dashboardMoves.length > 0 && (
