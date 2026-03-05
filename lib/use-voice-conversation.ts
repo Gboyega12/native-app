@@ -255,6 +255,9 @@ export function useVoiceConversation({
   const playerRef = useRef(createAudioPlayer());
   const amplitudeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
+  // Keep onTranscript in a ref so stopListening is stable
+  const onTranscriptRef = useRef(onTranscript);
+  onTranscriptRef.current = onTranscript;
 
   // Conversation loop: when active, auto-listen after TTS and auto-stop on silence
   const conversationActiveRef = useRef(false);
@@ -284,11 +287,17 @@ export function useVoiceConversation({
     };
   }, []);
 
+  // Keep onStateChange in a ref so updateState is stable (never recreated).
+  // This is critical — if updateState changes every render, speak/stopListening
+  // also change every render, causing the auto-play TTS effect to be unreliable.
+  const onStateChangeRef = useRef(onStateChange);
+  onStateChangeRef.current = onStateChange;
+
   const updateState = useCallback((state: VoiceState) => {
     if (!mountedRef.current) return;
     setVoiceState(state);
-    onStateChange?.(state);
-  }, [onStateChange]);
+    onStateChangeRef.current?.(state);
+  }, []); // Stable — reads from ref
 
   // ── Get auth token ──
   const getToken = async (): Promise<string | null> => {
@@ -349,7 +358,7 @@ export function useVoiceConversation({
 
       // We have text — pass to chat
       updateState('thinking');
-      onTranscript(data.text);
+      onTranscriptRef.current(data.text);
     } catch (err: any) {
       console.error('[voice] Transcription failed:', err?.message);
       setErrorMessage('Failed to process audio');
@@ -358,7 +367,7 @@ export function useVoiceConversation({
         if (mountedRef.current) updateState('idle');
       }, 2000);
     }
-  }, [onTranscript, updateState]);
+  }, [updateState]); // Stable — reads onTranscript from ref
 
   // Keep a ref to stopListening so the amplitude timer can call it
   // without stale closure issues (timer is created once per recording session).
