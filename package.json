@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "./index.js",
   "scripts": {
+    "test": "jest",
     "start": "expo start",
     "web": "expo start --web",
     "build": "expo export --platform web",
@@ -47,7 +48,9 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@jest/globals": "^30.2.0",
     "@types/react": "~19.1.0",
+    "jest": "^30.2.0",
     "typescript": "~5.9.2"
   },
   "private": true
