@@ -42,6 +42,7 @@ export default function InstallApp() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [installed, setInstalled] = useState(false);
   const [promptAvailable, setPromptAvailable] = useState(!!deferredPrompt);
+  const [showHint, setShowHint] = useState(false);
   const iosSafari = isIOSSafari();
   const alreadyInstalled = isStandalone();
 
@@ -83,6 +84,19 @@ export default function InstallApp() {
     setPromptAvailable(false);
   }, [router]);
 
+  const handleOpenShareSheet = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ url: window.location.href });
+      } catch {
+        // User cancelled or share failed — show fallback hint
+        setShowHint(true);
+      }
+    } else {
+      setShowHint(true);
+    }
+  }, []);
+
   const handleSkip = () => {
     router.push('/(main)/connect');
   };
@@ -120,13 +134,21 @@ export default function InstallApp() {
         {/* iOS Safari: manual instructions */}
         {iosSafari && !promptAvailable && (
           <View style={styles.instructionsCard}>
-            <View style={styles.stepRow}>
+            <TouchableOpacity style={styles.stepRow} onPress={handleOpenShareSheet} activeOpacity={0.6}>
               <View style={styles.stepNum}><Text style={styles.stepNumText}>1</Text></View>
               <Text style={styles.stepText}>
-                Tap the <Text style={styles.bold}>Share</Text> button{' '}
-                <Text style={styles.mono}>[{'\u2191'}]</Text> at the bottom of Safari
+                Tap here to open the <Text style={styles.bold}>Share</Text> menu{' '}
+                <Text style={styles.mono}>[{'\u2191'}]</Text>
               </Text>
-            </View>
+            </TouchableOpacity>
+            {showHint && (
+              <View style={styles.hintRow}>
+                <Text style={styles.hintText}>
+                  Look for the <Text style={styles.bold}>Share</Text> button{' '}
+                  <Text style={styles.mono}>[{'\u2191'}]</Text> in Safari's toolbar below {'\u2193'}
+                </Text>
+              </View>
+            )}
             <View style={styles.stepRow}>
               <View style={styles.stepNum}><Text style={styles.stepNumText}>2</Text></View>
               <Text style={styles.stepText}>
@@ -256,6 +278,19 @@ const styles = StyleSheet.create({
   mono: {
     fontFamily: fonts.mono,
     fontSize: 16,
+  },
+  hintRow: {
+    backgroundColor: colors.accent + '15',
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  hintText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.accent,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   fallbackText: {
     fontFamily: fonts.regular,
