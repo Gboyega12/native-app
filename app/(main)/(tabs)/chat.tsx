@@ -887,8 +887,7 @@ export default function Chat() {
   const autoSendRef = useRef(false);
   const [speakingMsgIdx, setSpeakingMsgIdx] = useState<number | null>(null);
   const stopSpeechRef = useRef<(() => void) | null>(null);
-  const lastSpokenMsgCountRef = useRef(0);
-  // Track that we're expecting a voice response (set on transcript, cleared after speak)
+  // Set when voice input triggers a message; cleared after TTS speaks the response
   const pendingVoiceResponseRef = useRef(false);
 
   // ── Full speech-to-speech conversation hook ──
@@ -904,9 +903,9 @@ export default function Chat() {
   } = useVoiceConversation({
     onTranscript: (text) => {
       // Voice mode: transcribed text goes straight to chat
-      // Mark that the next response should be spoken (even if loop was ended)
       pendingVoiceResponseRef.current = true;
-      setInput('');
+      // Flash the transcribed text briefly so user sees they were heard
+      setInput(text);
       sendMessage(text);
     },
     onStateChange: (state) => {
@@ -916,20 +915,9 @@ export default function Chat() {
     autoPlayResponse: true,
   });
 
-  // ── Auto-play TTS when Bocy responds to voice input ──
-  // Uses pendingVoiceResponseRef so even the final response after ending
-  // the conversation loop still gets spoken.
-  useEffect(() => {
-    if (!pendingVoiceResponseRef.current && !conversationActive) return;
-    if (loading) return; // Still streaming — wait for final message
-    const lastMsg = messages[messages.length - 1];
-    if (!lastMsg || lastMsg.role !== 'assistant' || !lastMsg.content) return;
-    // Don't re-speak if we already spoke for this message count
-    if (messages.length <= lastSpokenMsgCountRef.current) return;
-    lastSpokenMsgCountRef.current = messages.length;
-    pendingVoiceResponseRef.current = false;
-    speakResponse(lastMsg.content);
-  }, [messages, loading, conversationActive, speakResponse]);
+  // speakResponse ref — so sendMessage can call it without stale closures
+  const speakResponseRef = useRef(speakResponse);
+  speakResponseRef.current = speakResponse;
 
   // ── TTS support check (ElevenLabs uses Audio API; Web Speech API is fallback) ──
   const ttsSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
@@ -1795,12 +1783,13 @@ export default function Chat() {
 
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
+    let responseText = '';
     try {
       // ── Try streaming first ──
-      const streamSuccess = await tryStream(newMessages);
-      if (!streamSuccess) {
+      responseText = await tryStream(newMessages);
+      if (!responseText) {
         // ── Fall back to standard request ──
-        await standardRequest(newMessages);
+        responseText = await standardRequest(newMessages);
       }
     } catch {
       setError('Connection error. Please check your internet and try again.');
@@ -1810,9 +1799,15 @@ export default function Chat() {
 
     setLoading(false);
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+
+    // ── Voice response: speak the AI's reply if triggered by voice input ──
+    if (pendingVoiceResponseRef.current && responseText) {
+      pendingVoiceResponseRef.current = false;
+      speakResponseRef.current(responseText);
+    }
   };
 
-  const tryStream = async (newMessages: ChatMessage[]): Promise<boolean> => {
+  const tryStream = async (newMessages: ChatMessage[]): Promise<string> => {
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -1820,7 +1815,7 @@ export default function Chat() {
         body: JSON.stringify({ messages: newMessages, context, stream: true, user_id: userId }),
       });
 
-      if (!res.ok || !res.body) return false;
+      if (!res.ok || !res.body) return '';
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -1845,7 +1840,7 @@ export default function Chat() {
             const event = JSON.parse(raw);
             if (event.error) {
               setError(event.error);
-              return false;
+              return '';
             }
             if (event.t) {
               fullText += event.t;
@@ -1876,17 +1871,17 @@ export default function Chat() {
         const final: ChatMessage[] = [...newMessages, assistantMsg];
         setMessages(final);
         persistMessages(final);
-        return true;
+        return fullText;
       }
 
-      return false;
+      return '';
     } catch {
       // Streaming not supported (e.g. React Native on device) — fall back
-      return false;
+      return '';
     }
   };
 
-  const standardRequest = async (newMessages: ChatMessage[]) => {
+  const standardRequest = async (newMessages: ChatMessage[]): Promise<string> => {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1912,10 +1907,12 @@ export default function Chat() {
       const final: ChatMessage[] = [...newMessages, assistantMsg];
       setMessages(final);
       persistMessages(final);
+      return data.text;
     } else {
       setError(data.error || 'Failed to get response');
       const errorMsg: ChatMessage = { role: 'assistant', content: 'Sorry, I couldn\'t process that. Please try again.' };
       setMessages([...newMessages, errorMsg]);
+      return '';
     }
   };
 
@@ -1938,7 +1935,7 @@ export default function Chat() {
     stopSpeechRef.current?.();
     stopSpeaking();
     setSpeakingMsgIdx(null);
-    lastSpokenMsgCountRef.current = 0;
+    pendingVoiceResponseRef.current = false;
     setMessages([]);
     setError(null);
     try {
