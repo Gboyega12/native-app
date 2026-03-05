@@ -889,7 +889,7 @@ export default function Chat() {
   const stopSpeechRef = useRef<(() => void) | null>(null);
   // Track whether the user initiated this interaction via voice (for auto-TTS)
   const [voiceMode, setVoiceMode] = useState(false);
-  const lastAssistantMsgRef = useRef<string>('');
+  const lastSpokenMsgCountRef = useRef(0);
 
   // ── Full speech-to-speech conversation hook ──
   const {
@@ -915,16 +915,18 @@ export default function Chat() {
   });
 
   // ── Auto-play TTS when Bocy responds in voice mode ──
+  // Wait until streaming is done (loading === false), then speak the final message.
+  // Use message count to avoid re-speaking the same response.
   useEffect(() => {
     if (!voiceMode) return;
-    if (loading) return;
+    if (loading) return; // Still streaming — wait for final message
     const lastMsg = messages[messages.length - 1];
     if (!lastMsg || lastMsg.role !== 'assistant' || !lastMsg.content) return;
-    // Don't re-speak the same message
-    if (lastMsg.content === lastAssistantMsgRef.current) return;
-    lastAssistantMsgRef.current = lastMsg.content;
+    // Don't re-speak if we already spoke for this message count
+    if (messages.length <= lastSpokenMsgCountRef.current) return;
+    lastSpokenMsgCountRef.current = messages.length;
     speakResponse(lastMsg.content);
-  }, [messages, loading, voiceMode]);
+  }, [messages, loading, voiceMode, speakResponse]);
 
   // ── TTS support check (ElevenLabs uses Audio API; Web Speech API is fallback) ──
   const ttsSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
@@ -1934,6 +1936,7 @@ export default function Chat() {
     stopSpeaking();
     setSpeakingMsgIdx(null);
     setVoiceMode(false);
+    lastSpokenMsgCountRef.current = 0;
     setMessages([]);
     setError(null);
     try {
