@@ -1,9 +1,14 @@
 /**
- * useVoiceConversation — full speech-to-speech loop
+ * useVoiceConversation — seamless speech-to-speech conversation loop
  *
  * Record (expo-av / MediaRecorder) → /api/stt → text
  * Text → sendMessage() (existing chat pipeline)
- * Response text → /api/tts → audio playback
+ * Response text → /api/tts → audio playback → auto-listen again
+ *
+ * Features:
+ * - Voice Activity Detection (VAD): auto-stops recording after silence
+ * - Conversation loop: after TTS finishes, auto-starts listening again
+ * - Single tap to start, tap again anytime to exit
  *
  * Supports: iOS, Android, and Web.
  */
@@ -28,6 +33,10 @@ interface UseVoiceConversationOptions {
   onStateChange?: (state: VoiceState) => void;
   /** Whether to auto-play TTS for responses */
   autoPlayResponse?: boolean;
+  /** Silence duration (ms) before auto-stopping recording. Default: 1500 */
+  silenceTimeout?: number;
+  /** Amplitude threshold below which audio is considered silence. Default: 0.05 */
+  silenceThreshold?: number;
 }
 
 interface UseVoiceConversationReturn {
@@ -36,7 +45,7 @@ interface UseVoiceConversationReturn {
   startListening: () => Promise<void>;
   /** Stop recording and transcribe */
   stopListening: () => Promise<void>;
-  /** Toggle recording on/off */
+  /** Toggle recording on/off — also starts/stops conversation loop */
   toggleListening: () => Promise<void>;
   /** Speak text aloud via TTS */
   speak: (text: string) => Promise<void>;
@@ -48,6 +57,8 @@ interface UseVoiceConversationReturn {
   errorMessage: string | null;
   /** Amplitude level 0-1 for visualisation (updated during recording) */
   amplitude: number;
+  /** Whether the conversation loop is active */
+  conversationActive: boolean;
 }
 
 // ── Recording abstraction ──
@@ -244,15 +255,29 @@ export function useVoiceConversation({
   onTranscript,
   onStateChange,
   autoPlayResponse = true,
+  silenceTimeout = 1500,
+  silenceThreshold = 0.05,
 }: UseVoiceConversationOptions): UseVoiceConversationReturn {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [amplitude, setAmplitude] = useState(0);
+  const [conversationActive, setConversationActive] = useState(false);
 
   const recorderRef = useRef<Recorder | null>(null);
   const playerRef = useRef(createAudioPlayer());
   const amplitudeTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
+  // Track whether the conversation loop is active (ref for use in callbacks)
+  const conversationActiveRef = useRef(false);
+  // VAD: track consecutive silent frames
+  const silentSinceRef = useRef<number | null>(null);
+  // Track if we've detected any speech during this recording session
+  const speechDetectedRef = useRef(false);
+  // Minimum recording duration (ms) before VAD can stop
+  const MIN_RECORD_DURATION = 500;
+  const recordStartRef = useRef<number>(0);
+  // Prevent concurrent stopListening calls
+  const stoppingRef = useRef(false);
 
   // Check platform support
   const isSupported = Platform.OS === 'ios' || Platform.OS === 'android' ||
@@ -262,6 +287,7 @@ export function useVoiceConversation({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      conversationActiveRef.current = false;
       recorderRef.current?.cleanup();
       playerRef.current.stop();
       if (amplitudeTimerRef.current) clearInterval(amplitudeTimerRef.current);
@@ -280,10 +306,39 @@ export function useVoiceConversation({
     return session?.access_token || null;
   };
 
+  // ── Stop the entire conversation loop ──
+  const endConversation = useCallback(() => {
+    conversationActiveRef.current = false;
+    setConversationActive(false);
+    // Stop any in-progress recording
+    if (recorderRef.current) {
+      recorderRef.current.cleanup();
+      recorderRef.current = null;
+    }
+    // Stop amplitude polling
+    if (amplitudeTimerRef.current) {
+      clearInterval(amplitudeTimerRef.current);
+      amplitudeTimerRef.current = null;
+    }
+    setAmplitude(0);
+    // Stop any playback
+    playerRef.current.stop();
+    // Reset VAD
+    silentSinceRef.current = null;
+    speechDetectedRef.current = false;
+    stoppingRef.current = false;
+    updateState('idle');
+  }, [updateState]);
+
   // ── Start recording ──
   const startListening = useCallback(async () => {
+    if (!conversationActiveRef.current && !mountedRef.current) return;
     try {
       setErrorMessage(null);
+      silentSinceRef.current = null;
+      speechDetectedRef.current = false;
+      stoppingRef.current = false;
+      recordStartRef.current = Date.now();
 
       // Create platform-appropriate recorder
       const recorder = Platform.OS === 'web'
@@ -294,27 +349,63 @@ export function useVoiceConversation({
       await recorder.start();
       updateState('listening');
 
-      // Start amplitude polling for visualisation
+      // Start amplitude polling for visualisation + VAD
       amplitudeTimerRef.current = setInterval(async () => {
         if (!mountedRef.current) return;
         const amp = await recorder.getAmplitude();
         setAmplitude(amp);
+
+        // ── Voice Activity Detection ──
+        // Only engage VAD if conversation loop is active
+        if (!conversationActiveRef.current) return;
+        // Don't auto-stop too early
+        if (Date.now() - recordStartRef.current < MIN_RECORD_DURATION) return;
+
+        if (amp > silenceThreshold) {
+          // User is speaking
+          speechDetectedRef.current = true;
+          silentSinceRef.current = null;
+        } else if (speechDetectedRef.current) {
+          // User was speaking but now it's silent — start silence timer
+          if (silentSinceRef.current === null) {
+            silentSinceRef.current = Date.now();
+          } else if (Date.now() - silentSinceRef.current >= silenceTimeout) {
+            // Silence has lasted long enough — auto-stop
+            if (!stoppingRef.current) {
+              stoppingRef.current = true;
+              // Clear interval before stopping to prevent re-entry
+              if (amplitudeTimerRef.current) {
+                clearInterval(amplitudeTimerRef.current);
+                amplitudeTimerRef.current = null;
+              }
+              // Use setTimeout to avoid calling stopListening inside the interval
+              setTimeout(() => {
+                stopListeningInternal();
+              }, 0);
+            }
+          }
+        }
       }, 100);
     } catch (err: any) {
       console.error('[voice] Recording start failed:', err?.message);
       setErrorMessage('Microphone access denied. Please enable it in settings.');
       updateState('error');
+      // If in conversation mode, exit on mic error
+      if (conversationActiveRef.current) {
+        endConversation();
+      }
     }
-  }, [updateState]);
+  }, [updateState, silenceThreshold, silenceTimeout, endConversation]);
 
-  // ── Stop recording and transcribe ──
-  const stopListening = useCallback(async () => {
+  // ── Stop recording and transcribe (internal, no conversation-end logic) ──
+  const stopListeningInternal = useCallback(async () => {
     // Stop amplitude polling
     if (amplitudeTimerRef.current) {
       clearInterval(amplitudeTimerRef.current);
       amplitudeTimerRef.current = null;
     }
     setAmplitude(0);
+    silentSinceRef.current = null;
 
     const recorder = recorderRef.current;
     if (!recorder) return;
@@ -329,6 +420,9 @@ export function useVoiceConversation({
       if (!token) {
         setErrorMessage('Not authenticated');
         updateState('error');
+        setTimeout(() => {
+          if (mountedRef.current) updateState('idle');
+        }, 2000);
         return;
       }
 
@@ -345,10 +439,14 @@ export function useVoiceConversation({
       if (!res.ok || !data.success || !data.text) {
         setErrorMessage(data.error || 'Could not understand audio');
         updateState('error');
-        // Auto-recover to idle after 2 seconds
+        // In conversation mode, auto-recover by listening again
         setTimeout(() => {
-          if (mountedRef.current) updateState('idle');
-        }, 2000);
+          if (mountedRef.current && conversationActiveRef.current) {
+            startListening();
+          } else if (mountedRef.current) {
+            updateState('idle');
+          }
+        }, 1500);
         return;
       }
 
@@ -360,26 +458,45 @@ export function useVoiceConversation({
       setErrorMessage('Failed to process audio');
       updateState('error');
       setTimeout(() => {
-        if (mountedRef.current) updateState('idle');
+        if (mountedRef.current && conversationActiveRef.current) {
+          startListening();
+        } else if (mountedRef.current) {
+          updateState('idle');
+        }
       }, 2000);
     }
-  }, [onTranscript, updateState]);
+  }, [onTranscript, updateState, startListening]);
 
-  // ── Toggle ──
+  // ── Public stop listening (also used for manual stop) ──
+  const stopListening = useCallback(async () => {
+    stoppingRef.current = true;
+    await stopListeningInternal();
+  }, [stopListeningInternal]);
+
+  // ── Toggle — starts or stops the conversation loop ──
   const toggleListening = useCallback(async () => {
-    if (voiceState === 'listening') {
-      await stopListening();
-    } else if (voiceState === 'idle' || voiceState === 'error') {
-      await startListening();
-    } else if (voiceState === 'speaking') {
-      playerRef.current.stop();
-      updateState('idle');
+    if (conversationActiveRef.current) {
+      // User tapped mic while conversation is active — end the loop
+      endConversation();
+      return;
     }
-  }, [voiceState, startListening, stopListening, updateState]);
+
+    // Start conversation loop
+    conversationActiveRef.current = true;
+    setConversationActive(true);
+
+    if (voiceState === 'idle' || voiceState === 'error') {
+      await startListening();
+    }
+  }, [voiceState, startListening, endConversation]);
 
   // ── Speak response via TTS ──
+  // After TTS finishes, auto-starts listening if conversation is active
   const speak = useCallback(async (text: string) => {
     if (!text.trim()) return;
+    // If conversation was ended while waiting, don't speak
+    if (!conversationActiveRef.current && !mountedRef.current) return;
+
     try {
       updateState('speaking');
       const token = await getToken();
@@ -398,7 +515,12 @@ export function useVoiceConversation({
 
       if (!res.ok) {
         console.warn('[voice] TTS failed:', res.status);
-        updateState('idle');
+        // Auto-listen again if conversation is still active
+        if (mountedRef.current && conversationActiveRef.current) {
+          await startListening();
+        } else if (mountedRef.current) {
+          updateState('idle');
+        }
         return;
       }
 
@@ -408,19 +530,34 @@ export function useVoiceConversation({
       );
 
       await playerRef.current.play(base64, 'audio/mpeg', () => {
-        if (mountedRef.current) updateState('idle');
+        if (!mountedRef.current) return;
+        // ── Conversation loop: after speaking, auto-listen again ──
+        if (conversationActiveRef.current) {
+          startListening();
+        } else {
+          updateState('idle');
+        }
       });
     } catch (err: any) {
       console.warn('[voice] TTS playback error:', err?.message);
-      if (mountedRef.current) updateState('idle');
+      if (mountedRef.current && conversationActiveRef.current) {
+        startListening();
+      } else if (mountedRef.current) {
+        updateState('idle');
+      }
     }
-  }, [updateState]);
+  }, [updateState, startListening]);
 
   // ── Stop speaking ──
   const stopSpeaking = useCallback(() => {
     playerRef.current.stop();
-    updateState('idle');
-  }, [updateState]);
+    if (conversationActiveRef.current) {
+      // If conversation is active and user interrupts TTS, start listening
+      startListening();
+    } else {
+      updateState('idle');
+    }
+  }, [updateState, startListening]);
 
   return {
     voiceState,
@@ -432,5 +569,6 @@ export function useVoiceConversation({
     isSupported,
     errorMessage,
     amplitude,
+    conversationActive,
   };
 }

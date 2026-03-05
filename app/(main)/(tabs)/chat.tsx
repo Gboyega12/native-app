@@ -900,6 +900,7 @@ export default function Chat() {
     isSupported: voiceConversationSupported,
     errorMessage: voiceError,
     amplitude: voiceAmplitude,
+    conversationActive,
   } = useVoiceConversation({
     onTranscript: (text) => {
       // Voice mode: transcribed text goes straight to chat
@@ -910,6 +911,10 @@ export default function Chat() {
     onStateChange: (state) => {
       // Sync listening state with existing UI
       setListening(state === 'listening');
+      // When conversation loop ends, clear voice mode
+      if (state === 'idle' && !conversationActive) {
+        setVoiceMode(false);
+      }
     },
     autoPlayResponse: true,
   });
@@ -1046,6 +1051,7 @@ export default function Chat() {
     voiceState === 'processing' ? 'Transcribing\u2026'
     : voiceState === 'thinking' ? 'Thinking\u2026'
     : voiceState === 'speaking' ? 'Speaking\u2026'
+    : voiceState === 'listening' && conversationActive ? 'Listening\u2026'
     : voiceError ? voiceError
     : null;
 
