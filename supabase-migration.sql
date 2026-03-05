@@ -59,6 +59,10 @@ CREATE POLICY "Users can read own analyses"
 CREATE POLICY "Users can insert own analyses"
   ON analyses FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
+CREATE POLICY "Users can update own analyses"
+  ON analyses FOR UPDATE USING ((select auth.uid()) = user_id)
+  WITH CHECK ((select auth.uid()) = user_id);
+
 
 -- ============================================================
 -- Table: bank_data

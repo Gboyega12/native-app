@@ -1,5 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Allow up to 60s for sync (Hobby plan max).
+// Default 10s is too tight for token exchange + multiple TrueLayer API calls.
+export const config = { maxDuration: 60 };
+
 const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 'true';
 const TL_AUTH_HOST = IS_SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
 const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://api.truelayer.com';
@@ -7,8 +11,11 @@ const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://
 /**
  * Sync a single TrueLayer connection: refresh token → fetch transactions + balances.
  * Returns { csv, balances, newRefreshToken } or null on failure.
+ * On token exchange success but data fetch failure, returns { newRefreshToken }
+ * so the caller can persist the rotated token even if data fetching fails.
  */
 async function syncConnection(bankRow, clientId, clientSecret) {
+  let newRefreshToken = null;
   try {
     const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
       method: 'POST',
@@ -23,9 +30,13 @@ async function syncConnection(bankRow, clientId, clientSecret) {
 
     const tokenData = await tokenRes.json();
     if (!tokenData.access_token) {
-      console.warn(`[sync] Token expired for connection ${bankRow.connection_id}`);
+      console.warn(`[sync] Token refresh failed for connection ${bankRow.connection_id}:`, tokenData.error || 'no access_token');
       return null;
     }
+
+    // Capture the new refresh token immediately so it can be persisted
+    // even if subsequent data fetches fail (old token is already consumed).
+    newRefreshToken = tokenData.refresh_token || null;
 
     const headers = { Authorization: `Bearer ${tokenData.access_token}` };
 
@@ -33,8 +44,23 @@ async function syncConnection(bankRow, clientId, clientSecret) {
       fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
       fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
     ]);
-    const accounts = (await accountsRes.json()).results || [];
-    const cards = (await cardsRes.json()).results || [];
+
+    const accountsJson = await accountsRes.json();
+    const cardsJson = await cardsRes.json();
+
+    // Guard: if TrueLayer returned an error (403, 429, etc.), the response
+    // has no .results — bail out rather than proceeding with empty arrays
+    // which would overwrite valid CSV data with an empty CSV.
+    if (!accountsRes.ok || !cardsRes.ok) {
+      console.warn(`[sync] TrueLayer data endpoints returned errors — accounts: ${accountsRes.status}, cards: ${cardsRes.status}`, {
+        accountsError: accountsJson.error || null,
+        cardsError: cardsJson.error || null,
+      });
+      return null;
+    }
+
+    const accounts = accountsJson.results || [];
+    const cards = cardsJson.results || [];
 
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
@@ -43,10 +69,14 @@ async function syncConnection(bankRow, clientId, clientSecret) {
 
     const txPromises = [
       ...accounts.map((a) =>
-        fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers })
+          .then((r) => r.json())
+          .catch((err) => { console.warn(`[sync] Transaction fetch failed for account ${a.account_id}:`, err.message); return { results: [] }; })
       ),
       ...cards.map((c) =>
-        fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers })
+          .then((r) => r.json())
+          .catch((err) => { console.warn(`[sync] Transaction fetch failed for card ${c.account_id}:`, err.message); return { results: [] }; })
       ),
     ];
 
@@ -109,11 +139,16 @@ async function syncConnection(bankRow, clientId, clientSecret) {
     return {
       csvLines,
       balances: [...cardBalances, ...accountBalances],
-      newRefreshToken: tokenData.refresh_token || null,
+      newRefreshToken,
       txCount: allTx.length,
     };
   } catch (err) {
     console.warn(`[sync] Connection ${bankRow.connection_id} failed:`, err.message);
+    // If token exchange succeeded but data fetch failed, return the new
+    // refresh token so it can still be persisted (old token is consumed).
+    if (newRefreshToken) {
+      return { csvLines: [], balances: [], newRefreshToken, txCount: 0, tokenOnlyRecovery: true };
+    }
     return null;
   }
 }
@@ -133,6 +168,29 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // Authenticate the caller via Supabase JWT to prevent unauthenticated access
+  const authHeader = req.headers.authorization || '';
+  const authToken = authHeader.replace('Bearer ', '');
+  if (!authToken) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  if (supabaseAnonKey) {
+    const anonClient = createClient(supabaseUrl, supabaseAnonKey);
+    const { data: { user }, error: authError } = await anonClient.auth.getUser(authToken);
+    if (authError || !user) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    // Ensure the user can only sync their own data
+    if (req.body?.user_id && req.body.user_id !== user.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    // Use the authenticated user's ID
+    req.body = { ...req.body, user_id: user.id };
+  }
+
   const userId = req.body?.user_id;
   if (!userId) {
     return res.status(400).json({ error: 'Missing user_id' });
@@ -144,13 +202,13 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Server misconfigured', details: 'Missing TrueLayer credentials' });
   }
 
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const svcUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceKey) {
+  if (!svcUrl || !serviceKey) {
     return res.status(500).json({ error: 'Server misconfigured', details: 'Missing Supabase credentials' });
   }
 
-  const admin = createClient(supabaseUrl, serviceKey);
+  const admin = createClient(svcUrl, serviceKey);
 
   try {
     // Find ALL TrueLayer connections for this user
@@ -178,7 +236,13 @@ export default async function handler(req, res) {
     let expiredConnections = [];
 
     for (const { row, result } of results) {
-      if (!result) {
+      // Always persist a new refresh token if we got one, even on data fetch failure.
+      // The old token is consumed on exchange, so losing the new one = permanent death.
+      if (result?.newRefreshToken) {
+        await admin.from('bank_data').update({ refresh_token: result.newRefreshToken }).eq('id', row.id);
+      }
+
+      if (!result || result.tokenOnlyRecovery) {
         // Only flag as expired if the 90-day consent window has actually lapsed.
         // Transient failures (network errors, TrueLayer outages) within the
         // consent window should NOT trigger the reconnect banner.
@@ -196,17 +260,19 @@ export default async function handler(req, res) {
       mergedBalances.push(...result.balances);
       totalTx += result.txCount;
 
-      // Update each bank_data row individually with its own data
+      // Update each bank_data row individually with its own data.
+      // Guard: never overwrite stored CSV with empty data — only write if
+      // we actually got transactions back from TrueLayer.
       const updateFields = {
-        csv_data: ['Date,Description,Amount', ...result.csvLines].join('\n'),
         updated_at: new Date().toISOString(),
       };
+      if (result.csvLines.length > 0) {
+        updateFields.csv_data = ['Date,Description,Amount', ...result.csvLines].join('\n');
+      }
       if (result.balances.length > 0) {
         updateFields.card_balances = result.balances;
       }
-      if (result.newRefreshToken) {
-        updateFields.refresh_token = result.newRefreshToken;
-      }
+      // refresh_token is already persisted above (before data fetch guards)
       await admin.from('bank_data').update(updateFields).eq('id', row.id);
     }
 

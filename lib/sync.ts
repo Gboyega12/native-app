@@ -163,9 +163,13 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   try {
     const syncController = new AbortController();
     const syncTimeout = setTimeout(() => syncController.abort(), 15_000);
+    const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch('/api/truelayer/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
       body: JSON.stringify({ user_id: userId }),
       signal: syncController.signal,
     });
@@ -189,8 +193,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         }
       }
     } else if (data.reason === 'sync_failed') {
-      // Transient failure (all connections still within 90-day consent window).
-      // Don't flag as a connection issue — fall through to cached data silently.
+      // Transient failure — track it so we can surface persistent failures.
+      console.warn('[sync] All connections failed (transient, within 90-day window)');
+      connectionIssues.push('sync_failed');
     } else if (data.reason === 'no_connection') {
       connectionIssues.push('no_connection');
     }
@@ -203,7 +208,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         });
       }
     }
-  } catch {}
+  } catch (e: any) {
+    console.warn('[sync] TrueLayer sync request failed:', e?.message || e);
+  }
 
   // If connections have issues but we still don't have bank names, query DB as fallback
   if (connectionIssues.length > 0 && expiredBankNames.length === 0) {
@@ -218,7 +225,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
           if (row.provider_name) expiredBankNames.push(row.provider_name);
         }
       }
-    } catch {}
+    } catch (e: any) {
+      console.warn('[sync] Failed to fetch bank names:', e?.message || e);
+    }
   }
 
   // Fallback to existing CSV from all bank_data rows
@@ -241,7 +250,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         const uniqueLines = deduplicateCSVLines(rawLines);
         csvData = ['Date,Description,Amount', ...uniqueLines].join('\n');
       }
-    } catch {}
+    } catch (e: any) {
+      console.warn('[sync] Failed to read fallback CSV:', e?.message || e);
+    }
   }
 
   if (!csvData) return null;
@@ -262,7 +273,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     ]);
     if (overrideRes.data) overrides = overrideRes.data;
     if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
-  } catch {}
+  } catch (e: any) {
+    console.warn('[sync] Failed to fetch user config:', e?.message || e);
+  }
 
   let debtAccountsData: any[] = [];
   let identityData: any = null;
@@ -280,7 +293,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     ]);
     if (debtRes.data) debtAccountsData = debtRes.data;
     if (idRes.data) identityData = idRes.data;
-  } catch {}
+  } catch (e: any) {
+    console.warn('[sync] Failed to fetch debt/identity data:', e?.message || e);
+  }
 
   // ── 3. Enrich ──
   const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
@@ -297,7 +312,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .select('account_name, account_type, outstanding_balance, credit_limit')
       .eq('user_id', userId);
     if (freshDebt) debtAccountsData = freshDebt;
-  } catch {}
+  } catch (e: any) {
+    console.warn('[sync] Debt reconciliation failed:', e?.message || e);
+  }
 
   // ── 4. Rank moves ──
   let goals: Goals | null = null;
@@ -308,7 +325,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .eq('user_id', userId)
       .maybeSingle();
     goals = goalsData;
-  } catch {}
+  } catch (e: any) {
+    console.warn('[sync] Failed to fetch goals:', e?.message || e);
+  }
 
   const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
   const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
@@ -327,7 +346,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         if (dismissedActions.has(allMoves[i].action)) allMoves.splice(i, 1);
       }
     }
-  } catch {}
+  } catch (e: any) {
+    console.warn('[sync] Failed to filter dismissed moves:', e?.message || e);
+  }
 
   const topMove = allMoves[0] || null;
 
@@ -403,7 +424,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       debt_account_count: result.profile.metrics.debtAccountCount || 0,
       archetype: rawAnalysis.archetype,
     });
-  } catch {}
+  } catch (e: any) {
+    console.warn('[sync] Failed to insert score snapshot:', e?.message || e);
+  }
 
   // ── 8. Compute latest transaction date for freshness tracking ──
   let latestTransactionDate: string | null = null;
@@ -449,7 +472,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         }
       }
     }
-  } catch {}
+  } catch (e: any) {
+    console.warn('[sync] Failed to sync debt accounts from card balances:', e?.message || e);
+  }
 
   return {
     analysis: rawAnalysis,

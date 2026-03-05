@@ -10,6 +10,10 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+// Allow up to 60s for the cron job (Hobby plan max).
+// Processing multiple users' bank connections easily exceeds the default 10s.
+export const config = { maxDuration: 60 };
+
 const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 'true';
 const TL_AUTH_HOST = IS_SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
 const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://api.truelayer.com';
@@ -22,6 +26,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
  * Returns updated data or null on failure.
  */
 async function refreshConnection(bankRow, clientId, clientSecret) {
+  let newRefreshToken = null;
   try {
     const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
       method: 'POST',
@@ -39,14 +44,28 @@ async function refreshConnection(bankRow, clientId, clientSecret) {
       return { success: false, expired: true };
     }
 
+    // Capture refresh token immediately — old one is consumed on exchange.
+    newRefreshToken = tokenData.refresh_token || null;
+
     const headers = { Authorization: `Bearer ${tokenData.access_token}` };
 
     const [accountsRes, cardsRes] = await Promise.all([
       fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
       fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
     ]);
-    const accounts = (await accountsRes.json()).results || [];
-    const cards = (await cardsRes.json()).results || [];
+
+    const accountsJson = await accountsRes.json();
+    const cardsJson = await cardsRes.json();
+
+    // Guard: if TrueLayer returned an error (403, 429, etc.), bail out
+    // rather than proceeding with empty arrays and overwriting valid CSV.
+    if (!accountsRes.ok || !cardsRes.ok) {
+      console.warn(`[bank-sync] TrueLayer data endpoints returned errors — accounts: ${accountsRes.status}, cards: ${cardsRes.status}`);
+      return { success: false, expired: false };
+    }
+
+    const accounts = accountsJson.results || [];
+    const cards = cardsJson.results || [];
 
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
@@ -55,10 +74,14 @@ async function refreshConnection(bankRow, clientId, clientSecret) {
 
     const txPromises = [
       ...accounts.map((a) =>
-        fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers })
+          .then((r) => r.json())
+          .catch((err) => { console.warn(`[bank-sync] Transaction fetch failed for account ${a.account_id}:`, err.message); return { results: [] }; })
       ),
       ...cards.map((c) =>
-        fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers })
+          .then((r) => r.json())
+          .catch((err) => { console.warn(`[bank-sync] Transaction fetch failed for card ${c.account_id}:`, err.message); return { results: [] }; })
       ),
     ];
 
@@ -68,10 +91,17 @@ async function refreshConnection(bankRow, clientId, clientSecret) {
         .then((data) => ({ card: c, balance: (data.results || [])[0] || null }))
         .catch(() => ({ card: c, balance: null }))
     );
+    const accountBalancePromises = accounts.map((a) =>
+      fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/balance`, { headers })
+        .then((r) => r.json())
+        .then((data) => ({ account: a, balance: (data.results || [])[0] || null }))
+        .catch(() => ({ account: a, balance: null }))
+    );
 
-    const [txResults, cardBalanceResults] = await Promise.all([
+    const [txResults, cardBalanceResults, accountBalanceResults] = await Promise.all([
       Promise.all(txPromises),
       Promise.all(cardBalancePromises),
+      Promise.all(accountBalancePromises),
     ]);
     const allTx = txResults.flatMap((r) => r.results || []);
 
@@ -93,16 +123,34 @@ async function refreshConnection(bankRow, clientId, clientSecret) {
         available: r.balance.available || null,
       }));
 
+    const accountBalances = accountBalanceResults
+      .filter((r) => r.balance)
+      .map((r) => {
+        const bal = r.balance;
+        const hasOverdraft = bal.overdraft != null && bal.overdraft > 0;
+        const isOverdrawn = bal.current != null && bal.current < 0;
+        if (!hasOverdraft && !isOverdrawn) return null;
+        return {
+          name: r.account.display_name || r.account.provider?.display_name || 'Account',
+          type: isOverdrawn ? 'overdraft' : 'overdraft_facility',
+          balance: isOverdrawn ? Math.abs(bal.current) : 0,
+          limit: bal.overdraft || null,
+          available: bal.available || null,
+        };
+      })
+      .filter(Boolean);
+
     return {
       success: true,
       csvLines,
-      cardBalances,
-      newRefreshToken: tokenData.refresh_token || null,
+      cardBalances: [...cardBalances, ...accountBalances],
+      newRefreshToken,
       txCount: allTx.length,
     };
   } catch (err) {
     console.warn(`[bank-sync] Connection ${bankRow.connection_id} failed:`, err.message);
-    return { success: false, expired: false };
+    // Return the new refresh token even on failure so it can be persisted
+    return { success: false, expired: false, newRefreshToken };
   }
 }
 
@@ -163,6 +211,11 @@ export default async function handler(req, res) {
       );
 
       for (const { row, result } of batchResults) {
+        // Always persist a new refresh token if we got one, even on failure.
+        if (result.newRefreshToken) {
+          await admin.from('bank_data').update({ refresh_token: result.newRefreshToken }).eq('id', row.id);
+        }
+
         if (!result.success) {
           if (result.expired) {
             results.expired++;
@@ -174,17 +227,18 @@ export default async function handler(req, res) {
 
         results.refreshed++;
 
-        // Update the bank_data row with fresh data
+        // Update the bank_data row with fresh data.
+        // Guard: never overwrite stored CSV with empty data.
         const updateFields = {
-          csv_data: ['Date,Description,Amount', ...result.csvLines].join('\n'),
           updated_at: new Date().toISOString(),
         };
+        if (result.csvLines.length > 0) {
+          updateFields.csv_data = ['Date,Description,Amount', ...result.csvLines].join('\n');
+        }
         if (result.cardBalances && result.cardBalances.length > 0) {
           updateFields.card_balances = result.cardBalances;
         }
-        if (result.newRefreshToken) {
-          updateFields.refresh_token = result.newRefreshToken;
-        }
+        // refresh_token is already persisted above (before data fetch guards)
 
         await admin.from('bank_data').update(updateFields).eq('id', row.id);
 

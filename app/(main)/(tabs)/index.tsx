@@ -952,6 +952,8 @@ export default function Home() {
           setConnectionWarning({ message: 'all_expired', banks });
         } else if (result.connectionIssues.includes('some_connections_expired')) {
           setConnectionWarning({ message: 'some_expired', banks });
+        } else if (result.connectionIssues.includes('sync_failed')) {
+          setConnectionWarning({ message: 'sync_failed', banks: [] });
         }
       } else if (result.dataSource === 'fallback') {
         setConnectionWarning({ message: 'fallback', banks: [] });
