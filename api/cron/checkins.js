@@ -1,5 +1,5 @@
 // ── Proactive Check-in Cron Job ──
-// Runs daily at 12 noon (via Vercel Cron).
+// Runs weekly on Thursday at 12 noon (via Vercel Cron).
 // Sends a contextual nudge to Pro users. If a specific trigger fires
 // (spending spike, inactivity, milestone) the message is tailored.
 // Otherwise a general daily financial check-in is sent so the 12 noon
