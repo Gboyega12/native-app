@@ -15,6 +15,7 @@ import Card from '@/components/Card';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals, FinancialProfile, UserIdentity } from '@/lib/types';
 import { solveBudgetAllocation } from '@/lib/budget-solver';
 import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo';
+import { useVoiceConversation, type VoiceState } from '@/lib/use-voice-conversation';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -886,6 +887,44 @@ export default function Chat() {
   const autoSendRef = useRef(false);
   const [speakingMsgIdx, setSpeakingMsgIdx] = useState<number | null>(null);
   const stopSpeechRef = useRef<(() => void) | null>(null);
+  // Track whether the user initiated this interaction via voice (for auto-TTS)
+  const [voiceMode, setVoiceMode] = useState(false);
+  const lastAssistantMsgRef = useRef<string>('');
+
+  // ── Full speech-to-speech conversation hook ──
+  const {
+    voiceState,
+    toggleListening: toggleVoiceConversation,
+    speak: speakResponse,
+    stopSpeaking,
+    isSupported: voiceConversationSupported,
+    errorMessage: voiceError,
+    amplitude: voiceAmplitude,
+  } = useVoiceConversation({
+    onTranscript: (text) => {
+      // Voice mode: transcribed text goes straight to chat
+      setVoiceMode(true);
+      setInput('');
+      sendMessage(text);
+    },
+    onStateChange: (state) => {
+      // Sync listening state with existing UI
+      setListening(state === 'listening');
+    },
+    autoPlayResponse: true,
+  });
+
+  // ── Auto-play TTS when Bocy responds in voice mode ──
+  useEffect(() => {
+    if (!voiceMode) return;
+    if (loading) return;
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || lastMsg.role !== 'assistant' || !lastMsg.content) return;
+    // Don't re-speak the same message
+    if (lastMsg.content === lastAssistantMsgRef.current) return;
+    lastAssistantMsgRef.current = lastMsg.content;
+    speakResponse(lastMsg.content);
+  }, [messages, loading, voiceMode]);
 
   // ── TTS support check (ElevenLabs uses Audio API; Web Speech API is fallback) ──
   const ttsSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
@@ -897,10 +936,12 @@ export default function Chat() {
       stopSpeechRef.current?.();
       stopSpeechRef.current = null;
       setSpeakingMsgIdx(null);
+      stopSpeaking();
       return;
     }
     // Stop any current speech
     stopSpeechRef.current?.();
+    stopSpeaking();
 
     // Get auth token for ElevenLabs TTS proxy
     const { data: { session } } = await supabase.auth.getSession();
@@ -919,11 +960,20 @@ export default function Chat() {
     }
   }, [prefill]);
 
-  // ── Voice input via Web Speech API ──
-  const voiceSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
+  // ── Voice input — uses full speech-to-speech hook (cross-platform) ──
+  // Falls back to Web Speech API on browsers where expo-av isn't available.
+  const webSpeechAvailable = Platform.OS === 'web' && typeof window !== 'undefined' &&
     (!!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition);
+  const voiceSupported = voiceConversationSupported || webSpeechAvailable;
 
   const toggleVoice = () => {
+    // Prefer cross-platform speech-to-speech hook
+    if (voiceConversationSupported) {
+      toggleVoiceConversation();
+      return;
+    }
+
+    // Fallback: Web Speech API (browser only, for quick text dictation)
     if (listening) {
       recognitionRef.current?.stop();
       setListening(false);
@@ -963,7 +1013,6 @@ export default function Chat() {
 
     recognition.onend = () => {
       setListening(false);
-      // Clean up any interim markers, then auto-send if we have a final transcript
       setInput((prev) => {
         const cleaned = prev.replace(/\u200B/g, '').trim();
         if (cleaned) {
@@ -977,17 +1026,26 @@ export default function Chat() {
       setListening(false);
     };
 
+    setVoiceMode(true);
     setListening(true);
     recognition.start();
   };
 
-  // ── Auto-send after voice recognition completes ──
+  // ── Auto-send after Web Speech API recognition completes (fallback path) ──
   useEffect(() => {
     if (autoSendRef.current && input.trim() && !listening) {
       autoSendRef.current = false;
       sendMessage(input);
     }
   }, [input, listening]);
+
+  /** Human-readable voice state label for UI */
+  const voiceStateLabel: string | null =
+    voiceState === 'processing' ? 'Transcribing\u2026'
+    : voiceState === 'thinking' ? 'Thinking\u2026'
+    : voiceState === 'speaking' ? 'Speaking\u2026'
+    : voiceError ? voiceError
+    : null;
 
   // ── Load context + persisted messages on focus ──
   // Also subscribe to sync completions from other screens so chat stays fresh.
@@ -1873,7 +1931,9 @@ export default function Chat() {
 
   const clearChat = async () => {
     stopSpeechRef.current?.();
+    stopSpeaking();
     setSpeakingMsgIdx(null);
+    setVoiceMode(false);
     setMessages([]);
     setError(null);
     try {
@@ -1941,25 +2001,31 @@ export default function Chat() {
             {/* Center content: orb + hint */}
             <View style={s.voiceHeroCenter}>
               <View style={s.voiceHeroTop}>
-                {(paydayActive || listening) && (
+                {(paydayActive || listening || voiceState !== 'idle') && (
                   <Text style={s.voiceHeroTitle}>
-                    {paydayActive ? 'Payday check-in' : 'Listening\u2026'}
+                    {paydayActive ? 'Payday check-in'
+                      : voiceState === 'processing' ? 'Processing\u2026'
+                      : voiceState === 'thinking' ? 'Thinking\u2026'
+                      : voiceState === 'speaking' ? 'Bocy is speaking'
+                      : 'Listening\u2026'}
                   </Text>
                 )}
                 <Text style={s.voiceHeroSubtitle}>
-                  {listening
-                    ? 'Speak naturally. I\u2019ll send when you\u2019re done.'
-                    : paydayActive
-                      ? 'Tap to speak, or pick a question below'
-                      : 'Tap the mic \u2022 ask anything'}
+                  {voiceStateLabel
+                    ? voiceStateLabel
+                    : listening
+                      ? 'Speak naturally. I\u2019ll send when you\u2019re done.'
+                      : paydayActive
+                        ? 'Tap to speak, or pick a question below'
+                        : 'Tap the mic \u2022 ask anything'}
                 </Text>
               </View>
 
               {/* Voice Orb — the hero CTA */}
               <VoiceOrb
-                listening={listening}
+                listening={listening || voiceState === 'processing' || voiceState === 'thinking' || voiceState === 'speaking'}
                 onPress={voiceSupported ? toggleVoice : () => { setShowTextInput(true); setTimeout(() => inputRef.current?.focus(), 100); }}
-                disabled={loading}
+                disabled={loading && voiceState === 'idle'}
               />
 
               {/* Waveform visualiser + live transcript */}
@@ -2165,8 +2231,18 @@ export default function Chat() {
                 <TextInput
                   ref={inputRef}
                   style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
-                  placeholder={listening ? 'Listening...' : 'Type or tap mic...'}
-                  placeholderTextColor={listening ? colors.green : colors.muted}
+                  placeholder={
+                    listening ? 'Listening...'
+                    : voiceState === 'processing' ? 'Transcribing...'
+                    : voiceState === 'thinking' ? 'Thinking...'
+                    : voiceState === 'speaking' ? 'Speaking...'
+                    : 'Type or tap mic...'
+                  }
+                  placeholderTextColor={
+                    listening || voiceState === 'speaking' ? colors.green
+                    : voiceState === 'processing' || voiceState === 'thinking' ? colors.accent
+                    : colors.muted
+                  }
                   value={input}
                   onChangeText={setInput}
                   onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
@@ -2178,25 +2254,35 @@ export default function Chat() {
                 />
                 {/* Waveform in input bar when listening */}
                 {listening && <VoiceWaveform active={listening} />}
-                <PulseButton trigger={input.trim() ? 'send' : listening ? 'listening' : 'voice'}>
+                <PulseButton trigger={input.trim() ? 'send' : listening ? 'listening' : voiceState === 'speaking' ? 'listening' : 'voice'}>
                   {input.trim() ? (
                     <TouchableOpacity
                       style={[s.actionButton, loading && s.actionButtonDisabled]}
-                      onPress={() => sendMessage(input)}
+                      onPress={() => { setVoiceMode(false); sendMessage(input); }}
                       disabled={loading}
                       activeOpacity={0.7}
                     >
                       <Text style={s.actionButtonIcon}>{'\u2191'}</Text>
+                    </TouchableOpacity>
+                  ) : voiceState === 'speaking' ? (
+                    <TouchableOpacity
+                      style={[s.voiceInputOrb, s.voiceInputOrbListening]}
+                      onPress={stopSpeaking}
+                      activeOpacity={0.7}
+                    >
+                      <View style={s.glyphStop} />
                     </TouchableOpacity>
                   ) : (
                     <TouchableOpacity
                       style={[s.voiceInputOrb, listening && s.voiceInputOrbListening]}
                       onPress={voiceSupported ? toggleVoice : undefined}
                       activeOpacity={0.7}
-                      disabled={!voiceSupported}
+                      disabled={!voiceSupported || voiceState === 'processing' || voiceState === 'thinking'}
                     >
                       {listening ? (
                         <View style={s.glyphStop} />
+                      ) : voiceState === 'processing' || voiceState === 'thinking' ? (
+                        <ActivityIndicator size="small" color={colors.bg} />
                       ) : (
                         <DotMic dotSize={2.5} gap={1.5} color={colors.bg} />
                       )}
