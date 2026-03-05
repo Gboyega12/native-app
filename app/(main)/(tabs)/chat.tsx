@@ -887,8 +887,6 @@ export default function Chat() {
   const autoSendRef = useRef(false);
   const [speakingMsgIdx, setSpeakingMsgIdx] = useState<number | null>(null);
   const stopSpeechRef = useRef<(() => void) | null>(null);
-  // Track whether the user initiated this interaction via voice (for auto-TTS)
-  const [voiceMode, setVoiceMode] = useState(false);
   const lastSpokenMsgCountRef = useRef(0);
 
   // ── Full speech-to-speech conversation hook ──
@@ -904,26 +902,21 @@ export default function Chat() {
   } = useVoiceConversation({
     onTranscript: (text) => {
       // Voice mode: transcribed text goes straight to chat
-      setVoiceMode(true);
       setInput('');
       sendMessage(text);
     },
     onStateChange: (state) => {
       // Sync listening state with existing UI
       setListening(state === 'listening');
-      // When conversation loop ends, clear voice mode
-      if (state === 'idle' && !conversationActive) {
-        setVoiceMode(false);
-      }
     },
     autoPlayResponse: true,
   });
 
-  // ── Auto-play TTS when Bocy responds in voice mode ──
-  // Wait until streaming is done (loading === false), then speak the final message.
-  // Use message count to avoid re-speaking the same response.
+  // ── Auto-play TTS when Bocy responds during voice conversation ──
+  // Triggers when the conversation loop is active (conversationActive),
+  // streaming has finished (loading === false), and there's a new assistant message.
   useEffect(() => {
-    if (!voiceMode) return;
+    if (!conversationActive) return;
     if (loading) return; // Still streaming — wait for final message
     const lastMsg = messages[messages.length - 1];
     if (!lastMsg || lastMsg.role !== 'assistant' || !lastMsg.content) return;
@@ -931,7 +924,7 @@ export default function Chat() {
     if (messages.length <= lastSpokenMsgCountRef.current) return;
     lastSpokenMsgCountRef.current = messages.length;
     speakResponse(lastMsg.content);
-  }, [messages, loading, voiceMode, speakResponse]);
+  }, [messages, loading, conversationActive, speakResponse]);
 
   // ── TTS support check (ElevenLabs uses Audio API; Web Speech API is fallback) ──
   const ttsSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
@@ -1033,7 +1026,6 @@ export default function Chat() {
       setListening(false);
     };
 
-    setVoiceMode(true);
     setListening(true);
     recognition.start();
   };
@@ -1941,7 +1933,6 @@ export default function Chat() {
     stopSpeechRef.current?.();
     stopSpeaking();
     setSpeakingMsgIdx(null);
-    setVoiceMode(false);
     lastSpokenMsgCountRef.current = 0;
     setMessages([]);
     setError(null);
@@ -2267,7 +2258,7 @@ export default function Chat() {
                   {input.trim() ? (
                     <TouchableOpacity
                       style={[s.actionButton, loading && s.actionButtonDisabled]}
-                      onPress={() => { setVoiceMode(false); sendMessage(input); }}
+                      onPress={() => sendMessage(input)}
                       disabled={loading}
                       activeOpacity={0.7}
                     >
