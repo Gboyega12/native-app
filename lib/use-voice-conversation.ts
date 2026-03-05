@@ -8,7 +8,7 @@
  * Features:
  * - Voice Activity Detection (VAD): auto-stops recording after silence
  * - Conversation loop: after TTS finishes, auto-starts listening again
- * - Single tap to start, tap again anytime to exit
+ * - Single tap to start, tap again to stop + transcribe (or exit loop)
  *
  * Supports: iOS, Android, and Web.
  */
@@ -27,37 +27,23 @@ export type VoiceState =
   | 'error';
 
 interface UseVoiceConversationOptions {
-  /** Called with transcribed text — should trigger sendMessage() */
   onTranscript: (text: string) => void;
-  /** Called when voice state changes */
   onStateChange?: (state: VoiceState) => void;
-  /** Whether to auto-play TTS for responses */
   autoPlayResponse?: boolean;
-  /** Silence duration (ms) before auto-stopping recording. Default: 1500 */
   silenceTimeout?: number;
-  /** Amplitude threshold below which audio is considered silence. Default: 0.05 */
   silenceThreshold?: number;
 }
 
 interface UseVoiceConversationReturn {
   voiceState: VoiceState;
-  /** Start recording */
   startListening: () => Promise<void>;
-  /** Stop recording and transcribe */
   stopListening: () => Promise<void>;
-  /** Toggle recording on/off — also starts/stops conversation loop */
   toggleListening: () => Promise<void>;
-  /** Speak text aloud via TTS */
   speak: (text: string) => Promise<void>;
-  /** Stop any current speech playback */
   stopSpeaking: () => void;
-  /** Whether voice is supported on this platform */
   isSupported: boolean;
-  /** Current error message, if any */
   errorMessage: string | null;
-  /** Amplitude level 0-1 for visualisation (updated during recording) */
   amplitude: number;
-  /** Whether the conversation loop is active */
   conversationActive: boolean;
 }
 
@@ -240,16 +226,13 @@ function createAudioPlayer() {
 }
 
 // ── Main hook ──
-//
-// All async/timer callbacks read from refs (not useCallback closures) so they
-// always see the latest values and never go stale.
 
 export function useVoiceConversation({
   onTranscript,
   onStateChange,
   autoPlayResponse = true,
   silenceTimeout = 1500,
-  silenceThreshold = 0.05,
+  silenceThreshold = 0.08,
 }: UseVoiceConversationOptions): UseVoiceConversationReturn {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -265,15 +248,15 @@ export function useVoiceConversation({
   const speechDetectedRef = useRef(false);
   const recordStartRef = useRef<number>(0);
   const stoppingRef = useRef(false);
+  const voiceStateRef = useRef<VoiceState>('idle');
 
-  // ── Keep refs in sync with latest callback props ──
-  // This avoids stale closures in timers/async code.
+  // Keep callback props in refs to avoid stale closures
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
   const onStateChangeRef = useRef(onStateChange);
   onStateChangeRef.current = onStateChange;
 
-  const MIN_RECORD_DURATION = 500;
+  const MIN_RECORD_DURATION = 600;
 
   const isSupported = Platform.OS === 'ios' || Platform.OS === 'android' ||
     (Platform.OS === 'web' && typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia);
@@ -289,23 +272,17 @@ export function useVoiceConversation({
     };
   }, []);
 
-  // ── State update helper (always reads ref for onStateChange) ──
   const updateState = useCallback((state: VoiceState) => {
     if (!mountedRef.current) return;
+    voiceStateRef.current = state;
     setVoiceState(state);
     onStateChangeRef.current?.(state);
-  }, []); // No deps — reads from ref
+  }, []);
 
   const getToken = async (): Promise<string | null> => {
     const { data: { session } } = await supabase.auth.getSession();
     return session?.access_token || null;
   };
-
-  // ── Core operations as plain functions stored in refs ──
-  // This breaks the circular useCallback dependency chain.
-
-  const startListeningRef = useRef<() => Promise<void>>(async () => {});
-  const stopListeningInternalRef = useRef<() => Promise<void>>(async () => {});
 
   const clearAmplitudeTimer = useCallback(() => {
     if (amplitudeTimerRef.current) {
@@ -315,183 +292,210 @@ export function useVoiceConversation({
     setAmplitude(0);
   }, []);
 
-  // ── End conversation loop ──
+  // ── Core: stop recording + transcribe ──
+  // This is the single function that handles stopping a recording and sending
+  // it to STT. It does NOT end the conversation loop — the loop continues
+  // (or not) based on conversationActiveRef.
+  const processRecording = useCallback(async () => {
+    clearAmplitudeTimer();
+    silentSinceRef.current = null;
+    stoppingRef.current = false;
+
+    const recorder = recorderRef.current;
+    if (!recorder) {
+      // No recorder to process — go idle
+      if (voiceStateRef.current === 'listening') updateState('idle');
+      return;
+    }
+    recorderRef.current = null;
+
+    try {
+      updateState('processing');
+      const { base64, mimeType } = await recorder.stop();
+
+      const token = await getToken();
+      if (!token) {
+        setErrorMessage('Not authenticated');
+        updateState('error');
+        setTimeout(() => { if (mountedRef.current) updateState('idle'); }, 2000);
+        return;
+      }
+
+      const res = await fetch('/api/stt', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ audio: base64, mimeType }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.text) {
+        setErrorMessage(data.error || 'Could not understand audio');
+        updateState('error');
+        setTimeout(() => {
+          if (!mountedRef.current) return;
+          if (conversationActiveRef.current) {
+            // Conversation loop: retry listening
+            startRecording();
+          } else {
+            updateState('idle');
+          }
+        }, 1500);
+        return;
+      }
+
+      // Success — send to chat
+      updateState('thinking');
+      onTranscriptRef.current(data.text);
+    } catch (err: any) {
+      console.error('[voice] Transcription failed:', err?.message);
+      setErrorMessage('Failed to process audio');
+      updateState('error');
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        if (conversationActiveRef.current) {
+          startRecording();
+        } else {
+          updateState('idle');
+        }
+      }, 2000);
+    }
+  }, [updateState, clearAmplitudeTimer]);
+
+  // ── Core: start recording ──
+  // Separated so it can be called from multiple places without circular deps.
+  // Uses processRecording ref to avoid stale closure.
+  const processRecordingRef = useRef(processRecording);
+  processRecordingRef.current = processRecording;
+
+  const startRecording = useCallback(async () => {
+    if (!mountedRef.current) return;
+
+    try {
+      setErrorMessage(null);
+      silentSinceRef.current = null;
+      speechDetectedRef.current = false;
+      stoppingRef.current = false;
+      recordStartRef.current = Date.now();
+
+      const recorder = Platform.OS === 'web'
+        ? createWebRecorder()
+        : await createNativeRecorder();
+
+      // Check if we were cancelled while creating recorder
+      if (!mountedRef.current) {
+        recorder.cleanup();
+        return;
+      }
+
+      recorderRef.current = recorder;
+      await recorder.start();
+      updateState('listening');
+
+      // Amplitude polling + VAD
+      amplitudeTimerRef.current = setInterval(async () => {
+        if (!mountedRef.current) return;
+
+        const amp = await recorder.getAmplitude();
+        setAmplitude(amp);
+
+        // VAD: only auto-stop in conversation mode
+        if (!conversationActiveRef.current) return;
+        if (stoppingRef.current) return;
+        if (Date.now() - recordStartRef.current < MIN_RECORD_DURATION) return;
+
+        if (amp > silenceThreshold) {
+          speechDetectedRef.current = true;
+          silentSinceRef.current = null;
+        } else if (speechDetectedRef.current) {
+          // Speech was detected, now it's silent
+          if (silentSinceRef.current === null) {
+            silentSinceRef.current = Date.now();
+          } else if (Date.now() - silentSinceRef.current >= silenceTimeout) {
+            // Silence long enough — auto-stop and transcribe
+            stoppingRef.current = true;
+            if (amplitudeTimerRef.current) {
+              clearInterval(amplitudeTimerRef.current);
+              amplitudeTimerRef.current = null;
+            }
+            setTimeout(() => processRecordingRef.current(), 0);
+          }
+        }
+      }, 100);
+    } catch (err: any) {
+      console.error('[voice] Recording start failed:', err?.message);
+      setErrorMessage('Microphone access denied. Please enable it in settings.');
+      updateState('error');
+      if (conversationActiveRef.current) {
+        conversationActiveRef.current = false;
+        setConversationActive(false);
+      }
+    }
+  }, [updateState, silenceThreshold, silenceTimeout]);
+
+  // Keep the ref up to date (startRecording changes when deps change)
+  const startRecordingRef = useRef(startRecording);
+  startRecordingRef.current = startRecording;
+
+  // ── Hard cancel: discard recording and end loop ──
   const endConversation = useCallback(() => {
     conversationActiveRef.current = false;
     setConversationActive(false);
+    clearAmplitudeTimer();
+    stoppingRef.current = false;
+    silentSinceRef.current = null;
+    speechDetectedRef.current = false;
+    // Discard any in-progress recording
     if (recorderRef.current) {
       recorderRef.current.cleanup();
       recorderRef.current = null;
     }
-    clearAmplitudeTimer();
     playerRef.current.stop();
-    silentSinceRef.current = null;
-    speechDetectedRef.current = false;
-    stoppingRef.current = false;
     updateState('idle');
   }, [updateState, clearAmplitudeTimer]);
 
-  // ── Assign startListening implementation ──
-  // Uses refs for stopListeningInternal to avoid circular deps.
-  useEffect(() => {
-    startListeningRef.current = async () => {
-      if (!mountedRef.current) return;
-      try {
-        setErrorMessage(null);
-        silentSinceRef.current = null;
-        speechDetectedRef.current = false;
-        stoppingRef.current = false;
-        recordStartRef.current = Date.now();
-
-        const recorder = Platform.OS === 'web'
-          ? createWebRecorder()
-          : await createNativeRecorder();
-
-        // If conversation was ended while we were creating the recorder, abort
-        if (!mountedRef.current || (!conversationActiveRef.current && voiceState === 'idle')) {
-          recorder.cleanup();
-          return;
-        }
-
-        recorderRef.current = recorder;
-        await recorder.start();
-        updateState('listening');
-
-        amplitudeTimerRef.current = setInterval(async () => {
-          if (!mountedRef.current) return;
-
-          const amp = await recorder.getAmplitude();
-          setAmplitude(amp);
-
-          // VAD only when conversation loop is active
-          if (!conversationActiveRef.current) return;
-          if (Date.now() - recordStartRef.current < MIN_RECORD_DURATION) return;
-
-          if (amp > silenceThreshold) {
-            speechDetectedRef.current = true;
-            silentSinceRef.current = null;
-          } else if (speechDetectedRef.current) {
-            if (silentSinceRef.current === null) {
-              silentSinceRef.current = Date.now();
-            } else if (Date.now() - silentSinceRef.current >= silenceTimeout) {
-              if (!stoppingRef.current) {
-                stoppingRef.current = true;
-                if (amplitudeTimerRef.current) {
-                  clearInterval(amplitudeTimerRef.current);
-                  amplitudeTimerRef.current = null;
-                }
-                // Call via ref to get latest implementation
-                setTimeout(() => stopListeningInternalRef.current(), 0);
-              }
-            }
-          }
-        }, 100);
-      } catch (err: any) {
-        console.error('[voice] Recording start failed:', err?.message);
-        setErrorMessage('Microphone access denied. Please enable it in settings.');
-        updateState('error');
-        if (conversationActiveRef.current) {
-          conversationActiveRef.current = false;
-          setConversationActive(false);
-        }
-      }
-    };
-  }, [updateState, silenceThreshold, silenceTimeout]);
-
-  // ── Assign stopListeningInternal implementation ──
-  useEffect(() => {
-    stopListeningInternalRef.current = async () => {
-      if (amplitudeTimerRef.current) {
-        clearInterval(amplitudeTimerRef.current);
-        amplitudeTimerRef.current = null;
-      }
-      setAmplitude(0);
-      silentSinceRef.current = null;
-
-      const recorder = recorderRef.current;
-      if (!recorder) return;
-      recorderRef.current = null;
-
-      try {
-        updateState('processing');
-        const { base64, mimeType } = await recorder.stop();
-
-        const token = await getToken();
-        if (!token) {
-          setErrorMessage('Not authenticated');
-          updateState('error');
-          setTimeout(() => {
-            if (mountedRef.current) updateState('idle');
-          }, 2000);
-          return;
-        }
-
-        const res = await fetch('/api/stt', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({ audio: base64, mimeType }),
-        });
-
-        const data = await res.json();
-        if (!res.ok || !data.success || !data.text) {
-          setErrorMessage(data.error || 'Could not understand audio');
-          updateState('error');
-          setTimeout(() => {
-            if (mountedRef.current && conversationActiveRef.current) {
-              startListeningRef.current();
-            } else if (mountedRef.current) {
-              updateState('idle');
-            }
-          }, 1500);
-          return;
-        }
-
-        // We have text — transition to thinking and send to chat
-        updateState('thinking');
-        onTranscriptRef.current(data.text);
-      } catch (err: any) {
-        console.error('[voice] Transcription failed:', err?.message);
-        setErrorMessage('Failed to process audio');
-        updateState('error');
-        setTimeout(() => {
-          if (mountedRef.current && conversationActiveRef.current) {
-            startListeningRef.current();
-          } else if (mountedRef.current) {
-            updateState('idle');
-          }
-        }, 2000);
-      }
-    };
-  }, [updateState]);
-
-  // ── Public API (stable references that delegate to refs) ──
-
+  // ── Public: start listening ──
   const startListening = useCallback(async () => {
-    await startListeningRef.current();
-  }, []);
+    await startRecording();
+  }, [startRecording]);
 
+  // ── Public: stop listening (stop + transcribe) ──
   const stopListening = useCallback(async () => {
     stoppingRef.current = true;
-    await stopListeningInternalRef.current();
-  }, []);
+    await processRecording();
+  }, [processRecording]);
 
+  // ── Public: toggle ──
+  // First tap: start conversation loop + begin recording
+  // Second tap while listening: stop recording + transcribe + end loop
+  // Second tap while processing/thinking/speaking: hard cancel
   const toggleListening = useCallback(async () => {
     if (conversationActiveRef.current) {
-      endConversation();
+      const state = voiceStateRef.current;
+      if (state === 'listening') {
+        // User tapped while recording — stop, transcribe, then end loop after this turn
+        conversationActiveRef.current = false;
+        setConversationActive(false);
+        stoppingRef.current = true;
+        await processRecordingRef.current();
+      } else {
+        // User tapped during processing/thinking/speaking — hard cancel
+        endConversation();
+      }
       return;
     }
 
+    // Start conversation loop
     conversationActiveRef.current = true;
     setConversationActive(true);
-    await startListeningRef.current();
+    await startRecordingRef.current();
   }, [endConversation]);
 
+  // ── Speak response via TTS, then auto-listen if loop active ──
   const speak = useCallback(async (text: string) => {
-    if (!text.trim()) return;
-    if (!mountedRef.current) return;
+    if (!text.trim() || !mountedRef.current) return;
 
     try {
       updateState('speaking');
@@ -511,7 +515,7 @@ export function useVoiceConversation({
       if (!res.ok) {
         console.warn('[voice] TTS failed:', res.status);
         if (mountedRef.current && conversationActiveRef.current) {
-          await startListeningRef.current();
+          await startRecordingRef.current();
         } else if (mountedRef.current) {
           updateState('idle');
         }
@@ -526,7 +530,7 @@ export function useVoiceConversation({
       await playerRef.current.play(base64, 'audio/mpeg', () => {
         if (!mountedRef.current) return;
         if (conversationActiveRef.current) {
-          startListeningRef.current();
+          startRecordingRef.current();
         } else {
           updateState('idle');
         }
@@ -534,17 +538,18 @@ export function useVoiceConversation({
     } catch (err: any) {
       console.warn('[voice] TTS playback error:', err?.message);
       if (mountedRef.current && conversationActiveRef.current) {
-        startListeningRef.current();
+        startRecordingRef.current();
       } else if (mountedRef.current) {
         updateState('idle');
       }
     }
   }, [updateState]);
 
+  // ── Stop speaking ──
   const stopSpeaking = useCallback(() => {
     playerRef.current.stop();
     if (conversationActiveRef.current) {
-      startListeningRef.current();
+      startRecordingRef.current();
     } else {
       updateState('idle');
     }

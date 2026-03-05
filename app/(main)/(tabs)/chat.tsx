@@ -888,6 +888,8 @@ export default function Chat() {
   const [speakingMsgIdx, setSpeakingMsgIdx] = useState<number | null>(null);
   const stopSpeechRef = useRef<(() => void) | null>(null);
   const lastSpokenMsgCountRef = useRef(0);
+  // Track that we're expecting a voice response (set on transcript, cleared after speak)
+  const pendingVoiceResponseRef = useRef(false);
 
   // ── Full speech-to-speech conversation hook ──
   const {
@@ -902,6 +904,8 @@ export default function Chat() {
   } = useVoiceConversation({
     onTranscript: (text) => {
       // Voice mode: transcribed text goes straight to chat
+      // Mark that the next response should be spoken (even if loop was ended)
+      pendingVoiceResponseRef.current = true;
       setInput('');
       sendMessage(text);
     },
@@ -912,17 +916,18 @@ export default function Chat() {
     autoPlayResponse: true,
   });
 
-  // ── Auto-play TTS when Bocy responds during voice conversation ──
-  // Triggers when the conversation loop is active (conversationActive),
-  // streaming has finished (loading === false), and there's a new assistant message.
+  // ── Auto-play TTS when Bocy responds to voice input ──
+  // Uses pendingVoiceResponseRef so even the final response after ending
+  // the conversation loop still gets spoken.
   useEffect(() => {
-    if (!conversationActive) return;
+    if (!pendingVoiceResponseRef.current && !conversationActive) return;
     if (loading) return; // Still streaming — wait for final message
     const lastMsg = messages[messages.length - 1];
     if (!lastMsg || lastMsg.role !== 'assistant' || !lastMsg.content) return;
     // Don't re-speak if we already spoke for this message count
     if (messages.length <= lastSpokenMsgCountRef.current) return;
     lastSpokenMsgCountRef.current = messages.length;
+    pendingVoiceResponseRef.current = false;
     speakResponse(lastMsg.content);
   }, [messages, loading, conversationActive, speakResponse]);
 
