@@ -140,7 +140,6 @@ export default async function handler(req, res) {
           .map((a) => ACHIEVEMENT_MAP[a.achievement_key])
           .filter(Boolean);
 
-        const scoreChange = prevSnapshot ? analysis.decision_score - prevSnapshot.decision_score : 0;
         const surplusChange = prevSnapshot ? analysis.surplus - prevSnapshot.surplus : 0;
 
         // Build push notification body — lead with actionable info
@@ -165,8 +164,6 @@ export default async function handler(req, res) {
             subject,
             html: buildDigestHtml({
               name,
-              decisionScore: analysis.decision_score,
-              scoreChange,
               monthlyIncome: analysis.monthly_income,
               monthlySpending: analysis.monthly_spending,
               surplus: analysis.surplus,

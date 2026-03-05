@@ -1,16 +1,16 @@
 // ── Proactive Check-in Cron Job ──
 // Runs daily at 12 noon (via Vercel Cron).
 // Sends a contextual nudge to Pro users. If a specific trigger fires
-// (score drop, spending spike, inactivity, milestone) the message is
-// tailored. Otherwise a general daily check-in is sent so the 12 noon
+// (spending spike, inactivity, milestone) the message is tailored.
+// Otherwise a general daily financial check-in is sent so the 12 noon
 // notification always arrives.
 //
 // Check-in triggers (in priority order):
-//   1. Score drop: Decision score dropped 5+ since last snapshot
+//   1. Surplus drop: Surplus dropped significantly since last snapshot
 //   2. Spending spike: A category jumped 30%+ vs. last period
 //   3. Plan stale: User has moves but hasn't opened app in 3+ days
 //   4. Milestone approaching: Close to a savings/debt goal
-//   5. Fallback: General daily score summary (always fires)
+//   5. Fallback: General daily financial summary (always fires)
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -126,10 +126,10 @@ export default async function handler(req, res) {
         // ── Determine check-in message ──
         let message = null;
 
-        // 1. Score drop
-        if (previous && current.decision_score - previous.decision_score <= -5) {
-          const drop = previous.decision_score - current.decision_score;
-          message = `Your decision score dropped ${drop} points recently. This usually happens when spending increases or income changes. Want to look at what shifted and find a quick fix?`;
+        // 1. Surplus drop
+        if (previous && previous.surplus > 0 && current.surplus < previous.surplus * 0.7) {
+          const drop = Math.round(previous.surplus - current.surplus);
+          message = `Your surplus dropped by £${drop} recently. This usually happens when spending increases or income changes. Want to look at what shifted and find a quick fix?`;
         }
 
         // 2. Spending spike
@@ -176,13 +176,13 @@ export default async function handler(req, res) {
         // Fallback: if no specific condition triggered, send a general daily
         // check-in so the 12 noon notification always arrives for Pro users.
         if (!message) {
-          const score = current.decision_score;
-          if (score >= 70) {
-            message = `Your score is ${score} — your finances are in a strong position. Let's keep the momentum going. Want to see if there's a new move worth trying?`;
-          } else if (score >= 50) {
-            message = `Your score is sitting at ${score}. There's room to grow — want to take a quick look at what could push it higher this week?`;
+          const surplus = current.surplus;
+          if (surplus >= 300) {
+            message = `You've got £${Math.round(surplus)} surplus this month — your finances are in a strong position. Want to see if there's a new move worth trying?`;
+          } else if (surplus >= 0) {
+            message = `You've got £${Math.round(surplus)} surplus this month. There's room to grow — want to take a quick look at what could stretch that further?`;
           } else {
-            message = `Your score is at ${score}. A few targeted moves could start turning things around. Want to take a look?`;
+            message = `You're running a £${Math.round(Math.abs(surplus))} deficit this month. A few targeted moves could start turning things around. Want to take a look?`;
           }
         }
 

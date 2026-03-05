@@ -38,8 +38,6 @@ function baseLayout(content: string, preheader: string = '', appUrl: string = 'h
     h2 { font-size: 18px; font-weight: 600; margin: 0 0 16px 0; letter-spacing: -0.3px; }
     p { font-size: 14px; line-height: 22px; margin: 0 0 12px 0; }
     .achievement-badge { display: inline-block; width: 36px; height: 36px; line-height: 36px; text-align: center; background: ${BRAND_COLOR}20; color: ${BRAND_COLOR}; border: 1px solid ${BRAND_COLOR}40; border-radius: 50%; font-weight: 700; font-size: 14px; margin-right: 12px; }
-    .score-bar { height: 6px; background: ${BORDER_COLOR}; border-radius: 3px; margin: 8px 0; }
-    .score-fill { height: 6px; border-radius: 3px; }
     .move-item { padding: 12px 0; border-bottom: 1px solid ${BORDER_COLOR}; }
     .move-item:last-child { border-bottom: none; }
     .footer { text-align: center; margin-top: 32px; padding-top: 24px; border-top: 1px solid ${BORDER_COLOR}; }
@@ -69,8 +67,6 @@ function baseLayout(content: string, preheader: string = '', appUrl: string = 'h
 
 export interface WeeklyDigestData {
   name: string;
-  decisionScore: number;
-  scoreChange: number;
   monthlyIncome: number;
   monthlySpending: number;
   surplus: number;
