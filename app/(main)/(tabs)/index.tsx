@@ -2004,21 +2004,22 @@ export default function Home() {
 
                 {/* Big centered spend number */}
                 <View style={s.periodTotalRow}>
-                  <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                    <Text style={[s.periodTotalAmount, { fontSize: 32, color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
-                      {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
-                    </Text>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: overallPctUsed > 100 ? colors.coral : colors.muted, marginLeft: 6, letterSpacing: 0.3 }}>
-                      {overallPctUsed}%
-                    </Text>
-                  </View>
+                  <Text style={[s.periodTotalAmount, { fontSize: 32, color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
+                    {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
+                  </Text>
                   <Text style={s.periodTotalOf}>
                     of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
                   </Text>
                 </View>
 
-                {/* Overall progress bar */}
-                <View style={s.progressTrack}>
+                {/* Overall progress bar with percentage label */}
+                <View style={s.sectionHeaderRow}>
+                  <View style={{ flex: 1 }} />
+                  <Text style={[s.sectionStatus, { color: overallPctUsed > 100 ? colors.coral : colors.muted, marginBottom: 6 }]}>
+                    {overallPctUsed}%
+                  </Text>
+                </View>
+                <View style={[s.progressTrack, { marginTop: 0 }]}>
                   <View style={[
                     s.progressFill,
                     {
