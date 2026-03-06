@@ -6,7 +6,6 @@ import { classifyTransaction } from './classifier';
 import { normaliseDescription } from './normalise';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
 import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants';
-import { buildSurplusWaterfall, generateSurplusMoves, inferTaxSituation } from './surplus-engine';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -1036,50 +1035,76 @@ const EnrichmentEngine = {
       });
     }
 
-    // ── Surplus allocation for financially healthy users ──
-    // Uses the surplus engine to generate tax-optimised waterfall moves.
-    // Replaces generic ISA/pension recommendations with mathematically ranked
-    // allocation tiers based on the user's actual marginal tax rate.
-    if (m.savingsRate >= 15 && p.surplus > 0 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
-      try {
-        const tax = inferTaxSituation(profile, identity);
-        const allocation = buildSurplusWaterfall(profile, tax, identity || null);
-        const surplusMoves = generateSurplusMoves(allocation);
-        moves.push(...surplusMoves);
-      } catch {
-        // Fallback: if surplus engine fails, add basic ISA move
-        if (p.surplus * 12 > 3000) {
-          moves.push({
-            action: `Invest £${Math.round(p.surplus * 0.7)}/month into a Stocks & Shares ISA`,
-            annualImpact: Math.round(p.surplus * 0.7 * 12 * 0.05),
-            monthlyImpact: Math.round(p.surplus * 0.7 * 0.05),
-            effort: 'low',
-            category: 'invest',
-            merchants: [],
-            strategy: `You have £${Math.round(p.surplus)}/month surplus. ISA growth is tax-free.`,
-            steps: ['Open a Stocks & Shares ISA', 'Set up monthly direct debit', 'Choose a global index fund'],
-            effect: `Tax-free growth on £${Math.round(p.surplus * 0.7 * 12).toLocaleString()}/year.`,
-          });
-        }
+    // ── High-level intelligent moves for financially healthy users ──
+    if (m.savingsRate >= 20 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
+      // ISA maximization
+      const isaLimit = 20000;
+      const annualSurplus = Math.round(p.surplus * 12);
+      if (annualSurplus > 3000) {
+        const isaContribution = Math.min(annualSurplus, isaLimit);
+        const isaReturn = Math.round(isaContribution * 0.05); // ~5% return estimate
+        moves.push({
+          action: `Max out your ISA with \u00a3${Math.round(isaContribution / 12)}/month tax-free`,
+          annualImpact: isaReturn,
+          monthlyImpact: Math.round(isaReturn / 12),
+          effort: 'low',
+          category: 'invest',
+          merchants: [],
+          strategy: `You have \u00a3${Math.round(p.surplus)}/month surplus and a ${Math.round(m.savingsRate)}% savings rate. Your ISA allowance is \u00a3${isaLimit.toLocaleString()}/year — this grows tax-free.`,
+          steps: ['Open a Stocks & Shares ISA if you don\'t have one', 'Set up monthly direct debit on payday', 'Choose a global index fund for long-term growth', 'I\'ll track your ISA utilisation'],
+          effect: `\u00a3${isaReturn.toLocaleString()}/year in tax-free returns (estimated at 5%).`,
+        });
       }
 
-      // Income growth — always relevant for surplus optimisers
+      // Salary sacrifice pension
+      if (p.income > 2500) {
+        const pensionExtra = Math.round(p.surplus * 0.15);
+        const taxRelief = Math.round(pensionExtra * 0.25); // Basic rate relief
+        moves.push({
+          action: `Boost pension by \u00a3${pensionExtra}/month via salary sacrifice`,
+          annualImpact: taxRelief * 12,
+          monthlyImpact: taxRelief,
+          effort: 'medium',
+          category: 'invest',
+          merchants: [],
+          strategy: `Salary sacrifice reduces your taxable income. Every \u00a3100 you contribute costs you \u00a3${p.income > 4167 ? '60' : '80'} after tax relief. Free money from HMRC.`,
+          steps: ['Check your employer\'s salary sacrifice scheme', 'Calculate how much extra you can afford', 'Request the change through HR/payroll', 'I\'ll factor the reduced take-home into your budget'],
+          effect: `\u00a3${(taxRelief * 12).toLocaleString()}/year in tax relief + employer NI savings.`,
+        });
+      }
+
+      // Premium bonds for emergency fund
+      if (p.surplus > 200) {
+        moves.push({
+          action: 'Move emergency fund to Premium Bonds for tax-free prizes',
+          annualImpact: Math.round(p.surplus * 12 * 0.04),
+          monthlyImpact: Math.round(p.surplus * 0.04),
+          effort: 'low',
+          category: 'savings',
+          merchants: [],
+          strategy: `Your emergency fund can work harder. Premium Bonds offer prize rates equivalent to ~4% — all tax-free. Max \u00a350,000.`,
+          steps: ['Open an NS&I account if you don\'t have one', 'Transfer your emergency fund into Premium Bonds', 'Keep 1 month of expenses in easy access for true emergencies', 'I\'ll track any prizes you win'],
+          effect: 'Tax-free returns on money you\'d keep in savings anyway.',
+        });
+      }
+
+      // Income growth / career move
       if (p.income > 0) {
         const raiseTarget = Math.round(p.income * 0.1);
         moves.push({
-          action: `Target a £${raiseTarget}/month raise or income boost`,
+          action: `Target a \u00a3${raiseTarget}/month raise or income boost`,
           annualImpact: raiseTarget * 12,
           monthlyImpact: raiseTarget,
           effort: 'high',
           category: 'savings',
           merchants: [],
-          strategy: `Your spending is well-managed. The biggest lever now is increasing income. A 10% raise would add £${raiseTarget}/month.`,
-          steps: ['Research market rate for your role', 'Document achievements for a pay review', 'Consider freelance or side income'],
-          effect: `£${(raiseTarget * 12).toLocaleString()}/year extra to invest, save, or enjoy.`,
+          strategy: `Your spending is well-managed. The biggest lever now is increasing income. A 10% raise or side income would add \u00a3${raiseTarget}/month.`,
+          steps: ['Research market rate for your role on Glassdoor/LinkedIn', 'Document your achievements for a pay review conversation', 'Consider freelance or side income opportunities', 'I\'ll model the impact of any income change on your goals'],
+          effect: `\u00a3${(raiseTarget * 12).toLocaleString()}/year extra to invest, save, or enjoy.`,
         });
       }
 
-      // Smart spending: cashback & rewards
+      // Smart spending: cashback & rewards optimization
       moves.push({
         action: 'Optimise cashback and rewards across all spending',
         annualImpact: Math.round(p.spending * 12 * 0.015),
@@ -1087,9 +1112,9 @@ const EnrichmentEngine = {
         effort: 'low',
         category: 'savings',
         merchants: [],
-        strategy: `You spend £${Math.round(p.spending)}/month. Even 1-2% back adds up to £${Math.round(p.spending * 12 * 0.015)}/year.`,
-        steps: ['Use a rewards credit card for all spending and pay in full', 'Stack cashback sites for online purchases', 'Review if your current cards offer the best rewards'],
-        effect: `£${Math.round(p.spending * 12 * 0.015)}/year in cashback and rewards.`,
+        strategy: `You spend \u00a3${Math.round(p.spending)}/month. Even 1-2% back across all spending adds up to \u00a3${Math.round(p.spending * 12 * 0.015)}/year.`,
+        steps: ['Use a rewards credit card for all spending and pay in full', 'Stack cashback sites (TopCashback/Quidco) for online purchases', 'Review if your current cards offer the best rewards for your categories', 'I\'ll track your rewards earnings'],
+        effect: `\u00a3${Math.round(p.spending * 12 * 0.015)}/year in cashback and rewards.`,
       });
     }
 

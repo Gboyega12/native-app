@@ -15,12 +15,11 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
-import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, UserIdentity } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
-import { buildSurplusWaterfall, inferTaxSituation, findThresholdProximity, type SurplusAllocation, type ThresholdAlert } from '@/lib/surplus-engine';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -200,11 +199,6 @@ export default function Home() {
   // Previous month snapshot for real income comparison
   const [prevSnapshot, setPrevSnapshot] = useState<{ monthly_spending: number; monthly_income: number } | null>(null);
 
-  // Surplus allocation waterfall
-  const [surplusWaterfall, setSurplusWaterfall] = useState<SurplusAllocation | null>(null);
-  const [thresholdAlerts, setThresholdAlerts] = useState<ThresholdAlert[]>([]);
-  const [waterfallExpanded, setWaterfallExpanded] = useState(false);
-
   // ── Plan data (merged from plan page) ──
   const [userPlans, setUserPlans] = useState<any[]>([]);
   const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[] }>>({});
@@ -240,44 +234,6 @@ export default function Home() {
     else setBudgetPeriod('month');
   }, [analysis]);
 
-  // Compute surplus allocation waterfall when analysis changes
-  useEffect(() => {
-    if (!analysis || (analysis.surplus ?? 0) <= 0) {
-      setSurplusWaterfall(null);
-      setThresholdAlerts([]);
-      return;
-    }
-    try {
-      const savingsRate = analysis.monthly_income > 0 ? ((analysis.surplus ?? 0) / analysis.monthly_income) * 100 : 0;
-      if (savingsRate < 15) { setSurplusWaterfall(null); return; }
-
-      const profile: any = {
-        monthly: {
-          income: analysis.monthly_income,
-          spending: analysis.monthly_spending,
-          surplus: analysis.surplus ?? 0,
-          debtPayments: 0,
-          subscriptions: 0, foodDelivery: 0, transport: 0, groceries: 0,
-          shopping: 0, eatingOut: 0, entertainment: 0,
-        },
-        budgetReality: {
-          nonDiscretionary: analysis.non_discretionary ?? { total: 0, items: [] },
-          discretionary: analysis.discretionary ?? { total: 0, items: [] },
-        },
-        incomeSources: analysis.income_sources ?? [],
-        subscriptions: [],
-        metrics: { savingsRate, creditCardCount: 0, bnplCount: 0, debtAccountCount: 0, subscriptionCount: 0, streamingCount: 0, foodDelivery: 0, transport: 0, groceries: 0, shopping: 0, eatingOut: 0, coffeeAndCafes: 0, entertainment: 0, debtPayments: 0 },
-      };
-      const tax = inferTaxSituation(profile, null);
-      const allocation = buildSurplusWaterfall(profile, tax, null);
-      const alerts = findThresholdProximity(tax.grossIncome, tax);
-      setSurplusWaterfall(allocation);
-      setThresholdAlerts(alerts);
-    } catch {
-      setSurplusWaterfall(null);
-      setThresholdAlerts([]);
-    }
-  }, [analysis]);
 
   // Load custom weekly limit from storage
   useEffect(() => {
@@ -1685,109 +1641,6 @@ export default function Home() {
               <View key={i} style={[s.dot, { backgroundColor: colors.border }]} />
             ))}
           </View>
-
-          {/* ══════════════════════════════════════════════
-              SURPLUS WATERFALL — tax-optimised allocation
-              ══════════════════════════════════════════════ */}
-          {surplusWaterfall && surplusWaterfall.waterfall.length > 0 && (
-            <AnimGlyph delay={150}>
-              <Card variant="highlight" style={{ marginBottom: spacing.lg }}>
-                <TouchableOpacity onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setWaterfallExpanded(!waterfallExpanded); }} activeOpacity={0.8}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontFamily: fonts.mono, fontSize: 9, letterSpacing: 2.5, color: colors.green, textTransform: 'uppercase', marginBottom: 6 }}>
-                        SURPLUS ALLOCATION
-                      </Text>
-                      <Text style={{ fontFamily: fonts.medium, fontSize: 20, color: colors.text }}>
-                        {'\u00a3'}{surplusWaterfall.monthlySurplus.toLocaleString()}<Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2 }}>/mo to allocate</Text>
-                      </Text>
-                      <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted, marginTop: 4 }}>
-                        Marginal rate: {Math.round(surplusWaterfall.marginalRate.combined * 100)}% {'\u2022'} Blended return: {Math.round(surplusWaterfall.blendedReturn * 100)}%
-                      </Text>
-                    </View>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, marginTop: 4 }}>{waterfallExpanded ? '\u25B2' : '\u25BC'}</Text>
-                  </View>
-                </TouchableOpacity>
-
-                {/* Compact waterfall bars (always visible) */}
-                <View style={{ marginTop: 16 }}>
-                  {surplusWaterfall.waterfall.slice(0, waterfallExpanded ? undefined : 3).map((tier, i) => (
-                    <View key={tier.destination} style={{ marginBottom: 10 }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.text, flex: 1 }} numberOfLines={1}>{tier.label}</Text>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green, marginLeft: 8 }}>
-                          {'\u00a3'}{tier.monthlyAmount}/mo
-                        </Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <View style={{ flex: 1, height: 3, borderRadius: 1.5, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
-                          <View style={{
-                            width: `${Math.min(100, surplusWaterfall.monthlySurplus > 0 ? (tier.monthlyAmount / surplusWaterfall.monthlySurplus) * 100 : 0)}%`,
-                            height: '100%', borderRadius: 1.5,
-                            backgroundColor: i === 0 ? colors.green : i === 1 ? colors.accent : colors.text2,
-                          }} />
-                        </View>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, width: 50, textAlign: 'right' }}>
-                          {tier.effectiveReturn > 1 ? `${Math.round((tier.effectiveReturn - 1) * 100)}%` : `${Math.round(tier.effectiveReturn * 100)}%`} eff.
-                        </Text>
-                      </View>
-                      {waterfallExpanded && (
-                        <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, marginTop: 4, lineHeight: 18 }}>{tier.reasoning}</Text>
-                      )}
-                    </View>
-                  ))}
-                </View>
-
-                {waterfallExpanded && surplusWaterfall.freeMoneyMissed > 0 && (
-                  <View style={{ marginTop: 12, padding: 12, borderRadius: radius.sm, backgroundColor: `${colors.green}12` }}>
-                    <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.green }}>
-                      {'\u00a3'}{surplusWaterfall.freeMoneyMissed.toLocaleString()}/yr in employer match unclaimed
-                    </Text>
-                    <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, marginTop: 4 }}>
-                      Increase your pension contribution to capture this. It's a 100% instant return.
-                    </Text>
-                  </View>
-                )}
-
-                {waterfallExpanded && thresholdAlerts.length > 0 && (
-                  <View style={{ marginTop: 12 }}>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 8 }}>TAX THRESHOLDS</Text>
-                    {thresholdAlerts.map((alert, i) => (
-                      <View key={alert.threshold} style={{ marginBottom: 8, padding: 10, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border }}>
-                        <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18 }}>{alert.insight}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-
-                {waterfallExpanded && surplusWaterfall.waterfall.some(t => t.projection.years10 > 0) && (
-                  <View style={{ marginTop: 16 }}>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 10 }}>PROJECTED GROWTH</Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, marginBottom: 4 }}>5 YEARS</Text>
-                        <Text style={{ fontFamily: fonts.medium, fontSize: 16, color: colors.text }}>
-                          {'\u00a3'}{surplusWaterfall.waterfall.reduce((s, t) => s + t.projection.years5, 0).toLocaleString()}
-                        </Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, marginBottom: 4 }}>10 YEARS</Text>
-                        <Text style={{ fontFamily: fonts.medium, fontSize: 16, color: colors.green }}>
-                          {'\u00a3'}{surplusWaterfall.waterfall.reduce((s, t) => s + t.projection.years10, 0).toLocaleString()}
-                        </Text>
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, marginBottom: 4 }}>20 YEARS</Text>
-                        <Text style={{ fontFamily: fonts.medium, fontSize: 16, color: colors.green }}>
-                          {'\u00a3'}{surplusWaterfall.waterfall.reduce((s, t) => s + t.projection.years20, 0).toLocaleString()}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                )}
-              </Card>
-            </AnimGlyph>
-          )}
 
           {/* ══════════════════════════════════════════════
               YOUR MOVES — inline from Plan page

@@ -787,35 +787,6 @@ Tools:
     prompt += `\nIMPORTANT: When the user asks about financial resilience, "what if" scenarios, or whether they can afford a life change, reference these scenario probabilities. Make risk feel concrete: "There's a ${hc.scenarios?.[0]?.probability || 6}% chance of income disruption this year — your buffer ${hc.buffer_adequacy >= 70 ? 'covers that well' : 'would struggle with that'}."`;
   }
 
-  // ── Surplus allocation waterfall ──
-  if (ctx.surplus_allocation) {
-    const sa = ctx.surplus_allocation;
-    prompt += `\n\nSurplus allocation analysis (tax-optimised waterfall):`;
-    prompt += `\n- Monthly surplus: £${sa.monthly_surplus} (£${sa.annual_surplus}/year)`;
-    prompt += `\n- Effective marginal tax rate: ${sa.marginal_rate.combined}%`;
-    if (sa.marginal_rate.income_tax) prompt += ` (income tax ${sa.marginal_rate.income_tax}%`;
-    if (sa.marginal_rate.national_insurance) prompt += `, NI ${sa.marginal_rate.national_insurance}%`;
-    if (sa.marginal_rate.student_loan) prompt += `, student loan ${sa.marginal_rate.student_loan}%`;
-    if (sa.marginal_rate.child_benefit) prompt += `, child benefit charge ${sa.marginal_rate.child_benefit}%`;
-    prompt += `)`;
-    prompt += `\n- Optimal allocation order:`;
-    for (const t of sa.waterfall) {
-      prompt += `\n  ${t.label}: £${t.monthly_amount}/mo (${t.effective_return}% effective return${t.guaranteed_return > 0 ? `, ${t.guaranteed_return}% guaranteed` : ''})`;
-      if (t.projection_10yr > 0) prompt += ` → £${t.projection_10yr.toLocaleString()} in 10 years`;
-    }
-    if (sa.free_money_missed > 0) {
-      prompt += `\n- FREE MONEY MISSED: £${sa.free_money_missed}/year in unmatched employer pension contributions`;
-    }
-    prompt += `\n- Blended first-year return: ${sa.blended_return}%`;
-    if (sa.threshold_alerts?.length) {
-      prompt += `\n- Tax threshold alerts:`;
-      for (const a of sa.threshold_alerts) {
-        prompt += `\n  • ${a.insight}`;
-      }
-    }
-    prompt += `\nIMPORTANT: When the user asks "where should my surplus go?", "should I invest or save?", "ISA or pension?", or anything about allocating spare money — use this waterfall. Present it as a priority order with the maths: "Your first £X/month should go to [top tier] because [reasoning]. After that, £Y/month to [next tier]." Always show the effective return and explain WHY each tier is ranked where it is. If there's free money missed (employer match), lead with that urgently.`;
-  }
-
   // ── Spending breakdown ──
   if (ctx.spending_by_category?.length) {
     prompt += `\n\nSpending by category (MONTHLY AVERAGES — these are per-month figures, not totals):`;
