@@ -1112,6 +1112,14 @@ export default function Chat() {
         isSalary: s.isSalary,
       })),
       essential_gaps: a?.essential_gaps,
+      verified_bills: a?.verified_bills?.map((b: any) => ({
+        category: b.category,
+        merchant: b.merchant,
+        monthlyAmount: b.monthlyAmount,
+        frequency: b.frequency,
+        lastPayment: b.lastPayment,
+        lastPaymentDate: b.lastPaymentDate,
+      })),
       spending_by_category: buildSpendingBreakdown(a),
       behavioral_patterns: a?.behavioral_patterns,
       goal_trajectory: a?.goal_context ? {

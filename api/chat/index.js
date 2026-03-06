@@ -827,6 +827,15 @@ Tools:
     prompt += `\nIMPORTANT: Do NOT multiply these amounts by months when discussing current spending. Each figure is already the monthly cost. If a user pays £10/month for Netflix, their monthly Netflix spend is £10, not £40 (even if they've had it for 4 months).`;
   }
 
+  // ── Verified bills (exact amounts from recognized merchants in transactions) ──
+  if (ctx.verified_bills?.length) {
+    prompt += `\n\n✓ VERIFIED BILLS — These exact amounts are confirmed from the user's transaction history:`;
+    for (const bill of ctx.verified_bills) {
+      prompt += `\n- ${bill.merchant} (${bill.category}): £${bill.monthlyAmount}/month (paid ${bill.frequency}, last payment £${bill.lastPayment} on ${bill.lastPaymentDate})`;
+    }
+    prompt += `\n\nThese are REAL amounts from actual bank transactions, not estimates. Use these exact figures when discussing budgets, paycheck breakdowns, and essential costs. They are more reliable than typical ranges.`;
+  }
+
   // ── Essential gaps (missing from transactions but expected from identity) ──
   if (ctx.essential_gaps?.length) {
     prompt += `\n\n⚠ MISSING ESSENTIALS — These expenses are expected based on the user's profile but NOT visible in their transaction data:`;

@@ -187,6 +187,8 @@ export interface Analysis {
   income_cv?: number;
   /** Essentials expected from identity but not found in transaction data */
   essential_gaps?: EssentialGap[];
+  /** Bills verified from actual transaction data with exact amounts */
+  verified_bills?: VerifiedBill[];
 }
 
 // ── Goal Trajectory ──
@@ -247,6 +249,24 @@ export interface EssentialGap {
   confidence: 'high' | 'medium' | 'low';
 }
 
+/** A bill verified from actual transaction data — exact amounts from recognized merchants */
+export interface VerifiedBill {
+  /** Category (e.g. "Energy", "Water", "Council Tax") */
+  category: string;
+  /** Recognized merchant name (e.g. "British Gas", "Thames Water") */
+  merchant: string;
+  /** Verified monthly amount (annualized from actual payments) */
+  monthlyAmount: number;
+  /** How often the bill is paid */
+  frequency: 'weekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
+  /** Last payment amount seen */
+  lastPayment: number;
+  /** Date of last payment */
+  lastPaymentDate: string;
+  /** Number of payments found in transaction history */
+  paymentCount: number;
+}
+
 export interface EnrichmentResult {
   profile: FinancialProfile;
   archetype: Archetype;
@@ -260,6 +280,8 @@ export interface EnrichmentResult {
   enrichmentMetrics: EnrichmentMetrics;
   /** Essentials expected from identity but not found in transactions */
   essentialGaps?: EssentialGap[];
+  /** Bills verified from actual transaction data with exact amounts */
+  verifiedBills?: VerifiedBill[];
 }
 
 // ── Chat ──
@@ -319,6 +341,7 @@ export interface ChatContext {
   subscriptions?: { merchant: string; amount: number }[];
   income_sources?: { source: string; frequency: string; avgAmount: number; monthly: number; isSalary: boolean }[];
   essential_gaps?: EssentialGap[];
+  verified_bills?: { category: string; merchant: string; monthlyAmount: number; frequency: string; lastPayment: number; lastPaymentDate: string }[];
   spending_by_category?: { category: string; monthly: number }[];
   recent_transfers?: { description: string; amount: number; date: string }[];
   recent_transactions?: { description: string; amount: number; date: string; category: string; essential: boolean }[];

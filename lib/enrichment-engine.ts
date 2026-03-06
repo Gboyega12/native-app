@@ -18,6 +18,7 @@ import type {
   EnrichmentMetrics,
   BudgetCategory,
   EssentialGap,
+  VerifiedBill,
 } from './types';
 
 function splitCSVLine(line: string): string[] {
@@ -80,9 +81,12 @@ const EnrichmentEngine = {
     const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
     const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
 
-    // Detect essential gaps if identity is available
+    // Verify bills from recognized merchants (exact amounts from transaction data)
+    const verifiedBills = this.verifyBillsFromTransactions(enriched);
+
+    // Detect essential gaps if identity is available — verified bills reduce false gaps
     const essentialGaps = identity
-      ? this.detectEssentialGaps(profile, identity, debtAccounts)
+      ? this.detectEssentialGaps(profile, identity, debtAccounts, undefined, verifiedBills)
       : undefined;
 
     return {
@@ -97,6 +101,7 @@ const EnrichmentEngine = {
       enrichedTransactions: enriched,
       enrichmentMetrics,
       essentialGaps,
+      verifiedBills: verifiedBills.length > 0 ? verifiedBills : undefined,
     };
   },
 
@@ -684,9 +689,104 @@ const EnrichmentEngine = {
   },
 
   /**
+   * Scan enriched transactions for recognized bill merchants and extract
+   * verified payment amounts. Groups by category + merchant, detects payment
+   * frequency from intervals, and computes a reliable monthly equivalent.
+   *
+   * This replaces estimated ranges with real amounts for bills like British Gas,
+   * Thames Water, Council Tax, etc. — even quarterly or irregular ones.
+   */
+  verifyBillsFromTransactions(transactions: EnrichedTransaction[]): VerifiedBill[] {
+    // Categories where we want to verify bill amounts from merchant data
+    const billCategories = new Set([
+      'energy', 'water', 'council tax', 'insurance', 'rent', 'mortgage',
+      'broadband & phone', 'tv licence', 'debt payments',
+    ]);
+
+    // Group spending by category + merchant for bill categories
+    const spending = transactions.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund);
+    const merchantGroups: Record<string, EnrichedTransaction[]> = {};
+
+    for (const tx of spending) {
+      const cat = (tx.category || '').toLowerCase();
+      if (!billCategories.has(cat)) continue;
+      if (!tx.merchant || tx.confidence === 'low') continue; // skip unrecognized
+
+      const key = `${cat}::${tx.merchant}`;
+      if (!merchantGroups[key]) merchantGroups[key] = [];
+      merchantGroups[key].push(tx);
+    }
+
+    const bills: VerifiedBill[] = [];
+
+    for (const [key, txs] of Object.entries(merchantGroups)) {
+      const [category, merchant] = key.split('::');
+      const sorted = txs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const lastTx = sorted[sorted.length - 1];
+
+      // Compute payment frequency from intervals between payments
+      const intervals: number[] = [];
+      for (let i = 1; i < sorted.length; i++) {
+        const days = (new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()) / (1000 * 60 * 60 * 24);
+        if (days > 0) intervals.push(days);
+      }
+
+      let frequency: VerifiedBill['frequency'] = 'irregular';
+      let monthlyAmount: number;
+
+      if (intervals.length >= 1) {
+        const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+
+        if (avgInterval >= 5 && avgInterval <= 10) frequency = 'weekly';
+        else if (avgInterval >= 25 && avgInterval <= 35) frequency = 'monthly';
+        else if (avgInterval >= 80 && avgInterval <= 100) frequency = 'quarterly';
+        else if (avgInterval >= 170 && avgInterval <= 200) frequency = 'semi_annual';
+        else if (avgInterval >= 340 && avgInterval <= 400) frequency = 'annual';
+
+        // Monthly equivalent: use average payment amount ÷ interval in months
+        const avgPayment = txs.reduce((s, t) => s + Math.abs(t.amount), 0) / txs.length;
+        const intervalMonths = avgInterval / 30.44;
+        monthlyAmount = Math.round(avgPayment / Math.max(intervalMonths, 1));
+      } else {
+        // Single payment — estimate monthly from amount and likely frequency
+        const amount = Math.abs(lastTx.amount);
+        // Heuristic: large single bills are likely quarterly/annual
+        if (amount > 300) {
+          frequency = 'quarterly';
+          monthlyAmount = Math.round(amount / 3);
+        } else if (amount > 100) {
+          frequency = 'monthly';
+          monthlyAmount = Math.round(amount);
+        } else {
+          frequency = 'monthly';
+          monthlyAmount = Math.round(amount);
+        }
+      }
+
+      // Capitalize category for display
+      const displayCategory = category.split(' ').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+
+      bills.push({
+        category: displayCategory,
+        merchant,
+        monthlyAmount,
+        frequency,
+        lastPayment: Math.abs(lastTx.amount),
+        lastPaymentDate: lastTx.date,
+        paymentCount: txs.length,
+      });
+    }
+
+    return bills.sort((a, b) => b.monthlyAmount - a.monthlyAmount);
+  },
+
+  /**
    * Detect essential expenses expected from the user's identity but missing
    * from their transaction data. Cross-references housing status, household
    * type, and dependents against detected spending categories.
+   *
+   * Now also checks verified bills — if a bill merchant is found in transactions,
+   * that category is NOT flagged as a gap (even for quarterly/irregular payments).
    *
    * This enables the chat to ask targeted questions about variable or
    * externally-paid costs (rent via partner, cash payments, quarterly bills)
@@ -697,6 +797,7 @@ const EnrichmentEngine = {
     identity: any,
     debtAccounts?: any[],
     budgetAdjustments?: any[],
+    verifiedBills?: VerifiedBill[],
   ): EssentialGap[] {
     if (!identity) return [];
     const gaps: EssentialGap[] = [];
@@ -721,8 +822,18 @@ const EnrichmentEngine = {
       }
     }
 
+    // Check verified bills — even quarterly/annual bills count as present
+    const verifiedCategories = new Set<string>();
+    if (verifiedBills) {
+      for (const bill of verifiedBills) {
+        verifiedCategories.add(bill.category.toLowerCase());
+      }
+    }
+
     const has = (cat: string) =>
-      detectedCategories.has(cat.toLowerCase()) || manualCategories.has(cat.toLowerCase());
+      detectedCategories.has(cat.toLowerCase()) ||
+      manualCategories.has(cat.toLowerCase()) ||
+      verifiedCategories.has(cat.toLowerCase());
 
     // ── Housing costs ──
     const housing = identity.housing;
@@ -1325,8 +1436,9 @@ const EnrichmentEngine = {
     const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
     const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
     const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
+    const verifiedBills = this.verifyBillsFromTransactions(enriched);
     const essentialGaps = identity
-      ? this.detectEssentialGaps(profile, identity, debtAccounts)
+      ? this.detectEssentialGaps(profile, identity, debtAccounts, undefined, verifiedBills)
       : undefined;
 
     return {
@@ -1341,6 +1453,7 @@ const EnrichmentEngine = {
       enrichedTransactions: enriched,
       enrichmentMetrics,
       essentialGaps,
+      verifiedBills: verifiedBills.length > 0 ? verifiedBills : undefined,
     };
   },
 

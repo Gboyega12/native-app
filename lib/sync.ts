@@ -383,6 +383,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     is_variable_income: result.profile.monthly.isVariableIncome,
     income_cv: result.profile.monthly.incomeCV,
     essential_gaps: result.essentialGaps,
+    verified_bills: result.verifiedBills,
   };
 
   // ── 6. Upsert to Supabase ──
