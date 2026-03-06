@@ -184,6 +184,24 @@ export default async function handler(req, res) {
       }
     } catch {}
 
+    // Clean up old connections for the same provider and user.
+    // Without this, reconnecting a bank creates a duplicate row while the
+    // old expired row persists — causing the reconnect banner to reappear
+    // even though the user just reconnected successfully.
+    if (postUserId && providerName) {
+      try {
+        await admin
+          .from('bank_data')
+          .delete()
+          .eq('user_id', postUserId)
+          .eq('provider_name', providerName)
+          .eq('source', 'truelayer')
+          .neq('connection_id', connectionId);
+      } catch (cleanupErr) {
+        console.warn('[callback] Non-critical: old connection cleanup failed:', cleanupErr.message);
+      }
+    }
+
 
     // Store card + account balances on bank_data row (best-effort, non-blocking)
     // Processing step will read these and upsert into debt_accounts with user_id

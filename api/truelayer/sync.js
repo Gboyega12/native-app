@@ -318,6 +318,30 @@ export default async function handler(req, res) {
 
     console.log(`[sync] Synced ${syncedCount}/${bankRows.length} connections, ${totalTx} transactions, ${mergedBalances.length} balance(s)`);
 
+    // Clean up duplicate connections for the same provider.
+    // When a user reconnects a bank, a new row is created — the old expired row
+    // should be removed so the reconnect banner doesn't keep reappearing.
+    try {
+      const providerGroups = {};
+      for (const row of bankRows) {
+        const key = row.provider_name || row.connection_id;
+        if (!providerGroups[key]) providerGroups[key] = [];
+        providerGroups[key].push(row);
+      }
+      for (const [, rows] of Object.entries(providerGroups)) {
+        if (rows.length <= 1) continue;
+        // Keep the newest, delete the rest
+        rows.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+        const staleIds = rows.slice(1).map((r) => r.id);
+        if (staleIds.length > 0) {
+          await admin.from('bank_data').delete().in('id', staleIds);
+          console.log(`[sync] Cleaned up ${staleIds.length} stale connection(s) for provider ${rows[0].provider_name}`);
+        }
+      }
+    } catch (cleanupErr) {
+      console.warn('[sync] Non-critical: duplicate cleanup failed:', cleanupErr.message);
+    }
+
     return res.json({
       success: true,
       csv_data: mergedCsv,
