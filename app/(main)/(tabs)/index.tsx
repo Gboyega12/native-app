@@ -2004,9 +2004,18 @@ export default function Home() {
                   </Text>
                 </View>
 
-                <View style={{ height: 24 }} />
+                {/* Overall progress bar */}
+                <View style={s.progressTrack}>
+                  <View style={[
+                    s.progressFill,
+                    {
+                      width: `${Math.min(100, overallPctUsed)}%`,
+                      backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.accent,
+                    },
+                  ]} />
+                </View>
 
-                <View style={s.sectionBlock}>
+                <View style={s.sectionBlockNoRule}>
                   <View style={s.sectionHeaderRow}>
                     <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
                     <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.green : colors.coral }]}>
@@ -2024,7 +2033,7 @@ export default function Home() {
                   </View>
                 </View>
 
-                <View style={s.sectionBlock}>
+                <View style={s.sectionBlockNoRule}>
                   <View style={s.sectionHeaderRow}>
                     <Text style={[s.sectionLabel, { color: colors.text2 }]}>Lifestyle</Text>
                     <Text style={[s.sectionStatus, { color: lifestyleOnTrack ? colors.dim : colors.coral }]}>
@@ -2042,7 +2051,7 @@ export default function Home() {
                   </View>
                 </View>
 
-                <View style={[s.sectionBlock, { borderBottomWidth: 0 }]}>
+                <View style={s.sectionBlockNoRule}>
                   <View style={s.sectionHeaderRow}>
                     <Text style={[s.sectionLabel, { color: colors.text2 }]}>Remaining</Text>
                     <Text style={[s.sectionStatus, { color: periodRemaining > 0 ? colors.green : colors.coral }]}>
@@ -3588,6 +3597,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 20,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
+  },
+  sectionBlockNoRule: {
+    paddingVertical: 16,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
