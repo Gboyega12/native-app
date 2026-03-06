@@ -17,7 +17,7 @@ import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
-import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM } from '@/components/Card';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 
@@ -216,6 +216,8 @@ export default function Home() {
   const [breakdownExpanded, setBreakdownExpanded] = useState(false);
   const [budgetPeriod, setBudgetPeriod] = useState<'year' | 'month' | 'week'>('month');
   const budgetPeriodInitialised = useRef(false);
+  const connectorDotsRef = useRef<ConnectorDotsHandle>(null);
+  const txManuallyCollapsed = useRef(false);
 
   // Default budget period matches salary frequency
   useEffect(() => {
@@ -1960,11 +1962,16 @@ export default function Home() {
           {/* ══════════════════════════════════════════════
               BUDGET — collapsed by default
               ══════════════════════════════════════════════ */}
-          {/* ── Budget overview — collapsed by default ── */}
           <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; }}>
             <TouchableOpacity
               activeOpacity={0.8}
-              onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetExpanded(!budgetExpanded); }}
+              onPress={() => {
+                LayoutAnimation.configureNext(SMOOTH_ANIM);
+                const opening = !budgetExpanded;
+                setBudgetExpanded(opening);
+                if (opening && !txManuallyCollapsed.current) setTxCardExpanded(true);
+                if (!opening) { setTxCardExpanded(false); txManuallyCollapsed.current = false; }
+              }}
               style={s.collapsedSectionBtn}
             >
               <Text style={s.moveSectionLabel}>BUDGET</Text>
@@ -1981,14 +1988,31 @@ export default function Home() {
                 <View style={{ position: 'absolute', top: 16, right: 20, zIndex: 1 }}>
                   <ExpandDots count={6} size={3} />
                 </View>
-                <View style={s.progressTrack}>
-                  <View style={[
-                    s.progressFill,
-                    {
-                      width: `${Math.min(100, overallPctUsed)}%`,
-                      backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.accent,
-                    },
-                  ]} />
+
+                {/* Big centered spend number */}
+                <View style={s.periodTotalRow}>
+                  <Text style={[s.periodTotalAmount, { fontSize: 32, color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
+                    {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
+                  </Text>
+                  <Text style={s.periodTotalOf}>
+                    {' '}of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
+                  </Text>
+                </View>
+
+                {/* Overall progress bar with percentage */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, marginBottom: 28 }}>
+                  <View style={[s.progressTrack, { flex: 1, marginTop: 0, marginBottom: 0 }]}>
+                    <View style={[
+                      s.progressFill,
+                      {
+                        width: `${Math.min(100, overallPctUsed)}%`,
+                        backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.accent,
+                      },
+                    ]} />
+                  </View>
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: overallPctUsed > 100 ? colors.coral : colors.muted, letterSpacing: 0.3, minWidth: 32, textAlign: 'right' }}>
+                    {overallPctUsed}%
+                  </Text>
                 </View>
 
                 <View style={s.sectionBlock}>
@@ -2039,7 +2063,11 @@ export default function Home() {
                 {/* Period toggle */}
                 <View style={[s.periodToggleRow, { marginBottom: 0, marginTop: 8 }]}>
                   {(['year', 'month', 'week'] as const).map((p) => (
-                    <TouchableOpacity key={p} style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]} onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod(p); }}>
+                    <TouchableOpacity key={p} style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]} onPress={() => {
+                      LayoutAnimation.configureNext(SMOOTH_ANIM);
+                      setBudgetPeriod(p);
+                      connectorDotsRef.current?.pulse();
+                    }}>
                       <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>{p === 'year' ? 'Annual' : p === 'month' ? 'Monthly' : 'Weekly'}</Text>
                     </TouchableOpacity>
                   ))}
@@ -2048,17 +2076,19 @@ export default function Home() {
             )}
           </View>
 
-          {/* Dot separator */}
-          <View style={s.dotSeparator}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <View key={i} style={[s.dot, { backgroundColor: colors.border }]} />
-            ))}
-          </View>
+          {/* Animated connector between Budget and Transactions */}
+          <ConnectorDots ref={connectorDotsRef} />
 
           {/* ── Transactions — collapsed by default ── */}
           <TouchableOpacity
             activeOpacity={0.8}
-            onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setTxCardExpanded(prev => !prev); }}
+            onPress={() => {
+              LayoutAnimation.configureNext(SMOOTH_ANIM);
+              setTxCardExpanded(prev => {
+                if (prev) txManuallyCollapsed.current = true;
+                return !prev;
+              });
+            }}
             style={s.collapsedSectionBtn}
           >
             <Text style={s.moveSectionLabel}>TRANSACTIONS</Text>

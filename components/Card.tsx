@@ -2,7 +2,7 @@
 // Reusable card primitives with variants, press feedback, and entrance animations.
 // Nothing OS design language: border-defined, minimal shadows, monochrome-first.
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Animated, Easing,
   Platform, LayoutAnimation, type ViewStyle, type TextStyle,
@@ -329,6 +329,71 @@ export function ExpandDots({ color, count = 5, size = 3 }: { color?: string; cou
     </View>
   );
 }
+
+// ── ConnectorDots ──
+// Animated dot separator that pulses when triggered (e.g. on period change).
+// 5 dots cascade downward briefly, accent flash, then return to neutral.
+export type ConnectorDotsHandle = { pulse: () => void };
+
+export const ConnectorDots = forwardRef<ConnectorDotsHandle, { color?: string; accentColor?: string }>(
+  function ConnectorDots({ color, accentColor }, ref) {
+    const { colors } = useTheme();
+    const dotColor = color || colors.border;
+    const dotAccent = accentColor || colors.accent;
+    const COUNT = 5;
+    const anims = useRef(
+      Array.from({ length: COUNT }, () => ({
+        translateY: new Animated.Value(0),
+        colorProgress: new Animated.Value(0), // 0 = neutral, 1 = accent
+      })),
+    ).current;
+
+    useImperativeHandle(ref, () => ({
+      pulse() {
+        const cascade = anims.map((dot, i) =>
+          Animated.sequence([
+            Animated.delay(i * 30),
+            Animated.parallel([
+              Animated.sequence([
+                Animated.timing(dot.translateY, { toValue: 6, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+                Animated.timing(dot.translateY, { toValue: 0, duration: 200, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }),
+              ]),
+              Animated.sequence([
+                Animated.timing(dot.colorProgress, { toValue: 1, duration: 150, useNativeDriver: false }),
+                Animated.delay(100),
+                Animated.timing(dot.colorProgress, { toValue: 0, duration: 300, useNativeDriver: false }),
+              ]),
+            ]),
+          ]),
+        );
+        Animated.parallel(cascade).start();
+      },
+    }));
+
+    return (
+      <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 12 }}>
+        {anims.map((dot, i) => {
+          const bg = dot.colorProgress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [dotColor, dotAccent],
+          });
+          return (
+            <Animated.View
+              key={i}
+              style={{
+                width: 3,
+                height: 3,
+                borderRadius: 1.5,
+                backgroundColor: bg,
+                transform: [{ translateY: dot.translateY }],
+              }}
+            />
+          );
+        })}
+      </View>
+    );
+  },
+);
 
 // ── Variant style resolver ──
 function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: string): ViewStyle {
