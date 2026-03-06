@@ -20,8 +20,8 @@ const _listeners: Set<SyncListener> = new Set();
 /** Minimum interval between automatic syncs (30 seconds). */
 const MIN_SYNC_INTERVAL_MS = 30_000;
 
-/** Maximum time the entire sync pipeline may run before we bail out (30 seconds). */
-const SYNC_TIMEOUT_MS = 30_000;
+/** Maximum time the entire sync pipeline may run before we bail out (55 seconds). */
+const SYNC_TIMEOUT_MS = 55_000;
 
 /**
  * Request a bank data sync. If one is already in-flight, returns the

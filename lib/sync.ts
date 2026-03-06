@@ -162,7 +162,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
 
   try {
     const syncController = new AbortController();
-    const syncTimeout = setTimeout(() => syncController.abort(), 15_000);
+    const syncTimeout = setTimeout(() => syncController.abort(), 45_000);
     const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch('/api/truelayer/sync', {
       method: 'POST',
