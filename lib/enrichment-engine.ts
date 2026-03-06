@@ -17,6 +17,7 @@ import type {
   EnrichmentResult,
   EnrichmentMetrics,
   BudgetCategory,
+  EssentialGap,
 } from './types';
 
 function splitCSVLine(line: string): string[] {
@@ -79,6 +80,11 @@ const EnrichmentEngine = {
     const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
     const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
 
+    // Detect essential gaps if identity is available
+    const essentialGaps = identity
+      ? this.detectEssentialGaps(profile, identity, debtAccounts)
+      : undefined;
+
     return {
       profile,
       archetype,
@@ -90,6 +96,7 @@ const EnrichmentEngine = {
       behavioralPatterns: patterns.map((p: any) => p.pattern || p),
       enrichedTransactions: enriched,
       enrichmentMetrics,
+      essentialGaps,
     };
   },
 
@@ -676,6 +683,149 @@ const EnrichmentEngine = {
     return patterns;
   },
 
+  /**
+   * Detect essential expenses expected from the user's identity but missing
+   * from their transaction data. Cross-references housing status, household
+   * type, and dependents against detected spending categories.
+   *
+   * This enables the chat to ask targeted questions about variable or
+   * externally-paid costs (rent via partner, cash payments, quarterly bills)
+   * rather than guessing or ignoring them.
+   */
+  detectEssentialGaps(
+    profile: FinancialProfile,
+    identity: any,
+    debtAccounts?: any[],
+    budgetAdjustments?: any[],
+  ): EssentialGap[] {
+    if (!identity) return [];
+    const gaps: EssentialGap[] = [];
+
+    // Build a set of categories that have meaningful spend (>£5/mo)
+    const nonDisc = profile.budgetReality?.nonDiscretionary?.items || [];
+    const disc = profile.budgetReality?.discretionary?.items || [];
+    const allItems = [...nonDisc, ...disc];
+    const detectedCategories = new Set<string>();
+    for (const item of allItems) {
+      if (item.monthly > 5) {
+        detectedCategories.add(item.category.toLowerCase());
+      }
+    }
+
+    // Also check budget adjustments (manual items already added by user)
+    const manualCategories = new Set<string>();
+    if (budgetAdjustments) {
+      for (const adj of budgetAdjustments) {
+        if (adj.category) manualCategories.add(adj.category.toLowerCase());
+        if (adj.description) manualCategories.add(adj.description.toLowerCase());
+      }
+    }
+
+    const has = (cat: string) =>
+      detectedCategories.has(cat.toLowerCase()) || manualCategories.has(cat.toLowerCase());
+
+    // ── Housing costs ──
+    const housing = identity.housing;
+    if (housing === 'renting' || housing === 'shared_house' || housing === 'council') {
+      if (!has('rent') && !has('housing')) {
+        gaps.push({
+          category: 'Rent',
+          reason: housing === 'council'
+            ? 'You mentioned council housing — rent may be paid separately'
+            : 'You mentioned you\'re renting',
+          typicalRange: housing === 'council' ? { low: 300, high: 800 } : { low: 500, high: 1500 },
+          confidence: 'high',
+        });
+      }
+    } else if (housing === 'mortgage') {
+      if (!has('mortgage')) {
+        gaps.push({
+          category: 'Mortgage',
+          reason: 'You mentioned having a mortgage',
+          typicalRange: { low: 500, high: 2000 },
+          confidence: 'high',
+        });
+      }
+    }
+
+    // ── Council Tax (everyone except students and some living with family) ──
+    const isStudent = identity.work_setup === 'student';
+    if (!isStudent && housing !== 'with_family') {
+      if (!has('council tax') && !has('council')) {
+        gaps.push({
+          category: 'Council Tax',
+          reason: 'Most UK households pay council tax',
+          typicalRange: { low: 100, high: 250 },
+          confidence: housing === 'with_family' ? 'low' : 'medium',
+        });
+      }
+    }
+
+    // ── Energy (gas + electric) ──
+    if (housing !== 'with_family') {
+      if (!has('energy') && !has('bills') && !has('utilities') && !has('gas') && !has('electric')) {
+        gaps.push({
+          category: 'Energy',
+          reason: 'Energy bills may be paid quarterly, by a partner, or via prepayment',
+          typicalRange: { low: 80, high: 250 },
+          confidence: 'medium',
+        });
+      }
+    }
+
+    // ── Water ──
+    if (housing !== 'with_family') {
+      if (!has('water') && !has('sewerage')) {
+        gaps.push({
+          category: 'Water',
+          reason: 'Water bills are often quarterly or paid by another household member',
+          typicalRange: { low: 25, high: 60 },
+          confidence: 'low',
+        });
+      }
+    }
+
+    // ── Childcare ──
+    const hasYoungChildren = (identity.dependents || []).includes('young_children');
+    if (hasYoungChildren) {
+      if (!has('childcare') && !has('nursery')) {
+        gaps.push({
+          category: 'Childcare',
+          reason: 'You have young children — childcare may be paid in cash or by a partner',
+          typicalRange: { low: 400, high: 1500 },
+          confidence: 'medium',
+        });
+      }
+    }
+
+    // ── Insurance (contents/buildings) ──
+    if ((housing === 'renting' || housing === 'mortgage') && !has('insurance')) {
+      gaps.push({
+        category: 'Insurance',
+        reason: housing === 'mortgage'
+          ? 'Buildings insurance is usually required with a mortgage'
+          : 'Contents insurance is common for renters',
+        typicalRange: housing === 'mortgage' ? { low: 30, high: 80 } : { low: 10, high: 30 },
+        confidence: 'low',
+      });
+    }
+
+    // ── Debt minimums ──
+    if (debtAccounts && debtAccounts.length > 0) {
+      const totalDebt = debtAccounts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+      if (totalDebt > 0 && !has('debt payments') && !has('debt') && !has('loan')) {
+        gaps.push({
+          category: 'Debt Payments',
+          reason: `You have £${Math.round(totalDebt).toLocaleString()} in debt — minimum payments may not be visible`,
+          typicalRange: { low: Math.round(totalDebt * 0.02), high: Math.round(totalDebt * 0.05) },
+          confidence: 'medium',
+        });
+      }
+    }
+
+    return gaps;
+  },
+
   calcDecisionScore(profile: FinancialProfile): DecisionScore {
     const m = profile.metrics;
     let score = 50;
@@ -1175,6 +1325,9 @@ const EnrichmentEngine = {
     const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
     const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
     const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
+    const essentialGaps = identity
+      ? this.detectEssentialGaps(profile, identity, debtAccounts)
+      : undefined;
 
     return {
       profile,
@@ -1187,6 +1340,7 @@ const EnrichmentEngine = {
       behavioralPatterns: patterns.map((p: any) => p.pattern || p),
       enrichedTransactions: enriched,
       enrichmentMetrics,
+      essentialGaps,
     };
   },
 

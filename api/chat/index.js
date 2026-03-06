@@ -827,6 +827,22 @@ Tools:
     prompt += `\nIMPORTANT: Do NOT multiply these amounts by months when discussing current spending. Each figure is already the monthly cost. If a user pays £10/month for Netflix, their monthly Netflix spend is £10, not £40 (even if they've had it for 4 months).`;
   }
 
+  // ── Essential gaps (missing from transactions but expected from identity) ──
+  if (ctx.essential_gaps?.length) {
+    prompt += `\n\n⚠ MISSING ESSENTIALS — These expenses are expected based on the user's profile but NOT visible in their transaction data:`;
+    for (const gap of ctx.essential_gaps) {
+      prompt += `\n- ${gap.category}: ${gap.reason}. Typical UK range: £${gap.typicalRange.low}-£${gap.typicalRange.high}/month. Confidence: ${gap.confidence}.`;
+    }
+    prompt += `\n\nHOW TO HANDLE MISSING ESSENTIALS:`;
+    prompt += `\n- These gaps mean the surplus figure (£${Math.round(ctx.surplus || 0)}/month) may be OVERSTATED. The real surplus could be significantly lower.`;
+    prompt += `\n- When the user asks about budgets, paycheck splits, or "how much can I save", FIRST check if you've already asked about these gaps in this conversation.`;
+    prompt += `\n- If not yet asked, raise ONE gap per message. Example: "I don't see rent in your transactions. Do you pay it via a partner or another account? Knowing the amount helps me give you an accurate breakdown."`;
+    prompt += `\n- NEVER assume amounts. NEVER auto-fill. Wait for the user to tell you the number.`;
+    prompt += `\n- When the user provides an amount, use save_budget_item to record it. Only then.`;
+    prompt += `\n- Low-confidence gaps (insurance, water) — only ask if the user is specifically discussing budgets or expenses. Don't lead with these.`;
+    prompt += `\n- Once a gap is filled via save_budget_item, it won't appear in future conversations.`;
+  }
+
   // ── All moves (action plan) ──
   if (ctx.all_moves?.length) {
     prompt += `\n\nInsights from analysis (ranked by mathematical impact):`;

@@ -185,6 +185,8 @@ export interface Analysis {
   is_variable_income?: boolean;
   /** Income coefficient of variation (0-1 scale) */
   income_cv?: number;
+  /** Essentials expected from identity but not found in transaction data */
+  essential_gaps?: EssentialGap[];
 }
 
 // ── Goal Trajectory ──
@@ -233,6 +235,18 @@ export interface EnrichmentMetrics {
 
 // ── Enrichment Engine Output ──
 
+/** An essential expense expected from user's identity but missing from transaction data */
+export interface EssentialGap {
+  /** What's missing (e.g. "Rent", "Council Tax", "Energy") */
+  category: string;
+  /** Why we expect it (e.g. "You said you're renting") */
+  reason: string;
+  /** Typical UK monthly cost range for this category */
+  typicalRange: { low: number; high: number };
+  /** How confident we are this is genuinely missing vs paid another way */
+  confidence: 'high' | 'medium' | 'low';
+}
+
 export interface EnrichmentResult {
   profile: FinancialProfile;
   archetype: Archetype;
@@ -244,6 +258,8 @@ export interface EnrichmentResult {
   behavioralPatterns: string[];
   enrichedTransactions: EnrichedTransaction[];
   enrichmentMetrics: EnrichmentMetrics;
+  /** Essentials expected from identity but not found in transactions */
+  essentialGaps?: EssentialGap[];
 }
 
 // ── Chat ──
@@ -302,6 +318,7 @@ export interface ChatContext {
   all_moves?: { action: string; monthlyImpact: number; effort: string }[];
   subscriptions?: { merchant: string; amount: number }[];
   income_sources?: { source: string; frequency: string; avgAmount: number; monthly: number; isSalary: boolean }[];
+  essential_gaps?: EssentialGap[];
   spending_by_category?: { category: string; monthly: number }[];
   recent_transfers?: { description: string; amount: number; date: string }[];
   recent_transactions?: { description: string; amount: number; date: string; category: string; essential: boolean }[];

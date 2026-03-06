@@ -1111,6 +1111,7 @@ export default function Chat() {
         monthly: s.monthly,
         isSalary: s.isSalary,
       })),
+      essential_gaps: a?.essential_gaps,
       spending_by_category: buildSpendingBreakdown(a),
       behavioral_patterns: a?.behavioral_patterns,
       goal_trajectory: a?.goal_context ? {

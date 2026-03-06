@@ -316,6 +316,18 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     console.warn('[sync] Debt reconciliation failed:', e?.message || e);
   }
 
+  // ── 3c. Compute essential gap deduction for conservative surplus ──
+  // When essential costs are missing from transactions (rent via partner,
+  // variable bills, etc.), use the midpoint of typical ranges as a
+  // conservative deduction so the CRRA engine doesn't overvalue savings/invest.
+  if (result.essentialGaps && result.essentialGaps.length > 0) {
+    const gapDeduction = result.essentialGaps.reduce((sum, gap) => {
+      // Use midpoint of typical range as conservative estimate
+      return sum + (gap.typicalRange.low + gap.typicalRange.high) / 2;
+    }, 0);
+    (result.profile as any).essentialGapDeduction = Math.round(gapDeduction);
+  }
+
   // ── 4. Rank moves ──
   let goals: Goals | null = null;
   try {
@@ -370,6 +382,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     income_floor: result.profile.monthly.incomeFloor,
     is_variable_income: result.profile.monthly.isVariableIncome,
     income_cv: result.profile.monthly.incomeCV,
+    essential_gaps: result.essentialGaps,
   };
 
   // ── 6. Upsert to Supabase ──

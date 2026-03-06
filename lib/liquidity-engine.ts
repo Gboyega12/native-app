@@ -225,6 +225,16 @@ export function calcMoveMarginalUtility(
   const cat = move.category || 'spending';
   const tier = inferLiquidityTier(move);
 
+  // ── Conservative surplus when essential gaps exist ──
+  // If we detect essentials missing from the data (rent via partner, variable
+  // bills, etc.), the surplus is likely overstated. Use the midpoint of
+  // typical ranges as a conservative deduction.
+  let effectiveSurplus = profile.monthly.surplus;
+  const essentialGapDeduction = (profile as any).essentialGapDeduction || 0;
+  if (essentialGapDeduction > 0) {
+    effectiveSurplus = Math.max(0, effectiveSurplus - essentialGapDeduction);
+  }
+
   // ── Current allocation in this move's category ──
   let currentSpend: number;
   switch (cat) {
@@ -237,7 +247,7 @@ export function calcMoveMarginalUtility(
       currentSpend = profile.monthly.debtPayments;
       break;
     case 'invest':
-      currentSpend = Math.max(0, profile.monthly.surplus * 0.3);
+      currentSpend = Math.max(0, effectiveSurplus * 0.3);
       break;
     case 'break_even':
       currentSpend = 0; // in deficit — zero positive allocation
