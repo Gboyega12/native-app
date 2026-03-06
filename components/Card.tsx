@@ -331,8 +331,8 @@ export function ExpandDots({ color, count = 5, size = 3 }: { color?: string; cou
 }
 
 // ── ConnectorDots ──
-// Animated dot separator that pulses when triggered (e.g. on period change).
-// 5 dots cascade downward briefly, accent flash, then return to neutral.
+// Vertical dot pipe that visually bridges Budget → Transactions.
+// On period change, dots light up top-to-bottom like data flowing down.
 export type ConnectorDotsHandle = { pulse: () => void };
 
 export const ConnectorDots = forwardRef<ConnectorDotsHandle, { color?: string; accentColor?: string }>(
@@ -340,28 +340,33 @@ export const ConnectorDots = forwardRef<ConnectorDotsHandle, { color?: string; a
     const { colors } = useTheme();
     const dotColor = color || colors.border;
     const dotAccent = accentColor || colors.accent;
-    const COUNT = 5;
+    const COUNT = 7;
     const anims = useRef(
       Array.from({ length: COUNT }, () => ({
-        translateY: new Animated.Value(0),
-        colorProgress: new Animated.Value(0), // 0 = neutral, 1 = accent
+        colorProgress: new Animated.Value(0),
+        scale: new Animated.Value(1),
       })),
     ).current;
 
     useImperativeHandle(ref, () => ({
       pulse() {
+        // Reset all dots before starting
+        anims.forEach((dot) => {
+          dot.colorProgress.setValue(0);
+          dot.scale.setValue(1);
+        });
+        // Staggered top-to-bottom cascade: each dot lights up, swells, then fades
         const cascade = anims.map((dot, i) =>
           Animated.sequence([
-            Animated.delay(i * 30),
+            Animated.delay(i * 60),
             Animated.parallel([
               Animated.sequence([
-                Animated.timing(dot.translateY, { toValue: 6, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-                Animated.timing(dot.translateY, { toValue: 0, duration: 200, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }),
+                Animated.timing(dot.colorProgress, { toValue: 1, duration: 120, useNativeDriver: false }),
+                Animated.timing(dot.colorProgress, { toValue: 0, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
               ]),
               Animated.sequence([
-                Animated.timing(dot.colorProgress, { toValue: 1, duration: 150, useNativeDriver: false }),
-                Animated.delay(100),
-                Animated.timing(dot.colorProgress, { toValue: 0, duration: 300, useNativeDriver: false }),
+                Animated.timing(dot.scale, { toValue: 1.8, duration: 120, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+                Animated.timing(dot.scale, { toValue: 1, duration: 350, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }),
               ]),
             ]),
           ]),
@@ -371,7 +376,7 @@ export const ConnectorDots = forwardRef<ConnectorDotsHandle, { color?: string; a
     }));
 
     return (
-      <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 12 }}>
+      <View style={{ alignItems: 'center', paddingVertical: 2 }}>
         {anims.map((dot, i) => {
           const bg = dot.colorProgress.interpolate({
             inputRange: [0, 1],
@@ -385,7 +390,8 @@ export const ConnectorDots = forwardRef<ConnectorDotsHandle, { color?: string; a
                 height: 3,
                 borderRadius: 1.5,
                 backgroundColor: bg,
-                transform: [{ translateY: dot.translateY }],
+                marginVertical: 2.5,
+                transform: [{ scale: dot.scale }],
               }}
             />
           );

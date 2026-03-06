@@ -1991,29 +1991,20 @@ export default function Home() {
 
                 {/* Big centered spend number */}
                 <View style={s.periodTotalRow}>
-                  <Text style={[s.periodTotalAmount, { fontSize: 32, color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
-                    {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                    <Text style={[s.periodTotalAmount, { fontSize: 32, color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
+                      {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
+                    </Text>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: overallPctUsed > 100 ? colors.coral : colors.muted, marginLeft: 6, letterSpacing: 0.3 }}>
+                      {overallPctUsed}%
+                    </Text>
+                  </View>
                   <Text style={s.periodTotalOf}>
-                    {' '}of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
+                    of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
                   </Text>
                 </View>
 
-                {/* Overall progress bar with percentage */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, marginBottom: 28 }}>
-                  <View style={[s.progressTrack, { flex: 1, marginTop: 0, marginBottom: 0 }]}>
-                    <View style={[
-                      s.progressFill,
-                      {
-                        width: `${Math.min(100, overallPctUsed)}%`,
-                        backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.accent,
-                      },
-                    ]} />
-                  </View>
-                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: overallPctUsed > 100 ? colors.coral : colors.muted, letterSpacing: 0.3, minWidth: 32, textAlign: 'right' }}>
-                    {overallPctUsed}%
-                  </Text>
-                </View>
+                <View style={{ height: 24 }} />
 
                 <View style={s.sectionBlock}>
                   <View style={s.sectionHeaderRow}>
@@ -2076,8 +2067,10 @@ export default function Home() {
             )}
           </View>
 
-          {/* Animated connector between Budget and Transactions */}
-          <ConnectorDots ref={connectorDotsRef} />
+          {/* Vertical connector pipe between Budget and Transactions */}
+          <View style={{ alignItems: 'center', marginVertical: -4 }}>
+            <ConnectorDots ref={connectorDotsRef} />
+          </View>
 
           {/* ── Transactions — collapsed by default ── */}
           <TouchableOpacity
