@@ -1035,86 +1035,102 @@ const EnrichmentEngine = {
       });
     }
 
-    // ── High-level intelligent moves for financially healthy users ──
+    // ── Mathematical insights for financially healthy users ──
+    // These surface tax and return facts — not product recommendations.
+    // The user sees the numbers; the ranking reflects the tax math.
     if (m.savingsRate >= 20 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
-      // ISA maximization
+      // ISA allowance utilisation
       const isaLimit = 20000;
       const annualSurplus = Math.round(p.surplus * 12);
       if (annualSurplus > 3000) {
-        const isaContribution = Math.min(annualSurplus, isaLimit);
-        const isaReturn = Math.round(isaContribution * 0.05); // ~5% return estimate
+        const isaCapacity = Math.min(annualSurplus, isaLimit);
+        const taxFreeGrowth = Math.round(isaCapacity * 0.05);
         moves.push({
-          action: `Max out your ISA with \u00a3${Math.round(isaContribution / 12)}/month tax-free`,
-          annualImpact: isaReturn,
-          monthlyImpact: Math.round(isaReturn / 12),
+          action: `\u00a3${isaCapacity.toLocaleString()}/year of surplus falls within the ISA allowance`,
+          annualImpact: taxFreeGrowth,
+          monthlyImpact: Math.round(taxFreeGrowth / 12),
           effort: 'low',
           category: 'invest',
           merchants: [],
-          strategy: `You have \u00a3${Math.round(p.surplus)}/month surplus and a ${Math.round(m.savingsRate)}% savings rate. Your ISA allowance is \u00a3${isaLimit.toLocaleString()}/year — this grows tax-free.`,
-          steps: ['Open a Stocks & Shares ISA if you don\'t have one', 'Set up monthly direct debit on payday', 'Choose a global index fund for long-term growth', 'I\'ll track your ISA utilisation'],
-          effect: `\u00a3${isaReturn.toLocaleString()}/year in tax-free returns (estimated at 5%).`,
+          strategy: `Your annual surplus of \u00a3${annualSurplus.toLocaleString()} is within the \u00a3${isaLimit.toLocaleString()} ISA allowance. Growth inside an ISA is not subject to capital gains tax or income tax on dividends.`,
+          steps: ['Your ISA allowance resets each 6 April', 'Unused allowance does not carry over', 'You can hold one of each ISA type per tax year'],
+          effect: `At 5% growth, \u00a3${isaCapacity.toLocaleString()}/year generates \u00a3${taxFreeGrowth.toLocaleString()}/year tax-free.`,
         });
       }
 
-      // Salary sacrifice pension
+      // Pension tax relief arithmetic
       if (p.income > 2500) {
         const pensionExtra = Math.round(p.surplus * 0.15);
-        const taxRelief = Math.round(pensionExtra * 0.25); // Basic rate relief
+        const isHigherRate = p.income > 4167; // ~£50k/year
+        const netCostPer100 = isHigherRate ? 60 : 80;
+        const reliefRate = isHigherRate ? 40 : 20;
+        const annualRelief = Math.round(pensionExtra * 12 * (reliefRate / 100));
         moves.push({
-          action: `Boost pension by \u00a3${pensionExtra}/month via salary sacrifice`,
-          annualImpact: taxRelief * 12,
-          monthlyImpact: taxRelief,
+          action: `\u00a3${pensionExtra}/month into pension costs \u00a3${Math.round(pensionExtra * netCostPer100 / 100)} net after ${reliefRate}% tax relief`,
+          annualImpact: annualRelief,
+          monthlyImpact: Math.round(annualRelief / 12),
           effort: 'medium',
           category: 'invest',
           merchants: [],
-          strategy: `Salary sacrifice reduces your taxable income. Every \u00a3100 you contribute costs you \u00a3${p.income > 4167 ? '60' : '80'} after tax relief. Free money from HMRC.`,
-          steps: ['Check your employer\'s salary sacrifice scheme', 'Calculate how much extra you can afford', 'Request the change through HR/payroll', 'I\'ll factor the reduced take-home into your budget'],
-          effect: `\u00a3${(taxRelief * 12).toLocaleString()}/year in tax relief + employer NI savings.`,
+          strategy: `At your income level, each \u00a3100 directed to a pension has a net cost of \u00a3${netCostPer100} after ${reliefRate}% tax relief. Via salary sacrifice, NI savings reduce this further.`,
+          steps: ['Tax relief is ${reliefRate}% at your marginal rate', 'Salary sacrifice also saves ${isHigherRate ? 2 : 8}% in National Insurance', 'Annual pension allowance is \u00a360,000 (including employer contributions)'],
+          effect: `\u00a3${annualRelief.toLocaleString()}/year in tax relief on \u00a3${(pensionExtra * 12).toLocaleString()}/year of contributions.`,
         });
       }
 
-      // Premium bonds for emergency fund
+      // Tax-free savings threshold
       if (p.surplus > 200) {
+        const annualSavingsInterest = Math.round(p.surplus * 12 * 0.04);
+        const isHigherRate = p.income > 4167;
+        const psa = isHigherRate ? 500 : 1000;
+        const taxOnInterest = annualSavingsInterest > psa
+          ? Math.round((annualSavingsInterest - psa) * (isHigherRate ? 0.40 : 0.20))
+          : 0;
         moves.push({
-          action: 'Move emergency fund to Premium Bonds for tax-free prizes',
-          annualImpact: Math.round(p.surplus * 12 * 0.04),
-          monthlyImpact: Math.round(p.surplus * 0.04),
+          action: `\u00a3${annualSavingsInterest.toLocaleString()}/year savings interest ${annualSavingsInterest > psa ? 'exceeds' : 'is within'} your \u00a3${psa} personal savings allowance`,
+          annualImpact: taxOnInterest > 0 ? taxOnInterest : Math.round(p.surplus * 12 * 0.04),
+          monthlyImpact: taxOnInterest > 0 ? Math.round(taxOnInterest / 12) : Math.round(p.surplus * 0.04),
           effort: 'low',
           category: 'savings',
           merchants: [],
-          strategy: `Your emergency fund can work harder. Premium Bonds offer prize rates equivalent to ~4% — all tax-free. Max \u00a350,000.`,
-          steps: ['Open an NS&I account if you don\'t have one', 'Transfer your emergency fund into Premium Bonds', 'Keep 1 month of expenses in easy access for true emergencies', 'I\'ll track any prizes you win'],
-          effect: 'Tax-free returns on money you\'d keep in savings anyway.',
+          strategy: taxOnInterest > 0
+            ? `At 4% interest, your surplus generates ~\u00a3${annualSavingsInterest}/year. Your personal savings allowance is \u00a3${psa} (${isHigherRate ? 'higher' : 'basic'} rate). Interest above this is taxed at ${isHigherRate ? 40 : 20}%. Tax-free wrappers avoid this.`
+            : `At 4% interest, your surplus generates ~\u00a3${annualSavingsInterest}/year — within your \u00a3${psa} personal savings allowance, so no tax is due.`,
+          steps: [`Your personal savings allowance is \u00a3${psa} as a ${isHigherRate ? 'higher' : 'basic'} rate taxpayer`, 'Interest from ISAs and Premium Bonds does not count against this', 'This allowance is separate from the ISA allowance'],
+          effect: taxOnInterest > 0
+            ? `\u00a3${taxOnInterest}/year in tax on savings interest above the allowance.`
+            : `All \u00a3${annualSavingsInterest}/year in interest is within your tax-free allowance.`,
         });
       }
 
-      // Income growth / career move
+      // Surplus growth potential
       if (p.income > 0) {
-        const raiseTarget = Math.round(p.income * 0.1);
+        const tenPct = Math.round(p.income * 0.1);
         moves.push({
-          action: `Target a \u00a3${raiseTarget}/month raise or income boost`,
-          annualImpact: raiseTarget * 12,
-          monthlyImpact: raiseTarget,
+          action: `A 10% income increase would add \u00a3${tenPct}/month (\u00a3${(tenPct * 12).toLocaleString()}/year) to surplus`,
+          annualImpact: tenPct * 12,
+          monthlyImpact: tenPct,
           effort: 'high',
           category: 'savings',
           merchants: [],
-          strategy: `Your spending is well-managed. The biggest lever now is increasing income. A 10% raise or side income would add \u00a3${raiseTarget}/month.`,
-          steps: ['Research market rate for your role on Glassdoor/LinkedIn', 'Document your achievements for a pay review conversation', 'Consider freelance or side income opportunities', 'I\'ll model the impact of any income change on your goals'],
-          effect: `\u00a3${(raiseTarget * 12).toLocaleString()}/year extra to invest, save, or enjoy.`,
+          strategy: `Your spending is well-managed at ${Math.round(m.savingsRate)}% savings rate. At this level, income growth has a larger impact than further spending cuts.`,
+          steps: ['Each extra \u00a31 of income keeps ~\u00a3' + Math.round((p.income > 4167 ? 0.58 : 0.72) * 100) / 100 + ' after tax and NI', 'Pension contributions reduce taxable income', 'Bonus income may be taxed at a higher marginal rate'],
+          effect: `\u00a3${(tenPct * 12).toLocaleString()}/year additional surplus, of which ~\u00a3${Math.round(tenPct * 12 * (p.income > 4167 ? 0.58 : 0.72)).toLocaleString()} after tax.`,
         });
       }
 
-      // Smart spending: cashback & rewards optimization
+      // Spending efficiency
+      const cashbackEstimate = Math.round(p.spending * 12 * 0.015);
       moves.push({
-        action: 'Optimise cashback and rewards across all spending',
-        annualImpact: Math.round(p.spending * 12 * 0.015),
+        action: `1-2% back on \u00a3${Math.round(p.spending * 12).toLocaleString()}/year spending = \u00a3${cashbackEstimate}/year`,
+        annualImpact: cashbackEstimate,
         monthlyImpact: Math.round(p.spending * 0.015),
         effort: 'low',
         category: 'savings',
         merchants: [],
-        strategy: `You spend \u00a3${Math.round(p.spending)}/month. Even 1-2% back across all spending adds up to \u00a3${Math.round(p.spending * 12 * 0.015)}/year.`,
-        steps: ['Use a rewards credit card for all spending and pay in full', 'Stack cashback sites (TopCashback/Quidco) for online purchases', 'Review if your current cards offer the best rewards for your categories', 'I\'ll track your rewards earnings'],
-        effect: `\u00a3${Math.round(p.spending * 12 * 0.015)}/year in cashback and rewards.`,
+        strategy: `Your annual spending is \u00a3${Math.round(p.spending * 12).toLocaleString()}. Cashback and rewards programmes typically return 1-2% of spend. This is money you're spending anyway.`,
+        steps: ['Cashback is typically treated as a discount, not taxable income', 'Stacking cashback sources can increase the effective rate', 'The value depends on whether you pay balances in full each month'],
+        effect: `\u00a3${cashbackEstimate}/year from spending that already happens.`,
       });
     }
 

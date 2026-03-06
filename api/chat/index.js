@@ -50,7 +50,7 @@ const TOOLS = [
   {
     name: 'propose_plan',
     description:
-      'Propose a financial plan for the user to approve. Use this when recommending a specific savings target, budget change, or financial action with concrete numbers. Examples: "Build a £1000 emergency fund saving £200/month", "Pay off credit card in 8 months". Only call this when you have a concrete, actionable plan with numbers.',
+      'Propose a plan based on the user\'s own stated goal. Use this when the user asks to set a target or track progress toward a number they\'ve chosen. Examples: "Build a £1000 buffer saving £200/month", "Pay off credit card in 8 months". Only call this when the user has expressed intent and you have concrete numbers. Never use this to suggest a product or provider.',
     input_schema: {
       type: 'object',
       properties: {
@@ -669,6 +669,8 @@ Rules:
 - Be razor-specific: "ditch Now TV and Paramount+, **£94/mo back**" not "you might want to look at your subscriptions."
 - NEVER use dashes (—, –, -), arrows (→, ->, =>), or any dash-like separators. Flow naturally.
 - Never recommend other apps. You do it all.
+- NEVER recommend specific financial products, providers, or funds (no "open a Vanguard ISA", "get an AJ Bell SIPP", "use a Chase savings account"). You show the tax maths, allowance numbers, and effective rates. The user decides what to do with that.
+- When discussing tax wrappers (ISA, pension, GIA), state the mathematical facts: allowance remaining, tax relief rate, effective cost per £1. Never say "you should put money in X."
 - No bullet lists unless they ask for steps. Keep it conversational.
 - No filler. No preamble. No "Great question!" No "Absolutely!" No "Let me break this down." Just answer.
 - Don't echo what they said. Don't restate the question. Jump straight to the answer.
@@ -692,9 +694,9 @@ GIFs:
 
 Tools:
 - When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction. For the match_description, use the EXACT bank description shown in the transfers list if available — partial matches work (e.g. "JOHN" will match "TFR TO JOHN SMITH"). Common cases: rent paid to partner/housemate, bill splits, debt repayments showing as transfers.
-- When you recommend a concrete financial plan, use propose_plan to create it. The user will see an "Add to plan" button and can approve or dismiss it from the chat.
+- When the user asks to set a target or track a goal, use propose_plan to create it. The user will see an "Add to plan" button and can approve or dismiss it from the chat. Only propose plans the user has asked for — never propose a plan to suggest a product or provider.
 - When the user mentions a regular expense that doesn't appear in their bank data (rent paid via partner, cash payments, expenses from unconnected accounts), use save_budget_item to add it to their budget. This appears immediately on their budget card. Examples: "My rent is £1200", "I spend £200 on childcare", "Add council tax £150".
-- When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis and recommendations. Don't suggest this casually — only when a real shift has happened.
+- When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis. Don't suggest this casually — only when a real shift has happened.
 - IMPORTANT: In all tool call inputs (action titles, reasons, descriptions), use PLAIN TEXT only — no markdown, no **bold**, no *italic*. Markdown is only for your chat messages.`;
 
   if (!ctx) return prompt;
@@ -715,7 +717,7 @@ Tools:
     if (id.dependents?.length && !id.dependents.includes('none')) {
       prompt += `\n- Dependents: ${id.dependents.join(', ').replace(/_/g, ' ')}`;
     }
-    prompt += `\nIMPORTANT: Tailor ALL guidance to this life context. A self-employed single parent needs different recommendations than a salaried office worker in a couple. Reference their specific situation. Don't give generic suggestions — make it personal.`;
+    prompt += `\nIMPORTANT: Tailor ALL insights to this life context. A self-employed single parent has different tax and allowance positions than a salaried office worker in a couple. Reference their specific situation.`;
   }
 
   // ── Core financials ──
@@ -810,7 +812,7 @@ Tools:
 
   // ── All moves (action plan) ──
   if (ctx.all_moves?.length) {
-    prompt += `\n\nRecommended moves (from analysis):`;
+    prompt += `\n\nInsights from analysis (ranked by mathematical impact):`;
     for (const m of ctx.all_moves) {
       prompt += `\n- ${m.action} → saves £${Math.round(m.monthlyImpact)}/month (effort: ${m.effort})`;
     }
@@ -853,9 +855,9 @@ Tools:
     const totalCreditLimit = ctx.debt_accounts.reduce((s, d) => s + (d.limit || 0), 0);
     const overallUtilisation = totalCreditLimit > 0 ? Math.round((totalDebt / totalCreditLimit) * 100) : -1;
     if (overallUtilisation >= 0 && overallUtilisation <= 30) {
-      prompt += `\nOverall utilisation: ${overallUtilisation}% — this is GOOD DEBT management. The user pays on time with low utilisation, likely earning rewards/points. Do NOT recommend aggressive debt paydown. Instead, suggest maximising rewards, maintaining low utilisation, and ensuring full monthly payments.`;
+      prompt += `\nOverall utilisation: ${overallUtilisation}% — low utilisation, paying on time. No high-interest cost.`;
     } else if (overallUtilisation > 75) {
-      prompt += `\nOverall utilisation: ${overallUtilisation}% — this is HIGH utilisation and is negatively impacting credit score. Recommend aggressive paydown starting with highest-rate debt.`;
+      prompt += `\nOverall utilisation: ${overallUtilisation}% — high utilisation. Interest costs are significant at this level.`;
     } else if (overallUtilisation > 30) {
       prompt += `\nOverall utilisation: ${overallUtilisation}% — moderate utilisation. Suggest bringing it below 30% for credit score benefits.`;
     }
@@ -923,7 +925,7 @@ Tools:
 
     if (gt.bufferRecommendation) {
       const b = gt.bufferRecommendation;
-      prompt += `\n\nPersonalised buffer recommendation (Monte Carlo): £${b.amount.toLocaleString()} (${b.months} months of expenses) covers ${b.coverageRate}% of simulated income shock scenarios. Use this instead of generic "3-6 months" advice.`;
+      prompt += `\n\nBuffer analysis (Monte Carlo): £${b.amount.toLocaleString()} (${b.months} months of expenses) covers ${b.coverageRate}% of simulated income shock scenarios.`;
     }
   }
 
