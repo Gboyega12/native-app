@@ -733,6 +733,8 @@ export default function Home() {
 
   useFocusEffect(
     useCallback(() => {
+      // Invalidate cached sync so returning from connect screen always fetches fresh data
+      invalidateSyncCache();
       loadData();
       // Subscribe to sync completions from other screens
       const unsub = onSyncComplete((result) => {
@@ -1439,7 +1441,9 @@ export default function Home() {
         </View>
         {(syncing || lastSynced > 0 || syncError) && (
           <Text style={[s.syncText, syncError && !syncing ? { color: colors.coral } : undefined]}>
-            {syncing ? 'Syncing...' : syncError ? syncError : `Synced ${formatTimeAgo(lastSynced)}${syncDataSource === 'fallback' ? ' (cached)' : ''}`}
+            {syncing ? 'Syncing...' : syncError ? syncError : syncDataSource === 'fallback' && latestTxDate
+              ? `Data from ${formatTimeAgo(new Date(latestTxDate).getTime())} (cached)`
+              : `Synced ${formatTimeAgo(lastSynced)}`}
           </Text>
         )}
       </View>
