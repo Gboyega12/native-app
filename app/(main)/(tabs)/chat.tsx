@@ -1104,6 +1104,13 @@ export default function Chat() {
         monthlyImpact: m.monthlyImpact,
         effort: m.effort,
       })),
+      income_sources: a?.income_sources?.map((s: any) => ({
+        source: s.source,
+        frequency: s.frequency,
+        avgAmount: s.avgAmount,
+        monthly: s.monthly,
+        isSalary: s.isSalary,
+      })),
       spending_by_category: buildSpendingBreakdown(a),
       behavioral_patterns: a?.behavioral_patterns,
       goal_trajectory: a?.goal_context ? {

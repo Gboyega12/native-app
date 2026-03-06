@@ -274,7 +274,19 @@ export function calcMoveMarginalUtility(
     if (work === 'self_employed') bufferTargetRate = 25;
     else if (work === 'multiple_jobs' || work === 'student') bufferTargetRate = 20;
   }
-  const bufferGap = Math.max(0, Math.min(1, 1 - savingsRate / bufferTargetRate));
+  let bufferGap = Math.max(0, Math.min(1, 1 - savingsRate / bufferTargetRate));
+
+  // ── Pay frequency adjustment ──
+  // Weekly/fortnightly earners replenish faster, reducing effective buffer gap.
+  // A weekly earner with a thin buffer is less exposed than a monthly earner
+  // with the same buffer — their next paycheck is days away, not weeks.
+  const primaryIncome = profile.incomeSources?.find((s) => s.isSalary) || profile.incomeSources?.[0];
+  const payFrequency = primaryIncome?.frequency || 'monthly';
+  if (payFrequency === 'weekly') {
+    bufferGap *= 0.80; // 20% reduction — cash replenishes every 7 days
+  } else if (payFrequency === 'fortnightly') {
+    bufferGap *= 0.90; // 10% reduction — cash replenishes every 14 days
+  }
 
   // ── Apply liquidity discount ──
   const discount = getLiquidityDiscount(tier, bufferGap);

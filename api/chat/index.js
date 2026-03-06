@@ -50,7 +50,7 @@ const TOOLS = [
   {
     name: 'propose_plan',
     description:
-      'Propose a plan based on the user\'s own stated goal. Use this when the user asks to set a target or track progress toward a number they\'ve chosen. Examples: "Build a £1000 buffer saving £200/month", "Pay off credit card in 8 months". Only call this when the user has expressed intent and you have concrete numbers. Never use this to suggest a product or provider.',
+      'Propose a plan based on the user\'s own EXPLICIT request. ONLY call this when the user has DIRECTLY asked you to create a plan, set a target, or track a goal — and you have concrete numbers they provided. Examples of when to call: user says "set up a plan to save £1000", "track my credit card payoff". Examples of when NOT to call: user asks "how should I budget my paycheck", "what should I do with my surplus", "can I afford X" — these are questions, not plan requests. NEVER call this proactively or as part of a paycheck breakdown. NEVER call this when answering a question. Never use this to suggest a product or provider.',
     input_schema: {
       type: 'object',
       properties: {
@@ -77,7 +77,7 @@ const TOOLS = [
   {
     name: 'save_budget_item',
     description:
-      'Add a manual budget item that doesn\'t appear in bank transactions. Use this when the user tells you about recurring expenses paid in cash, via a partner, or through accounts not connected. Examples: "My rent is £1200 paid by standing order from my partner", "I spend £200/month on childcare in cash", "Add council tax £150 to essentials".',
+      'Add a manual budget item that doesn\'t appear in bank transactions. ONLY use this when the user EXPLICITLY tells you to add a specific expense with a concrete amount. The user must provide both what it is AND how much. Examples of when to call: "My rent is £1200 paid by standing order", "Add council tax £150 to essentials". Examples of when NOT to call: user mentions rent exists but hasn\'t given an amount, user is answering a question about their expenses, user is discussing a paycheck breakdown. When in doubt, ASK the user to confirm the amount before saving.',
     input_schema: {
       type: 'object',
       properties: {
@@ -671,6 +671,8 @@ Rules:
 - Never recommend other apps. You do it all.
 - NEVER recommend specific financial products, providers, or funds (no "open a Vanguard ISA", "get an AJ Bell SIPP", "use a Chase savings account"). You show the tax maths, allowance numbers, and effective rates. The user decides what to do with that.
 - When discussing tax wrappers (ISA, pension, GIA), state the mathematical facts: allowance remaining, tax relief rate, effective cost per £1. Never say "you should put money in X."
+- NEVER guess or assume expenses that aren't in the data. If you don't see rent, council tax, childcare, or other expected essentials, ASK the user — don't fill in amounts yourself. Say "I don't see rent in your transactions — do you pay it via another account or a partner?" The user's data might be correct (they might live rent-free, or pay via a partner). ALWAYS confirm before acting.
+- NEVER call propose_plan or save_budget_item unless the user EXPLICITLY asks you to create a plan or add a budget item. Giving a breakdown, answering a question, or discussing spending is NOT a trigger to create plans or save budget items.
 - No bullet lists unless they ask for steps. Keep it conversational.
 - No filler. No preamble. No "Great question!" No "Absolutely!" No "Let me break this down." Just answer.
 - Don't echo what they said. Don't restate the question. Jump straight to the answer.
@@ -694,8 +696,8 @@ GIFs:
 
 Tools:
 - When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction. For the match_description, use the EXACT bank description shown in the transfers list if available — partial matches work (e.g. "JOHN" will match "TFR TO JOHN SMITH"). Common cases: rent paid to partner/housemate, bill splits, debt repayments showing as transfers.
-- When the user asks to set a target or track a goal, use propose_plan to create it. The user will see an "Add to plan" button and can approve or dismiss it from the chat. Only propose plans the user has asked for — never propose a plan to suggest a product or provider.
-- When the user mentions a regular expense that doesn't appear in their bank data (rent paid via partner, cash payments, expenses from unconnected accounts), use save_budget_item to add it to their budget. This appears immediately on their budget card. Examples: "My rent is £1200", "I spend £200 on childcare", "Add council tax £150".
+- When the user EXPLICITLY asks to set a target or track a goal, use propose_plan to create it. The user will see an "Add to plan" button and can approve or dismiss it from the chat. NEVER call propose_plan unless the user directly asks for a plan. Answering questions, giving breakdowns, or discussing budgets is NOT a reason to create a plan. If a user asks "how should I split my paycheck" that's a question — answer it, don't create a plan.
+- When the user EXPLICITLY tells you to add a specific expense with a concrete amount, use save_budget_item. The user must provide both what it is AND how much. NEVER call this tool based on assumptions or as part of a breakdown. If you notice rent or an essential is missing from their data, ASK about it first — don't add it yourself.
 - When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis. Don't suggest this casually — only when a real shift has happened.
 - IMPORTANT: In all tool call inputs (action titles, reasons, descriptions), use PLAIN TEXT only — no markdown, no **bold**, no *italic*. Markdown is only for your chat messages.`;
 
@@ -727,6 +729,21 @@ Tools:
   if (ctx.surplus != null) prompt += `\n- Monthly surplus: £${Math.round(ctx.surplus)}`;
   if (ctx.decision_score != null) prompt += `\n- Financial health score: ${ctx.decision_score}/100`;
   if (ctx.archetype) prompt += `\n- Financial profile: ${ctx.archetype}`;
+
+  // ── Income sources with pay frequency ──
+  if (ctx.income_sources?.length) {
+    prompt += `\n\nIncome sources:`;
+    for (const src of ctx.income_sources) {
+      const freq = src.frequency || 'irregular';
+      const freqLabel = freq === 'weekly' ? 'weekly' : freq === 'fortnightly' ? 'fortnightly' : freq === 'monthly' ? 'monthly' : 'irregular';
+      prompt += `\n- ${src.source}: £${Math.round(src.avgAmount)} per payment (${freqLabel}), £${Math.round(src.monthly)}/month${src.isSalary ? ' [primary salary]' : ''}`;
+    }
+    const primarySrc = ctx.income_sources.find(s => s.isSalary) || ctx.income_sources[0];
+    if (primarySrc) {
+      const freq = primarySrc.frequency || 'monthly';
+      prompt += `\nIMPORTANT: User is paid ${freq}. When discussing paycheck breakdowns, budgets per pay period, or "what to do with this paycheck", frame everything in ${freq} terms, not monthly (unless the user asks for monthly). A ${freq} earner receiving £${Math.round(primarySrc.avgAmount)} needs to think about £${Math.round(primarySrc.avgAmount)} at a time, not £${Math.round(ctx.monthly_income)}.`;
+    }
+  }
 
   // ── Budget line (real spending power & trade-offs) ──
   if (ctx.budget_line) {
@@ -965,26 +982,28 @@ Tools:
     const totalIncome = pc.incomeEvents.reduce((s, e) => s + e.amount, 0);
     const sources = pc.incomeEvents.map(e => `£${Math.round(e.amount)} from ${e.source}`).join(', ');
 
+    // Determine pay frequency from income events
+    const payFrequencies = pc.incomeEvents.map(e => e.frequency).filter(f => f && f !== 'unknown');
+    const primaryFreq = payFrequencies[0] || 'monthly';
+    const freqLabel = primaryFreq === 'weekly' ? 'weekly' : primaryFreq === 'fortnightly' ? 'fortnightly' : 'monthly';
+    const periodsPerMonth = primaryFreq === 'weekly' ? 4.33 : primaryFreq === 'fortnightly' ? 2.17 : 1;
+
     prompt += `\n\n🔔 PAYDAY MODE ACTIVE — Income just landed this week:`;
     prompt += `\n- Income received: ${sources}`;
+    prompt += `\n- Pay frequency: ${freqLabel} (user gets paid ${freqLabel})`;
     prompt += `\n- Already committed to bills/essentials this week: £${Math.round(pc.committedThisWeek)}`;
     prompt += `\n- Discretionary spending this week so far: £${Math.round(pc.discretionaryThisWeek)}`;
     prompt += `\n- Adaptive safe-to-spend budget: £${Math.round(pc.adaptiveBudget)}/week`;
     prompt += `\n- Static weekly budget: £${Math.round(pc.staticBudget)}/week`;
+    prompt += `\n- IMPORTANT: This user is paid ${freqLabel}. ALL breakdowns must be per ${freqLabel === 'monthly' ? 'month' : freqLabel === 'fortnightly' ? 'fortnight' : 'week'}, NOT monthly (unless they ask for monthly). If they ask "how should I split this paycheck", break it down per pay period (${freqLabel}), not per month. For ${freqLabel} earners, divide monthly commitments by ${periodsPerMonth.toFixed(2)} to get per-paycheck amounts.`;
 
     prompt += `\n\nPAYDAY CONVERSATION RULES:`;
-    prompt += `\n- This is the most important moment in the user's financial cycle. Money just hit their account and this is when habits are formed.`;
-    prompt += `\n- Your job right now: help them ALLOCATE before they SPEND. Guide them to put money where it needs to go FIRST.`;
-    prompt += `\n- Be proactive and specific. Walk them through their commitments:`;
-    prompt += `\n  1. Bills and essentials that are due`;
-    prompt += `\n  2. Any debt payments they should make`;
-    prompt += `\n  3. Savings goals they committed to (auto-save, buffer, ISA)`;
-    prompt += `\n  4. What's genuinely left for discretionary spending`;
-    prompt += `\n- Use the adaptive budget (£${Math.round(pc.adaptiveBudget)}/week) not the static one. This accounts for committed payments already made.`;
+    prompt += `\n- Money just hit their account. Help them think through allocation — but ONLY if they ask. Don't dump a breakdown unprompted.`;
+    prompt += `\n- CRITICAL: Do NOT call propose_plan or save_budget_item during payday conversations. These are questions, not plan requests.`;
+    prompt += `\n- If they ask "how should I split this" or "where should this go", give a MATHEMATICAL breakdown based on their pay frequency and data — don't create plans or budget items.`;
+    prompt += `\n- Use the adaptive budget (£${Math.round(pc.adaptiveBudget)}/week) not the static one.`;
     prompt += `\n- If they've already spent £${Math.round(pc.discretionaryThisWeek)} on discretionary this week, tell them exactly how much is left.`;
-    prompt += `\n- Reference their active plans and moves. Hold them accountable: "You committed to saving £X, now's the time."`;
-    prompt += `\n- If they're about to overspend, be direct but kind. "That would blow your weekly budget. Can it wait?"`;
-    prompt += `\n- Celebrate if they're sticking to the plan. Quick wins matter.`;
+    prompt += `\n- NEVER guess missing essentials. If you don't see rent, council tax, or other expected essentials in their data, ASK: "I don't see rent in your transactions — do you pay it via a partner or another account?" Don't assume amounts.`;
     prompt += `\n- Do NOT just dump all these numbers. Weave them naturally into conversation. Only mention what's relevant to what they're asking about.`;
   }
 

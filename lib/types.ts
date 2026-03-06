@@ -301,6 +301,7 @@ export interface ChatContext {
   top_move?: { action: string; monthlyImpact: number };
   all_moves?: { action: string; monthlyImpact: number; effort: string }[];
   subscriptions?: { merchant: string; amount: number }[];
+  income_sources?: { source: string; frequency: string; avgAmount: number; monthly: number; isSalary: boolean }[];
   spending_by_category?: { category: string; monthly: number }[];
   recent_transfers?: { description: string; amount: number; date: string }[];
   recent_transactions?: { description: string; amount: number; date: string; category: string; essential: boolean }[];
