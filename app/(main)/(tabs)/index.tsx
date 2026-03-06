@@ -1643,7 +1643,7 @@ export default function Home() {
           </View>
 
           {/* ══════════════════════════════════════════════
-              YOUR MOVES — inline from Plan page
+              YOUR INSIGHTS — inline from Plan page
               ══════════════════════════════════════════════ */}
           {(activePlanMoves.length > 0 || userPlans.length > 0 || opportunityMoves.length > 0) && (
             <>
@@ -1811,7 +1811,7 @@ export default function Home() {
               {opportunityMoves.length > 0 && (
                 <>
                   <View style={s.moveSectionHeader}>
-                    <Text style={s.moveSectionLabel}>YOUR MOVES</Text>
+                    <Text style={s.moveSectionLabel}>YOUR INSIGHTS</Text>
                     <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green, letterSpacing: 0.3 }}>
                       {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo potential
                     </Text>

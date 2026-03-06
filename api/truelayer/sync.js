@@ -51,16 +51,21 @@ async function syncConnection(bankRow, clientId, clientSecret) {
     // Guard: if TrueLayer returned an error (403, 429, etc.), the response
     // has no .results — bail out rather than proceeding with empty arrays
     // which would overwrite valid CSV data with an empty CSV.
+    // IMPORTANT: preserve the new refresh token so the caller can persist it —
+    // returning null here would lose the rotated token permanently.
     if (!accountsRes.ok || !cardsRes.ok) {
       console.warn(`[sync] TrueLayer data endpoints returned errors — accounts: ${accountsRes.status}, cards: ${cardsRes.status}`, {
         accountsError: accountsJson.error || null,
         cardsError: cardsJson.error || null,
       });
-      return null;
+      return { csvLines: [], balances: [], newRefreshToken, txCount: 0, tokenOnlyRecovery: true };
     }
 
     const accounts = accountsJson.results || [];
     const cards = cardsJson.results || [];
+
+    // Extract provider name from TrueLayer account/card data
+    const providerName = accounts[0]?.provider?.display_name || cards[0]?.provider?.display_name || null;
 
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
@@ -141,6 +146,7 @@ async function syncConnection(bankRow, clientId, clientSecret) {
       balances: [...cardBalances, ...accountBalances],
       newRefreshToken,
       txCount: allTx.length,
+      providerName,
     };
   } catch (err) {
     console.warn(`[sync] Connection ${bankRow.connection_id} failed:`, err.message);
@@ -250,7 +256,9 @@ export default async function handler(req, res) {
         const expiry = new Date(created);
         expiry.setDate(expiry.getDate() + CONSENT_DAYS);
         if (Date.now() >= expiry.getTime()) {
-          expiredConnections.push({ connection_id: row.connection_id, provider_name: row.provider_name || null });
+          // Use provider_name from DB, or from the sync result (backfill), or fallback
+          const name = row.provider_name || result?.providerName || null;
+          expiredConnections.push({ connection_id: row.connection_id, provider_name: name });
         }
         continue;
       }
@@ -271,6 +279,10 @@ export default async function handler(req, res) {
       }
       if (result.balances.length > 0) {
         updateFields.card_balances = result.balances;
+      }
+      // Backfill provider_name if missing (older rows created before the column existed)
+      if (!row.provider_name && result.providerName) {
+        updateFields.provider_name = result.providerName;
       }
       // refresh_token is already persisted above (before data fetch guards)
       await admin.from('bank_data').update(updateFields).eq('id', row.id);
@@ -322,20 +334,27 @@ export default async function handler(req, res) {
     // When a user reconnects a bank, a new row is created — the old expired row
     // should be removed so the reconnect banner doesn't keep reappearing.
     try {
+      // Build a map of row.id → providerName, using syncConnection response
+      // to fill in missing provider_name (backfill for old rows)
+      const rowProviders = {};
+      for (const { row, result } of results) {
+        rowProviders[row.id] = row.provider_name || result?.providerName || null;
+      }
+
       const providerGroups = {};
       for (const row of bankRows) {
-        const key = row.provider_name || row.connection_id;
+        const key = rowProviders[row.id] || row.connection_id;
         if (!providerGroups[key]) providerGroups[key] = [];
         providerGroups[key].push(row);
       }
-      for (const [, rows] of Object.entries(providerGroups)) {
+      for (const [provKey, rows] of Object.entries(providerGroups)) {
         if (rows.length <= 1) continue;
         // Keep the newest, delete the rest
         rows.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
         const staleIds = rows.slice(1).map((r) => r.id);
         if (staleIds.length > 0) {
           await admin.from('bank_data').delete().in('id', staleIds);
-          console.log(`[sync] Cleaned up ${staleIds.length} stale connection(s) for provider ${rows[0].provider_name}`);
+          console.log(`[sync] Cleaned up ${staleIds.length} stale connection(s) for provider ${provKey}`);
         }
       }
     } catch (cleanupErr) {

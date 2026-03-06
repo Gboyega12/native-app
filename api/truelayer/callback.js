@@ -158,7 +158,7 @@ export default async function handler(req, res) {
       : cards.length > 0 && accounts.length === 0 ? 'credit'
       : accounts.length > 0 ? 'bank' : null;
 
-    // Insert core fields first (guaranteed columns), then best-effort update extras
+    // Insert bank data row with all available fields
     const insertRow = {
       connection_id: connectionId,
       csv_data: csv,
@@ -166,6 +166,8 @@ export default async function handler(req, res) {
       refresh_token: tokenData.refresh_token || null,
     };
     if (postUserId) insertRow.user_id = postUserId;
+    if (providerName) insertRow.provider_name = providerName;
+    if (accountType) insertRow.account_type = accountType;
 
     const { error: dbError } = await admin.from('bank_data').insert(insertRow);
 
@@ -174,29 +176,30 @@ export default async function handler(req, res) {
       return fail(500, 'Failed to save bank data', dbError.message || dbError.code);
     }
 
-    // Best-effort: set provider_name + account_type (columns may not exist yet)
-    try {
-      const extras = {};
-      if (providerName) extras.provider_name = providerName;
-      if (accountType) extras.account_type = accountType;
-      if (Object.keys(extras).length > 0) {
-        await admin.from('bank_data').update(extras).eq('connection_id', connectionId);
-      }
-    } catch {}
-
     // Clean up old connections for the same provider and user.
     // Without this, reconnecting a bank creates a duplicate row while the
     // old expired row persists — causing the reconnect banner to reappear
     // even though the user just reconnected successfully.
-    if (postUserId && providerName) {
+    if (postUserId) {
       try {
-        await admin
+        const deleteQuery = admin
           .from('bank_data')
           .delete()
           .eq('user_id', postUserId)
-          .eq('provider_name', providerName)
           .eq('source', 'truelayer')
           .neq('connection_id', connectionId);
+
+        // If we know the provider, only delete rows for the same provider.
+        // Otherwise delete all OTHER TrueLayer rows for this user that have
+        // the same account_type (bank/credit), to avoid leaving orphaned
+        // expired connections behind.
+        if (providerName) {
+          deleteQuery.eq('provider_name', providerName);
+        } else if (accountType) {
+          deleteQuery.eq('account_type', accountType);
+        }
+
+        await deleteQuery;
       } catch (cleanupErr) {
         console.warn('[callback] Non-critical: old connection cleanup failed:', cleanupErr.message);
       }

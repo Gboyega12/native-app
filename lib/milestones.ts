@@ -155,7 +155,7 @@ function buildDay7(a: Analysis): MilestoneContent | null {
     title: 'Your first week',
     insight: parts.join(' '),
     detail,
-    cta: 'Review your moves',
+    cta: 'Review your insights',
     ctaRoute: 'plan',
   };
 }

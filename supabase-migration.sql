@@ -77,6 +77,8 @@ CREATE TABLE bank_data (
   source TEXT NOT NULL DEFAULT 'truelayer',
   refresh_token TEXT,
   card_balances JSONB,
+  provider_name TEXT,
+  account_type TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );

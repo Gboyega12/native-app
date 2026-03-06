@@ -1074,7 +1074,7 @@ export default function Plan() {
         <>
           <AnimGlyph delay={100}>
             <View style={s.sectionHeader}>
-              <Text style={s.sectionLabel}>YOUR MOVES</Text>
+              <Text style={s.sectionLabel}>YOUR INSIGHTS</Text>
               <Text style={[s.sectionMeta, { color: colors.green }]}>
                 {'\u00a3'}{Math.round(totalMonthlyImpact - activeMonthly)}/mo potential
               </Text>
