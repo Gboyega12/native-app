@@ -347,6 +347,36 @@ export interface ChatContext {
       description: string;
     }[];
   } | null;
+  surplus_allocation?: {
+    monthly_surplus: number;
+    annual_surplus: number;
+    marginal_rate: {
+      income_tax: number;
+      national_insurance: number;
+      student_loan: number;
+      child_benefit: number;
+      combined: number;
+    };
+    waterfall: {
+      destination: string;
+      label: string;
+      monthly_amount: number;
+      annual_amount: number;
+      effective_return: number;
+      guaranteed_return: number;
+      reasoning: string;
+      projection_10yr: number;
+    }[];
+    blended_return: number;
+    free_money_missed: number;
+    threshold_alerts: {
+      threshold: string;
+      label: string;
+      distance: number;
+      direction: string;
+      insight: string;
+    }[];
+  } | null;
   goal_trajectory?: {
     goalLabel: string;
     currentMonths: number;

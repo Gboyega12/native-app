@@ -15,6 +15,7 @@ import Card from '@/components/Card';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals, FinancialProfile, UserIdentity } from '@/lib/types';
 import { solveBudgetAllocation } from '@/lib/budget-solver';
 import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo';
+import { buildSurplusWaterfall, findThresholdProximity, inferTaxSituation, type SurplusAllocation, type TaxSituation } from '@/lib/surplus-engine';
 import { useVoiceConversation, type VoiceState } from '@/lib/use-voice-conversation';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
@@ -1398,6 +1399,7 @@ export default function Chat() {
     if (identityForSolver && latestAnalysis) {
       ctx.budget_line = buildBudgetLine(latestAnalysis, prevSnapshot, identityForSolver);
       ctx.household_cashflow = buildHouseholdCashflow(latestAnalysis, identityForSolver);
+      ctx.surplus_allocation = buildSurplusAllocationContext(latestAnalysis, identityForSolver);
     }
 
     setContext(ctx);
@@ -2449,6 +2451,56 @@ function buildHouseholdCashflow(
         probability: s.probability,
         monthly_impact: s.monthlyImpact,
         description: s.description,
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Build surplus allocation waterfall for the chat context. */
+function buildSurplusAllocationContext(
+  a: Analysis | null,
+  identity: UserIdentity | null,
+): ChatContext['surplus_allocation'] {
+  if (!a || !a.monthly_income || (a.surplus ?? 0) <= 0) return null;
+
+  try {
+    const profile = analysisToProfile(a);
+    if (!profile) return null;
+
+    const tax = inferTaxSituation(profile, identity || null);
+    const allocation = buildSurplusWaterfall(profile, tax, identity || null);
+    const alerts = findThresholdProximity(tax.grossIncome, tax);
+
+    return {
+      monthly_surplus: allocation.monthlySurplus,
+      annual_surplus: allocation.annualSurplus,
+      marginal_rate: {
+        income_tax: Math.round(allocation.marginalRate.incomeTax * 100),
+        national_insurance: Math.round(allocation.marginalRate.nationalInsurance * 100),
+        student_loan: Math.round(allocation.marginalRate.studentLoan * 100),
+        child_benefit: Math.round(allocation.marginalRate.childBenefit * 1000) / 10,
+        combined: Math.round(allocation.marginalRate.combined * 100),
+      },
+      waterfall: allocation.waterfall.map((t) => ({
+        destination: t.destination,
+        label: t.label,
+        monthly_amount: t.monthlyAmount,
+        annual_amount: t.annualAmount,
+        effective_return: Math.round(t.effectiveReturn * 1000) / 10,
+        guaranteed_return: Math.round(t.guaranteedReturn * 1000) / 10,
+        reasoning: t.reasoning,
+        projection_10yr: t.projection.years10,
+      })),
+      blended_return: Math.round(allocation.blendedReturn * 1000) / 10,
+      free_money_missed: allocation.freeMoneyMissed,
+      threshold_alerts: alerts.map((a) => ({
+        threshold: a.threshold,
+        label: a.label,
+        distance: a.distance,
+        direction: a.direction,
+        insight: a.insight,
       })),
     };
   } catch {
