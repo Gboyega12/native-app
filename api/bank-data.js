@@ -50,7 +50,7 @@ export default async function handler(req, res) {
       // Best-effort: derive account_type from card_balances if column exists
       try {
         const { data: row } = await admin.from('bank_data')
-          .select('card_balances, account_type')
+          .select('card_balances, account_type, provider_name')
           .eq('connection_id', connectionId)
           .single();
 
@@ -59,6 +59,30 @@ export default async function handler(req, res) {
           await admin.from('bank_data')
             .update({ account_type: derived })
             .eq('connection_id', connectionId);
+        }
+
+        // Clean up old connections for the same provider.
+        // This handles the web flow where callback didn't have user_id
+        // and couldn't run cleanup at insert time.
+        if (row?.provider_name) {
+          await admin
+            .from('bank_data')
+            .delete()
+            .eq('user_id', userId)
+            .eq('source', 'truelayer')
+            .eq('provider_name', row.provider_name)
+            .neq('connection_id', connectionId);
+        } else if (row?.account_type || (!row?.account_type && !row?.provider_name)) {
+          // If no provider_name, use account_type. If neither, still clean up
+          // expired rows that have no provider_name (orphaned from before schema fix).
+          const acType = row?.account_type || (row?.card_balances?.length > 0 ? 'credit' : 'bank');
+          await admin
+            .from('bank_data')
+            .delete()
+            .eq('user_id', userId)
+            .eq('source', 'truelayer')
+            .eq('account_type', acType)
+            .neq('connection_id', connectionId);
         }
       } catch {}
     }

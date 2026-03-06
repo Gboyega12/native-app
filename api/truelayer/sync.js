@@ -252,7 +252,10 @@ export default async function handler(req, res) {
         // Only flag as expired if the 90-day consent window has actually lapsed.
         // Transient failures (network errors, TrueLayer outages) within the
         // consent window should NOT trigger the reconnect banner.
-        const created = new Date(row.created_at || row.updated_at);
+        // IMPORTANT: Use created_at (when consent was granted), NOT updated_at
+        // (which advances on every sync and would shift the 90-day window).
+        const created = new Date(row.created_at);
+        if (!created || isNaN(created.getTime())) continue;
         const expiry = new Date(created);
         expiry.setDate(expiry.getDate() + CONSENT_DAYS);
         if (Date.now() >= expiry.getTime()) {
@@ -314,9 +317,11 @@ export default async function handler(req, res) {
     const mergedCsv = ['Date,Description,Amount', ...uniqueLines].join('\n');
 
     // Check for connections approaching 90-day consent expiry (warn at 14 days)
+    // Use created_at (when consent was granted), not updated_at (which shifts with syncs).
     const expiringConnections = [];
     for (const row of bankRows) {
-      const created = new Date(row.created_at || row.updated_at);
+      const created = new Date(row.created_at);
+      if (!created || isNaN(created.getTime())) continue;
       const expiry = new Date(created);
       expiry.setDate(expiry.getDate() + CONSENT_DAYS);
       const daysLeft = Math.ceil((expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24));

@@ -182,24 +182,28 @@ export default async function handler(req, res) {
     // even though the user just reconnected successfully.
     if (postUserId) {
       try {
-        const deleteQuery = admin
-          .from('bank_data')
-          .delete()
-          .eq('user_id', postUserId)
-          .eq('source', 'truelayer')
-          .neq('connection_id', connectionId);
-
-        // If we know the provider, only delete rows for the same provider.
-        // Otherwise delete all OTHER TrueLayer rows for this user that have
-        // the same account_type (bank/credit), to avoid leaving orphaned
-        // expired connections behind.
+        // Build the cleanup query with all required filters in a single chain.
+        // Supabase query builder is immutable — .eq() returns a NEW object,
+        // so conditional chaining via variable reassignment doesn't work.
         if (providerName) {
-          deleteQuery.eq('provider_name', providerName);
+          await admin
+            .from('bank_data')
+            .delete()
+            .eq('user_id', postUserId)
+            .eq('source', 'truelayer')
+            .eq('provider_name', providerName)
+            .neq('connection_id', connectionId);
         } else if (accountType) {
-          deleteQuery.eq('account_type', accountType);
+          await admin
+            .from('bank_data')
+            .delete()
+            .eq('user_id', postUserId)
+            .eq('source', 'truelayer')
+            .eq('account_type', accountType)
+            .neq('connection_id', connectionId);
         }
-
-        await deleteQuery;
+        // If neither providerName nor accountType is known, skip cleanup
+        // to avoid deleting unrelated connections.
       } catch (cleanupErr) {
         console.warn('[callback] Non-critical: old connection cleanup failed:', cleanupErr.message);
       }
