@@ -1989,6 +1989,19 @@ export default function Home() {
                   <ExpandDots count={6} size={3} />
                 </View>
 
+                {/* Period toggle — at top so thumb doesn't block the connector animation below */}
+                <View style={[s.periodToggleRow, { marginBottom: 20, marginTop: 0 }]}>
+                  {(['year', 'month', 'week'] as const).map((p) => (
+                    <TouchableOpacity key={p} style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]} onPress={() => {
+                      LayoutAnimation.configureNext(SMOOTH_ANIM);
+                      setBudgetPeriod(p);
+                      connectorDotsRef.current?.pulse();
+                    }}>
+                      <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>{p === 'year' ? 'Annual' : p === 'month' ? 'Monthly' : 'Weekly'}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
                 {/* Big centered spend number */}
                 <View style={s.periodTotalRow}>
                   <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
@@ -2058,19 +2071,6 @@ export default function Home() {
                       {'\u00a3'}{Math.round(periodRemaining).toLocaleString()}
                     </Text>
                   </View>
-                </View>
-
-                {/* Period toggle */}
-                <View style={[s.periodToggleRow, { marginBottom: 0, marginTop: 8 }]}>
-                  {(['year', 'month', 'week'] as const).map((p) => (
-                    <TouchableOpacity key={p} style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]} onPress={() => {
-                      LayoutAnimation.configureNext(SMOOTH_ANIM);
-                      setBudgetPeriod(p);
-                      connectorDotsRef.current?.pulse();
-                    }}>
-                      <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>{p === 'year' ? 'Annual' : p === 'month' ? 'Monthly' : 'Weekly'}</Text>
-                    </TouchableOpacity>
-                  ))}
                 </View>
               </Card>
             )}
