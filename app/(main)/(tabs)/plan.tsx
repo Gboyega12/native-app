@@ -12,6 +12,7 @@ import { useTheme } from '@/lib/theme-context';
 import Card, { AnimGlyph, SMOOTH_ANIM } from '@/components/Card';
 import { useResponsive } from '@/lib/responsive';
 import type { Analysis, Move, GoalTrajectory, IncomeSource } from '@/lib/types';
+import type { NextMoveSuggestion } from '@/lib/reactive-engine';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -219,6 +220,7 @@ export default function Plan() {
   const [refreshing, setRefreshing] = useState(false);
   const [showAllMoves, setShowAllMoves] = useState(false);
   const itemYPositions = useRef<Record<number, number>>({});
+  const [nextMoveSuggestion, setNextMoveSuggestion] = useState<NextMoveSuggestion | null>(null);
 
   // Handle deep-link: store target action for resolution after data loads
   useEffect(() => {
@@ -279,6 +281,7 @@ export default function Plan() {
       const unsub = onSyncComplete((result) => {
         if (!result) return;
         setAnalysis(result.analysis);
+        if (result.reactive?.nextMove) setNextMoveSuggestion(result.reactive.nextMove);
       });
       return () => unsub();
     }, [])
@@ -349,6 +352,7 @@ export default function Plan() {
         : moves;
 
       setAnalysis({ ...result.analysis, all_moves: filtered });
+      if (result.reactive?.nextMove) setNextMoveSuggestion(result.reactive.nextMove);
     } catch (err: any) {
       console.warn('[plan] Background sync failed:', err?.message);
     }
@@ -1066,6 +1070,49 @@ export default function Plan() {
           <View key={i} style={[s.dotItem, { backgroundColor: colors.border }]} />
         ))}
       </View>
+
+      {/* ── Next Priority Move (reactive suggestion) ── */}
+      {nextMoveSuggestion && !progress[`move-${nextMoveSuggestion.rank - 1}`]?.approved && (
+        <Card variant="default" style={{ marginBottom: spacing.md, borderColor: colors.green, borderWidth: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 1, textTransform: 'uppercase' as const }}>
+              NEXT PRIORITY {'\u00B7'} {nextMoveSuggestion.flowchartLabel}
+            </Text>
+          </View>
+          <Text style={{ fontFamily: fonts.heading, fontSize: 16, color: colors.text, marginBottom: 6 }}>
+            {stripMd(nextMoveSuggestion.move.action)}
+          </Text>
+          <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18, marginBottom: 10 }}>
+            {nextMoveSuggestion.reason}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <Text style={{ fontFamily: fonts.heading, fontSize: 14, color: colors.green }}>
+              {'\u00a3'}{nextMoveSuggestion.move.monthlyImpact}/mo
+            </Text>
+            <View style={{ backgroundColor: `${effortColor(nextMoveSuggestion.move.effort, colors)}15`, borderRadius: 100, paddingHorizontal: 8, paddingVertical: 2 }}>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: effortColor(nextMoveSuggestion.move.effort, colors) }}>
+                {effortLabel(nextMoveSuggestion.move.effort)}
+              </Text>
+            </View>
+            {nextMoveSuggestion.trajectory && nextMoveSuggestion.trajectory.hitRate12m > 0 && (
+              <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.dim }}>
+                {nextMoveSuggestion.trajectory.hitRate12m}% chance in 12mo
+              </Text>
+            )}
+          </View>
+          <TouchableOpacity
+            onPress={() => {
+              // Find this move's index in the sorted moves array and start it
+              const idx = moves.findIndex((m) => m.action === nextMoveSuggestion.move.action);
+              if (idx >= 0) handleStartMove(idx, moves[idx]);
+            }}
+            style={{ backgroundColor: colors.accent, borderRadius: 100, paddingVertical: 10, alignItems: 'center' as const }}
+            activeOpacity={0.8}
+          >
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.bg }}>Start this move</Text>
+          </TouchableOpacity>
+        </Card>
+      )}
 
       {/* ══════════════════════════════════════════════
           SECTION 3 — OPPORTUNITIES

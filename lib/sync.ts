@@ -6,7 +6,8 @@
 import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
-import type { Analysis, Goals, EnrichedTransaction } from '@/lib/types';
+import { runReactiveEngine, type ReactiveResult } from '@/lib/reactive-engine';
+import type { Analysis, Goals, EnrichedTransaction, FinancialProfile } from '@/lib/types';
 
 export interface IncomeEvent {
   source: string;
@@ -47,6 +48,8 @@ export interface SyncResult {
   expiredBankNames: string[];
   /** Connections approaching 90-day consent expiry (within 14 days). */
   expiringConnections: { name: string; daysLeft: number }[];
+  /** Reactive engine results: events, next move suggestion, achievements. */
+  reactive: ReactiveResult | null;
 }
 
 /**
@@ -505,6 +508,22 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     console.warn('[sync] Failed to sync debt accounts from card balances:', e?.message || e);
   }
 
+  // ── 11. Reactive engine — close the feedback loop ──
+  let reactive: ReactiveResult | null = null;
+  try {
+    reactive = await runReactiveEngine(
+      userId,
+      rawAnalysis,
+      result.enrichedTransactions,
+      result.profile as FinancialProfile,
+      goals,
+      identityData,
+      debtAccountsData,
+    );
+  } catch (e: any) {
+    console.warn('[sync] Reactive engine failed:', e?.message || e);
+  }
+
   return {
     analysis: rawAnalysis,
     debtAccounts: syncedDebt,
@@ -514,6 +533,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     connectionIssues,
     expiredBankNames,
     expiringConnections,
+    reactive,
   };
 }
 

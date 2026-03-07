@@ -11,6 +11,7 @@ import { getLastResult } from '@/app/(main)/processing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { requestSync, onSyncComplete, getLastSyncTime, invalidateSyncCache } from '@/lib/sync-coordinator';
 import type { WeeklyContext } from '@/lib/sync';
+import type { ReactiveEvent, NextMoveSuggestion } from '@/lib/reactive-engine';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
@@ -202,6 +203,12 @@ export default function Home() {
 
   // Previous month snapshot for real income comparison
   const [prevSnapshot, setPrevSnapshot] = useState<{ monthly_spending: number; monthly_income: number } | null>(null);
+
+  // ── Reactive engine state ──
+  const [reactiveEvents, setReactiveEvents] = useState<ReactiveEvent[]>([]);
+  const [showReactiveModal, setShowReactiveModal] = useState(false);
+  const [reactiveEventIndex, setReactiveEventIndex] = useState(0);
+  const [nextMoveSuggestion, setNextMoveSuggestion] = useState<NextMoveSuggestion | null>(null);
 
   // ── Plan data (merged from plan page) ──
   const [userPlans, setUserPlans] = useState<any[]>([]);
@@ -745,6 +752,17 @@ export default function Home() {
       const unsub = onSyncComplete((result) => {
         if (!result) return;
         if (result.weeklyContext) setWeeklyCtx(result.weeklyContext);
+        // Surface reactive events from syncs triggered by other screens
+        if (result.reactive?.events?.length) {
+          setReactiveEvents(result.reactive.events);
+          setReactiveEventIndex(0);
+          if (!result.weeklyContext?.incomeArrivedThisWeek) {
+            setTimeout(() => setShowReactiveModal(true), 800);
+          }
+        }
+        if (result.reactive?.nextMove) {
+          setNextMoveSuggestion(result.reactive.nextMove);
+        }
       });
       return () => unsub();
     }, [])
@@ -1022,6 +1040,21 @@ export default function Home() {
 
       // Update adaptive weekly context
       if (result.weeklyContext) setWeeklyCtx(result.weeklyContext);
+
+      // ── Handle reactive engine events ──
+      if (result.reactive) {
+        if (result.reactive.events.length > 0) {
+          setReactiveEvents(result.reactive.events);
+          setReactiveEventIndex(0);
+          // Show reactive modal after a short delay (don't compete with payday modal)
+          if (!result.weeklyContext?.incomeArrivedThisWeek) {
+            setTimeout(() => setShowReactiveModal(true), 800);
+          }
+        }
+        if (result.reactive.nextMove) {
+          setNextMoveSuggestion(result.reactive.nextMove);
+        }
+      }
 
       // Re-fetch budget adjustments and apply for display
       let budgetAdjustments: any[] = [];
@@ -1813,6 +1846,44 @@ export default function Home() {
                 </>
               )}
 
+              {/* ── Next Priority Move (reactive suggestion) ── */}
+              {nextMoveSuggestion && !planProgress[`move-${nextMoveSuggestion.rank - 1}`]?.approved && (
+                <Card variant="default" style={{ marginBottom: spacing.md, borderColor: colors.green, borderWidth: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8, gap: 8 }}>
+                    <View style={[s.moveBadge, { borderColor: colors.green, backgroundColor: `${colors.green}12` }]}>
+                      <Text style={[s.moveBadgeText, { color: colors.green }]}>{'\u2192'}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 }}>
+                        NEXT PRIORITY {'\u00B7'} {nextMoveSuggestion.flowchartLabel}
+                      </Text>
+                      <Text style={s.moveAction}>{stripMd(nextMoveSuggestion.move.action)}</Text>
+                    </View>
+                  </View>
+                  <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18, marginBottom: 10 }}>
+                    {nextMoveSuggestion.reason}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <Text style={s.moveImpactText}>{'\u00a3'}{nextMoveSuggestion.move.monthlyImpact}/mo</Text>
+                    <View style={[s.effortPill, { backgroundColor: `${effortColor(nextMoveSuggestion.move.effort)}15` }]}>
+                      <Text style={[s.effortPillText, { color: effortColor(nextMoveSuggestion.move.effort) }]}>{effortLabel(nextMoveSuggestion.move.effort)}</Text>
+                    </View>
+                    {nextMoveSuggestion.trajectory && nextMoveSuggestion.trajectory.hitRate12m > 0 && (
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.dim }}>
+                        {nextMoveSuggestion.trajectory.hitRate12m}% in 12mo
+                      </Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => router.push({ pathname: '/(main)/(tabs)/plan' })}
+                    style={{ marginTop: 12, backgroundColor: colors.accent, borderRadius: 100, paddingVertical: 10, alignItems: 'center' }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.bg }}>Start this move</Text>
+                  </TouchableOpacity>
+                </Card>
+              )}
+
               {/* Opportunity moves */}
               {opportunityMoves.length > 0 && (
                 <>
@@ -2537,6 +2608,31 @@ export default function Home() {
           actionLabel="Ask Bocy"
           actionPrefill="I just got paid. Walk me through what to do first."
           fingerprint={incomeFingerprint ? `income:${incomeFingerprint}` : undefined}
+        />
+      )}
+
+      {/* ── Reactive engine insight modal (debt payments, achievements, plan verification) ── */}
+      {reactiveEvents.length > 0 && reactiveEventIndex < reactiveEvents.length && (
+        <InsightModal
+          visible={showReactiveModal && !showInsightModal}
+          onDismiss={() => {
+            if (reactiveEventIndex < reactiveEvents.length - 1) {
+              setReactiveEventIndex((i) => i + 1);
+            } else {
+              setShowReactiveModal(false);
+            }
+          }}
+          onAction={(prefill) => {
+            setShowReactiveModal(false);
+            router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: prefill || 'What should I focus on next?' } });
+          }}
+          type={reactiveEvents[reactiveEventIndex].insightType}
+          tag={reactiveEvents[reactiveEventIndex].tag}
+          title={reactiveEvents[reactiveEventIndex].title}
+          body={reactiveEvents[reactiveEventIndex].body}
+          actionLabel={reactiveEvents[reactiveEventIndex].actionLabel || 'Ask Bocy'}
+          actionPrefill={reactiveEvents[reactiveEventIndex].actionPrefill}
+          fingerprint={reactiveEvents[reactiveEventIndex].fingerprint}
         />
       )}
 
