@@ -158,6 +158,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   let dataSource: 'truelayer' | 'fallback' = 'truelayer';
   const connectionIssues: string[] = [];
   const expiredBankNames: string[] = [];
+  let syncFailedNoConnection = false;
   const expiringConnections: { name: string; daysLeft: number }[] = [];
 
   try {
@@ -200,7 +201,11 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       // "reconnect your bank" banner for a transient TrueLayer outage.
       console.warn('[sync] All connections failed (transient, within 90-day window) — will use fallback data');
     } else if (data.reason === 'no_connection') {
-      connectionIssues.push('no_connection');
+      // Don't push immediately — wait to see if we have cached CSV.
+      // The token may be dead but the data is still in bank_data.
+      // We'll check after the fallback query below.
+      syncFailedNoConnection = true;
+      console.warn('[sync] No active TrueLayer connections found — will check for cached data');
     }
     // Extract connections approaching 90-day consent expiry
     if (data.expiring_connections?.length > 0) {
@@ -256,6 +261,13 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     } catch (e: any) {
       console.warn('[sync] Failed to read fallback CSV:', e?.message || e);
     }
+  }
+
+  // Deferred no_connection check: only flag as a real issue if there's
+  // genuinely no cached data. If we loaded fallback CSV, the user has data —
+  // the refresh token is just dead. Treat as stale data, not "no connection".
+  if (syncFailedNoConnection && !csvData) {
+    connectionIssues.push('no_connection');
   }
 
   if (!csvData) return null;
