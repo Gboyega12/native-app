@@ -11,7 +11,6 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import Card, { AnimGlyph, SMOOTH_ANIM } from '@/components/Card';
 import { useResponsive } from '@/lib/responsive';
-import { hydrateSubGoals } from '@/lib/types';
 import type { Analysis, Move, MoveSubGoal, GoalTrajectory, IncomeSource } from '@/lib/types';
 import type { ReactiveResult } from '@/lib/reactive-engine';
 
@@ -21,6 +20,103 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 /** Strip markdown bold/italic markers */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
+
+/**
+ * Hydrate sub-goals from existing move data when move.subGoals is missing.
+ * Mirrors the logic in genDecisionStack() but works with already-stored moves
+ * so the sub-goal UI appears immediately without waiting for a fresh sync.
+ */
+function hydrateSubGoals(move: Move): MoveSubGoal[] | undefined {
+  if (move.subGoals && move.subGoals.length > 0) return move.subGoals;
+
+  const action = (move.action || '').toLowerCase();
+  const cat = move.category;
+
+  // ── Debt moves ──
+  if (cat === 'debt') {
+    // Extract debt count from action text like "Attack 3 debts with snowball"
+    const countMatch = action.match(/(\d+)\s*debt/);
+    if (countMatch) {
+      const count = parseInt(countMatch[1], 10);
+      // Can't derive real account names without data, use generic labels
+      return Array.from({ length: count }, (_, i) => ({
+        type: 'debt_clear' as const,
+        target: `Debt ${i + 1}`,
+        startValue: 0,
+        targetValue: 0,
+      }));
+    }
+    // Single debt — "Overpay debt by £X/month"
+    if (action.includes('overpay') || action.includes('clear')) {
+      return [{
+        type: 'debt_clear' as const,
+        target: 'Debt',
+        startValue: 0,
+        targetValue: 0,
+      }];
+    }
+  }
+
+  // ── Subscription moves ──
+  if (action.includes('cancel') || action.includes('subscript')) {
+    const merchants = move.merchants || [];
+    if (merchants.length > 0) {
+      return merchants.slice(0, 4).map((m) => ({
+        type: 'sub_cancel' as const,
+        target: m,
+        startValue: 0,
+        targetValue: 0,
+      }));
+    }
+  }
+
+  // ── Spending reduction moves ──
+  if (cat === 'spending' && !action.includes('cancel') && !action.includes('subscript')) {
+    // Extract current and target values from action like "Cut delivery spend from £120 to £80/month"
+    const amountMatch = action.match(/£(\d+).*?(?:to|at)\s*£(\d+)/i);
+    const category = action.includes('delivery') ? 'Delivery'
+      : action.includes('dining') || action.includes('eating') ? 'Eating Out'
+      : action.includes('shopping') ? 'Shopping'
+      : action.includes('transport') ? 'Transport'
+      : action.includes('caf') || action.includes('coffee') ? 'Coffee & Cafes'
+      : null;
+
+    if (category) {
+      return [{
+        type: 'spending_reduce' as const,
+        target: category,
+        startValue: amountMatch ? parseInt(amountMatch[1], 10) : 0,
+        targetValue: amountMatch ? parseInt(amountMatch[2], 10) : 0,
+      }];
+    }
+  }
+
+  // ── Buffer moves ──
+  if (cat === 'buffer') {
+    const targetMatch = action.match(/£([\d,]+)\s*buffer/i);
+    return [{
+      type: 'buffer_build' as const,
+      target: action.includes('parental') ? 'Parental leave runway'
+        : action.includes('career') ? 'Career change runway'
+        : 'Emergency buffer',
+      startValue: 0,
+      targetValue: targetMatch ? parseInt(targetMatch[1].replace(/,/g, ''), 10) : 0,
+    }];
+  }
+
+  // ── Savings moves ──
+  if (cat === 'savings' && (action.includes('surplus') || action.includes('saving') || action.includes('deposit'))) {
+    const targetMatch = action.match(/£([\d,]+)/);
+    return [{
+      type: 'savings_reach' as const,
+      target: action.includes('deposit') ? 'House deposit' : 'Savings',
+      startValue: 0,
+      targetValue: targetMatch ? parseInt(targetMatch[1].replace(/,/g, ''), 10) : 0,
+    }];
+  }
+
+  return undefined;
+}
 
 /** Category label mapping for display */
 const CATEGORY_LABELS: Record<string, string> = {
@@ -401,18 +497,14 @@ export default function Plan() {
   const saveProgress = async (key: string, row: ProgressRow) => {
     const uid = userIdRef.current;
     if (!uid) return;
-    const upsertData: any = {
+    await supabase.from('plan_progress').upsert({
       user_id: uid,
       move_key: key,
       move_action: row.move_action,
       approved: row.approved,
       completed_steps: row.completed_steps,
       updated_at: new Date().toISOString(),
-    };
-    // Preserve sub_goals if present in state
-    const sg = subGoalState[key];
-    if (sg && sg.length > 0) upsertData.sub_goals = sg;
-    await supabase.from('plan_progress').upsert(upsertData, { onConflict: 'user_id,move_key' });
+    }, { onConflict: 'user_id,move_key' });
   };
 
   const toggleStep = (key: string, stepIndex: number, moveAction: string) => {
@@ -442,12 +534,6 @@ export default function Plan() {
       approved: true,
       completed_steps: [],
     };
-
-    // Seed sub_goals from move data or hydration so they persist immediately
-    const sgs = hydrateSubGoals(move);
-    if (sgs && sgs.length > 0) {
-      setSubGoalState((prev) => ({ ...prev, [key]: sgs }));
-    }
 
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setProgress((prev) => ({ ...prev, [key]: row }));
