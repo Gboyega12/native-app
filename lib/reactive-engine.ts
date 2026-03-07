@@ -73,6 +73,11 @@ export interface ReactiveResult {
   planCompletedCount: number;
   /** Total move count */
   totalMoveCount: number;
+  /** Steps verified this sync — keyed by move_key → updated completed_steps.
+   *  The UI merges these into local progress state to tick checkboxes + update progress bars. */
+  verifiedSteps: Record<string, number[]>;
+  /** Short hint for the next priority move (no card needed — just a one-liner) */
+  nextMoveHint: string | null;
 }
 
 // ── Gap 1: Transaction-to-Plan Verification ──
@@ -99,8 +104,9 @@ async function verifyPlanStepsFromTransactions(
   enrichedTxs: EnrichedTransaction[],
   analysis: Analysis,
   previousAnalysis: Analysis | null,
-): Promise<{ verified: ReactiveEvent[]; completedCount: number }> {
+): Promise<{ verified: ReactiveEvent[]; completedCount: number; verifiedSteps: Record<string, number[]> }> {
   const events: ReactiveEvent[] = [];
+  const verifiedSteps: Record<string, number[]> = {};
 
   // Fetch active progress records
   const { data: progressRows } = await supabase
@@ -110,7 +116,7 @@ async function verifyPlanStepsFromTransactions(
     .not('move_key', 'like', 'dismissed-%');
 
   if (!progressRows || progressRows.length === 0) {
-    return { verified: events, completedCount: 0 };
+    return { verified: events, completedCount: 0, verifiedSteps };
   }
 
   const moves = analysis.all_moves || [];
@@ -242,6 +248,9 @@ async function verifyPlanStepsFromTransactions(
 
     // Persist updated steps if changed
     if (newStepsCompleted) {
+      // Record for the UI to merge into local state
+      verifiedSteps[row.move_key] = completedSteps;
+
       await supabase.from('plan_progress').upsert({
         user_id: userId,
         move_key: row.move_key,
@@ -267,12 +276,16 @@ async function verifyPlanStepsFromTransactions(
     }
   }
 
-  return { verified: events, completedCount };
+  return { verified: events, completedCount, verifiedSteps };
 }
 
 // ── Gap 3: Next Priority Move Suggestion ──
 // Uses the full move-engine pipeline: UKPF flowchart → CRRA marginal utility →
 // Monte Carlo consistency → liquidity tier → goal trajectory.
+//
+// Chaining: When a move is just completed, the next suggestion chains to
+// a move in the SAME category first (debt → next debt, buffer → next buffer)
+// before falling back to the general priority order.
 
 function suggestNextPriorityMove(
   analysis: Analysis,
@@ -281,15 +294,26 @@ function suggestNextPriorityMove(
   identity: any,
   debtAccounts: any[],
   progress: Record<string, ProgressRow>,
-): NextMoveSuggestion | null {
+  justCompletedEvents: ReactiveEvent[],
+): { suggestion: NextMoveSuggestion | null; hint: string | null } {
   const moves = analysis.all_moves || [];
-  if (moves.length === 0 || !profile) return null;
+  if (moves.length === 0 || !profile) return { suggestion: null, hint: null };
 
   const ukpf = determineFlowchartPosition(profile, goals, debtAccounts, identity);
 
-  // Filter out already-completed or not-yet-started moves
-  // Priority: moves that are started but incomplete > new moves matching flowchart priority
+  // Detect what was just completed to enable chaining
+  const justCompletedCategory = justCompletedEvents
+    .filter((e) => e.type === 'move_auto_completed' || e.type === 'debt_payment' || e.type === 'subscription_cancelled')
+    .map((e) => {
+      // Find the move's category from the action text
+      const m = moves.find((mv) => mv.action === e.data?.moveAction);
+      return m?.category || null;
+    })
+    .find((c) => c != null) || null;
+
+  // Build candidate buckets
   const startedIncomplete: { move: Move; index: number }[] = [];
+  const chainMatches: { move: Move; index: number }[] = [];
   const unstartedMatching: { move: Move; index: number }[] = [];
   const unstartedOther: { move: Move; index: number }[] = [];
 
@@ -301,15 +325,16 @@ function suggestNextPriorityMove(
     const completed = prog?.completed_steps || [];
 
     if (prog?.approved) {
-      // Started but not fully done
       if (completed.length < steps.length) {
         startedIncomplete.push({ move, index: i });
       }
-      // Else fully done — skip
+      // Fully done — skip
     } else {
-      // Not started
       const cat = move.category || 'spending';
-      if (cat === ukpf.priority) {
+      // Chain: same category as what was just completed
+      if (justCompletedCategory && cat === justCompletedCategory) {
+        chainMatches.push({ move, index: i });
+      } else if (cat === ukpf.priority) {
         unstartedMatching.push({ move, index: i });
       } else {
         unstartedOther.push({ move, index: i });
@@ -317,11 +342,11 @@ function suggestNextPriorityMove(
     }
   }
 
-  // Pick the best candidate from the priority order
-  const candidates = [...startedIncomplete, ...unstartedMatching, ...unstartedOther];
-  if (candidates.length === 0) return null;
+  // Priority order: in-progress > chain matches > flowchart matches > rest
+  const candidates = [...startedIncomplete, ...chainMatches, ...unstartedMatching, ...unstartedOther];
+  if (candidates.length === 0) return { suggestion: null, hint: null };
 
-  // Score each candidate using the full CRRA + Monte Carlo pipeline
+  // Score candidates using CRRA + Monte Carlo
   let vol: VolatilityProfile | null = null;
   if (profile.budgetReality) {
     vol = estimateVolatility(profile, identity);
@@ -338,6 +363,7 @@ function suggestNextPriorityMove(
     score: number;
     mu: { multiplier: number; liquidityTier: LiquidityTier };
     reason: string;
+    isChain: boolean;
   } | null = null;
 
   for (const c of candidates) {
@@ -345,46 +371,61 @@ function suggestNextPriorityMove(
       c.move, profile, vol, identity, debtAccounts, bufferRec,
     );
 
-    // Composite score: marginal utility × annual impact × effort bonus
     let score = multiplier * (c.move.annualImpact / 100);
     if (c.move.effort === 'low') score *= 1.3;
     else if (c.move.effort === 'high') score *= 0.8;
 
-    // Priority boost for flowchart-matching moves
     const cat = c.move.category || 'spending';
     if (cat === ukpf.priority) score *= 1.2;
 
-    // Boost for in-progress moves (momentum)
     const isInProgress = startedIncomplete.some((s) => s.index === c.index);
     if (isInProgress) score *= 1.5;
 
-    // Build reason
+    // Strong chain boost: same-category continuation after completing a move
+    const isChain = chainMatches.some((s) => s.index === c.index);
+    if (isChain) score *= 2.0;
+
     let reason: string;
-    if (isInProgress) {
+    if (isChain) {
+      reason = `Next ${cat} move — keep clearing these`;
+    } else if (isInProgress) {
       const prog = progress[`move-${c.index}`];
       const done = prog?.completed_steps?.length || 0;
       const total = c.move.steps?.length || 0;
-      reason = `${done}/${total} steps done — keep the momentum going`;
+      reason = `${done}/${total} steps done — keep going`;
     } else if (cat === ukpf.priority) {
-      reason = `Your #1 priority right now is "${ukpf.label}" — this move directly addresses it`;
-    } else if (multiplier > 1.5) {
-      reason = `High marginal utility (${multiplier.toFixed(1)}×) — each pound here delivers outsized value`;
+      reason = `Your priority: ${ukpf.label}`;
     } else if (c.move.effort === 'low') {
-      reason = `Quick win with £${c.move.annualImpact}/yr impact — low effort, high reward`;
+      reason = `Quick win — £${c.move.annualImpact}/yr`;
     } else {
-      reason = `£${c.move.annualImpact}/yr annual impact with ${c.move.effort} effort`;
+      reason = `£${c.move.annualImpact}/yr impact`;
     }
 
     if (!best || score > best.score) {
-      best = { candidate: c, score, mu: { multiplier, liquidityTier }, reason };
+      best = { candidate: c, score, mu: { multiplier, liquidityTier }, reason, isChain };
     }
   }
 
-  if (!best) return null;
+  if (!best) return { suggestion: null, hint: null };
 
-  const { candidate, mu, reason } = best;
+  const { candidate, mu, reason, isChain } = best;
 
-  // Compute trajectory for this specific move
+  // Build a short one-line hint (not a card)
+  const action = (candidate.move.action || '').replace(/\*\*/g, '');
+  const truncated = action.length > 50 ? action.slice(0, 49).trimEnd() + '\u2026' : action;
+  let hint: string;
+  if (isChain) {
+    hint = `Next up: ${truncated}`;
+  } else if (startedIncomplete.some((s) => s.index === candidate.index)) {
+    const prog = progress[`move-${candidate.index}`];
+    const done = prog?.completed_steps?.length || 0;
+    const total = candidate.move.steps?.length || 0;
+    hint = `Continue: ${truncated} (${done}/${total})`;
+  } else {
+    hint = `Next: ${truncated} — £${candidate.move.monthlyImpact}/mo`;
+  }
+
+  // Compute trajectory
   let trajectory: NextMoveSuggestion['trajectory'] = undefined;
   if (goals && goals.target_amount && vol) {
     const confidence = simulateGoalTimeline(
@@ -394,21 +435,24 @@ function suggestNextPriorityMove(
       vol,
     );
     trajectory = {
-      monthsSaved: 0, // Computed at display time from current vs. with-move
+      monthsSaved: 0,
       hitRate12m: confidence.hitRate12m,
       p50: confidence.p50,
     };
   }
 
   return {
-    move: candidate.move,
-    rank: candidate.index + 1,
-    reason,
-    flowchartLabel: ukpf.label,
-    priority: ukpf.priority,
-    marginalMultiplier: mu.multiplier,
-    liquidityTier: mu.liquidityTier,
-    trajectory,
+    suggestion: {
+      move: candidate.move,
+      rank: candidate.index + 1,
+      reason,
+      flowchartLabel: ukpf.label,
+      priority: ukpf.priority,
+      marginalMultiplier: mu.multiplier,
+      liquidityTier: mu.liquidityTier,
+      trajectory,
+    },
+    hint,
   };
 }
 
@@ -593,7 +637,7 @@ export async function runReactiveEngine(
   } catch {}
 
   // Gap 1: Verify plan steps from transactions
-  const { verified, completedCount } = await verifyPlanStepsFromTransactions(
+  const { verified, completedCount, verifiedSteps } = await verifyPlanStepsFromTransactions(
     userId, enrichedTxs, analysis, previousAnalysis,
   );
   allEvents.push(...verified);
@@ -606,9 +650,9 @@ export async function runReactiveEngine(
   );
   allEvents.push(...achievementEvents);
 
-  // Gap 3: Next priority move suggestion
-  const nextMove = suggestNextPriorityMove(
-    analysis, profile, goals, identity, debtAccounts, progressMap,
+  // Gap 3: Next priority move suggestion (with chaining from just-completed events)
+  const { suggestion: nextMove, hint: nextMoveHint } = suggestNextPriorityMove(
+    analysis, profile, goals, identity, debtAccounts, progressMap, allEvents,
   );
 
   return {
@@ -617,5 +661,7 @@ export async function runReactiveEngine(
     newAchievements,
     planCompletedCount: completedCount,
     totalMoveCount,
+    verifiedSteps,
+    nextMoveHint,
   };
 }
