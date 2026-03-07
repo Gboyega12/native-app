@@ -37,7 +37,7 @@ const CHUNK_WORD_THRESHOLD = 15;
  * still over the threshold. This makes AI responses feel like real texts.
  */
 function splitIntoBubbles(text: string): string[] {
-  if (!text) return [text];
+  if (!text || !text.trim()) return [];
 
   // Split by double newlines (paragraphs) first
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
@@ -1826,6 +1826,7 @@ export default function Chat() {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
     let responseText = '';
+    let hadError = false;
     try {
       // ── Try streaming first ──
       responseText = await tryStream(newMessages);
@@ -1834,9 +1835,24 @@ export default function Chat() {
         responseText = await standardRequest(newMessages);
       }
     } catch {
+      hadError = true;
       setError('Connection error. Please check your internet and try again.');
-      const errorMsg: ChatMessage = { role: 'assistant', content: 'Sorry, something went wrong.' };
-      setMessages([...newMessages, errorMsg]);
+    }
+
+    // If both paths failed to produce a response, show an error message
+    if (!responseText && !hadError) {
+      const fallbackMsg: ChatMessage = { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' };
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        // Replace empty assistant bubble if one exists
+        if (last?.role === 'assistant' && !last.content?.trim()) {
+          return [...prev.slice(0, -1), fallbackMsg];
+        }
+        if (last?.role === 'user') {
+          return [...prev, fallbackMsg];
+        }
+        return prev;
+      });
     }
 
     setLoading(false);
@@ -1882,12 +1898,21 @@ export default function Chat() {
             const event = JSON.parse(raw);
             if (event.error) {
               setError(event.error);
+              // If we already have partial text, keep it rather than discarding
+              if (fullText) break;
               return '';
             }
             if (event.t) {
               fullText += event.t;
-              const streamMsg: ChatMessage = { role: 'assistant', content: fullText };
-              setMessages([...newMessages, streamMsg]);
+              const streamContent = fullText;
+              setMessages((prev) => {
+                // Replace the last assistant message if streaming, otherwise append
+                const last = prev[prev.length - 1];
+                if (last?.role === 'assistant' && prev.length === newMessages.length + 1) {
+                  return [...prev.slice(0, -1), { ...last, content: streamContent }];
+                }
+                return [...prev, { role: 'assistant', content: streamContent }];
+              });
               scrollRef.current?.scrollToEnd({ animated: false });
             }
             // Collect action events from tool execution
@@ -1904,16 +1929,34 @@ export default function Chat() {
         }
       }
 
+      // Process remaining buffer (stream may not end with newline)
+      if (buffer.startsWith('data: ')) {
+        const raw = buffer.slice(6).trim();
+        if (raw && raw !== '[DONE]') {
+          try {
+            const event = JSON.parse(raw);
+            if (event.t) fullText += event.t;
+            if (event.action) {
+              collectedActions.push({
+                type: event.action.type,
+                data: event.action.data,
+                status: (event.action.type === 'goal_update_proposed' || event.action.type === 'plan_proposed') ? 'pending' : undefined,
+              });
+            }
+          } catch {}
+        }
+      }
+
       if (fullText || collectedActions.length > 0) {
         const assistantMsg: ChatMessage = {
           role: 'assistant',
-          content: fullText || '',
+          content: fullText || (collectedActions.length > 0 ? 'Done.' : ''),
           actions: collectedActions.length > 0 ? collectedActions : undefined,
         };
         const final: ChatMessage[] = [...newMessages, assistantMsg];
         setMessages(final);
         persistMessages(final);
-        return fullText;
+        return fullText || assistantMsg.content;
       }
 
       return '';
@@ -2160,7 +2203,7 @@ export default function Chat() {
           // Split long assistant messages into multiple bubbles (like real texts)
           const bubbleChunks = isAssistant && !loading
             ? splitIntoBubbles(msg.content)
-            : [msg.content];
+            : (msg.content ? [msg.content] : []);
 
           const bubble = (
             <View key={i}>
