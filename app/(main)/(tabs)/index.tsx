@@ -16,7 +16,7 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
-import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
@@ -210,7 +210,7 @@ export default function Home() {
   const [reactiveEventIndex, setReactiveEventIndex] = useState(0);
   // ── Plan data (merged from plan page) ──
   const [userPlans, setUserPlans] = useState<any[]>([]);
-  const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[] }>>({});
+  const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[]; sub_goals?: MoveSubGoal[] }>>({});
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
@@ -900,6 +900,7 @@ export default function Home() {
               move_action: row.move_action,
               approved: row.approved,
               completed_steps: row.completed_steps || [],
+              sub_goals: row.sub_goals && Array.isArray(row.sub_goals) ? row.sub_goals : undefined,
             };
           }
         }
@@ -1839,17 +1840,74 @@ export default function Home() {
                               <ExpandDots count={5} size={2.5} />
                             </View>
                             {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
-                            {steps.map((step: string, j: number) => {
-                              const isDone = doneSteps.includes(j);
-                              return (
-                                <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(moveKey, j, move.action)} activeOpacity={0.7}>
-                                  <View style={[s.checkbox, isDone && s.checkboxDone]}>
-                                    {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
-                                  </View>
-                                  <Text style={[s.checklistText, isDone && s.checklistTextDone]}>{stripMd(step)}</Text>
-                                </TouchableOpacity>
-                              );
-                            })}
+                            {(() => {
+                              // Show sub-goal progress bars when available, otherwise legacy steps
+                              const sgs: MoveSubGoal[] = planProgress[moveKey]?.sub_goals || move.subGoals || [];
+                              if (sgs.length > 0) {
+                                const doneSgs = sgs.filter((sg) => sg.completedAt);
+                                const sgProgress = sgs.length > 0 ? doneSgs.length / sgs.length : 0;
+                                return (
+                                  <>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                      <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                        <View style={{ width: `${Math.round(sgProgress * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: colors.accent }} />
+                                      </View>
+                                      <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{doneSgs.length}/{sgs.length} done</Text>
+                                    </View>
+                                    {sgs.map((sg, j) => {
+                                      const isDone = !!sg.completedAt;
+                                      const current = sg.currentValue ?? sg.startValue;
+                                      const pct = sg.type === 'sub_cancel'
+                                        ? (isDone ? 100 : 0)
+                                        : sg.type === 'spending_reduce'
+                                          ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / (sg.startValue - sg.targetValue)) * 100)))
+                                          : sg.type === 'debt_clear'
+                                            ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / sg.startValue) * 100)))
+                                            : Math.min(100, Math.max(0, Math.round((current / sg.targetValue) * 100)));
+                                      return (
+                                        <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                          <View style={[s.checkbox, isDone && s.checkboxDone]}>
+                                            {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
+                                          </View>
+                                          <View style={{ flex: 1 }}>
+                                            <Text style={[s.checklistText, isDone && s.checklistTextDone]}>{sg.target}</Text>
+                                            {!isDone && (
+                                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                                <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                                  <View style={{ width: `${pct}%`, height: '100%', borderRadius: 2, backgroundColor: colors.accent }} />
+                                                </View>
+                                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>
+                                                  {sg.type === 'sub_cancel'
+                                                    ? `\u00a3${sg.startValue}/mo`
+                                                    : sg.type === 'debt_clear'
+                                                      ? `\u00a3${current} left`
+                                                      : sg.type === 'spending_reduce'
+                                                        ? `\u00a3${current} \u2192 \u00a3${sg.targetValue}`
+                                                        : `\u00a3${current}/\u00a3${sg.targetValue}`
+                                                  }
+                                                </Text>
+                                              </View>
+                                            )}
+                                            {isDone && <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green, marginTop: 2 }}>{'\u2713'} Completed</Text>}
+                                          </View>
+                                        </View>
+                                      );
+                                    })}
+                                  </>
+                                );
+                              }
+                              return steps.map((step: string, j: number) => {
+                                const isDone = doneSteps.includes(j);
+                                return (
+                                  <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(moveKey, j, move.action)} activeOpacity={0.7}>
+                                    <View style={[s.checkbox, isDone && s.checkboxDone]}>
+                                      {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
+                                    </View>
+                                    <Text style={[s.checklistText, isDone && s.checklistTextDone]}>{stripMd(step)}</Text>
+                                  </TouchableOpacity>
+                                );
+                              });
+                            })()}
                             <TouchableOpacity style={[s.heroCta, { marginTop: 16, paddingVertical: 12 }]} onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } })}>
                               <Text style={s.heroCtaText}>Ask Bocy about this</Text>
                             </TouchableOpacity>
