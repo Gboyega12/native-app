@@ -25,7 +25,7 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
  * Refresh a single TrueLayer connection: refresh token → fetch transactions + balances.
  * Returns updated data or null on failure.
  */
-async function refreshConnection(bankRow, clientId, clientSecret) {
+async function refreshConnection(bankRow, clientId, clientSecret, admin) {
   let newRefreshToken = null;
   try {
     const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
@@ -44,8 +44,13 @@ async function refreshConnection(bankRow, clientId, clientSecret) {
       return { success: false, expired: true };
     }
 
-    // Capture refresh token immediately — old one is consumed on exchange.
+    // Persist the new refresh token IMMEDIATELY — before any data fetches.
+    // TrueLayer tokens are single-use. The old token is consumed on exchange.
+    // If we wait and the function times out, the new token is lost forever.
     newRefreshToken = tokenData.refresh_token || null;
+    if (newRefreshToken && admin) {
+      await admin.from('bank_data').update({ refresh_token: newRefreshToken }).eq('id', bankRow.id);
+    }
 
     const headers = { Authorization: `Bearer ${tokenData.access_token}` };
 
@@ -59,9 +64,10 @@ async function refreshConnection(bankRow, clientId, clientSecret) {
 
     // Guard: if TrueLayer returned an error (403, 429, etc.), bail out
     // rather than proceeding with empty arrays and overwriting valid CSV.
+    // Refresh token is already persisted above.
     if (!accountsRes.ok || !cardsRes.ok) {
       console.warn(`[bank-sync] TrueLayer data endpoints returned errors — accounts: ${accountsRes.status}, cards: ${cardsRes.status}`);
-      return { success: false, expired: false };
+      return { success: false, expired: false, newRefreshToken };
     }
 
     const accounts = accountsJson.results || [];
@@ -206,16 +212,14 @@ export default async function handler(req, res) {
             return { row, result: { success: false, expired: true } };
           }
 
-          const result = await refreshConnection(row, clientId, clientSecret);
+          const result = await refreshConnection(row, clientId, clientSecret, admin);
           return { row, result };
         })
       );
 
       for (const { row, result } of batchResults) {
-        // Always persist a new refresh token if we got one, even on failure.
-        if (result.newRefreshToken) {
-          await admin.from('bank_data').update({ refresh_token: result.newRefreshToken }).eq('id', row.id);
-        }
+        // Refresh token is now persisted inside refreshConnection() immediately
+        // after token exchange — no need to do it here.
 
         if (!result.success) {
           if (result.expired) {

@@ -14,7 +14,7 @@ const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://
  * On token exchange success but data fetch failure, returns { newRefreshToken }
  * so the caller can persist the rotated token even if data fetching fails.
  */
-async function syncConnection(bankRow, clientId, clientSecret) {
+async function syncConnection(bankRow, clientId, clientSecret, admin) {
   let newRefreshToken = null;
   try {
     const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
@@ -34,9 +34,15 @@ async function syncConnection(bankRow, clientId, clientSecret) {
       return null;
     }
 
-    // Capture the new refresh token immediately so it can be persisted
-    // even if subsequent data fetches fail (old token is already consumed).
+    // Persist the new refresh token IMMEDIATELY — before any data fetches.
+    // TrueLayer tokens are single-use (rotating). The old token is consumed
+    // the moment we exchange it. If we wait until after data fetches and
+    // the function times out or crashes, the new token is lost forever and
+    // the user must re-authenticate.
     newRefreshToken = tokenData.refresh_token || null;
+    if (newRefreshToken && admin) {
+      await admin.from('bank_data').update({ refresh_token: newRefreshToken }).eq('id', bankRow.id);
+    }
 
     const headers = { Authorization: `Bearer ${tokenData.access_token}` };
 
@@ -242,7 +248,7 @@ export default async function handler(req, res) {
 
     // Sync all connections in parallel
     const results = await Promise.all(
-      bankRows.map((row) => syncConnection(row, clientId, clientSecret).then((r) => ({ row, result: r })))
+      bankRows.map((row) => syncConnection(row, clientId, clientSecret, admin).then((r) => ({ row, result: r })))
     );
 
     let mergedCsvLines = [];
@@ -252,11 +258,8 @@ export default async function handler(req, res) {
     let expiredConnections = [];
 
     for (const { row, result } of results) {
-      // Always persist a new refresh token if we got one, even on data fetch failure.
-      // The old token is consumed on exchange, so losing the new one = permanent death.
-      if (result?.newRefreshToken) {
-        await admin.from('bank_data').update({ refresh_token: result.newRefreshToken }).eq('id', row.id);
-      }
+      // Refresh token is now persisted inside syncConnection() immediately
+      // after token exchange, before data fetches — no need to do it here.
 
       if (!result || result.tokenOnlyRecovery) {
         // Only flag as expired if the 90-day consent window has actually lapsed.
