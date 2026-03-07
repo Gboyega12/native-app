@@ -75,7 +75,8 @@ async function refreshConnection(bankRow, clientId, clientSecret, admin) {
 
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
-    fromDate.setFullYear(fromDate.getFullYear() - 1);
+    // Re-syncs only need 30 days (incremental). Initial 12-month pull is in callback.js.
+    fromDate.setDate(fromDate.getDate() - 30);
     const from = fromDate.toISOString().split('T')[0];
 
     const txPromises = [
@@ -186,7 +187,7 @@ export default async function handler(req, res) {
     // Get all TrueLayer connections with valid refresh tokens
     const { data: bankRows, error: fetchErr } = await admin
       .from('bank_data')
-      .select('id, connection_id, refresh_token, user_id, provider_name, created_at, updated_at')
+      .select('id, connection_id, refresh_token, user_id, provider_name, created_at, updated_at, csv_data')
       .eq('source', 'truelayer')
       .not('refresh_token', 'is', null)
       .order('updated_at', { ascending: true }); // Oldest first — prioritize stale data
@@ -239,7 +240,23 @@ export default async function handler(req, res) {
           updated_at: new Date().toISOString(),
         };
         if (result.csvLines.length > 0) {
-          updateFields.csv_data = ['Date,Description,Amount', ...result.csvLines].join('\n');
+          // Merge new transactions with existing stored CSV (incremental sync).
+          const existingLines = [];
+          if (row.csv_data) {
+            const lines = row.csv_data.split('\n');
+            existingLines.push(...lines.slice(1).filter((l) => l.trim()));
+          }
+          const allLines = [...existingLines, ...result.csvLines];
+          const seen = new Set();
+          const unique = [];
+          for (const line of allLines) {
+            const key = line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
+            if (!seen.has(key)) {
+              seen.add(key);
+              unique.push(line);
+            }
+          }
+          updateFields.csv_data = ['Date,Description,Amount', ...unique].join('\n');
         }
         if (result.cardBalances && result.cardBalances.length > 0) {
           updateFields.card_balances = result.cardBalances;
