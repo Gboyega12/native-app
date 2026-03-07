@@ -170,6 +170,84 @@ export interface Move {
   subGoals?: MoveSubGoal[];
 }
 
+/**
+ * Derive sub-goals from a Move. Returns the move's own subGoals if present,
+ * otherwise synthesises them from the action text / merchants for older analyses.
+ */
+export function hydrateSubGoals(move: Move): MoveSubGoal[] | undefined {
+  if (move.subGoals && move.subGoals.length > 0) return move.subGoals;
+
+  const action = (move.action || '').toLowerCase();
+  const cat = move.category;
+
+  // Debt moves
+  if (cat === 'debt') {
+    const countMatch = action.match(/(\d+)\s*debt/);
+    if (countMatch) {
+      const count = parseInt(countMatch[1], 10);
+      return Array.from({ length: count }, (_, i) => ({
+        type: 'debt_clear' as const, target: `Debt ${i + 1}`, startValue: 0, targetValue: 0,
+      }));
+    }
+    if (action.includes('overpay') || action.includes('clear')) {
+      return [{ type: 'debt_clear' as const, target: 'Debt', startValue: 0, targetValue: 0 }];
+    }
+  }
+
+  // Subscription moves
+  if (action.includes('cancel') || action.includes('subscript')) {
+    const merchants = move.merchants || [];
+    if (merchants.length > 0) {
+      return merchants.slice(0, 4).map((m) => ({
+        type: 'sub_cancel' as const, target: m, startValue: 0, targetValue: 0,
+      }));
+    }
+  }
+
+  // Spending reduction moves
+  if (cat === 'spending' && !action.includes('cancel') && !action.includes('subscript')) {
+    const amountMatch = action.match(/£(\d+).*?(?:to|at)\s*£(\d+)/i);
+    const category = action.includes('delivery') ? 'Delivery'
+      : action.includes('dining') || action.includes('eating') ? 'Eating Out'
+      : action.includes('shopping') ? 'Shopping'
+      : action.includes('transport') ? 'Transport'
+      : action.includes('caf') || action.includes('coffee') ? 'Coffee & Cafes'
+      : null;
+    if (category) {
+      return [{
+        type: 'spending_reduce' as const, target: category,
+        startValue: amountMatch ? parseInt(amountMatch[1], 10) : 0,
+        targetValue: amountMatch ? parseInt(amountMatch[2], 10) : 0,
+      }];
+    }
+  }
+
+  // Buffer moves
+  if (cat === 'buffer') {
+    const targetMatch = action.match(/£([\d,]+)\s*buffer/i);
+    return [{
+      type: 'buffer_build' as const,
+      target: action.includes('parental') ? 'Parental leave runway'
+        : action.includes('career') ? 'Career change runway' : 'Emergency buffer',
+      startValue: 0,
+      targetValue: targetMatch ? parseInt(targetMatch[1].replace(/,/g, ''), 10) : 0,
+    }];
+  }
+
+  // Savings moves
+  if (cat === 'savings' && (action.includes('surplus') || action.includes('saving') || action.includes('deposit'))) {
+    const targetMatch = action.match(/£([\d,]+)/);
+    return [{
+      type: 'savings_reach' as const,
+      target: action.includes('deposit') ? 'House deposit' : 'Savings',
+      startValue: 0,
+      targetValue: targetMatch ? parseInt(targetMatch[1].replace(/,/g, ''), 10) : 0,
+    }];
+  }
+
+  return undefined;
+}
+
 // ── Decision Score ──
 
 export interface DecisionScore {

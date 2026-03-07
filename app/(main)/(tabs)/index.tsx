@@ -16,6 +16,7 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
+import { hydrateSubGoals } from '@/lib/types';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
@@ -1137,7 +1138,8 @@ export default function Home() {
     if (!uid) return;
     const key = `move-${index}`;
     if (planProgress[key]?.approved) return;
-    const row = { move_key: key, move_action: move.action, approved: true, completed_steps: [] as number[] };
+    const sgs = hydrateSubGoals(move);
+    const row = { move_key: key, move_action: move.action, approved: true, completed_steps: [] as number[], sub_goals: sgs };
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setPlanProgress((prev) => ({ ...prev, [key]: row }));
     const upsertData: any = {
@@ -1145,7 +1147,7 @@ export default function Home() {
       approved: true, completed_steps: [],
       updated_at: new Date().toISOString(),
     };
-    if (move.subGoals && move.subGoals.length > 0) upsertData.sub_goals = move.subGoals;
+    if (sgs && sgs.length > 0) upsertData.sub_goals = sgs;
     await supabase.from('plan_progress').upsert(upsertData, { onConflict: 'user_id,move_key' });
   };
 
@@ -1808,7 +1810,14 @@ export default function Home() {
                     const moveKey = `move-${i}`;
                     const steps = move.steps || [];
                     const doneSteps = planProgress[moveKey]?.completed_steps || [];
-                    const stepProgress = steps.length > 0 ? doneSteps.length / steps.length : 0;
+                    const moveSgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move) || [];
+                    const hasSgs = moveSgs.length > 0;
+                    const sgDoneCount = hasSgs ? moveSgs.filter((sg) => sg.completedAt).length : 0;
+                    const stepProgress = hasSgs
+                      ? (moveSgs.length > 0 ? sgDoneCount / moveSgs.length : 0)
+                      : (steps.length > 0 ? doneSteps.length / steps.length : 0);
+                    const progressTotal = hasSgs ? moveSgs.length : steps.length;
+                    const progressDone = hasSgs ? sgDoneCount : doneSteps.length;
                     const nextStepIdx = steps.findIndex((_: string, idx: number) => !doneSteps.includes(idx));
                     return (
                       <Card key={`active-${i}`} variant="active" style={{ marginBottom: spacing.md }}>
@@ -1823,12 +1832,12 @@ export default function Home() {
                                 <Text style={s.moveImpactText}>{'\u00a3'}{move.monthlyImpact}/mo</Text>
                                 <Text style={{ fontSize: 10, color: colors.muted }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                               </View>
-                              {!isExpanded && steps.length > 0 && (
+                              {!isExpanded && progressTotal > 0 && (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
                                   <View style={{ flex: 1, height: 2, borderRadius: 1, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
                                     <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 1, backgroundColor: colors.accent }} />
                                   </View>
-                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{doneSteps.length}/{steps.length}</Text>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{progressDone}/{progressTotal}</Text>
                                 </View>
                               )}
                             </View>
@@ -1842,7 +1851,7 @@ export default function Home() {
                             {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
                             {(() => {
                               // Show sub-goal progress bars when available, otherwise legacy steps
-                              const sgs: MoveSubGoal[] = planProgress[moveKey]?.sub_goals || move.subGoals || [];
+                              const sgs: MoveSubGoal[] = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move) || [];
                               if (sgs.length > 0) {
                                 const doneSgs = sgs.filter((sg) => sg.completedAt);
                                 const sgProgress = sgs.length > 0 ? doneSgs.length / sgs.length : 0;
