@@ -216,6 +216,7 @@ export default function Home() {
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
   const [showAllMoves, setShowAllMoves] = useState(false);
+  const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
   const userIdRef = useRef<string | null>(null);
 
   // Custom weekly spending limit
@@ -1113,7 +1114,7 @@ export default function Home() {
   const effortColor = (e: string) => e === 'low' ? colors.lavender : e === 'medium' ? colors.dim : colors.green;
   const effortLabel = (e: string) => e === 'low' ? 'Quick win' : e === 'medium' ? 'Some effort' : 'Big move';
 
-  const togglePlanStep = (key: string, stepIndex: number, moveAction: string) => {
+  const togglePlanStep = (key: string, stepIndex: number, moveAction: string, totalSteps?: number) => {
     setPlanProgress((prev) => {
       const row = prev[key] || { move_key: key, move_action: moveAction, approved: true, completed_steps: [] };
       const steps = [...row.completed_steps];
@@ -1128,6 +1129,15 @@ export default function Home() {
           approved: updated.approved, completed_steps: steps,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id,move_key' }).then(() => {});
+      }
+      // Trigger celebration when all steps just completed
+      if (totalSteps && steps.length >= totalSteps && idx < 0) {
+        setTimeout(() => {
+          LayoutAnimation.configureNext(SMOOTH_ANIM);
+          setJustCompleted(key);
+        }, 300);
+        // Auto-clear celebration after a few seconds
+        setTimeout(() => setJustCompleted(null), 3500);
       }
       return { ...prev, [key]: updated };
     });
@@ -1456,8 +1466,36 @@ export default function Home() {
   const sortedMoves: (Move & { _sortIdx: number })[] = moves
     .map((m, i) => ({ ...m, _sortIdx: i }))
     .sort((a, b) => (effortOrder[a.effort] ?? 2) - (effortOrder[b.effort] ?? 2));
-  const activePlanMoves = sortedMoves.filter((_, i) => planProgress[`move-${sortedMoves[i]._sortIdx}`]?.approved);
-  const opportunityMoves = sortedMoves.filter((_, i) => !planProgress[`move-${sortedMoves[i]._sortIdx}`]?.approved);
+
+  /** Check if a move has all steps/sub-goals completed */
+  const isMoveCompleted = (move: Move & { _sortIdx: number }) => {
+    const key = `move-${move._sortIdx}`;
+    const prog = planProgress[key];
+    if (!prog?.approved) return false;
+    const sgs = prog.sub_goals || hydrateSubGoals(move) || [];
+    if (sgs.length > 0) return sgs.every((sg) => sg.completedAt);
+    const steps = move.steps || [];
+    if (steps.length > 0) return (prog.completed_steps || []).length >= steps.length;
+    return false;
+  };
+
+  const approvedMoves = sortedMoves.filter((m) => planProgress[`move-${m._sortIdx}`]?.approved);
+  const activePlanMoves = approvedMoves.filter((m) => !isMoveCompleted(m));
+  const completedPlanMoves = approvedMoves.filter((m) => isMoveCompleted(m));
+  const opportunityMoves = sortedMoves.filter((m) => !planProgress[`move-${m._sortIdx}`]?.approved);
+
+  /** Check if a user plan has all steps completed */
+  const isPlanCompleted = (plan: any) => {
+    const planKey = `plan-${plan.id}`;
+    const steps = getPlanSteps(plan);
+    const done = planProgress[planKey]?.completed_steps || [];
+    return steps.length > 0 && done.length >= steps.length;
+  };
+  const activeUserPlans = userPlans.filter((p) => !isPlanCompleted(p));
+  const completedUserPlans = userPlans.filter((p) => isPlanCompleted(p));
+
+  const hasCompleted = completedPlanMoves.length > 0 || completedUserPlans.length > 0;
+  const hasActive = activePlanMoves.length > 0 || activeUserPlans.length > 0;
 
   // ── Focus card type: what matters right now? ──
   const isPayday = !!weeklyCtx?.incomeArrivedThisWeek && !incomeDismissed;
@@ -1705,15 +1743,15 @@ export default function Home() {
           {/* ══════════════════════════════════════════════
               YOUR INSIGHTS — inline from Plan page
               ══════════════════════════════════════════════ */}
-          {(activePlanMoves.length > 0 || userPlans.length > 0 || opportunityMoves.length > 0) && (
+          {(hasActive || hasCompleted || opportunityMoves.length > 0) && (
             <>
               {/* Active moves */}
-              {(activePlanMoves.length > 0 || userPlans.length > 0) && (
+              {hasActive && (
                 <>
                   <View style={s.moveSectionHeader}>
                     <Text style={s.moveSectionLabel}>IN PROGRESS</Text>
                   </View>
-                  {userPlans.map((plan) => {
+                  {activeUserPlans.map((plan) => {
                     const isPlanExpanded = expandedPlan === plan.id;
                     const planKey = `plan-${plan.id}`;
                     const planSteps = getPlanSteps(plan);
@@ -1763,7 +1801,7 @@ export default function Home() {
                               const isDone = doneSteps.includes(j);
                               const isNext = j === nextStepIdx;
                               return (
-                                <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(planKey, j, plan.action)} activeOpacity={0.7}>
+                                <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(planKey, j, plan.action, planSteps.length)} activeOpacity={0.7}>
                                   <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: isDone ? colors.accent : colors.dim, backgroundColor: isDone ? colors.accent : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
                                     {isDone && <Text style={{ color: colors.bg, fontSize: 12, fontWeight: '700' }}>{'\u2713'}</Text>}
                                   </View>
@@ -1908,7 +1946,7 @@ export default function Home() {
                               return steps.map((step: string, j: number) => {
                                 const isDone = doneSteps.includes(j);
                                 return (
-                                  <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(moveKey, j, move.action)} activeOpacity={0.7}>
+                                  <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(moveKey, j, move.action, steps.length)} activeOpacity={0.7}>
                                     <View style={[s.checkbox, isDone && s.checkboxDone]}>
                                       {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
                                     </View>
@@ -1925,6 +1963,88 @@ export default function Home() {
                             </TouchableOpacity>
                           </View>
                         )}
+                      </Card>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Celebration banner — shown briefly when a move is just completed */}
+              {justCompleted && (
+                <Card variant="highlight" style={{ marginBottom: spacing.md, alignItems: 'center', paddingVertical: 20 }}>
+                  <Text style={{ fontFamily: fonts.medium, fontSize: 16, color: colors.accent, marginBottom: 4 }}>Move completed!</Text>
+                  <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.muted }}>Nice work — keep the momentum going.</Text>
+                </Card>
+              )}
+
+              {/* Completed moves */}
+              {hasCompleted && (
+                <>
+                  <View style={s.moveSectionHeader}>
+                    <Text style={s.moveSectionLabel}>DONE</Text>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent, letterSpacing: 0.3 }}>
+                      {completedPlanMoves.length + completedUserPlans.length} completed
+                    </Text>
+                  </View>
+                  {completedUserPlans.map((plan) => {
+                    const planKey = `plan-${plan.id}`;
+                    const planSteps = getPlanSteps(plan);
+                    return (
+                      <Card key={plan.id} style={{ marginBottom: spacing.md, opacity: 0.75 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                          <View style={[s.moveBadge, { backgroundColor: colors.accent, borderColor: colors.accent }]}>
+                            <Text style={[s.moveBadgeText, { color: colors.bg }]}>{'\u2713'}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[s.moveAction, { textDecorationLine: 'line-through', color: colors.muted }]}>{stripMd(plan.action)}</Text>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent, marginTop: 4 }}>{'\u2713'} {planSteps.length}/{planSteps.length} steps done</Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity
+                          style={{ marginTop: 12, alignItems: 'center', paddingVertical: 8 }}
+                          onPress={() => {
+                            const title = 'Remove completed plan?';
+                            const msg = `Remove "${stripMd(plan.action)}" from your list?`;
+                            if (Platform.OS === 'web') {
+                              if (window.confirm(`${title}\n\n${msg}`)) handleRemovePlan(plan.id);
+                            } else {
+                              Alert.alert(title, msg, [
+                                { text: 'Cancel', style: 'cancel' },
+                                { text: 'Remove', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
+                              ]);
+                            }
+                          }}
+                        >
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.muted }}>Remove</Text>
+                        </TouchableOpacity>
+                      </Card>
+                    );
+                  })}
+                  {completedPlanMoves.map((move) => {
+                    const i = move._sortIdx;
+                    const moveKey = `move-${i}`;
+                    const sgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move) || [];
+                    const steps = move.steps || [];
+                    const totalItems = sgs.length > 0 ? sgs.length : steps.length;
+                    return (
+                      <Card key={`done-${i}`} style={{ marginBottom: spacing.md, opacity: 0.75 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                          <View style={[s.moveBadge, { backgroundColor: colors.accent, borderColor: colors.accent }]}>
+                            <Text style={[s.moveBadgeText, { color: colors.bg }]}>{'\u2713'}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[s.moveAction, { textDecorationLine: 'line-through', color: colors.muted }]}>{stripMd(move.action)}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent }}>{'\u2713'} {totalItems > 0 ? `${totalItems}/${totalItems} done` : 'Completed'}</Text>
+                              {move.monthlyImpact != null && (
+                                <Text style={[s.moveImpactText, { color: colors.muted }]}>{'\u00a3'}{move.monthlyImpact}/mo saved</Text>
+                              )}
+                            </View>
+                          </View>
+                        </View>
+                        <TouchableOpacity style={{ marginTop: 12, alignItems: 'center', paddingVertical: 8 }} onPress={() => handleStopMove(i)}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.muted }}>Remove</Text>
+                        </TouchableOpacity>
                       </Card>
                     );
                   })}
