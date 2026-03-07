@@ -1964,7 +1964,10 @@ export default function Chat() {
     }
   };
 
-  const paydayActive = !!context.payday_context?.incomeArrivedThisWeek;
+  const hasPaydayContext = !!context.payday_context?.incomeArrivedThisWeek;
+  // Only show the payday banner when the user hasn't engaged yet (empty chat or just the auto-nudge)
+  const hasUserMessage = messages.some((m) => m.role === 'user');
+  const paydayActive = hasPaydayContext && !hasUserMessage;
   const suggestedQuestions = getContextualQuestions(analysis, goals, paydayActive, context.payday_context);
 
   const isEmptyState = messages.length === 0 || (messages.length === 1 && messages[0].role === 'assistant' && paydayActive);
