@@ -1,12 +1,13 @@
 // ── Walkthrough component ──
 // Interactive walkthrough that scrolls to actual cards/sections and
-// navigates between tabs so users see each feature in context.
+// shows a tooltip near each card. Uses a light scrim so the underlying
+// card remains visible (no opaque modal blocking the view).
 // Persists "seen" state in AsyncStorage so it only shows once.
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, Modal, Pressable, StyleSheet, Animated, Easing,
-  type ScrollView,
+  View, Text, Pressable, StyleSheet, Animated, Easing, Dimensions,
+  type ScrollView, type LayoutChangeEvent,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { type Router } from 'expo-router';
@@ -19,12 +20,10 @@ const WALKTHROUGH_KEY = '@bocy_walkthrough_seen';
 type WalkthroughStep = {
   title: string;
   body: string;
-  /** Where the tooltip appears on screen */
-  position: 'top' | 'center' | 'bottom';
-  /** Which tab to navigate to ('home' stays on dashboard) */
-  tab: 'home' | 'plan' | 'chat';
-  /** Key into cardPositions to scroll the dashboard */
+  /** Which key in cardPositions to spotlight */
   scrollTo?: string;
+  /** Where the tooltip appears relative to the card */
+  tooltipPosition: 'below' | 'above';
   /** Emoji-style label shown above the title */
   tag?: string;
 };
@@ -33,39 +32,35 @@ const STEPS: WalkthroughStep[] = [
   {
     title: 'Your #1 Move',
     body: 'Your highest-impact action right now. Bocy ranks every opportunity by how much it saves you.',
-    position: 'top',
-    tab: 'home',
     scrollTo: 'hero',
+    tooltipPosition: 'below',
     tag: 'TOP PICK',
   },
   {
     title: 'Safe to Spend',
     body: 'How much you can freely spend this week without touching your goals. Updates automatically.',
-    position: 'center',
-    tab: 'home',
-    scrollTo: 'safeToSpend',
+    scrollTo: 'hero',
+    tooltipPosition: 'below',
     tag: 'WEEKLY',
   },
   {
     title: 'Your Budget',
-    body: 'Where every pound goes: essentials, lifestyle, and what\u2019s left. Tap any card for the breakdown.',
-    position: 'center',
-    tab: 'home',
+    body: 'Where every pound goes: essentials, lifestyle, and what\u2019s left. Tap any category for the breakdown.',
     scrollTo: 'budget',
+    tooltipPosition: 'above',
     tag: 'SPENDING',
   },
   {
-    title: 'Your Plan',
-    body: 'Step-by-step moves ranked by impact. Start at the top, tick off as you go.',
-    position: 'bottom',
-    tab: 'plan',
+    title: 'Your Moves',
+    body: 'Personalised actions ranked by impact. Start a move, tick off steps, and watch your progress grow.',
+    scrollTo: 'moves',
+    tooltipPosition: 'above',
     tag: 'ACTION',
   },
   {
     title: 'Chat with Bocy',
-    body: '\u201CCan I afford this?\u201D \u201CWhat\u2019s my biggest expense?\u201D Ask anything. Bocy knows your numbers.',
-    position: 'bottom',
-    tab: 'chat',
+    body: '\u201CCan I afford this?\u201D \u201CWhat\u2019s my biggest expense?\u201D Ask anything \u2014 Bocy knows your numbers.',
+    tooltipPosition: 'below',
     tag: 'ASK ME',
   },
 ];
@@ -106,26 +101,27 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
     ]).start();
   }, []);
 
-  // Navigate to the correct screen/position for a step
+  // Navigate / scroll to the correct position for a step
   const navigateToStep = useCallback((stepIndex: number) => {
     const s = STEPS[stepIndex];
 
-    // Navigate to the correct tab
-    if (s.tab === 'plan' && router) {
-      router.navigate('/(main)/(tabs)/plan');
-    } else if (s.tab === 'chat' && router) {
+    // Last step → navigate to chat tab
+    if (stepIndex === STEPS.length - 1 && router) {
       router.navigate('/(main)/(tabs)/chat');
-    } else if (s.tab === 'home' && router) {
+      return;
+    }
+
+    // All other steps are on the home tab
+    if (router) {
       router.navigate('/(main)/(tabs)');
     }
 
-    // Scroll dashboard to the relevant card
-    if (s.tab === 'home' && s.scrollTo && scrollRef?.current && cardPositions?.current) {
+    if (s.scrollTo && scrollRef?.current && cardPositions?.current) {
       const y = cardPositions.current[s.scrollTo];
       if (y != null) {
         setTimeout(() => {
-          scrollRef.current?.scrollTo({ y: Math.max(0, y - 100), animated: true });
-        }, s.tab === 'home' ? 100 : 400);
+          scrollRef.current?.scrollTo({ y: Math.max(0, y - 120), animated: true });
+        }, 100);
       }
     }
   }, [scrollRef, cardPositions, router]);
@@ -134,7 +130,6 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
     if (visible) {
       setStep(0);
       animateIn();
-      // Scroll to the first card
       setTimeout(() => navigateToStep(0), 200);
     }
   }, [visible]);
@@ -151,7 +146,6 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
   };
 
   const handleDone = async () => {
-    // Navigate back to home tab
     if (router) {
       router.navigate('/(main)/(tabs)');
     }
@@ -167,95 +161,96 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
   const current = STEPS[step];
   const isLast = step === STEPS.length - 1;
 
-  return (
-    <Modal transparent visible={visible} animationType="fade" statusBarTranslucent>
-      <Pressable style={styles.overlay} onPress={handleNext}>
-        <View style={[
-          styles.tooltipContainer,
-          current.position === 'top' && styles.tooltipTop,
-          current.position === 'center' && styles.tooltipCenter,
-          current.position === 'bottom' && styles.tooltipBottom,
-        ]}>
-          {/* Pointer arrow */}
-          {current.position === 'bottom' && (
-            <View style={[styles.arrowDown, { borderTopColor: colors.surface }]} />
-          )}
+  const tooltip = (
+    <Animated.View
+      style={[
+        styles.tooltip,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.accentDim,
+          opacity: fadeAnim,
+          transform: [{ translateY: slideAnim }],
+        },
+      ]}
+    >
+      {/* Progress bar */}
+      <View style={[styles.progressTrack, { backgroundColor: colors.mintDim }]}>
+        <Animated.View
+          style={[
+            styles.progressFill,
+            {
+              backgroundColor: colors.green,
+              width: `${((step + 1) / STEPS.length) * 100}%`,
+            },
+          ]}
+        />
+      </View>
 
-          <Animated.View
-            style={[
-              styles.tooltip,
-              {
-                backgroundColor: colors.surface,
-                borderColor: colors.accentDim,
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }],
-              },
-            ]}
-          >
-            {/* Progress bar */}
-            <View style={[styles.progressTrack, { backgroundColor: colors.mintDim }]}>
-              <Animated.View
-                style={[
-                  styles.progressFill,
-                  {
-                    backgroundColor: colors.green,
-                    width: `${((step + 1) / STEPS.length) * 100}%`,
-                  },
-                ]}
-              />
-            </View>
-
-            {/* Tag + Bocy face */}
-            <View style={styles.tagRow}>
-              {current.tag && (
-                <View style={[styles.tag, { backgroundColor: colors.greenDim }]}>
-                  <Text style={[styles.tagText, { color: colors.green }]}>{current.tag}</Text>
-                </View>
-              )}
-              <View style={styles.tagBocyWrap}>
-                <BocyFace mood="happy" size="sm" breathing />
-              </View>
-            </View>
-
-            {/* Content */}
-            <Text style={[styles.title, { color: colors.text }]}>
-              {current.title}
-            </Text>
-            <Text style={[styles.body, { color: colors.text2 }]}>
-              {current.body}
-            </Text>
-
-            {/* Actions */}
-            <View style={styles.actions}>
-              <Pressable onPress={handleDone} hitSlop={10}>
-                <Text style={[styles.skipText, { color: colors.muted }]}>
-                  Skip
-                </Text>
-              </Pressable>
-
-              <View style={styles.actionsRight}>
-                <Text style={[styles.stepCounter, { color: colors.dim }]}>
-                  {step + 1}/{STEPS.length}
-                </Text>
-                <Pressable
-                  style={[styles.nextBtn, { backgroundColor: colors.accent }]}
-                  onPress={handleNext}
-                >
-                  <Text style={[styles.nextBtnText, { color: colors.bg }]}>
-                    {isLast ? 'Let\u2019s go' : 'Next'}
-                  </Text>
-                </Pressable>
-              </View>
-            </View>
-          </Animated.View>
-
-          {/* Pointer arrow below tooltip */}
-          {current.position === 'top' && (
-            <View style={[styles.arrowUp, { borderBottomColor: colors.surface }]} />
-          )}
+      {/* Tag + Bocy face */}
+      <View style={styles.tagRow}>
+        {current.tag && (
+          <View style={[styles.tag, { backgroundColor: colors.greenDim }]}>
+            <Text style={[styles.tagText, { color: colors.green }]}>{current.tag}</Text>
+          </View>
+        )}
+        <View style={styles.tagBocyWrap}>
+          <BocyFace mood="happy" size="sm" breathing />
         </View>
-      </Pressable>
-    </Modal>
+      </View>
+
+      {/* Content */}
+      <Text style={[styles.title, { color: colors.text }]}>
+        {current.title}
+      </Text>
+      <Text style={[styles.body, { color: colors.text2 }]}>
+        {current.body}
+      </Text>
+
+      {/* Actions */}
+      <View style={styles.actions}>
+        <Pressable onPress={handleDone} hitSlop={10}>
+          <Text style={[styles.skipText, { color: colors.muted }]}>
+            Skip
+          </Text>
+        </Pressable>
+
+        <View style={styles.actionsRight}>
+          <Text style={[styles.stepCounter, { color: colors.dim }]}>
+            {step + 1}/{STEPS.length}
+          </Text>
+          <Pressable
+            style={[styles.nextBtn, { backgroundColor: colors.accent }]}
+            onPress={handleNext}
+          >
+            <Text style={[styles.nextBtnText, { color: colors.bg }]}>
+              {isLast ? 'Let\u2019s go' : 'Next'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    </Animated.View>
+  );
+
+  return (
+    <Pressable style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.4)' }]} onPress={handleNext}>
+      <View style={[
+        styles.tooltipContainer,
+        current.tooltipPosition === 'below' && styles.tooltipNearTop,
+        current.tooltipPosition === 'above' && styles.tooltipNearBottom,
+      ]}>
+        {/* Arrow pointing up (tooltip is below the card) */}
+        {current.tooltipPosition === 'below' && (
+          <View style={[styles.arrowUp, { borderBottomColor: colors.surface }]} />
+        )}
+
+        {tooltip}
+
+        {/* Arrow pointing down (tooltip is above the card) */}
+        {current.tooltipPosition === 'above' && (
+          <View style={[styles.arrowDown, { borderTopColor: colors.surface }]} />
+        )}
+      </View>
+    </Pressable>
   );
 }
 
@@ -281,24 +276,21 @@ export function useWalkthrough() {
 
 const styles = StyleSheet.create({
   overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    justifyContent: 'center',
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 999,
   },
   tooltipContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
   },
-  tooltipTop: {
-    justifyContent: 'flex-start',
-    paddingTop: 140,
+  tooltipNearTop: {
+    top: 130,
   },
-  tooltipCenter: {
-    justifyContent: 'center',
-  },
-  tooltipBottom: {
-    justifyContent: 'flex-end',
-    paddingBottom: 130,
+  tooltipNearBottom: {
+    bottom: 100,
   },
   tooltip: {
     borderWidth: 1,
@@ -380,23 +372,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   // ── Pointer arrows ──
-  arrowDown: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 10,
-    borderRightWidth: 10,
-    borderTopWidth: 10,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
-    marginBottom: -1,
-    alignSelf: 'center',
-  },
   arrowUp: {
     width: 0,
     height: 0,
     borderLeftWidth: 10,
     borderRightWidth: 10,
     borderBottomWidth: 10,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    marginBottom: -1,
+    alignSelf: 'center',
+  },
+  arrowDown: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 10,
+    borderRightWidth: 10,
+    borderTopWidth: 10,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
     marginTop: -1,

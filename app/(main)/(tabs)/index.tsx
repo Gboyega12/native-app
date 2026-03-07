@@ -1502,6 +1502,7 @@ export default function Home() {
   const focusType: 'payday' | 'budget' | 'move' = isPayday ? 'payday' : 'budget';
 
   return (
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
     <ScrollView
       ref={dashScrollRef}
       style={s.container}
@@ -1744,7 +1745,7 @@ export default function Home() {
               YOUR INSIGHTS — inline from Plan page
               ══════════════════════════════════════════════ */}
           {(hasActive || hasCompleted || opportunityMoves.length > 0) && (
-            <>
+            <View onLayout={(e) => { cardPositions.current.moves = e.nativeEvent.layout.y; }}>
               {/* Active moves */}
               {hasActive && (
                 <>
@@ -2198,7 +2199,7 @@ export default function Home() {
 
                 </>
               )}
-            </>
+            </View>
           )}
 
           {/* Dot separator */}
@@ -2751,8 +2752,6 @@ export default function Home() {
         </>
       )}
 
-      {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} scrollRef={dashScrollRef} cardPositions={cardPositions} router={router} />}
-
       {/* ── Income arrival insight modal ── */}
       {weeklyCtx?.incomeArrivedThisWeek && Array.isArray(weeklyCtx?.recentIncomeEvents) && weeklyCtx.recentIncomeEvents.length > 0 && (
         <InsightModal
@@ -2907,6 +2906,9 @@ export default function Home() {
         </Pressable>
       </Modal>
     </ScrollView>
+
+    {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} scrollRef={dashScrollRef} cardPositions={cardPositions} router={router} />}
+    </View>
   );
 }
 
