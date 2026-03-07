@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
@@ -19,6 +20,12 @@ import { useVoiceConversation, type VoiceState } from '@/lib/use-voice-conversat
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
+
+/** Fingerprint for a payday context — changes each pay event so dismissal resets next payday */
+const paydayFingerprint = (pc: any): string => {
+  const events = (pc?.incomeEvents || []).map((e: any) => `${e.source}:${e.amount}:${e.date}`).join('|');
+  return events || 'payday';
+};
 
 
 /** Word-count threshold — messages longer than this get split into chunks */
@@ -877,6 +884,7 @@ export default function Chat() {
   const [context, setContext] = useState<ChatContext>({});
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [goals, setGoals] = useState<Goals | null>(null);
+  const [paydayDismissed, setPaydayDismissed] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [savingPlan, setSavingPlan] = useState<string | null>(null); // "msgIdx-actionIdx"
   const scrollRef = useRef<ScrollView>(null);
@@ -1418,6 +1426,17 @@ export default function Chat() {
 
     setContext(ctx);
 
+    // ── Check if payday check-in was already dismissed ──
+    let isPaydayDismissed = false;
+    if (ctx.payday_context?.incomeArrivedThisWeek) {
+      const fp = paydayFingerprint(ctx.payday_context);
+      const dismissed = await AsyncStorage.getItem('dismiss:chat:payday').catch(() => null);
+      if (dismissed === fp) {
+        isPaydayDismissed = true;
+        setPaydayDismissed(true);
+      }
+    }
+
     // ── Load persisted messages ──
     let chatData: { messages: any[] } | null = null;
     try {
@@ -1431,8 +1450,8 @@ export default function Chat() {
 
     if (chatData?.messages?.length) {
       setMessages(chatData.messages);
-    } else if (ctx.payday_context?.incomeArrivedThisWeek && ctx.payday_context.incomeEvents.length > 0) {
-      // No existing messages + income arrived = auto-send a payday nudge
+    } else if (ctx.payday_context?.incomeArrivedThisWeek && ctx.payday_context.incomeEvents.length > 0 && !isPaydayDismissed) {
+      // No existing messages + income arrived + not dismissed = auto-send a payday nudge
       const pc = ctx.payday_context;
       const totalIncome = pc.incomeEvents.reduce((s: number, e: any) => s + e.amount, 0);
       const nudgeMsg: ChatMessage = {
@@ -1797,6 +1816,13 @@ export default function Chat() {
     setLoading(true);
     setError(null);
 
+    // Dismiss the payday banner permanently for this pay event
+    if (hasPaydayContext && !paydayDismissed) {
+      setPaydayDismissed(true);
+      const fp = paydayFingerprint(context.payday_context);
+      AsyncStorage.setItem('dismiss:chat:payday', fp).catch(() => {});
+    }
+
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
     let responseText = '';
@@ -1965,9 +1991,9 @@ export default function Chat() {
   };
 
   const hasPaydayContext = !!context.payday_context?.incomeArrivedThisWeek;
-  // Only show the payday banner when the user hasn't engaged yet (empty chat or just the auto-nudge)
+  // Only show the payday banner when the user hasn't engaged yet and hasn't dismissed it
   const hasUserMessage = messages.some((m) => m.role === 'user');
-  const paydayActive = hasPaydayContext && !hasUserMessage;
+  const paydayActive = hasPaydayContext && !hasUserMessage && !paydayDismissed;
   const suggestedQuestions = getContextualQuestions(analysis, goals, paydayActive, context.payday_context);
 
   const isEmptyState = messages.length === 0 || (messages.length === 1 && messages[0].role === 'assistant' && paydayActive);
