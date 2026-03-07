@@ -30,32 +30,32 @@ type WalkthroughStep = {
 
 const STEPS: WalkthroughStep[] = [
   {
-    title: 'Your #1 Move',
-    body: 'Your highest-impact action right now. Bocy ranks every opportunity by how much it saves you.',
-    scrollTo: 'hero',
-    tooltipPosition: 'below',
-    tag: 'TOP PICK',
-  },
-  {
     title: 'Safe to Spend',
-    body: 'How much you can freely spend this week without touching your goals. Updates automatically.',
+    body: 'How much you can freely spend this week without touching your goals. Updates every time you sync.',
     scrollTo: 'hero',
     tooltipPosition: 'below',
     tag: 'WEEKLY',
   },
   {
-    title: 'Your Budget',
-    body: 'Where every pound goes: essentials, lifestyle, and what\u2019s left. Tap any category for the breakdown.',
-    scrollTo: 'budget',
-    tooltipPosition: 'above',
-    tag: 'SPENDING',
-  },
-  {
     title: 'Your Moves',
     body: 'Personalised actions ranked by impact. Start a move, tick off steps, and watch your progress grow.',
     scrollTo: 'moves',
-    tooltipPosition: 'above',
+    tooltipPosition: 'below',
     tag: 'ACTION',
+  },
+  {
+    title: 'Your Budget',
+    body: 'Where every pound goes \u2014 essentials, lifestyle, and what\u2019s left. Tap any category for the full breakdown.',
+    scrollTo: 'budget',
+    tooltipPosition: 'below',
+    tag: 'SPENDING',
+  },
+  {
+    title: 'Transactions',
+    body: 'Every transaction, categorised automatically. Hold any one to re-categorise it yourself.',
+    scrollTo: 'transactions',
+    tooltipPosition: 'above',
+    tag: 'DETAIL',
   },
   {
     title: 'Chat with Bocy',
@@ -119,8 +119,10 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
     if (s.scrollTo && scrollRef?.current && cardPositions?.current) {
       const y = cardPositions.current[s.scrollTo];
       if (y != null) {
+        // Scroll so the card peeks above the tooltip — less offset for 'above' so card shows below
+        const offset = s.tooltipPosition === 'above' ? 200 : 60;
         setTimeout(() => {
-          scrollRef.current?.scrollTo({ y: Math.max(0, y - 120), animated: true });
+          scrollRef.current?.scrollTo({ y: Math.max(0, y - offset), animated: true });
         }, 100);
       }
     }
@@ -235,17 +237,17 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
     <Pressable style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.4)' }]} onPress={handleNext}>
       <View style={[
         styles.tooltipContainer,
-        current.tooltipPosition === 'below' && styles.tooltipNearTop,
-        current.tooltipPosition === 'above' && styles.tooltipNearBottom,
+        current.tooltipPosition === 'below' && styles.tooltipLower,
+        current.tooltipPosition === 'above' && styles.tooltipUpper,
       ]}>
-        {/* Arrow pointing up (tooltip is below the card) */}
+        {/* Arrow pointing up toward the card (tooltip sits below it) */}
         {current.tooltipPosition === 'below' && (
           <View style={[styles.arrowUp, { borderBottomColor: colors.surface }]} />
         )}
 
         {tooltip}
 
-        {/* Arrow pointing down (tooltip is above the card) */}
+        {/* Arrow pointing down toward the card (tooltip sits above it) */}
         {current.tooltipPosition === 'above' && (
           <View style={[styles.arrowDown, { borderTopColor: colors.surface }]} />
         )}
@@ -286,11 +288,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
   },
-  tooltipNearTop: {
-    top: 130,
+  tooltipLower: {
+    bottom: 40,
   },
-  tooltipNearBottom: {
-    bottom: 100,
+  tooltipUpper: {
+    top: 60,
   },
   tooltip: {
     borderWidth: 1,

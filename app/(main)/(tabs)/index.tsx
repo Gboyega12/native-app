@@ -2333,6 +2333,7 @@ export default function Home() {
           </View>
 
           {/* ── Transactions — collapsed by default ── */}
+          <View onLayout={(e) => { cardPositions.current.transactions = e.nativeEvent.layout.y; }}>
           <TouchableOpacity
             activeOpacity={0.8}
             onPress={() => {
@@ -2418,6 +2419,7 @@ export default function Home() {
               <Text style={s.cardFooter}>Hold a transaction to re-categorise</Text>
             </Card>
           )}
+          </View>
 
           {/* Add budget item modal */}
           <Modal visible={showAddItem} transparent animationType="fade" onRequestClose={() => { setAddItemError(''); setShowAddItem(false); }}>
