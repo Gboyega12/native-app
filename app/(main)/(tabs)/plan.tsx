@@ -497,14 +497,18 @@ export default function Plan() {
   const saveProgress = async (key: string, row: ProgressRow) => {
     const uid = userIdRef.current;
     if (!uid) return;
-    await supabase.from('plan_progress').upsert({
+    const upsertData: any = {
       user_id: uid,
       move_key: key,
       move_action: row.move_action,
       approved: row.approved,
       completed_steps: row.completed_steps,
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,move_key' });
+    };
+    // Preserve sub_goals if present in state
+    const sg = subGoalState[key];
+    if (sg && sg.length > 0) upsertData.sub_goals = sg;
+    await supabase.from('plan_progress').upsert(upsertData, { onConflict: 'user_id,move_key' });
   };
 
   const toggleStep = (key: string, stepIndex: number, moveAction: string) => {

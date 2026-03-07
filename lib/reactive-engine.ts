@@ -299,10 +299,13 @@ async function verifySubGoalsFromData(
       const allSubGoalsDone = subGoals.every((sg) => sg.completedAt);
       if (allSubGoalsDone) completedCount++;
 
-      if (changed) {
-        verifiedSubGoals[row.move_key] = subGoals;
-        verifiedSteps[row.move_key] = completedSteps;
+      // Always populate verifiedSubGoals so UI can render them
+      verifiedSubGoals[row.move_key] = subGoals;
+      verifiedSteps[row.move_key] = completedSteps;
 
+      // Persist when progress detected OR when DB row is missing sub_goals
+      const dbMissingSg = !row.sub_goals || !Array.isArray(row.sub_goals) || row.sub_goals.length === 0;
+      if (changed || dbMissingSg) {
         await supabase.from('plan_progress').upsert({
           user_id: userId,
           move_key: row.move_key,
@@ -312,20 +315,20 @@ async function verifySubGoalsFromData(
           sub_goals: subGoals,
           updated_at: now.toISOString(),
         }, { onConflict: 'user_id,move_key' });
+      }
 
-        if (allSubGoalsDone) {
-          events.push({
-            type: 'move_auto_completed',
-            title: 'Move completed!',
-            body: `All goals for "${move.action}" are done. \u00a3${move.annualImpact}/yr impact unlocked.`,
-            insightType: 'goal_milestone',
-            tag: 'COMPLETE',
-            actionLabel: 'See next move',
-            actionPrefill: 'What should I focus on next?',
-            fingerprint: `move_complete_${row.move_key}_${now.getMonth()}`,
-            data: { moveAction: move.action, annualImpact: move.annualImpact },
-          });
-        }
+      if (changed && allSubGoalsDone) {
+        events.push({
+          type: 'move_auto_completed',
+          title: 'Move completed!',
+          body: `All goals for "${move.action}" are done. \u00a3${move.annualImpact}/yr impact unlocked.`,
+          insightType: 'goal_milestone',
+          tag: 'COMPLETE',
+          actionLabel: 'See next move',
+          actionPrefill: 'What should I focus on next?',
+          fingerprint: `move_complete_${row.move_key}_${now.getMonth()}`,
+          data: { moveAction: move.action, annualImpact: move.annualImpact },
+        });
       }
     } else {
       // ── Legacy step-based verification for moves without sub-goals ──

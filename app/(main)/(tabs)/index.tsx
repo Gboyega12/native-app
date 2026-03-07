@@ -1139,11 +1139,13 @@ export default function Home() {
     const row = { move_key: key, move_action: move.action, approved: true, completed_steps: [] as number[] };
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setPlanProgress((prev) => ({ ...prev, [key]: row }));
-    await supabase.from('plan_progress').upsert({
+    const upsertData: any = {
       user_id: uid, move_key: key, move_action: move.action,
       approved: true, completed_steps: [],
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,move_key' });
+    };
+    if (move.subGoals && move.subGoals.length > 0) upsertData.sub_goals = move.subGoals;
+    await supabase.from('plan_progress').upsert(upsertData, { onConflict: 'user_id,move_key' });
   };
 
   const handleStopMove = async (index: number) => {
