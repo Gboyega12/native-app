@@ -9,7 +9,7 @@
 // Gap 4: Wire plan completion counts back to the achievement engine.
 
 import { supabase } from '@/lib/supabase';
-import type { Analysis, Move, EnrichedTransaction, FinancialProfile, Goals } from '@/lib/types';
+import type { Analysis, Move, MoveSubGoal, EnrichedTransaction, FinancialProfile, Goals } from '@/lib/types';
 import type { RankedMove } from '@/lib/move-engine';
 import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
 import { checkAchievements, type ScoreSnapshot } from '@/lib/achievements';
@@ -76,37 +76,47 @@ export interface ReactiveResult {
   /** Steps verified this sync — keyed by move_key → updated completed_steps.
    *  The UI merges these into local progress state to tick checkboxes + update progress bars. */
   verifiedSteps: Record<string, number[]>;
-  /** Short hint for the next priority move (no card needed — just a one-liner) */
-  nextMoveHint: string | null;
+  /** Updated sub-goals with current values — keyed by move_key.
+   *  The UI uses these for real progress bars per sub-goal. */
+  verifiedSubGoals: Record<string, MoveSubGoal[]>;
 }
 
-// ── Gap 1: Transaction-to-Plan Verification ──
+// ── Gap 1: Sub-Goal Verification from Real Data ──
 
 interface ProgressRow {
   move_key: string;
   move_action: string;
   approved: boolean;
   completed_steps: number[];
+  sub_goals?: MoveSubGoal[];
 }
 
 /**
- * Scan enriched transactions for evidence that plan steps have been completed.
- * Matches transactions to active moves/plans and auto-marks steps.
+ * Verify sub-goals against real data sources:
+ * - debt_clear → check current balance from debt accounts
+ * - sub_cancel → check if merchant has 0 recent transactions
+ * - spending_reduce → check current category spend from profile metrics
+ * - savings_reach → check cumulative savings transfers
+ * - buffer_build → check cumulative savings/buffer transfers
  *
- * Detection patterns:
- * - Subscription cancelled: move mentions "cancel X", no recent tx from X
- * - Debt payment: move is debt category, matching outgoing payment found
- * - Savings transfer: move is buffer/savings, matching savings transfer found
- * - Spending reduction: move targets a category, spending in that category dropped
+ * Also keeps the old step-based verification for moves without sub-goals.
  */
-async function verifyPlanStepsFromTransactions(
+async function verifySubGoalsFromData(
   userId: string,
   enrichedTxs: EnrichedTransaction[],
   analysis: Analysis,
+  profile: FinancialProfile | null,
+  debtAccounts: any[],
   previousAnalysis: Analysis | null,
-): Promise<{ verified: ReactiveEvent[]; completedCount: number; verifiedSteps: Record<string, number[]> }> {
+): Promise<{
+  verified: ReactiveEvent[];
+  completedCount: number;
+  verifiedSteps: Record<string, number[]>;
+  verifiedSubGoals: Record<string, MoveSubGoal[]>;
+}> {
   const events: ReactiveEvent[] = [];
   const verifiedSteps: Record<string, number[]> = {};
+  const verifiedSubGoals: Record<string, MoveSubGoal[]> = {};
 
   // Fetch active progress records
   const { data: progressRows } = await supabase
@@ -116,15 +126,32 @@ async function verifyPlanStepsFromTransactions(
     .not('move_key', 'like', 'dismissed-%');
 
   if (!progressRows || progressRows.length === 0) {
-    return { verified: events, completedCount: 0, verifiedSteps };
+    return { verified: events, completedCount: 0, verifiedSteps, verifiedSubGoals };
   }
 
   const moves = analysis.all_moves || [];
   const now = new Date();
   const recentCutoff = new Date(now);
   recentCutoff.setDate(recentCutoff.getDate() - 30);
-
   const recentTxs = enrichedTxs.filter((tx) => new Date(tx.date) >= recentCutoff);
+
+  // Build spending lookup from profile metrics
+  const spendingByCategory: Record<string, number> = {};
+  if (profile?.metrics) {
+    const pm = profile.metrics;
+    spendingByCategory['Delivery'] = pm.foodDelivery || 0;
+    spendingByCategory['Eating Out'] = pm.eatingOut || 0;
+    spendingByCategory['Shopping'] = pm.shopping || 0;
+    spendingByCategory['Transport'] = pm.transport || 0;
+    spendingByCategory['Coffee & Cafes'] = pm.coffeeAndCafes || 0;
+  }
+
+  // Build debt balance lookup by account name
+  const debtByName: Record<string, number> = {};
+  for (const d of debtAccounts) {
+    const name = d.account_name || d.institution || 'Debt';
+    debtByName[name] = d.outstanding_balance || 0;
+  }
 
   let completedCount = 0;
 
@@ -133,150 +160,218 @@ async function verifyPlanStepsFromTransactions(
 
     const moveIndex = parseInt(row.move_key.replace('move-', ''), 10);
     const move = !isNaN(moveIndex) ? moves[moveIndex] : null;
-    const steps = move?.steps || [];
-    const completedSteps: number[] = [...(row.completed_steps || [])];
-    let newStepsCompleted = false;
 
     if (!move) {
-      // Check user plans
       if (row.move_key.startsWith('plan-')) {
-        // User plan — check if all steps done
-        if (completedSteps.length > 0) completedCount++;
+        if ((row.completed_steps || []).length > 0) completedCount++;
       }
       continue;
     }
 
-    const action = (move.action || '').toLowerCase();
-    const cat = move.category || 'spending';
+    const subGoals: MoveSubGoal[] = move.subGoals
+      ? move.subGoals.map((sg) => ({ ...sg }))
+      : [];
+    const completedSteps: number[] = [...(row.completed_steps || [])];
+    let changed = false;
 
-    // ── Subscription cancellation verification ──
-    if (action.includes('cancel') || action.includes('subscript')) {
-      const merchants = (move.merchants || []).map((m) => m.toLowerCase());
-      if (merchants.length > 0) {
-        // Check if ANY of the target merchants have NO recent transactions
-        const cancelledMerchants = merchants.filter((merchant) => {
-          const hasTx = recentTxs.some((tx) => {
-            const txMerchant = (tx.merchant || tx.description || '').toLowerCase();
-            return txMerchant.includes(merchant) || merchant.includes(txMerchant);
-          });
-          return !hasTx;
-        });
+    if (subGoals.length > 0) {
+      // ── Sub-goal verification ──
+      let subGoalCompletedCount = 0;
 
-        if (cancelledMerchants.length > 0 && !completedSteps.includes(1)) {
-          completedSteps.push(1); // "Cancel the ones you haven't used"
-          newStepsCompleted = true;
+      for (let si = 0; si < subGoals.length; si++) {
+        const sg = subGoals[si];
+
+        // Update currentValue from real data
+        switch (sg.type) {
+          case 'debt_clear': {
+            // Look up current balance by account name
+            const balance = debtByName[sg.target];
+            sg.currentValue = balance != null ? Math.round(balance) : sg.currentValue ?? sg.startValue;
+            if (sg.currentValue <= 0 && !sg.completedAt) {
+              sg.completedAt = now.toISOString();
+              changed = true;
+              events.push({
+                type: 'debt_payment',
+                title: `${sg.target} cleared!`,
+                body: `You've paid off ${sg.target}. ${subGoals.length - subGoalCompletedCount - 1} debt${subGoals.length - subGoalCompletedCount - 1 !== 1 ? 's' : ''} remaining.`,
+                insightType: 'goal_milestone',
+                tag: 'CLEARED',
+                actionLabel: 'See progress',
+                actionPrefill: 'Show me my debt payoff progress',
+                fingerprint: `debt_clear_${sg.target}_${now.getMonth()}`,
+                data: { target: sg.target, moveAction: move.action },
+              });
+            } else if (sg.currentValue < sg.startValue && sg.currentValue > 0 && !completedSteps.includes(si)) {
+              // Partial progress — debt is being paid down
+              changed = true;
+            }
+            break;
+          }
+
+          case 'sub_cancel': {
+            // Check if merchant has NO recent transactions
+            const merchantLower = sg.target.toLowerCase();
+            const hasTx = recentTxs.some((tx) => {
+              const txM = (tx.merchant || tx.description || '').toLowerCase();
+              return txM.includes(merchantLower) || merchantLower.includes(txM);
+            });
+            sg.currentValue = hasTx ? sg.startValue : 0;
+            if (!hasTx && !sg.completedAt) {
+              sg.completedAt = now.toISOString();
+              changed = true;
+              events.push({
+                type: 'subscription_cancelled',
+                title: `${sg.target} cancelled`,
+                body: `No charges from ${sg.target} in the last 30 days — \u00a3${sg.startValue}/mo saved.`,
+                insightType: 'goal_milestone',
+                tag: 'VERIFIED',
+                actionLabel: 'See your plan',
+                fingerprint: `sub_cancel_${sg.target}_${now.getMonth()}`,
+                data: { target: sg.target, amount: sg.startValue },
+              });
+            }
+            break;
+          }
+
+          case 'spending_reduce': {
+            // Check current spend vs target from profile metrics
+            const currentSpend = Math.round(spendingByCategory[sg.target] || sg.startValue);
+            sg.currentValue = currentSpend;
+            if (currentSpend <= sg.targetValue && !sg.completedAt) {
+              sg.completedAt = now.toISOString();
+              changed = true;
+              const reduction = sg.startValue - currentSpend;
+              events.push({
+                type: 'spending_reduced',
+                title: `${sg.target} spend down`,
+                body: `${sg.target} spending dropped to \u00a3${currentSpend}/mo — \u00a3${reduction}/mo saved.`,
+                insightType: 'goal_milestone',
+                tag: 'RESULT',
+                actionLabel: 'See impact',
+                fingerprint: `spend_reduce_${sg.target}_${now.getMonth()}`,
+                data: { category: sg.target, reduction },
+              });
+            } else if (currentSpend < sg.startValue && !sg.completedAt) {
+              // Partial progress
+              changed = true;
+            }
+            break;
+          }
+
+          case 'buffer_build':
+          case 'savings_reach': {
+            // Sum recent savings transfers as proxy for progress
+            const savingsTxs = recentTxs.filter((tx) => tx.amount < 0 && (tx as any).isSavings);
+            const totalSaved = savingsTxs.reduce((s, tx) => s + Math.abs(tx.amount), 0);
+            // Use stored progress or accumulate
+            const prevValue = (row as any).sub_goals?.[si]?.currentValue || 0;
+            sg.currentValue = Math.round(Math.max(prevValue, totalSaved));
+            if (sg.currentValue >= sg.targetValue && !sg.completedAt) {
+              sg.completedAt = now.toISOString();
+              changed = true;
+              events.push({
+                type: 'savings_detected',
+                title: `${sg.target} target hit!`,
+                body: `You've reached your \u00a3${sg.targetValue} target for ${sg.target.toLowerCase()}.`,
+                insightType: 'goal_milestone',
+                tag: 'COMPLETE',
+                actionLabel: 'See progress',
+                fingerprint: `${sg.type}_${sg.target}_${now.getMonth()}`,
+                data: { target: sg.target, amount: sg.targetValue },
+              });
+            } else if (totalSaved > 0 && !sg.completedAt) {
+              changed = true;
+            }
+            break;
+          }
+        }
+
+        if (sg.completedAt) {
+          subGoalCompletedCount++;
+          // Map sub-goal completion to step completion for backward compat
+          if (!completedSteps.includes(si)) {
+            completedSteps.push(si);
+          }
+        }
+      }
+
+      // Check if ALL sub-goals are complete → move is done
+      const allSubGoalsDone = subGoals.every((sg) => sg.completedAt);
+      if (allSubGoalsDone) completedCount++;
+
+      if (changed) {
+        verifiedSubGoals[row.move_key] = subGoals;
+        verifiedSteps[row.move_key] = completedSteps;
+
+        await supabase.from('plan_progress').upsert({
+          user_id: userId,
+          move_key: row.move_key,
+          move_action: row.move_action,
+          approved: true,
+          completed_steps: completedSteps,
+          sub_goals: subGoals,
+          updated_at: now.toISOString(),
+        }, { onConflict: 'user_id,move_key' });
+
+        if (allSubGoalsDone) {
           events.push({
-            type: 'subscription_cancelled',
-            title: 'Subscription cancelled',
-            body: `Looks like you cancelled ${cancelledMerchants.join(', ')} — no charges in the last 30 days.`,
+            type: 'move_auto_completed',
+            title: 'Move completed!',
+            body: `All goals for "${move.action}" are done. \u00a3${move.annualImpact}/yr impact unlocked.`,
             insightType: 'goal_milestone',
-            tag: 'VERIFIED',
-            actionLabel: 'See your plan',
-            fingerprint: `sub_cancel_${cancelledMerchants.sort().join('_')}_${now.getMonth()}`,
+            tag: 'COMPLETE',
+            actionLabel: 'See next move',
+            actionPrefill: 'What should I focus on next?',
+            fingerprint: `move_complete_${row.move_key}_${now.getMonth()}`,
+            data: { moveAction: move.action, annualImpact: move.annualImpact },
           });
         }
       }
-    }
+    } else {
+      // ── Legacy step-based verification for moves without sub-goals ──
+      const steps = move.steps || [];
+      const cat = move.category || 'spending';
+      let newStepsCompleted = false;
 
-    // ── Debt payment verification ──
-    if (cat === 'debt' || action.includes('debt') || action.includes('overpay')) {
-      const debtPayments = recentTxs.filter((tx) => tx.amount < 0 && (tx.isDebt || tx.isBNPL));
-      if (debtPayments.length > 0 && !completedSteps.includes(0)) {
-        const totalPaid = debtPayments.reduce((s, tx) => s + Math.abs(tx.amount), 0);
-        completedSteps.push(0); // First step: "List/pay debts"
-        newStepsCompleted = true;
-        events.push({
-          type: 'debt_payment',
-          title: 'Debt payment detected',
-          body: `£${Math.round(totalPaid)} in debt payments found this month. Your move "${move.action}" is on track.`,
-          insightType: 'goal_milestone',
-          tag: 'PROGRESS',
-          actionLabel: 'View debt plan',
-          actionPrefill: 'Show me my debt payoff progress',
-          fingerprint: `debt_payment_${Math.round(totalPaid)}_${now.getMonth()}`,
-          data: { totalPaid, moveAction: move.action },
-        });
+      if (cat === 'debt') {
+        const debtPayments = recentTxs.filter((tx) => tx.amount < 0 && ((tx as any).isDebt || (tx as any).isBNPL));
+        if (debtPayments.length > 0 && !completedSteps.includes(0)) {
+          completedSteps.push(0);
+          newStepsCompleted = true;
+        }
+      } else if (cat === 'buffer' || cat === 'savings') {
+        const savingsTransfers = recentTxs.filter((tx) => tx.amount < 0 && (tx as any).isSavings);
+        if (savingsTransfers.length > 0 && !completedSteps.includes(0)) {
+          completedSteps.push(0);
+          newStepsCompleted = true;
+        }
+      } else if (cat === 'spending' && previousAnalysis) {
+        const prevSpending = previousAnalysis.monthly_spending || 0;
+        const currSpending = analysis.monthly_spending || 0;
+        if (prevSpending > 0 && currSpending < prevSpending * 0.9 && !completedSteps.includes(0)) {
+          completedSteps.push(0);
+          newStepsCompleted = true;
+        }
       }
-    }
 
-    // ── Savings/buffer transfer verification ──
-    if (cat === 'buffer' || cat === 'savings' || action.includes('saving') || action.includes('buffer')) {
-      const savingsTransfers = recentTxs.filter((tx) => tx.amount < 0 && tx.isSavings);
-      if (savingsTransfers.length > 0 && !completedSteps.includes(0)) {
-        const totalSaved = savingsTransfers.reduce((s, tx) => s + Math.abs(tx.amount), 0);
-        completedSteps.push(0); // "Set aside your target amount"
-        newStepsCompleted = true;
-        events.push({
-          type: 'savings_detected',
-          title: 'Savings detected',
-          body: `£${Math.round(totalSaved)} moved to savings this month. Your buffer is growing.`,
-          insightType: 'goal_milestone',
-          tag: 'ON TRACK',
-          actionLabel: 'Check progress',
-          actionPrefill: 'How is my savings progress?',
-          fingerprint: `savings_${Math.round(totalSaved)}_${now.getMonth()}`,
-          data: { totalSaved },
-        });
-      }
-    }
+      const allDone = steps.length > 0 && completedSteps.length >= steps.length;
+      if (allDone) completedCount++;
 
-    // ── Spending reduction verification ──
-    if (cat === 'spending' && previousAnalysis) {
-      const prevSpending = previousAnalysis.monthly_spending || 0;
-      const currSpending = analysis.monthly_spending || 0;
-      if (prevSpending > 0 && currSpending < prevSpending * 0.9 && !completedSteps.includes(0)) {
-        const reduction = Math.round(prevSpending - currSpending);
-        completedSteps.push(0);
-        newStepsCompleted = true;
-        events.push({
-          type: 'spending_reduced',
-          title: 'Spending down',
-          body: `Your monthly spending dropped by £${reduction}. That's £${reduction * 12}/yr freed up.`,
-          insightType: 'goal_milestone',
-          tag: 'RESULT',
-          actionLabel: 'See impact',
-          actionPrefill: 'Show me how my spending compares to last month',
-          fingerprint: `spend_reduced_${reduction}_${now.getMonth()}`,
-          data: { reduction },
-        });
-      }
-    }
-
-    // Check if all steps are now completed
-    const allDone = steps.length > 0 && completedSteps.length >= steps.length;
-    if (allDone) completedCount++;
-
-    // Persist updated steps if changed
-    if (newStepsCompleted) {
-      // Record for the UI to merge into local state
-      verifiedSteps[row.move_key] = completedSteps;
-
-      await supabase.from('plan_progress').upsert({
-        user_id: userId,
-        move_key: row.move_key,
-        move_action: row.move_action,
-        approved: true,
-        completed_steps: completedSteps,
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,move_key' });
-
-      if (allDone) {
-        events.push({
-          type: 'move_auto_completed',
-          title: 'Move completed!',
-          body: `All steps for "${move.action}" are done. £${move.annualImpact}/yr impact unlocked.`,
-          insightType: 'goal_milestone',
-          tag: 'COMPLETE',
-          actionLabel: 'See next move',
-          actionPrefill: 'What should I focus on next?',
-          fingerprint: `move_complete_${row.move_key}_${now.getMonth()}`,
-          data: { moveAction: move.action, annualImpact: move.annualImpact },
-        });
+      if (newStepsCompleted) {
+        verifiedSteps[row.move_key] = completedSteps;
+        await supabase.from('plan_progress').upsert({
+          user_id: userId,
+          move_key: row.move_key,
+          move_action: row.move_action,
+          approved: true,
+          completed_steps: completedSteps,
+          updated_at: now.toISOString(),
+        }, { onConflict: 'user_id,move_key' });
       }
     }
   }
 
-  return { verified: events, completedCount, verifiedSteps };
+  return { verified: events, completedCount, verifiedSteps, verifiedSubGoals };
 }
 
 // ── Gap 3: Next Priority Move Suggestion ──
@@ -295,9 +390,9 @@ function suggestNextPriorityMove(
   debtAccounts: any[],
   progress: Record<string, ProgressRow>,
   justCompletedEvents: ReactiveEvent[],
-): { suggestion: NextMoveSuggestion | null; hint: string | null } {
+): NextMoveSuggestion | null {
   const moves = analysis.all_moves || [];
-  if (moves.length === 0 || !profile) return { suggestion: null, hint: null };
+  if (moves.length === 0 || !profile) return null;
 
   const ukpf = determineFlowchartPosition(profile, goals, debtAccounts, identity);
 
@@ -344,7 +439,7 @@ function suggestNextPriorityMove(
 
   // Priority order: in-progress > chain matches > flowchart matches > rest
   const candidates = [...startedIncomplete, ...chainMatches, ...unstartedMatching, ...unstartedOther];
-  if (candidates.length === 0) return { suggestion: null, hint: null };
+  if (candidates.length === 0) return null;
 
   // Score candidates using CRRA + Monte Carlo
   let vol: VolatilityProfile | null = null;
@@ -406,24 +501,9 @@ function suggestNextPriorityMove(
     }
   }
 
-  if (!best) return { suggestion: null, hint: null };
+  if (!best) return null;
 
-  const { candidate, mu, reason, isChain } = best;
-
-  // Build a short one-line hint (not a card)
-  const action = (candidate.move.action || '').replace(/\*\*/g, '');
-  const truncated = action.length > 50 ? action.slice(0, 49).trimEnd() + '\u2026' : action;
-  let hint: string;
-  if (isChain) {
-    hint = `Next up: ${truncated}`;
-  } else if (startedIncomplete.some((s) => s.index === candidate.index)) {
-    const prog = progress[`move-${candidate.index}`];
-    const done = prog?.completed_steps?.length || 0;
-    const total = candidate.move.steps?.length || 0;
-    hint = `Continue: ${truncated} (${done}/${total})`;
-  } else {
-    hint = `Next: ${truncated} — £${candidate.move.monthlyImpact}/mo`;
-  }
+  const { candidate, mu, reason } = best;
 
   // Compute trajectory
   let trajectory: NextMoveSuggestion['trajectory'] = undefined;
@@ -442,17 +522,14 @@ function suggestNextPriorityMove(
   }
 
   return {
-    suggestion: {
-      move: candidate.move,
-      rank: candidate.index + 1,
-      reason,
-      flowchartLabel: ukpf.label,
-      priority: ukpf.priority,
-      marginalMultiplier: mu.multiplier,
-      liquidityTier: mu.liquidityTier,
-      trajectory,
-    },
-    hint,
+    move: candidate.move,
+    rank: candidate.index + 1,
+    reason,
+    flowchartLabel: ukpf.label,
+    priority: ukpf.priority,
+    marginalMultiplier: mu.multiplier,
+    liquidityTier: mu.liquidityTier,
+    trajectory,
   };
 }
 
@@ -636,9 +713,9 @@ export async function runReactiveEngine(
     }
   } catch {}
 
-  // Gap 1: Verify plan steps from transactions
-  const { verified, completedCount, verifiedSteps } = await verifyPlanStepsFromTransactions(
-    userId, enrichedTxs, analysis, previousAnalysis,
+  // Gap 1: Verify sub-goals from real data
+  const { verified, completedCount, verifiedSteps, verifiedSubGoals } = await verifySubGoalsFromData(
+    userId, enrichedTxs, analysis, profile, debtAccounts, previousAnalysis,
   );
   allEvents.push(...verified);
 
@@ -651,7 +728,7 @@ export async function runReactiveEngine(
   allEvents.push(...achievementEvents);
 
   // Gap 3: Next priority move suggestion (with chaining from just-completed events)
-  const { suggestion: nextMove, hint: nextMoveHint } = suggestNextPriorityMove(
+  const nextMove = suggestNextPriorityMove(
     analysis, profile, goals, identity, debtAccounts, progressMap, allEvents,
   );
 
@@ -662,6 +739,6 @@ export async function runReactiveEngine(
     planCompletedCount: completedCount,
     totalMoveCount,
     verifiedSteps,
-    nextMoveHint,
+    verifiedSubGoals,
   };
 }

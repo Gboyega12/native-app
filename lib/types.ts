@@ -127,6 +127,32 @@ export interface Archetype {
   savingsOpportunity: string;
 }
 
+// ── Move Sub-Goals ──
+// Structured, typed sub-goals attached at move generation time.
+// Each sub-goal maps to a real data entity (debt account, subscription, category)
+// and is verified directly against source data — no fuzzy text matching.
+
+export type MoveSubGoalType =
+  | 'debt_clear'       // Clear a specific debt account
+  | 'sub_cancel'       // Cancel a specific subscription
+  | 'spending_reduce'  // Reduce spending in a category
+  | 'savings_reach'    // Reach a savings target
+  | 'buffer_build';    // Build emergency buffer to target
+
+export interface MoveSubGoal {
+  type: MoveSubGoalType;
+  /** Human-readable label: merchant name, debt account name, or category */
+  target: string;
+  /** Value at move creation: balance, monthly spend, etc. */
+  startValue: number;
+  /** Goal value: 0 for debt clear/sub cancel, reduced amount for spending */
+  targetValue: number;
+  /** Updated each sync from real data */
+  currentValue?: number;
+  /** ISO timestamp when this sub-goal was verified complete */
+  completedAt?: string | null;
+}
+
 // ── Moves ──
 
 export interface Move {
@@ -140,6 +166,8 @@ export interface Move {
   timeline?: string;
   category?: 'break_even' | 'buffer' | 'debt' | 'spending' | 'savings' | 'invest';
   merchants?: string[];
+  /** Structured sub-goals derived from real data at generation time */
+  subGoals?: MoveSubGoal[];
 }
 
 // ── Decision Score ──

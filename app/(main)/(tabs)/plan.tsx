@@ -11,7 +11,7 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import Card, { AnimGlyph, SMOOTH_ANIM } from '@/components/Card';
 import { useResponsive } from '@/lib/responsive';
-import type { Analysis, Move, GoalTrajectory, IncomeSource } from '@/lib/types';
+import type { Analysis, Move, MoveSubGoal, GoalTrajectory, IncomeSource } from '@/lib/types';
 import type { ReactiveResult } from '@/lib/reactive-engine';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -220,7 +220,7 @@ export default function Plan() {
   const [refreshing, setRefreshing] = useState(false);
   const [showAllMoves, setShowAllMoves] = useState(false);
   const itemYPositions = useRef<Record<number, number>>({});
-  const [nextMoveHint, setNextMoveHint] = useState<string | null>(null);
+  const [subGoalState, setSubGoalState] = useState<Record<string, MoveSubGoal[]>>({});
 
   // Handle deep-link: store target action for resolution after data loads
   useEffect(() => {
@@ -305,6 +305,7 @@ export default function Plan() {
       setUserPlans(plansRes.data || []);
 
       const progressMap: Record<string, ProgressRow> = {};
+      const sgMap: Record<string, MoveSubGoal[]> = {};
       const dismissedActions = new Set<string>();
       for (const row of (progressRes.data || [])) {
         if (row.move_key.startsWith('dismissed-')) {
@@ -316,6 +317,9 @@ export default function Plan() {
             approved: row.approved,
             completed_steps: row.completed_steps || [],
           };
+          if (row.sub_goals && Array.isArray(row.sub_goals) && row.sub_goals.length > 0) {
+            sgMap[row.move_key] = row.sub_goals;
+          }
         }
       }
 
@@ -329,6 +333,7 @@ export default function Plan() {
       }
 
       setProgress(progressMap);
+      setSubGoalState(sgMap);
 
       // Trigger background sync so moves/scores reflect latest bank data
       syncInBackground(user.id, dismissedActions);
@@ -372,7 +377,6 @@ export default function Plan() {
   // ── Apply reactive engine results to local state ──
   const applyReactiveResult = (reactive: ReactiveResult | null | undefined) => {
     if (!reactive) return;
-    if (reactive.nextMoveHint) setNextMoveHint(reactive.nextMoveHint);
     // Merge verified steps into local progress so checkboxes + progress bars update
     if (reactive.verifiedSteps && Object.keys(reactive.verifiedSteps).length > 0) {
       setProgress((prev) => {
@@ -384,6 +388,10 @@ export default function Plan() {
         }
         return updated;
       });
+    }
+    // Merge verified sub-goals for real progress rendering
+    if (reactive.verifiedSubGoals && Object.keys(reactive.verifiedSubGoals).length > 0) {
+      setSubGoalState((prev) => ({ ...prev, ...reactive.verifiedSubGoals }));
     }
   };
 
@@ -1020,7 +1028,15 @@ export default function Plan() {
             const moveKey = `move-${i}`;
             const steps = move.steps || [];
             const doneSteps = progress[moveKey]?.completed_steps || [];
-            const stepProgress = steps.length > 0 ? doneSteps.length / steps.length : 0;
+            // Use sub-goal progress when available, fall back to step progress
+            const sgs = move.subGoals && move.subGoals.length > 0
+              ? (subGoalState[moveKey] || move.subGoals) : null;
+            const sgDone = sgs ? sgs.filter((sg) => sg.completedAt).length : 0;
+            const stepProgress = sgs
+              ? (sgs.length > 0 ? sgDone / sgs.length : 0)
+              : (steps.length > 0 ? doneSteps.length / steps.length : 0);
+            const progressTotal = sgs ? sgs.length : steps.length;
+            const progressDone = sgs ? sgDone : doneSteps.length;
             const nextStepIdx = steps.findIndex((_, idx) => !doneSteps.includes(idx));
 
             return (
@@ -1061,12 +1077,12 @@ export default function Plan() {
                           </View>
                           <Text style={s.expandIcon}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                         </View>
-                        {!isExpanded && steps.length > 0 && (
+                        {!isExpanded && progressTotal > 0 && (
                           <View style={s.miniProgress}>
                             <View style={s.miniProgressBar}>
                               <View style={[s.miniProgressFill, { width: `${Math.round(stepProgress * 100)}%` }]} />
                             </View>
-                            <Text style={s.miniProgressText}>{doneSteps.length}/{steps.length}</Text>
+                            <Text style={s.miniProgressText}>{progressDone}/{progressTotal}</Text>
                           </View>
                         )}
                       </View>
@@ -1088,15 +1104,6 @@ export default function Plan() {
           <View key={i} style={[s.dotItem, { backgroundColor: colors.border }]} />
         ))}
       </View>
-
-      {/* ── Next move hint (subtle one-liner above opportunities) ── */}
-      {nextMoveHint && (
-        <View style={{ marginBottom: spacing.sm, paddingVertical: 4 }}>
-          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green, letterSpacing: 0.2 }}>
-            {'\u2192'} {nextMoveHint}
-          </Text>
-        </View>
-      )}
 
       {/* ══════════════════════════════════════════════
           SECTION 3 — OPPORTUNITIES
@@ -1268,8 +1275,70 @@ export default function Plan() {
           </View>
         )}
 
-        {/* Action checklist */}
-        {steps.length > 0 && (
+        {/* Sub-goal progress (replaces generic checklist when available) */}
+        {move.subGoals && move.subGoals.length > 0 && isActive ? (
+          <View style={s.detailBlock}>
+            <Text style={s.detailLabel}>Progress</Text>
+            {(() => {
+              const sgs = subGoalState[moveKey] || move.subGoals;
+              const doneSgs = sgs.filter((sg) => sg.completedAt);
+              const sgProgress = sgs.length > 0 ? doneSgs.length / sgs.length : 0;
+              return (
+                <>
+                  <View style={s.miniProgress}>
+                    <View style={s.miniProgressBar}>
+                      <View style={[s.miniProgressFill, { width: `${Math.round(sgProgress * 100)}%` }]} />
+                    </View>
+                    <Text style={s.miniProgressText}>{doneSgs.length}/{sgs.length} done</Text>
+                  </View>
+                  {sgs.map((sg, j) => {
+                    const isDone = !!sg.completedAt;
+                    const current = sg.currentValue ?? sg.startValue;
+                    const pct = sg.type === 'sub_cancel'
+                      ? (isDone ? 100 : 0)
+                      : sg.type === 'spending_reduce'
+                        ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / (sg.startValue - sg.targetValue)) * 100)))
+                        : sg.type === 'debt_clear'
+                          ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / sg.startValue) * 100)))
+                          : Math.min(100, Math.max(0, Math.round((current / sg.targetValue) * 100)));
+                    return (
+                      <View key={j} style={[s.checklistRow, { alignItems: 'flex-start' }]}>
+                        <View style={[s.checkbox, isDone && s.checkboxDone]}>
+                          {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
+                        </View>
+                        <View style={[s.checklistContent, { flex: 1 }]}>
+                          <Text style={[s.checklistText, isDone && s.checklistTextDone]}>
+                            {sg.target}
+                          </Text>
+                          {!isDone && (
+                            <View style={[s.miniProgress, { marginTop: 4, marginBottom: 2 }]}>
+                              <View style={[s.miniProgressBar, { flex: 1 }]}>
+                                <View style={[s.miniProgressFill, { width: `${pct}%` }]} />
+                              </View>
+                              <Text style={[s.miniProgressText, { fontSize: 10 }]}>
+                                {sg.type === 'sub_cancel'
+                                  ? `\u00a3${sg.startValue}/mo`
+                                  : sg.type === 'debt_clear'
+                                    ? `\u00a3${current} left`
+                                    : sg.type === 'spending_reduce'
+                                      ? `\u00a3${current} → \u00a3${sg.targetValue}`
+                                      : `\u00a3${current}/\u00a3${sg.targetValue}`
+                                }
+                              </Text>
+                            </View>
+                          )}
+                          {isDone && (
+                            <Text style={[s.nextStepLabel, { color: colors.green }]}>{'\u2713'} Completed</Text>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </>
+              );
+            })()}
+          </View>
+        ) : steps.length > 0 ? (
           <View style={s.detailBlock}>
             <Text style={s.detailLabel}>Action checklist</Text>
             {isActive && (
@@ -1313,7 +1382,7 @@ export default function Plan() {
               );
             })}
           </View>
-        )}
+        ) : null}
 
         {/* Expected outcome */}
         {move.effect && (

@@ -208,8 +208,6 @@ export default function Home() {
   const [reactiveEvents, setReactiveEvents] = useState<ReactiveEvent[]>([]);
   const [showReactiveModal, setShowReactiveModal] = useState(false);
   const [reactiveEventIndex, setReactiveEventIndex] = useState(0);
-  const [nextMoveHint, setNextMoveHint] = useState<string | null>(null);
-
   // ── Plan data (merged from plan page) ──
   const [userPlans, setUserPlans] = useState<any[]>([]);
   const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[] }>>({});
@@ -760,9 +758,6 @@ export default function Home() {
             setTimeout(() => setShowReactiveModal(true), 800);
           }
         }
-        if (result.reactive?.nextMoveHint) {
-          setNextMoveHint(result.reactive.nextMoveHint);
-        }
         // Merge verified steps into local progress state
         if (result.reactive?.verifiedSteps && Object.keys(result.reactive.verifiedSteps).length > 0) {
           setPlanProgress((prev) => {
@@ -1062,9 +1057,6 @@ export default function Home() {
           if (!result.weeklyContext?.incomeArrivedThisWeek) {
             setTimeout(() => setShowReactiveModal(true), 800);
           }
-        }
-        if (result.reactive.nextMoveHint) {
-          setNextMoveHint(result.reactive.nextMoveHint);
         }
         // Merge verified steps into local plan progress so checkboxes + progress bars update
         if (result.reactive.verifiedSteps && Object.keys(result.reactive.verifiedSteps).length > 0) {
@@ -1868,19 +1860,6 @@ export default function Home() {
                     );
                   })}
                 </>
-              )}
-
-              {/* ── Next move hint (subtle one-liner, not a card) ── */}
-              {nextMoveHint && (
-                <TouchableOpacity
-                  onPress={() => router.push({ pathname: '/(main)/(tabs)/plan' })}
-                  activeOpacity={0.7}
-                  style={{ marginBottom: spacing.sm, paddingVertical: 6 }}
-                >
-                  <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green, letterSpacing: 0.2 }}>
-                    {'\u2192'} {nextMoveHint}
-                  </Text>
-                </TouchableOpacity>
               )}
 
               {/* Opportunity moves */}

@@ -14,6 +14,7 @@ import type {
   Archetype,
   DecisionScore,
   Move,
+  MoveSubGoal,
   EnrichmentResult,
   EnrichmentMetrics,
   BudgetCategory,
@@ -1010,6 +1011,12 @@ const EnrichmentEngine = {
         .sort((a, b) => b.averageAmount - a.averageAmount)
         .slice(0, 4);
       const subBreakdown = topSubs.map((s) => `${s.merchant} \u00a3${Math.round(s.averageAmount)}/mo`).join(', ');
+      const subGoals: MoveSubGoal[] = topSubs.map((s) => ({
+        type: 'sub_cancel' as const,
+        target: s.merchant,
+        startValue: Math.round(s.averageAmount),
+        targetValue: 0,
+      }));
       moves.push({
         action: `Cancel or downgrade ${cutCount} subscriptions to free \u00a3${saving}/month`,
         annualImpact: saving * 12,
@@ -1020,6 +1027,7 @@ const EnrichmentEngine = {
         strategy: `${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month total. Biggest: ${subBreakdown}.`,
         steps: ['Review your subscriptions — I\'ve listed them below', 'Cancel the ones you haven\'t used in 30 days', 'Rotate streaming services monthly — I\'ll remind you'],
         effect: `Saves \u00a3${saving}/month (\u00a3${saving * 12}/year).`,
+        subGoals,
       });
     }
 
@@ -1037,6 +1045,12 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.foodDelivery)}/month on food delivery.`,
         steps: ['Batch-cook twice a week', 'Delete saved payment cards from delivery apps', 'I\'ll track your delivery spend weekly'],
         effect: `Frees \u00a3${saving}/month.`,
+        subGoals: [{
+          type: 'spending_reduce',
+          target: 'Delivery',
+          startValue: Math.round(m.foodDelivery),
+          targetValue: Math.round(m.foodDelivery - saving),
+        }],
       });
     }
 
@@ -1055,6 +1069,12 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.eatingOut)}/month on restaurants and caf\u00e9s.`,
         steps: ['Replace one meal out per week with home-cooked', 'Bring coffee from home 2x per week'],
         effect: `Saves \u00a3${saving}/month.`,
+        subGoals: [{
+          type: 'spending_reduce',
+          target: 'Eating Out',
+          startValue: Math.round(m.eatingOut),
+          targetValue: Math.round(m.eatingOut - saving),
+        }],
       });
     }
 
@@ -1072,6 +1092,12 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.shopping)}/month on shopping.`,
         steps: ['Apply 24-hour rule on purchases over \u00a330', 'Remove saved cards from shopping apps', 'Unsubscribe from marketing emails'],
         effect: `Saves \u00a3${saving}/month.`,
+        subGoals: [{
+          type: 'spending_reduce',
+          target: 'Shopping',
+          startValue: Math.round(m.shopping),
+          targetValue: Math.round(m.shopping - saving),
+        }],
       });
     }
 
@@ -1107,6 +1133,15 @@ const EnrichmentEngine = {
         });
       } else {
         const debtSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
+        // Build sub-goals from actual debt accounts, sorted smallest balance first (snowball order)
+        const debtSubGoals: MoveSubGoal[] = [...connectedDebts]
+          .sort((a, b) => (a.outstanding_balance || 0) - (b.outstanding_balance || 0))
+          .map((d) => ({
+            type: 'debt_clear' as const,
+            target: d.account_name || d.institution || 'Debt',
+            startValue: Math.round(d.outstanding_balance || 0),
+            targetValue: 0,
+          }));
         moves.push({
           action: `Attack ${actualDebtCount} debts with snowball method`,
           annualImpact: debtSaving * 12,
@@ -1117,6 +1152,7 @@ const EnrichmentEngine = {
           strategy: `${actualDebtCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}`,
           steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Direct your surplus at the smallest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'],
           effect: `Saves \u00a3${debtSaving * 12}/year in interest.`,
+          subGoals: debtSubGoals.length > 0 ? debtSubGoals : undefined,
         });
       }
     }
@@ -1139,6 +1175,7 @@ const EnrichmentEngine = {
       } else {
         const debtSaving = Math.round(p.debtPayments * T.singleDebtOverpayPct);
         const overpay = Math.round(Math.min(p.surplus * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
+        const singleDebt = connectedDebts[0];
         moves.push({
           action: `Overpay debt by \u00a3${overpay}/month to clear faster`,
           annualImpact: debtSaving * 12,
@@ -1149,6 +1186,12 @@ const EnrichmentEngine = {
           strategy: `1 debt account with \u00a3${Math.round(p.debtPayments)}/month in payments.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''}`,
           steps: ['Check if overpayments are allowed without penalty', 'Set up a monthly overpayment standing order', 'I\'ll redirect savings from other moves into this automatically'],
           effect: `Reduces total interest paid and clears debt sooner.`,
+          subGoals: singleDebt ? [{
+            type: 'debt_clear',
+            target: singleDebt.account_name || singleDebt.institution || 'Debt',
+            startValue: Math.round(singleDebt.outstanding_balance || 0),
+            targetValue: 0,
+          }] : undefined,
         });
       }
     }
@@ -1171,6 +1214,12 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.transport)}/month on transport.${isHybrid ? ' As a hybrid worker, you already commute less — but there may be cheaper options for your pattern.' : ''}`,
         steps,
         effect: `Saves \u00a3${saving}/month.`,
+        subGoals: [{
+          type: 'spending_reduce',
+          target: 'Transport',
+          startValue: Math.round(m.transport),
+          targetValue: Math.round(m.transport - saving),
+        }],
       });
     }
 
@@ -1197,6 +1246,12 @@ const EnrichmentEngine = {
         strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Monthly surplus is \u00a3${Math.round(p.surplus)}.${reason ? ' ' + reason : ''} Target: ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses.`,
         steps: ['Set aside this amount on payday — I\'ll track it', `Target ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses (\u00a3${bufferTarget})`, 'I\'ll update your progress each month'],
         effect: `\u00a3${bufferTarget} safety net in ${monthsToTarget} months.`,
+        subGoals: [{
+          type: 'buffer_build',
+          target: 'Emergency buffer',
+          startValue: 0,
+          targetValue: bufferTarget,
+        }],
       });
     }
 
@@ -1214,6 +1269,12 @@ const EnrichmentEngine = {
         strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Surplus is \u00a3${Math.round(p.surplus)}/month.`,
         steps: ['Put surplus into a savings account on payday', 'Automate the transfer so it\'s hands-free', 'I\'ll flag when it\'s time to review your rate'],
         effect: `\u00a3${interestGain}/year in passive interest.`,
+        subGoals: [{
+          type: 'savings_reach',
+          target: 'Savings',
+          startValue: 0,
+          targetValue: Math.round(p.surplus * 12),
+        }],
       });
     }
 
@@ -1231,6 +1292,12 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.coffeeAndCafes)}/month on coffee and caf\u00e9s.`,
         steps: ['Make coffee at home 3 mornings per week', 'Keep one treat coffee day', 'I\'ll track your weekly café spend'],
         effect: `Saves \u00a3${saving}/month.`,
+        subGoals: [{
+          type: 'spending_reduce',
+          target: 'Coffee & Cafes',
+          startValue: Math.round(m.coffeeAndCafes),
+          targetValue: Math.round(m.coffeeAndCafes - saving),
+        }],
       });
     }
 
@@ -1238,16 +1305,23 @@ const EnrichmentEngine = {
     if (buyingHome && p.surplus > 0) {
       const depositTarget = Math.round(p.income * 12 * 3); // rough 3x annual income
       const monthsToDeposit = p.surplus > 0 ? Math.ceil(depositTarget * 0.1 / p.surplus) : 0;
+      const depositAmount = Math.round(depositTarget * 0.1);
       moves.push({
-        action: `Build a house deposit — save \u00a3${Math.round(p.surplus * 0.6)}/month toward \u00a3${Math.round(depositTarget * 0.1)}`,
+        action: `Build a house deposit — save \u00a3${Math.round(p.surplus * 0.6)}/month toward \u00a3${depositAmount}`,
         annualImpact: Math.round(p.surplus * 0.6 * 12),
         monthlyImpact: Math.round(p.surplus * 0.6),
         effort: 'medium',
         category: 'savings',
         merchants: [],
-        strategy: `You're saving for your first home. A 10% deposit on a typical property for your income would be ~\u00a3${Math.round(depositTarget * 0.1).toLocaleString()}.`,
+        strategy: `You're saving for your first home. A 10% deposit on a typical property for your income would be ~\u00a3${depositAmount.toLocaleString()}.`,
         steps: ['Open a Lifetime ISA for the 25% government bonus (max \u00a34,000/year)', 'Set up automatic monthly transfers on payday', 'I\'ll track your deposit progress and project your timeline'],
         effect: `Deposit ready in ~${monthsToDeposit} months with current surplus.`,
+        subGoals: [{
+          type: 'savings_reach',
+          target: 'House deposit',
+          startValue: 0,
+          targetValue: depositAmount,
+        }],
       });
     }
 
@@ -1263,6 +1337,12 @@ const EnrichmentEngine = {
         strategy: 'With a baby on the way, you\'ll want 3 months of expenses saved to cover reduced income during parental leave.',
         steps: ['Calculate your expected statutory/employer maternity/paternity pay', 'Work out the monthly shortfall vs current spending', 'Set aside the difference now while you can', 'I\'ll model the income change for you'],
         effect: `\u00a3${parentalRunway.toLocaleString()} runway covers 3 months of expenses.`,
+        subGoals: [{
+          type: 'buffer_build',
+          target: 'Parental leave runway',
+          startValue: 0,
+          targetValue: parentalRunway,
+        }],
       });
     }
 
@@ -1278,6 +1358,12 @@ const EnrichmentEngine = {
         strategy: 'A career change means potential income gaps. 6 months of expenses gives you freedom to transition without financial pressure.',
         steps: ['Calculate 6 months of essential expenses', 'Redirect surplus into a dedicated transition fund', 'Consider freelance income during the transition', 'I\'ll track your runway and flag when you\'re ready'],
         effect: `\u00a3${runwayTarget.toLocaleString()} gives you 6 months to transition.`,
+        subGoals: [{
+          type: 'buffer_build',
+          target: 'Career change runway',
+          startValue: 0,
+          targetValue: runwayTarget,
+        }],
       });
     }
 
