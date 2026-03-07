@@ -83,10 +83,14 @@ export default function Home() {
     }).catch(() => {});
   }, [connectionWarning]);
 
-  // When connections are healthy, clear the stored dismiss so future warnings are fresh
+  // When connections are healthy, just reset the in-memory dismissed flag.
+  // Don't clear AsyncStorage — the dismiss fingerprint comparison (above)
+  // already handles showing the banner when the set of affected banks changes.
+  // Clearing on every healthy sync caused the banner to reappear after
+  // transient failures even though the user had already dismissed it.
   useEffect(() => {
     if (connectionWarning === null) {
-      AsyncStorage.removeItem(CONN_DISMISS_KEY).catch(() => {});
+      setConnectionDismissed(false);
     }
   }, [connectionWarning]);
 
@@ -962,36 +966,40 @@ export default function Home() {
       setSyncDataSource(result.dataSource);
       if (result.latestTransactionDate) setLatestTxDate(result.latestTransactionDate);
 
-      // Surface connection issues to the user
-      if (result.connectionIssues?.length > 0) {
+      // Surface connection issues to the user.
+      // Only show reconnect banners for genuine expiry / missing connections.
+      // Transient sync failures (sync_failed) should NOT show a scary
+      // "reconnect" banner — fall through to data freshness checks instead.
+      let nextWarning: typeof connectionWarning = null;
+      const hasRealConnectionIssue = result.connectionIssues?.some(
+        (i: string) => i === 'token_expired' || i === 'no_connection' || i === 'some_connections_expired'
+      );
+
+      if (hasRealConnectionIssue) {
         const banks = result.expiredBankNames ?? [];
         if (result.connectionIssues.includes('token_expired') || result.connectionIssues.includes('no_connection')) {
-          setConnectionWarning({ message: 'all_expired', banks });
+          nextWarning = { message: 'all_expired', banks };
         } else if (result.connectionIssues.includes('some_connections_expired')) {
-          setConnectionWarning({ message: 'some_expired', banks });
-        } else if (result.connectionIssues.includes('sync_failed')) {
-          setConnectionWarning({ message: 'sync_failed', banks: [] });
+          nextWarning = { message: 'some_expired', banks };
         }
       } else if (result.dataSource === 'fallback') {
-        // Check how stale the fallback data is
+        // Sync failed transiently or used cached data — check freshness
         const txAge = result.latestTransactionDate
           ? Math.floor((Date.now() - new Date(result.latestTransactionDate).getTime()) / (1000 * 60 * 60 * 24))
           : 999;
         if (txAge >= 2) {
-          setConnectionWarning({ message: 'stale_data', banks: [] });
-        } else {
-          setConnectionWarning({ message: 'fallback', banks: [] });
+          nextWarning = { message: 'stale_data', banks: [] };
         }
+        // If fallback data is <2 days old, no warning needed — data is fresh enough
       } else if (result.expiringConnections?.length > 0) {
         // Proactive warning: connections approaching 90-day consent expiry
         const expiringBanks = result.expiringConnections.map(
           (c: { name: string; daysLeft: number }) => `${c.name} (${c.daysLeft}d left)`
         );
-        setConnectionWarning({ message: 'expiring', banks: expiringBanks });
-      } else {
-        // All connections synced OK — clear warning
-        setConnectionWarning(null);
+        nextWarning = { message: 'expiring', banks: expiringBanks };
       }
+
+      setConnectionWarning(nextWarning);
 
       // Warn if data is stale (latest transaction > 2 days old)
       if (result.latestTransactionDate) {
@@ -1460,8 +1468,6 @@ export default function Home() {
                 ? connectionWarning.banks.map((bank, idx) => (
                     <Text key={idx} style={s.connectionBannerText}>Reconnect {bank}</Text>
                   ))
-                : connectionWarning.message === 'sync_failed'
-                ? <Text style={s.connectionBannerText}>Bank sync failed — try again later</Text>
                 : <Text style={s.connectionBannerText}>Bank connection needs attention</Text>}
             </View>
             <Text style={s.connectionBannerAction}>Fix</Text>

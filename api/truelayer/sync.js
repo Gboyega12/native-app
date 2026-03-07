@@ -40,21 +40,31 @@ async function syncConnection(bankRow, clientId, clientSecret) {
 
     const headers = { Authorization: `Bearer ${tokenData.access_token}` };
 
-    const [accountsRes, cardsRes] = await Promise.all([
-      fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
-      fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
-    ]);
+    // Fetch accounts and cards with a single retry — some banks need a
+    // moment after token refresh before data endpoints respond.
+    let accountsRes, cardsRes, accountsJson, cardsJson;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      [accountsRes, cardsRes] = await Promise.all([
+        fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
+        fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
+      ]);
 
-    const accountsJson = await accountsRes.json();
-    const cardsJson = await cardsRes.json();
+      accountsJson = await accountsRes.json();
+      cardsJson = await cardsRes.json();
 
-    // Guard: if TrueLayer returned an error (403, 429, etc.), the response
-    // has no .results — bail out rather than proceeding with empty arrays
-    // which would overwrite valid CSV data with an empty CSV.
+      if (accountsRes.ok && cardsRes.ok) break;
+
+      if (attempt === 0) {
+        console.warn(`[sync] TrueLayer data endpoints failed (attempt 1) — accounts: ${accountsRes.status}, cards: ${cardsRes.status}. Retrying in 2s...`);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+
+    // Guard: if TrueLayer still returned errors after retry, bail out.
     // IMPORTANT: preserve the new refresh token so the caller can persist it —
     // returning null here would lose the rotated token permanently.
     if (!accountsRes.ok || !cardsRes.ok) {
-      console.warn(`[sync] TrueLayer data endpoints returned errors — accounts: ${accountsRes.status}, cards: ${cardsRes.status}`, {
+      console.warn(`[sync] TrueLayer data endpoints returned errors after retry — accounts: ${accountsRes.status}, cards: ${cardsRes.status}`, {
         accountsError: accountsJson.error || null,
         cardsError: cardsJson.error || null,
       });

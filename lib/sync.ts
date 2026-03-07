@@ -193,9 +193,12 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         }
       }
     } else if (data.reason === 'sync_failed') {
-      // Transient failure — track it so we can surface persistent failures.
-      console.warn('[sync] All connections failed (transient, within 90-day window)');
-      connectionIssues.push('sync_failed');
+      // Transient failure — DON'T push to connectionIssues here.
+      // The fallback path below will load cached CSV, and the caller
+      // will see dataSource='fallback' which triggers appropriate
+      // freshness checks (stale_data vs fallback) instead of a scary
+      // "reconnect your bank" banner for a transient TrueLayer outage.
+      console.warn('[sync] All connections failed (transient, within 90-day window) — will use fallback data');
     } else if (data.reason === 'no_connection') {
       connectionIssues.push('no_connection');
     }
