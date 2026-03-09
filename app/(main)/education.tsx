@@ -1,16 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Animated,
-  Platform, UIManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyFace } from '@/components/Bocy';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 const SLIDES = [
   {
@@ -47,7 +42,7 @@ export default function Education() {
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   // Track page view on mount
-  useState(() => { trackScreen('Education'); });
+  useEffect(() => { trackScreen('Education'); }, []);
 
   const slide = SLIDES[current];
   const isLast = current === SLIDES.length - 1;

@@ -171,7 +171,9 @@ function ProcessingInner() {
           if (overrideRes.data) overrides = overrideRes.data;
           if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[processing] Failed to load overrides:', e);
+      }
 
       // Fetch identity + debt accounts for personalised analysis
       let identityData: any = null;
@@ -186,7 +188,9 @@ function ProcessingInner() {
           if (idRes.data) identityData = idRes.data;
           if (debtRes.data) debtAccountsData = debtRes.data;
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[processing] Failed to load identity/debt data:', e);
+      }
 
       setCurrentStep(1);
       let result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);

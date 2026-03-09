@@ -1,14 +1,11 @@
 /**
  * useVoiceConversation — full speech-to-speech loop
  *
- * Record (expo-av / MediaRecorder) → /api/stt → text
+ * Record (MediaRecorder) → /api/stt → text
  * Text → sendMessage() (existing chat pipeline)
  * Response text → /api/tts → audio playback
- *
- * Supports: iOS, Android, and Web.
  */
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 
 // ── Types ──
@@ -60,61 +57,6 @@ interface Recorder {
   stop: () => Promise<{ base64: string; mimeType: string }>;
   getAmplitude: () => Promise<number>;
   cleanup: () => void;
-}
-
-async function createNativeRecorder(): Promise<Recorder> {
-  const { Audio } = await import('expo-av');
-
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: true,
-    playsInSilentModeIOS: true,
-  });
-
-  const { recording } = await Audio.Recording.createAsync({
-    ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
-    isMeteringEnabled: true,
-  });
-
-  return {
-    start: async () => {
-      // Recording already started via createAsync
-    },
-    stop: async () => {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      if (!uri) throw new Error('No recording URI');
-
-      // Read file as base64 via fetch (avoids expo-file-system API differences)
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const dataUrl = reader.result as string;
-          // Strip the data:...;base64, prefix
-          const b64 = dataUrl.split(',')[1] || '';
-          resolve(b64);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-
-      return { base64, mimeType: 'audio/m4a' };
-    },
-    getAmplitude: async () => {
-      try {
-        const status = await recording.getStatusAsync();
-        // metering returns dB, normalise to 0-1
-        const db = (status as any).metering ?? -160;
-        return Math.max(0, Math.min(1, (db + 60) / 60));
-      } catch {
-        return 0;
-      }
-    },
-    cleanup: () => {
-      recording.stopAndUnloadAsync().catch(() => {});
-    },
-  };
 }
 
 function createWebRecorder(): Recorder {
@@ -184,57 +126,30 @@ function createWebRecorder(): Recorder {
 
 function createAudioPlayer() {
   let currentAudio: HTMLAudioElement | null = null;
-  let nativeSound: any = null;
 
   return {
     play: async (audioBase64: string, mimeType: string, onEnd?: () => void) => {
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        // Web: use Audio element
-        const blob = new Blob(
-          [Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))],
-          { type: mimeType }
-        );
-        const url = URL.createObjectURL(blob);
-        currentAudio = new Audio(url);
-        currentAudio.onended = () => {
-          URL.revokeObjectURL(url);
-          onEnd?.();
-        };
-        currentAudio.onerror = () => {
-          URL.revokeObjectURL(url);
+      const blob = new Blob(
+        [Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0))],
+        { type: mimeType }
+      );
+      const url = URL.createObjectURL(blob);
+      currentAudio = new Audio(url);
+      currentAudio.onended = () => {
+        URL.revokeObjectURL(url);
+        onEnd?.();
+      };
+      currentAudio.onerror = () => {
+        URL.revokeObjectURL(url);
           onEnd?.();
         };
         await currentAudio.play();
-      } else {
-        // Native: use expo-av
-        const { Audio } = await import('expo-av');
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
-        });
-        const { sound } = await Audio.Sound.createAsync(
-          { uri: `data:${mimeType};base64,${audioBase64}` },
-          { shouldPlay: true }
-        );
-        nativeSound = sound;
-        sound.setOnPlaybackStatusUpdate((status: any) => {
-          if (status.didJustFinish) {
-            sound.unloadAsync().catch(() => {});
-            onEnd?.();
-          }
-        });
-      }
     },
     stop: () => {
       if (currentAudio) {
         currentAudio.pause();
         currentAudio.src = '';
         currentAudio = null;
-      }
-      if (nativeSound) {
-        nativeSound.stopAsync().catch(() => {});
-        nativeSound.unloadAsync().catch(() => {});
-        nativeSound = null;
       }
     },
   };
@@ -272,9 +187,8 @@ export function useVoiceConversation({
   const SILENCE_TIMEOUT = 1500;
   const MIN_RECORD_DURATION = 600;
 
-  // Check platform support
-  const isSupported = Platform.OS === 'ios' || Platform.OS === 'android' ||
-    (Platform.OS === 'web' && typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia);
+  // Check browser support for microphone
+  const isSupported = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -383,10 +297,7 @@ export function useVoiceConversation({
       stoppingRef.current = false;
       recordStartRef.current = Date.now();
 
-      // Create platform-appropriate recorder
-      const recorder = Platform.OS === 'web'
-        ? createWebRecorder()
-        : await createNativeRecorder();
+      const recorder = createWebRecorder();
 
       recorderRef.current = recorder;
       await recorder.start();

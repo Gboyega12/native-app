@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
-  LayoutAnimation, Animated, Easing, Switch, Platform, ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking,
+  LayoutAnimation, Animated, Easing, Switch, ActivityIndicator,
   Modal, Pressable, TextInput,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -11,7 +11,6 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
-import { restorePurchases } from '@/lib/revenuecat';
 import { useWebPush } from '@/lib/web-push';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 
@@ -81,7 +80,6 @@ export default function Profile() {
   const s = useMemo(() => createStyles(colors), [colors]);
   const [showPaywall, setShowPaywall] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
-  const [restoringPurchases, setRestoringPurchases] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
@@ -182,18 +180,7 @@ export default function Profile() {
 
   const handleRemoveBank = async (bankId: string, label: string) => {
     trackEvent('Bank Removed');
-    const confirmed = Platform.OS === 'web'
-      ? window.confirm(`Remove ${label}?\n\nThis will disconnect this account and remove its data. You can reconnect later.`)
-      : await new Promise<boolean>((resolve) =>
-          Alert.alert(
-            `Remove ${label}?`,
-            'This will disconnect this account and remove its data. You can reconnect later.',
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
-            ],
-          ),
-        );
+    const confirmed = window.confirm(`Remove ${label}?\n\nThis will disconnect this account and remove its data. You can reconnect later.`);
     if (!confirmed) return;
     try {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -209,18 +196,7 @@ export default function Profile() {
 
   const handleRemoveDebtAccount = async (debtId: string, label: string) => {
     trackEvent('Debt Account Removed');
-    const confirmed = Platform.OS === 'web'
-      ? window.confirm(`Remove ${label}?\n\nThis will remove this account from your profile.`)
-      : await new Promise<boolean>((resolve) =>
-          Alert.alert(
-            `Remove ${label}?`,
-            'This will remove this account from your profile.',
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
-            ],
-          ),
-        );
+    const confirmed = window.confirm(`Remove ${label}?\n\nThis will remove this account from your profile.`);
     if (!confirmed) return;
     try {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -328,30 +304,13 @@ export default function Profile() {
         },
       });
       const data = await res.json();
-      if (data.url && Platform.OS === 'web') {
+      if (data.url) {
         window.location.href = data.url;
       }
     } catch (err) {
       console.warn('[Profile] Portal error:', err);
     }
     setPortalLoading(false);
-  };
-
-  const handleRestorePurchases = async () => {
-    trackEvent('Restore Purchases Tapped');
-    setRestoringPurchases(true);
-    try {
-      const restored = await restorePurchases();
-      if (restored) {
-        await refreshTier();
-        Alert.alert('Restored', 'Your Pro subscription has been restored.');
-      } else {
-        Alert.alert('No subscription found', 'We couldn\u2019t find an active subscription linked to this account.');
-      }
-    } catch {
-      Alert.alert('Error', 'Could not restore purchases. Please try again.');
-    }
-    setRestoringPurchases(false);
   };
 
   const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
@@ -388,24 +347,12 @@ export default function Profile() {
   };
 
   const handleDeleteAccount = async () => {
-    const confirmed = Platform.OS === 'web'
-      ? window.confirm('Delete account?\n\nThis will permanently delete your account and all associated data. This action cannot be undone.')
-      : await new Promise<boolean>((resolve) =>
-          Alert.alert(
-            'Delete account',
-            'This will permanently delete your account and all associated data. This action cannot be undone.',
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
-            ],
-          ),
-        );
+    const confirmed = window.confirm('Delete account?\n\nThis will permanently delete your account and all associated data. This action cannot be undone.');
     if (!confirmed) return;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        if (Platform.OS === 'web') window.alert('You are not signed in.');
-        else Alert.alert('Error', 'You are not signed in.');
+        window.alert('You are not signed in.');
         return;
       }
       const res = await fetch('/api/delete-account', {
@@ -420,14 +367,10 @@ export default function Profile() {
         await supabase.auth.signOut();
         router.replace('/(auth)/sign-in');
       } else {
-        const msg = data.error || 'Could not delete account. Please try again.';
-        if (Platform.OS === 'web') window.alert(msg);
-        else Alert.alert('Error', msg);
+        window.alert(data.error || 'Could not delete account. Please try again.');
       }
     } catch (err: any) {
-      const msg = err.message || 'Something went wrong. Please try again.';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Error', msg);
+      window.alert(err.message || 'Something went wrong. Please try again.');
     }
   };
 
@@ -741,25 +684,9 @@ export default function Profile() {
 
       {/* ── Subscription management ── */}
       {!isSubscribed && (
-        <>
-          <TouchableOpacity style={s.upgradeBtn} onPress={() => { trackEvent('Upgrade Tapped'); setShowPaywall(true); }} activeOpacity={0.8}>
-            <Text style={s.upgradeBtnText}>{isTrial ? 'Subscribe now' : 'Subscribe'}</Text>
-          </TouchableOpacity>
-          {(Platform.OS === 'ios' || Platform.OS === 'android') && (
-            <TouchableOpacity
-              style={s.restorePurchasesBtn}
-              onPress={handleRestorePurchases}
-              disabled={restoringPurchases}
-              activeOpacity={0.7}
-            >
-              {restoringPurchases ? (
-                <ActivityIndicator size="small" color={colors.dim} />
-              ) : (
-                <Text style={s.restorePurchasesBtnText}>Restore purchases</Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </>
+        <TouchableOpacity style={s.upgradeBtn} onPress={() => { trackEvent('Upgrade Tapped'); setShowPaywall(true); }} activeOpacity={0.8}>
+          <Text style={s.upgradeBtnText}>{isTrial ? 'Subscribe now' : 'Subscribe'}</Text>
+        </TouchableOpacity>
       )}
       {isSubscribed && (
         <TouchableOpacity style={s.manageSubBtn} onPress={handleManageSubscription} disabled={portalLoading} activeOpacity={0.7}>
@@ -924,10 +851,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center', marginBottom: 24,
   },
   upgradeBtnText: { fontFamily: fonts.semibold, fontSize: 15, color: c.bg },
-  restorePurchasesBtn: {
-    alignItems: 'center', paddingVertical: 10, marginTop: -16, marginBottom: 24,
-  },
-  restorePurchasesBtnText: { fontFamily: fonts.regular, fontSize: 13, color: c.dim, textDecorationLine: 'underline' as const },
   manageSubBtn: {
     borderWidth: 1, borderColor: c.border, borderRadius: 100,
     paddingVertical: 12, alignItems: 'center', marginBottom: 24,

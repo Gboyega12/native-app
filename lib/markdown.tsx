@@ -1,5 +1,5 @@
 import React, { useMemo, useState, createContext, useContext } from 'react';
-import { Text, View, Image, StyleSheet, Platform } from 'react-native';
+import { Text, View, StyleSheet } from 'react-native';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 
@@ -44,28 +44,18 @@ function GifImage({ uri, style }: { uri: string; style: any }) {
 
   if (failed) return null;
 
-  if (Platform.OS === 'web') {
-    return React.createElement('img', {
-      src: uri,
-      alt: '',
-      onError: () => setFailed(true),
-      style: {
-        width: '100%',
-        aspectRatio: '4 / 3',
-        borderRadius: style.borderRadius ?? 0,
-        objectFit: 'cover',
-        display: 'block',
-      },
-    });
-  }
-  return (
-    <Image
-      source={{ uri }}
-      style={style}
-      resizeMode="cover"
-      onError={() => setFailed(true)}
-    />
-  );
+  return React.createElement('img', {
+    src: uri,
+    alt: '',
+    onError: () => setFailed(true),
+    style: {
+      width: '100%',
+      aspectRatio: '4 / 3',
+      borderRadius: style.borderRadius ?? 0,
+      objectFit: 'cover',
+      display: 'block',
+    },
+  });
 }
 
 function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {

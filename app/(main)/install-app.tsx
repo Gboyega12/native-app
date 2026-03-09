@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Animated, Platform,
+  View, Text, TouchableOpacity, StyleSheet, Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
@@ -15,7 +15,7 @@ import { BocyFace } from '@/components/Bocy';
 // Cache the beforeinstallprompt event globally so it survives re-renders
 let deferredPrompt: any = null;
 
-if (Platform.OS === 'web' && typeof window !== 'undefined') {
+if (typeof window !== 'undefined') {
   window.addEventListener('beforeinstallprompt', (e: Event) => {
     e.preventDefault();
     deferredPrompt = e;
@@ -24,14 +24,14 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
 
 /** Detect iOS Safari for manual A2HS instructions. */
 function isIOSSafari(): boolean {
-  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
+  if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;
   return /iP(hone|od|ad)/.test(ua) && /WebKit/.test(ua) && !/CriOS|FxiOS/.test(ua);
 }
 
 /** Check if already running as installed PWA. */
 function isStandalone(): boolean {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') return false;
   return (
     (window.matchMedia?.('(display-mode: standalone)')?.matches) ||
     (window.navigator as any)?.standalone === true
@@ -49,7 +49,7 @@ export default function InstallApp() {
 
   // On native or already-installed PWA, skip straight to connect
   useEffect(() => {
-    if (Platform.OS !== 'web' || alreadyInstalled) {
+    if (alreadyInstalled) {
       router.replace('/(main)/connect');
       return;
     }
@@ -59,7 +59,7 @@ export default function InstallApp() {
 
   // Listen for late-arriving beforeinstallprompt
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
+    if (typeof window === 'undefined') return;
     const handler = (e: Event) => {
       e.preventDefault();
       deferredPrompt = e;

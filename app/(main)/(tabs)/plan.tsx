@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  Linking, Alert, LayoutAnimation, Platform, UIManager, Modal, Pressable,
+  Linking, LayoutAnimation, Modal, Pressable,
   RefreshControl,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
@@ -13,10 +13,6 @@ import Card, { AnimGlyph, SMOOTH_ANIM } from '@/components/Card';
 import { useResponsive } from '@/lib/responsive';
 import type { Analysis, Move, MoveSubGoal, GoalTrajectory, IncomeSource } from '@/lib/types';
 import type { ReactiveResult } from '@/lib/reactive-engine';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 /** Strip markdown bold/italic markers */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -281,17 +277,10 @@ function isSubscriptionMove(move: Move): boolean {
   return action.includes('subscript') || action.includes('cancel');
 }
 
-/** Confirm and execute a destructive action — works on web + native */
+/** Confirm and execute a destructive action */
 function confirmAction(title: string, message: string, onConfirm: () => void) {
-  if (Platform.OS === 'web') {
-    const ok = window.confirm(`${title}\n\n${message}`);
-    if (ok) onConfirm();
-  } else {
-    Alert.alert(title, message, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: onConfirm },
-    ]);
-  }
+  const ok = window.confirm(`${title}\n\n${message}`);
+  if (ok) onConfirm();
 }
 
 

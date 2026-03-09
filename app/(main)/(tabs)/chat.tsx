@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
+  KeyboardAvoidingView, Animated, Easing, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -74,7 +74,7 @@ function splitIntoBubbles(text: string): string[] {
  * Returns a cancel function. Only works on web.
  */
 function speakText(text: string, onEnd?: () => void, authToken?: string | null): (() => void) {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') {
+  if (typeof window === 'undefined') {
     onEnd?.();
     return () => {};
   }
@@ -929,7 +929,7 @@ export default function Chat() {
   speakResponseRef.current = speakResponse;
 
   // ── TTS support check (ElevenLabs uses Audio API; Web Speech API is fallback) ──
-  const ttsSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
+  const ttsSupported = typeof window !== 'undefined' &&
     (typeof Audio !== 'undefined' || !!window.speechSynthesis);
 
   const handleSpeak = async (msgIndex: number, text: string) => {
@@ -965,7 +965,7 @@ export default function Chat() {
 
   // ── Voice input — uses full speech-to-speech hook (cross-platform) ──
   // Falls back to Web Speech API on browsers where expo-av isn't available.
-  const webSpeechAvailable = Platform.OS === 'web' && typeof window !== 'undefined' &&
+  const webSpeechAvailable = typeof window !== 'undefined' &&
     (!!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition);
   const voiceSupported = voiceConversationSupported || webSpeechAvailable;
 
@@ -983,8 +983,6 @@ export default function Chat() {
       setListening(false);
       return;
     }
-
-    if (Platform.OS !== 'web') return;
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
@@ -1497,13 +1495,13 @@ export default function Chat() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          Alert.alert('Not signed in', 'Please sign in to save plans.');
+          window.alert('Please sign in to save plans.');
           return;
         }
         uid = user.id;
         setUserId(uid);
       } catch {
-        Alert.alert('Error', 'Could not verify sign-in. Please try again.');
+        window.alert('Could not verify sign-in. Please try again.');
         return;
       }
     }
@@ -1536,7 +1534,7 @@ export default function Chat() {
           }, { onConflict: 'id' });
 
           if (insertErr) {
-            Alert.alert('Could not save plan', insertErr.message);
+            window.alert(`Could not save plan: ${insertErr.message}`);
             setSavingPlan(null);
             return;
           }
@@ -1553,7 +1551,7 @@ export default function Chat() {
         });
 
         if (insertErr) {
-          Alert.alert('Could not save plan', insertErr.message);
+          window.alert(`Could not save plan: ${insertErr.message}`);
           setSavingPlan(null);
           return;
         }
@@ -1567,7 +1565,7 @@ export default function Chat() {
       setMessages(updated);
       persistMessages(updated);
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Something went wrong.');
+      window.alert(err?.message || 'Something went wrong.');
     }
 
     setSavingPlan(null);
@@ -1659,19 +1657,8 @@ export default function Chat() {
       persistMessages(updated);
     };
 
-    if (Platform.OS === 'web') {
-      const ok = window.confirm('Remove this plan?\n\nIt will be removed from your active plans.');
-      if (ok) doDelete();
-    } else {
-      Alert.alert(
-        'Remove plan?',
-        'It will be removed from your active plans.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: doDelete },
-        ],
-      );
-    }
+    const ok = window.confirm('Remove this plan?\n\nIt will be removed from your active plans.');
+    if (ok) doDelete();
   };
 
   // ── Handle budget item deletion ──
@@ -1720,19 +1707,8 @@ export default function Chat() {
       persistMessages(updated);
     };
 
-    if (Platform.OS === 'web') {
-      const ok = window.confirm('Remove this budget item?\n\nIt will be removed from your budget.');
-      if (ok) doDelete();
-    } else {
-      Alert.alert(
-        'Remove budget item?',
-        'It will be removed from your budget.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: doDelete },
-        ],
-      );
-    }
+    const ok = window.confirm('Remove this budget item?\n\nIt will be removed from your budget.');
+    if (ok) doDelete();
   };
 
   // ── Handle goal update acceptance ──
@@ -1748,13 +1724,13 @@ export default function Chat() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          Alert.alert('Not signed in', 'Please sign in to update goals.');
+          window.alert('Please sign in to update goals.');
           return;
         }
         uid = user.id;
         setUserId(uid);
       } catch {
-        Alert.alert('Error', 'Could not verify sign-in. Please try again.');
+        window.alert('Could not verify sign-in. Please try again.');
         return;
       }
     }
@@ -1777,7 +1753,7 @@ export default function Chat() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        Alert.alert('Could not update goals', data.error || 'Unknown error');
+        window.alert(data.error || 'Could not update goals.');
         setSavingPlan(null);
         return;
       }
@@ -1797,7 +1773,7 @@ export default function Chat() {
       setMessages(updated);
       persistMessages(updated);
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Something went wrong.');
+      window.alert(err?.message || 'Something went wrong.');
     }
 
     setSavingPlan(null);
@@ -2057,7 +2033,7 @@ export default function Chat() {
   return (
     <KeyboardAvoidingView
       style={s.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={undefined}
       keyboardVerticalOffset={90}
     >
       {/* ── Header (always visible to prevent layout shift) ── */}

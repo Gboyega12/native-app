@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform,
+  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
   Linking,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import * as DocumentPicker from 'expo-document-picker';
 import { getTrueLayerAuthUrl } from '@/lib/truelayer';
 import { supabase } from '@/lib/supabase';
@@ -13,7 +12,7 @@ import { colors, fonts, spacing, radius } from '@/theme';
 
 // ── Session storage helpers (web only) ──
 function saveConnectState(csv: string, count: number) {
-  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+  if (typeof sessionStorage !== 'undefined') {
     try {
       sessionStorage.setItem('bocy_connect_csv', csv);
       sessionStorage.setItem('bocy_connect_count', String(count));
@@ -22,7 +21,7 @@ function saveConnectState(csv: string, count: number) {
 }
 
 function restoreConnectState(): { csv: string; count: number } | null {
-  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+  if (typeof sessionStorage !== 'undefined') {
     try {
       const csv = sessionStorage.getItem('bocy_connect_csv');
       const count = sessionStorage.getItem('bocy_connect_count');
@@ -35,7 +34,7 @@ function restoreConnectState(): { csv: string; count: number } | null {
 }
 
 function clearConnectState() {
-  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+  if (typeof sessionStorage !== 'undefined') {
     try {
       sessionStorage.removeItem('bocy_connect_csv');
       sessionStorage.removeItem('bocy_connect_count');
@@ -67,7 +66,7 @@ export default function Connect() {
   const isFromProfile = params.from === 'profile';
 
   // Track page view on mount
-  useState(() => { trackScreen('Connect', { from: isFromProfile ? 'profile' : 'onboarding' }); });
+  useEffect(() => { trackScreen('Connect', { from: isFromProfile ? 'profile' : 'onboarding' }); }, []);
 
   // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
@@ -246,35 +245,7 @@ export default function Connect() {
       const connectionId = `conn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       const authUrl = getTrueLayerAuthUrl(connectionId);
 
-      if (Platform.OS === 'web') {
-        window.location.href = authUrl;
-        return;
-      }
-
-      const returnUrl = 'bocy://callback';
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, returnUrl);
-
-      if (result.type === 'success' && result.url) {
-        const url = new URL(result.url);
-        const connId = url.searchParams.get('connection_id');
-        const status = url.searchParams.get('status');
-        if (status === 'success' && connId) {
-          await fetchBankData(connId);
-          return;
-        }
-        const code = url.searchParams.get('code');
-        const state = url.searchParams.get('state');
-        if (code && state) {
-          await exchangeTrueLayerCode(code, state);
-          return;
-        }
-      }
-
-      setLoading(false);
-      setStatusMsg('');
-      if (result.type !== 'cancel') {
-        setErrorMsg('Could not connect to your bank. Please try again.');
-      }
+      window.location.href = authUrl;
     } catch (err: any) {
       setLoading(false);
       setStatusMsg('');
@@ -287,9 +258,7 @@ export default function Connect() {
     setLoadingCSV(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: Platform.OS === 'web'
-          ? ['text/csv', 'text/plain', '.csv']
-          : ['text/csv', 'text/comma-separated-values', 'application/csv'],
+        type: ['text/csv', 'text/plain', '.csv'],
         copyToCacheDirectory: true,
       });
 
@@ -300,7 +269,7 @@ export default function Connect() {
 
       const file = result.assets[0];
       let csvText: string;
-      const webFile = Platform.OS === 'web' && (file as any).file;
+      const webFile = (file as any).file;
       if (webFile) {
         csvText = await webFile.text();
       } else {
@@ -309,7 +278,7 @@ export default function Connect() {
       }
 
       if (!csvText.trim() || csvText.trim().split('\n').length < 2) {
-        Alert.alert('Invalid file', 'The CSV file appears to be empty or malformed.');
+        window.alert('The CSV file appears to be empty or malformed.');
         setLoadingCSV(false);
         return;
       }
@@ -324,7 +293,7 @@ export default function Connect() {
       handleConnectionSuccess(csvText, 'CSV statement');
     } catch (err) {
       setLoadingCSV(false);
-      Alert.alert('Error', 'Could not read the file. Please check the format and try again.');
+      window.alert('Could not read the file. Please check the format and try again.');
     }
   };
 
@@ -333,9 +302,7 @@ export default function Connect() {
     setLoadingPDF(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: Platform.OS === 'web'
-          ? ['application/pdf', '.pdf']
-          : ['application/pdf'],
+        type: ['application/pdf', '.pdf'],
         copyToCacheDirectory: true,
       });
 
@@ -347,7 +314,7 @@ export default function Connect() {
       const file = result.assets[0];
       const base64 = await fileToBase64(file);
       if (!base64) {
-        Alert.alert('Error', 'Could not read the PDF file.');
+        window.alert('Could not read the PDF file.');
         setLoadingPDF(false);
         return;
       }
@@ -360,7 +327,7 @@ export default function Connect() {
       const data = await res.json();
 
       if (!data.success || !data.csv_data) {
-        Alert.alert('Could not parse statement', data.error || 'Please try a CSV export instead.');
+        window.alert(data.error || 'Could not parse statement. Please try a CSV export instead.');
         setLoadingPDF(false);
         return;
       }
@@ -375,7 +342,7 @@ export default function Connect() {
       handleConnectionSuccess(data.csv_data, 'PDF statement');
     } catch (err) {
       setLoadingPDF(false);
-      Alert.alert('Error', 'Could not process the PDF. Please try a CSV export instead.');
+      window.alert('Could not process the PDF. Please try a CSV export instead.');
     }
   };
 
@@ -556,12 +523,10 @@ async function fileToBase64(
   file: DocumentPicker.DocumentPickerAsset,
 ): Promise<string | null> {
   try {
-    if (Platform.OS === 'web') {
-      const webFile = (file as any).file as File | undefined;
-      if (webFile) {
-        const buffer = await webFile.arrayBuffer();
-        return arrayBufferToBase64(buffer);
-      }
+    const webFile = (file as any).file as File | undefined;
+    if (webFile) {
+      const buffer = await webFile.arrayBuffer();
+      return arrayBufferToBase64(buffer);
     }
     const response = await fetch(file.uri);
     const blob = await response.blob();

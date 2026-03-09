@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView,
-  Platform, ScrollView, ActivityIndicator,
+  ScrollView, ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -19,7 +19,7 @@ export default function SignUp() {
   const [resending, setResending] = useState(false);
 
   // Track page view on mount
-  useState(() => { trackScreen('Sign Up'); });
+  useEffect(() => { trackScreen('Sign Up'); }, []);
 
   const handleSignUp = async () => {
     if (!email.trim() || !password.trim()) {
@@ -55,9 +55,7 @@ export default function SignUp() {
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: Platform.OS === 'web'
-          ? window.location.origin
-          : 'https://app.bocy.io/',
+        redirectTo: window.location.origin,
       },
     });
     if (oauthError) {
@@ -111,7 +109,7 @@ export default function SignUp() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={undefined}
     >
       <ScrollView
         contentContainerStyle={styles.scroll}

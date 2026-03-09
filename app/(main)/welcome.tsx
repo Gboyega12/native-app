@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView,
-  Platform, ScrollView, ActivityIndicator, Alert,
+  ScrollView, ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -17,7 +17,7 @@ export default function Welcome() {
   const [loading, setLoading] = useState(false);
 
   // Track page view on mount
-  useState(() => { trackScreen('Welcome'); });
+  useEffect(() => { trackScreen('Welcome'); }, []);
 
   const handleContinue = async () => {
     if (!firstName.trim()) return;
@@ -30,7 +30,7 @@ export default function Welcome() {
       router.replace('/(main)/education');
     } catch {
       setLoading(false);
-      Alert.alert('Error', 'Could not save your name. Please try again.');
+      window.alert('Could not save your name. Please try again.');
     }
   };
 
@@ -72,7 +72,7 @@ export default function Welcome() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={undefined}
     >
       <ScrollView
         contentContainerStyle={styles.centerContent}

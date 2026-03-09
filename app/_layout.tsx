@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { View } from 'react-native';
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -7,9 +7,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
-import { registerPushToken, configureNotificationChannels } from '@/lib/notifications';
 import { registerServiceWorker } from '@/lib/register-sw';
-import { initRevenueCat } from '@/lib/revenuecat';
 import { initMixpanel, resetMixpanel } from '@/lib/mixpanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
@@ -22,10 +20,7 @@ SplashScreen.preventAutoHideAsync().catch(() => {});
 let _pendingOAuth: { code: string; state: string } | null = null;
 let _pendingBankCallback = false;
 let _emailConfirmed = false;
-// Guard with Platform.OS — not just `typeof window !== 'undefined'` — because
-// React Native (Hermes) defines `window` as globalThis but does NOT provide
-// window.location, so the old check caused a fatal TypeError on iOS launch.
-if (Platform.OS === 'web' && typeof window !== 'undefined') {
+if (typeof window !== 'undefined') {
   const p = new URLSearchParams(window.location.search);
   const code = p.get('code');
   const state = p.get('state');
@@ -65,19 +60,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return () => subscription?.unsubscribe();
   }, []);
 
-  // Register push token + init RevenueCat once session is available
+  // Register service worker + init analytics once session is available
   useEffect(() => {
     if (session?.user?.id) {
-      try { configureNotificationChannels(); } catch (e) {
-        console.warn('[Layout] configureNotificationChannels error:', e);
-      }
-      registerPushToken(session.user.id).catch((e) =>
-        console.warn('[Layout] registerPushToken error:', e),
-      );
       registerServiceWorker();
-      initRevenueCat(session.user.id).catch((e) =>
-        console.warn('[Layout] initRevenueCat error:', e),
-      );
       initMixpanel(session.user.id, session.user.email).catch((e) =>
         console.warn('[Layout] initMixpanel error:', e),
       );
@@ -92,7 +78,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     // onboarding in the wrong browser. Show confirmation on sign-in instead.
     if (session && _emailConfirmed) {
       _emailConfirmed = false;
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (typeof window !== 'undefined') {
         sessionStorage.setItem('_emailConfirmed', '1');
       }
       supabase.auth.signOut().catch(() => {});

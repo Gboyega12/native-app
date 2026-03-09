@@ -1,6 +1,6 @@
 // ── Web Push Subscription ──
 // Client-side hook for subscribing to web push notifications via the
-// Push API. Only active on web — returns no-ops on native platforms.
+// Push API.
 //
 // Flow:
 //   1. Register service worker
@@ -10,7 +10,6 @@
 //   5. Store subscription state in Supabase notification_preferences
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 
 const VAPID_PUBLIC_KEY = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY || '';
@@ -56,7 +55,6 @@ export function useWebPush(userId?: string): WebPushState {
   const swReg = useRef<ServiceWorkerRegistration | null>(null);
 
   const supported =
-    Platform.OS === 'web' &&
     typeof window !== 'undefined' &&
     'serviceWorker' in navigator &&
     'PushManager' in window &&

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -44,7 +44,7 @@ export default function Goals() {
   const [loading, setLoading] = useState(false);
 
   // Track page view on mount
-  useState(() => { trackScreen('Goals'); });
+  useEffect(() => { trackScreen('Goals'); }, []);
 
   const handleNext = async () => {
     if (step < 2) {
@@ -72,7 +72,7 @@ export default function Goals() {
       router.push({ pathname: '/(main)/processing', params: { csvData } });
     } catch {
       setLoading(false);
-      Alert.alert('Error', 'Could not save your goals. Please try again.');
+      window.alert('Could not save your goals. Please try again.');
     }
   };
 

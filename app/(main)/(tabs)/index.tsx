@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Pressable,
+  LayoutAnimation, TextInput, Modal, Pressable,
   RefreshControl, Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -38,11 +38,6 @@ function formatTimeAgo(epochMs: number): string {
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
 }
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
 
 export default function Home() {
   const router = useRouter();
@@ -562,11 +557,7 @@ export default function Home() {
       // Re-enrich in background so scores/moves update
       syncInBackground(user.id);
     } catch (err: any) {
-      if (Platform.OS === 'web') {
-        window.alert(err.message || 'Could not save categories');
-      } else {
-        Alert.alert('Error', err.message || 'Could not save categories');
-      }
+      window.alert(err.message || 'Could not save categories');
     }
     setSavingCatReview(false);
   };
@@ -718,38 +709,15 @@ export default function Home() {
       } catch {}
     };
 
-    if (Platform.OS === 'web') {
-      const ok = window.confirm(`Delete "${stripMd(move.action)}"?\n\nThis recommendation will be permanently removed.`);
-      if (ok) doDelete();
-    } else {
-      Alert.alert(
-        'Delete recommendation?',
-        `Remove "${stripMd(move.action)}" from your insights?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: doDelete },
-        ],
-      );
-    }
+    const ok = window.confirm(`Delete "${stripMd(move.action)}"?\n\nThis recommendation will be permanently removed.`);
+    if (ok) doDelete();
   };
 
   const handleRemoveIncomeSource = (sourceName: string) => {
-    if (Platform.OS === 'web') {
-      // Alert.alert may not work reliably on web — use confirm
-      const ok = window.confirm(
-        `Remove "${sourceName}"?\n\nThis will no longer be counted as income. This affects your surplus and recommendations.`
-      );
-      if (ok) doRemoveIncomeSource(sourceName);
-    } else {
-      Alert.alert(
-        'Remove income source?',
-        `"${sourceName}" will no longer be counted as income. This affects your surplus and recommendations.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: () => doRemoveIncomeSource(sourceName) },
-        ],
-      );
-    }
+    const ok = window.confirm(
+      `Remove "${sourceName}"?\n\nThis will no longer be counted as income. This affects your surplus and recommendations.`
+    );
+    if (ok) doRemoveIncomeSource(sourceName);
   };
 
   useFocusEffect(
@@ -1837,15 +1805,8 @@ export default function Home() {
                             <TouchableOpacity
                               style={{ marginTop: 10, paddingVertical: 8, alignItems: 'center', minHeight: 44, justifyContent: 'center' }}
                               onPress={() => {
-                                const title = 'Delete plan?';
-                                const msg = `Remove "${stripMd(plan.action)}" from your plans?`;
-                                if (Platform.OS === 'web') {
-                                  if (window.confirm(`${title}\n\n${msg}`)) handleRemovePlan(plan.id);
-                                } else {
-                                  Alert.alert(title, msg, [
-                                    { text: 'Cancel', style: 'cancel' },
-                                    { text: 'Delete', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
-                                  ]);
+                                if (window.confirm(`Delete plan?\n\nRemove "${stripMd(plan.action)}" from your plans?`)) {
+                                  handleRemovePlan(plan.id);
                                 }
                               }}
                               activeOpacity={0.7}
@@ -2022,14 +1983,7 @@ export default function Home() {
                           onPress={() => {
                             const title = 'Remove completed plan?';
                             const msg = `Remove "${stripMd(plan.action)}" from your list?`;
-                            if (Platform.OS === 'web') {
-                              if (window.confirm(`${title}\n\n${msg}`)) handleRemovePlan(plan.id);
-                            } else {
-                              Alert.alert(title, msg, [
-                                { text: 'Cancel', style: 'cancel' },
-                                { text: 'Remove', style: 'destructive', onPress: () => handleRemovePlan(plan.id) },
-                              ]);
-                            }
+                            if (window.confirm(`${title}\n\n${msg}`)) handleRemovePlan(plan.id);
                           }}
                         >
                           <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.muted }}>Remove</Text>

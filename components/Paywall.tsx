@@ -1,17 +1,14 @@
 // ── Paywall modal ──
 // Shown when free users try to access Pro features.
-// Matches the Nothing Phone OS design language.
-// On iOS/Android: uses RevenueCat native IAP.
-// On web: uses Stripe Checkout redirect.
+// Uses Stripe Checkout redirect for web subscriptions.
 
 import { useState, useEffect, useMemo } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, Platform, ActivityIndicator, Alert, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, Pressable, ActivityIndicator, Linking } from 'react-native';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
-import { purchasePackage, getOffering, restorePurchases } from '@/lib/revenuecat';
 import { useSubscription } from '@/lib/subscription';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { trackEvent } from '@/lib/mixpanel';
 
 const FEATURES = [
   { label: 'Personalised action plan', desc: 'Step-by-step moves ranked by impact on your finances' },
@@ -33,7 +30,6 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   const s = useMemo(() => createStyles(colors), [colors]);
   const { refresh: refreshTier, isTrial, trialDaysLeft } = useSubscription();
   const [loading, setLoading] = useState(false);
-  const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPrice, setSelectedPrice] = useState<'monthly' | 'yearly'>('monthly');
 
@@ -42,30 +38,11 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     onClose();
   };
 
-  const isNative = Platform.OS === 'ios' || Platform.OS === 'android';
-
-  // Fetch native prices on open (override hardcoded £ values with store prices)
-  const [nativeMonthlyPrice, setNativeMonthlyPrice] = useState<string | null>(null);
-  const [nativeYearlyPrice, setNativeYearlyPrice] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!visible || !isNative) return;
-    (async () => {
-      const offering = await getOffering();
-      if (!offering) return;
-      const monthly = offering.availablePackages.find((p: any) => p.identifier === '$rc_monthly');
-      const yearly = offering.availablePackages.find((p: any) => p.identifier === '$rc_annual');
-      if (monthly) setNativeMonthlyPrice(monthly.product.priceString);
-      if (yearly) setNativeYearlyPrice(yearly.product.priceString);
-    })();
-  }, [visible, isNative]);
-
   // Reset state whenever modal opens so stale loading/error don't stick
   useEffect(() => {
     if (visible) {
       trackEvent('Paywall Shown');
       setLoading(false);
-      setRestoring(false);
       setError(null);
     }
   }, [visible]);
@@ -73,7 +50,6 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   // Reset loading when the page is restored from bfcache (e.g. user
   // navigated to Stripe Checkout then pressed the browser back button).
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
     const reset = (e: PageTransitionEvent) => {
       if (e.persisted) setLoading(false);
     };
@@ -91,31 +67,8 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     setLoading(false);
   };
 
-  // ── Native IAP via RevenueCat ──
-  const handleNativePurchase = async () => {
-    trackEvent('Subscribe Tapped', { plan: selectedPrice });
-    setLoading(true);
-    setError(null);
-    try {
-      const customerInfo = await purchasePackage(selectedPrice);
-      if (customerInfo) {
-        // Purchase succeeded — RC webhook will upsert the DB row,
-        // but also refresh locally for instant UI update
-        trackEvent('Subscribe Success', { plan: selectedPrice });
-        await refreshTier();
-        onClose();
-      }
-      // null = user cancelled, just stop loading
-    } catch (err: any) {
-      trackEvent('Subscribe Failed', { plan: selectedPrice });
-      console.warn('[Paywall] Native purchase error:', err);
-      showError(err?.message || 'Purchase failed. Please try again.');
-    }
-    setLoading(false);
-  };
-
-  // ── Web: Stripe Checkout redirect ──
-  const handleStripeCheckout = async () => {
+  // ── Stripe Checkout redirect ──
+  const handleSubscribe = async () => {
     trackEvent('Subscribe Tapped', { plan: selectedPrice });
     setLoading(true);
     setError(null);
@@ -172,27 +125,6 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     setLoading(false);
   };
 
-  const handleSubscribe = isNative ? handleNativePurchase : handleStripeCheckout;
-
-  // ── Restore purchases (native only) ──
-  const handleRestore = async () => {
-    trackEvent('Restore Purchases Tapped');
-    setRestoring(true);
-    setError(null);
-    try {
-      const restored = await restorePurchases();
-      if (restored) {
-        await refreshTier();
-        onClose();
-      } else {
-        showError('No active subscription found. If you subscribed recently, it may take a moment to sync.');
-      }
-    } catch (err: any) {
-      showError('Could not restore purchases. Please try again.');
-    }
-    setRestoring(false);
-  };
-
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleDismiss}>
       <Pressable style={s.overlay} onPress={trialExpired ? undefined : handleDismiss}>
@@ -246,7 +178,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
                 activeOpacity={0.7}
               >
                 <Text style={[s.priceAmount, selectedPrice !== 'monthly' && s.priceAmountInactive]}>
-                  {nativeMonthlyPrice || `${'\u00a3'}9.99`}
+                  {'\u00a3'}9.99
                 </Text>
                 <Text style={[s.pricePeriod, selectedPrice !== 'monthly' && s.pricePeriodInactive]}>
                   /month
@@ -258,7 +190,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
                 activeOpacity={0.7}
               >
                 <Text style={[s.priceAmount, selectedPrice !== 'yearly' && s.priceAmountInactive]}>
-                  {nativeYearlyPrice || `${'\u00a3'}79.99`}
+                  {'\u00a3'}79.99
                 </Text>
                 <Text style={[s.pricePeriod, selectedPrice !== 'yearly' && s.pricePeriodInactive]}>
                   /year
@@ -305,11 +237,8 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               </View>
             )}
             <Text style={s.legalNote}>
-              {selectedPrice === 'yearly'
-                ? (nativeYearlyPrice || '\u00a379.99') + '/year'
-                : (nativeMonthlyPrice || '\u00a39.99') + '/month'}
+              {selectedPrice === 'yearly' ? '\u00a379.99/year' : '\u00a39.99/month'}
               {'. '}Auto-renews. Cancel anytime.
-              {isNative ? '\nPayment will be charged to your Apple ID account at confirmation of purchase. Subscription automatically renews unless cancelled at least 24 hours before the end of the current period. You can manage and cancel subscriptions in your Account Settings on the App Store after purchase.' : ''}
             </Text>
             <View style={s.legalLinks}>
               <TouchableOpacity onPress={() => Linking.openURL('https://www.bocy.io/terms.html')} activeOpacity={0.7}>
@@ -320,22 +249,6 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
                 <Text style={s.legalLinkText}>Privacy Policy</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Restore purchases (native only) */}
-            {isNative && (
-              <TouchableOpacity
-                style={s.restoreBtn}
-                onPress={handleRestore}
-                disabled={restoring}
-                activeOpacity={0.7}
-              >
-                {restoring ? (
-                  <ActivityIndicator size="small" color={colors.dim} />
-                ) : (
-                  <Text style={s.restoreBtnText}>Restore purchases</Text>
-                )}
-              </TouchableOpacity>
-            )}
 
             {/* Dismiss — only shown during trial */}
             {!trialExpired && (
@@ -598,19 +511,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 12,
     color: c.muted,
-  },
-
-  // Restore
-  restoreBtn: {
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    marginTop: spacing.md,
-  },
-  restoreBtnText: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
-    color: c.dim,
-    textDecorationLine: 'underline',
   },
 
   // Close

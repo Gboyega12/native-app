@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated,
-  Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager,
+  ActivityIndicator, LayoutAnimation,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -11,10 +11,6 @@ import type {
   WorkSetup, HouseholdType, HousingStatus, FinancialExperience,
   RiskAppetite, Priority, UpcomingEvent, Dependent,
 } from '@/lib/types';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 const CARD_GAP = 10;
 
@@ -162,7 +158,7 @@ export default function Identity() {
   const [dependents, setDependents] = useState<string[]>([]);
 
   // Track page view on mount
-  useState(() => { trackScreen('Identity'); });
+  useEffect(() => { trackScreen('Identity'); }, []);
 
   const selections = [workSetup, household, housing, experience, priorities, events, risk, dependents];
   const setters = [setWorkSetup, setHousehold, setHousing, setExperience, setPriorities, setEvents, setRisk, setDependents];
@@ -312,7 +308,7 @@ export default function Identity() {
       router.push('/(main)/install-app');
     } catch (err: any) {
       console.warn('[identity] Save failed:', err?.message);
-      Alert.alert('Error', 'Could not save. Please try again.');
+      window.alert('Could not save. Please try again.');
       setSaving(false);
     }
   };
