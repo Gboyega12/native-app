@@ -1,11 +1,11 @@
 import {
   matchMerchant, fuzzyMatchMerchant, isPersonTransfer,
   isLikelyIncomeCredit, matchesSalaryKeywords,
-} from './merchant-db';
-import { classifyTransaction } from './classifier';
-import { normaliseDescription } from './normalise';
-import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
-import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants';
+} from './merchant-db.js';
+import { classifyTransaction } from './classifier.js';
+import { normaliseDescription } from './normalise.js';
+import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes.js';
+import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants.js';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -20,7 +20,7 @@ import type {
   BudgetCategory,
   EssentialGap,
   VerifiedBill,
-} from './types';
+} from './types.js';
 
 function splitCSVLine(line: string): string[] {
   const parts: string[] = [];
