@@ -232,11 +232,11 @@ export function AnimGlyph({ children, delay = 0, style }: { children: React.Reac
 // Width animates from 0% → target on mount, then breathes.
 export function BreathingBar({ color, width: barWidth, style }: { color: string; width: string; style?: any }) {
   const breathAnim = useRef(new Animated.Value(0)).current;
-  const widthAnim = useRef(new Animated.Value(0)).current;
+  const scaleXAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Animate width from 0 to 1 on mount
-    Animated.timing(widthAnim, {
+    // Animate scaleX from 0 to 1 on mount (avoids string interpolation issues on web)
+    Animated.timing(scaleXAnim, {
       toValue: 1,
       duration: 800,
       easing: Easing.out(Easing.cubic),
@@ -254,15 +254,19 @@ export function BreathingBar({ color, width: barWidth, style }: { color: string;
 
   const opacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0.95] });
 
-  // Parse target percentage and interpolate
-  const targetPct = parseFloat(barWidth) || 0;
-  const animatedWidth = widthAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', `${targetPct}%`],
-  });
-
   return (
-    <Animated.View style={[style, { width: animatedWidth, backgroundColor: color, opacity }]} />
+    <Animated.View
+      style={[
+        style,
+        {
+          width: barWidth,
+          backgroundColor: color,
+          opacity,
+          transform: [{ scaleX: scaleXAnim }],
+          transformOrigin: 'left center',
+        },
+      ]}
+    />
   );
 }
 

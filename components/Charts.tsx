@@ -179,11 +179,6 @@ function CategoryBarRow({ item, index, colors }: { item: CategoryBarItem; index:
     }).start();
   }, [pct]);
 
-  const barWidth = fillAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
-
   return (
     <View>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -199,9 +194,11 @@ function CategoryBarRow({ item, index, colors }: { item: CategoryBarItem; index:
         <Animated.View
           style={{
             height: '100%',
-            width: barWidth,
+            width: '100%',
             borderRadius: 2,
             backgroundColor: barColor,
+            transform: [{ scaleX: fillAnim }],
+            transformOrigin: 'left center',
           }}
         />
       </View>

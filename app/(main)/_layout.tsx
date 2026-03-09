@@ -11,8 +11,6 @@ export default function MainLayout() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.bg },
-          animation: 'fade_from_bottom',
-          animationDuration: 280,
         }}
       />
     </ErrorBoundary>

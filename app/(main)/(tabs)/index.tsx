@@ -1539,16 +1539,16 @@ export default function Home() {
       if (g.dy < -80) {
         // Dismiss
         Animated.parallel([
-          Animated.timing(paydayTranslateY, { toValue: -300, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
-          Animated.timing(paydayOpacity, { toValue: 0, duration: 250, useNativeDriver: true }),
+          Animated.timing(paydayTranslateY, { toValue: -300, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
+          Animated.timing(paydayOpacity, { toValue: 0, duration: 250, useNativeDriver: false }),
         ]).start(() => {
           hapticMedium();
           dismissIncome();
         });
       } else {
         // Snap back
-        Animated.spring(paydayTranslateY, { toValue: 0, useNativeDriver: true }).start();
-        Animated.spring(paydayOpacity, { toValue: 1, useNativeDriver: true }).start();
+        Animated.spring(paydayTranslateY, { toValue: 0, useNativeDriver: false }).start();
+        Animated.spring(paydayOpacity, { toValue: 1, useNativeDriver: false }).start();
       }
     },
   }), []);
@@ -1664,12 +1664,11 @@ export default function Home() {
             <AnimGlyph delay={0}>
               <Animated.ScrollView
                 horizontal
-                pagingEnabled
                 showsHorizontalScrollIndicator={false}
                 scrollEventThrottle={16}
                 onScroll={Animated.event(
                   [{ nativeEvent: { contentOffset: { x: heroScrollX } } }],
-                  { useNativeDriver: true },
+                  { useNativeDriver: false },
                 )}
                 onMomentumScrollEnd={(e) => {
                   const page = Math.round(e.nativeEvent.contentOffset.x / cardWidth);
