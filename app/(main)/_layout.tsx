@@ -7,7 +7,14 @@ export default function MainLayout() {
 
   return (
     <ErrorBoundary>
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.bg },
+          animation: 'fade_from_bottom',
+          animationDuration: 280,
+        }}
+      />
     </ErrorBoundary>
   );
 }

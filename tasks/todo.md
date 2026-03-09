@@ -1,22 +1,15 @@
-# PWA Cleanup & Code Quality Overhaul
+# Design Improvements — Phase 2
 
-## Phase 1: Remove Native iOS/Android Code
-- [ ] 1. Delete native-only files (revenuecat.ts, revenuecat webhook, withIAP.cjs, eas.json, RC migration SQL)
-- [ ] 2. Clean app.json: remove ios/android sections, native-only plugins
-- [ ] 3. Clean package.json: remove native deps, EAS scripts
-- [ ] 4. Clean app/_layout.tsx: remove RevenueCat init, native push registration
-- [ ] 5. Clean components/Paywall.tsx: remove native IAP path, keep Stripe web only
-- [ ] 6. Clean app/(main)/profile.tsx: remove restorePurchases, native checks
-- [ ] 7. Clean lib/notifications.ts: remove native expo-notifications, keep web push
-- [ ] 8. Clean lib/supabase.ts: remove expo-secure-store, use web storage only
-- [ ] 9. Clean lib/mixpanel.ts: replace native SDK with web-compatible approach
-- [ ] 10. Remove Android UIManager calls from education.tsx, identity.tsx, index.tsx, plan.tsx
-- [ ] 11. Simplify Platform.OS checks: remove dead iOS/Android branches
+## Tasks
 
-## Phase 2: Code Quality Fixes
-- [ ] 12. Fix useState(() => trackScreen()) anti-pattern → useEffect (5 files)
-- [ ] 13. Fix silent empty catch blocks (subscriptions.tsx, processing.tsx, etc.)
+- [ ] **1. AnimatedNumber component** — Count-up effect for currency/number values. RN Animated API spring from 0 → target over ~800ms. Drop-in for static `£X` displays on home screen.
+- [ ] **2. Skeleton loading screens** — Shimmer placeholder matching card layout. Replace ActivityIndicator on dashboard with skeleton bones.
+- [ ] **3. Gesture-driven card interactions** — Swipe-to-dismiss payday card (PanResponder), long-press preview on moves.
+- [ ] **4. Dark/light mode transition** — Smooth cross-fade overlay animation on theme toggle.
+- [ ] **5. Page transitions** — Slide/fade transitions on Stack screens in expo-router layouts.
+- [ ] **6. Progress bar animation** — Animate BreathingBar width from 0 → target on mount.
 
-## Phase 3: Verify & Ship
-- [ ] 14. TypeScript checks, Expo web build, tests
-- [ ] 15. Commit and push
+## Approach
+- All built with RN built-in Animated API (no reanimated/gesture-handler — avoids native rebuild)
+- Consistent with existing 420ms/cubic easing motion language
+- Each feature is independent

@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, TextInput, Modal, Pressable, Animated, Easing,
+  LayoutAnimation, TextInput, Modal, Pressable, Animated, Easing, PanResponder,
   RefreshControl, Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -21,6 +21,8 @@ import { hydrateSubGoals } from '@/lib/types';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
+import AnimatedNumber from '@/components/AnimatedNumber';
+import { DashboardSkeleton } from '@/components/Skeleton';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
@@ -1278,8 +1280,8 @@ export default function Home() {
 
   if (loading) {
     return (
-      <View style={s.loadingContainer}>
-        <ActivityIndicator color={colors.accent} size="large" />
+      <View style={[s.loadingContainer, { padding: 24 }]}>
+        <DashboardSkeleton />
       </View>
     );
   }
@@ -1503,6 +1505,35 @@ export default function Home() {
   const isPayday = !!weeklyCtx?.incomeArrivedThisWeek && !incomeDismissed;
   const focusType: 'payday' | 'budget' | 'move' = isPayday ? 'payday' : 'budget';
 
+  // ── Swipe-up to dismiss payday card ──
+  const paydayTranslateY = useRef(new Animated.Value(0)).current;
+  const paydayOpacity = useRef(new Animated.Value(1)).current;
+  const paydayPanResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 10 && g.dy < 0, // only swipe up
+    onPanResponderMove: (_, g) => {
+      if (g.dy < 0) {
+        paydayTranslateY.setValue(g.dy);
+        paydayOpacity.setValue(1 + g.dy / 200); // fade as you swipe
+      }
+    },
+    onPanResponderRelease: (_, g) => {
+      if (g.dy < -80) {
+        // Dismiss
+        Animated.parallel([
+          Animated.timing(paydayTranslateY, { toValue: -300, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(paydayOpacity, { toValue: 0, duration: 250, useNativeDriver: true }),
+        ]).start(() => {
+          hapticMedium();
+          dismissIncome();
+        });
+      } else {
+        // Snap back
+        Animated.spring(paydayTranslateY, { toValue: 0, useNativeDriver: true }).start();
+        Animated.spring(paydayOpacity, { toValue: 1, useNativeDriver: true }).start();
+      }
+    },
+  }), []);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
     <ScrollView
@@ -1635,6 +1666,10 @@ export default function Home() {
                 {/* ── Page 1: Budget / Payday ── */}
                 <View style={{ width: cardWidth }}>
           {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
+              <Animated.View
+                {...paydayPanResponder.panHandlers}
+                style={{ transform: [{ translateY: paydayTranslateY }], opacity: paydayOpacity }}
+              >
               <Card variant="hero">
                 <Text style={s.heroLabel}>PAYDAY</Text>
                 <Text style={s.heroAction}>
@@ -1678,6 +1713,7 @@ export default function Home() {
                   <Text style={s.heroCtaText}>Ask Bocy about this</Text>
                 </TouchableOpacity>
               </Card>
+              </Animated.View>
           ) : (
               <Card variant="hero">
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -1695,15 +1731,20 @@ export default function Home() {
                         </View>
                       </TouchableOpacity>
                     </View>
-                    <Text style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 38 }]}>
-                      {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
-                    </Text>
+                    <AnimatedNumber
+                      value={weeklyRemaining}
+                      prefix={'\u00a3'}
+                      style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 38 }]}
+                    />
                     <Text style={s.safeToSpendLabel}>left to spend</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={s.safeToSpendMeta}>
-                      {'\u00a3'}{Math.round(spentThisWeek).toLocaleString()} spent
-                    </Text>
+                    <AnimatedNumber
+                      value={spentThisWeek}
+                      prefix={'\u00a3'}
+                      suffix=" spent"
+                      style={s.safeToSpendMeta}
+                    />
                     <TouchableOpacity
                       onPress={() => { setLimitInput(customWeeklyLimit ? String(customWeeklyLimit) : String(Math.round(calculatedWeeklyBudget))); setShowLimitEditor(true); }}
                       activeOpacity={0.7}
@@ -1758,9 +1799,12 @@ export default function Home() {
                         <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
                           {stripMd(dashboardMoves[0].action)}
                         </Text>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.green, marginTop: 12, letterSpacing: 0.3 }}>
-                          +{'\u00a3'}{(dashboardMoves[0].annualImpact || 0).toLocaleString()}/yr
-                        </Text>
+                        <AnimatedNumber
+                          value={dashboardMoves[0].annualImpact || 0}
+                          prefix={'+\u00a3'}
+                          suffix="/yr"
+                          style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.green, marginTop: 12, letterSpacing: 0.3 }}
+                        />
                         {dashboardMoves[0].effect && (
                           <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.text2, marginTop: 14, lineHeight: 20 }}>
                             {stripMd(dashboardMoves[0].effect)}
