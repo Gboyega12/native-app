@@ -13,9 +13,9 @@
 // Layered with liquidity tiers: a £1 locked in a pension is worth less
 // than £1 in your current account when your buffer is thin.
 
-import type { Move, FinancialProfile, UserIdentity } from './types';
-import type { VolatilityProfile } from './monte-carlo';
-import { calcMarginalRate, calcPensionEffectiveReturn, inferTaxSituation, type TaxSituation } from './surplus-engine';
+import type { Move, FinancialProfile, UserIdentity } from './types.js';
+import type { VolatilityProfile } from './monte-carlo.js';
+import { calcMarginalRate, calcPensionEffectiveReturn, inferTaxSituation, type TaxSituation } from './surplus-engine.js';
 
 // ── Liquidity Tiers ──
 // Discount factor applied to the marginal utility based on how quickly
