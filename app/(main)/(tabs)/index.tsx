@@ -1022,14 +1022,11 @@ export default function Home() {
           nextWarning = { message: 'some_expired', banks };
         }
       } else if (result.dataSource === 'fallback') {
-        // Sync failed transiently or used cached data — check freshness
-        const txAge = result.latestTransactionDate
-          ? Math.floor((Date.now() - new Date(result.latestTransactionDate).getTime()) / (1000 * 60 * 60 * 24))
-          : 999;
-        if (txAge >= 2) {
-          nextWarning = { message: 'stale_data', banks: [] };
-        }
-        // If fallback data is <2 days old, no warning needed — data is fresh enough
+        // Sync failed transiently or used cached data.
+        // Don't show the connection warning banner for stale fallback data —
+        // the syncError text below handles this with a "pull down to retry"
+        // message, which is more appropriate than suggesting "reconnect"
+        // for what is likely a transient TrueLayer failure.
       } else if (result.expiringConnections?.length > 0) {
         // Proactive warning: connections approaching 90-day consent expiry
         const expiringBanks = result.expiringConnections.map(
@@ -1040,8 +1037,10 @@ export default function Home() {
 
       setConnectionWarning(nextWarning);
 
-      // Warn if data is stale (latest transaction > 2 days old)
-      if (result.latestTransactionDate) {
+      // Warn if data is stale — but only when sync actually failed (fallback).
+      // When TrueLayer synced successfully, stale data just means the bank
+      // hasn't posted recent transactions — "pull down to retry" won't help.
+      if (result.dataSource === 'fallback' && result.latestTransactionDate) {
         const txAge = Math.floor((Date.now() - new Date(result.latestTransactionDate).getTime()) / (1000 * 60 * 60 * 24));
         if (txAge >= 2) {
           setSyncError(`Transactions are ${txAge} days old — pull down to retry`);
