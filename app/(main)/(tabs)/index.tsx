@@ -1279,14 +1279,6 @@ export default function Home() {
     return [];
   };
 
-  if (loading) {
-    return (
-      <View style={[s.loadingContainer, { padding: 24 }]}>
-        <DashboardSkeleton />
-      </View>
-    );
-  }
-
   // ── Derived data ──
   const moves = Array.isArray(analysis?.all_moves) ? analysis.all_moves : [];
   const income = analysis?.monthly_income ?? 0;
@@ -1552,6 +1544,14 @@ export default function Home() {
       }
     },
   }), []);
+
+  if (loading) {
+    return (
+      <View style={[s.loadingContainer, { padding: 24 }]}>
+        <DashboardSkeleton />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
