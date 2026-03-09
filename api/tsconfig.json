@@ -6,5 +6,5 @@
     "target": "ESNext",
     "noEmit": true
   },
-  "include": ["./**/*.ts", "./**/*.js", "../lib/**/*.ts"]
+  "include": ["./**/*.ts", "./**/*.js"]
 }
