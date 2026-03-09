@@ -53,7 +53,7 @@
           }
         }
       ],
-      "./plugins/withIAP.js"
+      "./plugins/withIAP.cjs"
     ],
     "runtimeVersion": {
       "policy": "appVersion"
