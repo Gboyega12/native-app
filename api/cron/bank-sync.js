@@ -296,7 +296,11 @@ export default async function handler(req, res) {
               .trim();
             const words = cleaned.split(/\s+/).filter(Boolean);
             if (words.length < 2 || words.length > 3) return false;
-            return words.every((w) => /^[a-z'-]+$/.test(w) && w.length >= 2);
+            // All words must be alphabetic, at least one must be a full name (2+ chars).
+            // Allows single-letter initials like "Maria G", "J Smith".
+            const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w));
+            const hasFullName = words.some((w) => w.length >= 2);
+            return allAlpha && hasFullName;
           }
 
           // Find income-like transactions from this week

@@ -39,6 +39,18 @@ function formatTimeAgo(epochMs: number): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+/** Format a date-only string (e.g. "2026-03-09") as a human-friendly label.
+ *  Date-only strings become midnight UTC when parsed, so computing hours
+ *  from midnight gives misleading results like "17h ago" at 5pm. */
+function formatTxDateAge(dateStr: string): string {
+  const today = new Date().toISOString().split('T')[0];
+  if (dateStr === today) return 'today';
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  if (dateStr === yesterday) return 'yesterday';
+  const diffDays = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+  return `${diffDays}d ago`;
+}
+
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -1528,7 +1540,7 @@ export default function Home() {
         {(syncing || lastSynced > 0 || syncError) && (
           <Text style={[s.syncText, syncError && !syncing ? { color: colors.coral } : undefined]}>
             {syncing ? 'Syncing...' : syncError ? syncError : syncDataSource === 'fallback' && latestTxDate
-              ? `Data from ${formatTimeAgo(new Date(latestTxDate).getTime())} (cached)`
+              ? `Data from ${formatTxDateAge(latestTxDate)} (cached)`
               : `Synced ${formatTimeAgo(lastSynced)}`}
           </Text>
         )}

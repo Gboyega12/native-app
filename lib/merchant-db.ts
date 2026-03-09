@@ -567,10 +567,13 @@ export function isPersonTransfer(description: string): boolean {
   // Match 2-3 purely alphabetic words (typical person name pattern).
   // Single words are too ambiguous — "aldi", "pharmacy", "barbershop"
   // would all false-positive. Require at least 2 words for a name match.
+  // Allow single-letter initials (e.g. "Maria G", "J Smith", "A J Smith")
+  // as long as at least one word is a full name (2+ chars).
   const words = cleaned.split(/\s+/).filter(Boolean);
   if (words.length >= 2 && words.length <= 3) {
-    const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w) && w.length >= 2);
-    if (allAlpha) return true;
+    const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w));
+    const hasFullName = words.some((w) => w.length >= 2);
+    if (allAlpha && hasFullName) return true;
   }
 
   return false;
