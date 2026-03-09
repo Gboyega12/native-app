@@ -7,16 +7,15 @@
 import { createClient } from '@supabase/supabase-js';
 import EnrichmentEngine from '../lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition } from '../lib/move-engine';
-import type { Analysis, Goals } from '../lib/types';
 
 export const config = { maxDuration: 30 };
 
 /**
  * Deduplicate CSV lines across multiple bank_data rows.
  */
-function deduplicateCSVLines(csvLines: string[]): string[] {
-  const seen = new Set<string>();
-  const unique: string[] = [];
+function deduplicateCSVLines(csvLines) {
+  const seen = new Set();
+  const unique = [];
   for (const line of csvLines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -28,7 +27,7 @@ function deduplicateCSVLines(csvLines: string[]): string[] {
   return unique;
 }
 
-export default async function handler(req: any, res: any) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -77,11 +76,11 @@ export default async function handler(req: any, res: any) {
       return res.json({ success: false, reason: 'no_data' });
     }
 
-    const rawLines: string[] = [];
+    const rawLines = [];
     for (const row of bankRows) {
       if (!row.csv_data) continue;
-      const lines = (row.csv_data as string).split('\n');
-      rawLines.push(...lines.slice(1).filter((l: string) => l.trim()));
+      const lines = row.csv_data.split('\n');
+      rawLines.push(...lines.slice(1).filter((l) => l.trim()));
     }
     const uniqueLines = deduplicateCSVLines(rawLines);
     if (uniqueLines.length === 0) {
@@ -113,7 +112,7 @@ export default async function handler(req: any, res: any) {
     const overrides = overrideRes.data || [];
     const debtAccountsData = debtRes.data || [];
     const identityData = idRes.data || null;
-    const goals: Goals | null = goalsRes.data || null;
+    const goals = goalsRes.data || null;
 
     // ── 3. Enrich ──
     const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
@@ -134,7 +133,7 @@ export default async function handler(req: any, res: any) {
         .eq('user_id', userId)
         .like('move_key', 'dismissed-%');
       if (progressRows && progressRows.length > 0) {
-        const dismissedActions = new Set(progressRows.map((r: any) => r.move_action));
+        const dismissedActions = new Set(progressRows.map((r) => r.move_action));
         for (let i = allMoves.length - 1; i >= 0; i--) {
           if (dismissedActions.has(allMoves[i].action)) allMoves.splice(i, 1);
         }
@@ -144,7 +143,7 @@ export default async function handler(req: any, res: any) {
     const topMove = allMoves[0] || null;
 
     // ── 5. Build analysis ──
-    const rawAnalysis: Analysis = {
+    const rawAnalysis = {
       user_id: userId,
       archetype: result.archetype.key,
       decision_score: result.decisionScore.score,
@@ -154,7 +153,7 @@ export default async function handler(req: any, res: any) {
       non_discretionary: result.profile.budgetReality.nonDiscretionary,
       discretionary: result.profile.budgetReality.discretionary,
       income_sources: result.profile.incomeSources,
-      top_move: topMove || ({} as any),
+      top_move: topMove || {},
       all_moves: allMoves,
       behavioral_patterns: result.behavioralPatterns,
       goal_context: topMove?.trajectory || null,
@@ -212,7 +211,7 @@ export default async function handler(req: any, res: any) {
     });
 
     // ── 8. Latest transaction date ──
-    let latestTransactionDate: string | null = null;
+    let latestTransactionDate = null;
     for (const tx of result.enrichedTransactions) {
       if (tx.date && (!latestTransactionDate || tx.date > latestTransactionDate)) {
         latestTransactionDate = tx.date;
@@ -227,7 +226,7 @@ export default async function handler(req: any, res: any) {
       latest_transaction_date: latestTransactionDate,
       decision_score: rawAnalysis.decision_score,
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error('[enrich] Failed:', err?.message || err);
     return res.status(500).json({ error: 'Enrichment failed', details: err?.message });
   }
