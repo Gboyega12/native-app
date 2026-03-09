@@ -73,7 +73,12 @@ async function refreshConnection(bankRow, clientId, clientSecret, admin) {
     const accounts = accountsJson.results || [];
     const cards = cardsJson.results || [];
 
-    const to = new Date().toISOString().split('T')[0];
+    // Use tomorrow as the upper bound so TrueLayer includes all of today's transactions.
+    // Date-only strings (e.g. "2026-03-09") are interpreted as start-of-day UTC,
+    // which can exclude same-day transactions depending on the bank's timezone.
+    const toDate = new Date();
+    toDate.setDate(toDate.getDate() + 1);
+    const to = toDate.toISOString().split('T')[0];
     const fromDate = new Date();
     // Re-syncs only need 30 days (incremental). Initial 12-month pull is in callback.js.
     fromDate.setDate(fromDate.getDate() - 30);
@@ -282,6 +287,18 @@ export default async function handler(req, res) {
           const TRANSFER_PATTERNS = /\b(faster payment|bank transfer|transfer from|transfer to)\b/i;
           const PERSON_TITLE = /^(mr|mrs|miss|ms|dr)\s/i;
 
+          // Person name pattern: 2-3 purely alphabetic words (e.g. "JOHN SMITH")
+          // Strip banking prefixes before checking.
+          function looksLikePersonName(text) {
+            const cleaned = text.toLowerCase().trim()
+              .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
+              .replace(/\b(fp|bgt|bacs|chq)\b/g, '')
+              .trim();
+            const words = cleaned.split(/\s+/).filter(Boolean);
+            if (words.length < 2 || words.length > 3) return false;
+            return words.every((w) => /^[a-z'-]+$/.test(w) && w.length >= 2);
+          }
+
           // Find income-like transactions from this week
           const incomeCredits = result.csvLines.filter((line) => {
             const parts = line.split(',');
@@ -291,6 +308,8 @@ export default async function handler(req, res) {
             const amount = parseFloat(parts[parts.length - 1]);
             if (!date || date < weekStartStr || amount < 100) return false; // Min £100 credit
             if (TRANSFER_PATTERNS.test(desc) || PERSON_TITLE.test(desc.trim())) return false;
+            // Exclude person-to-person transfers (e.g. "JOHN SMITH", "FP SARAH JONES")
+            if (looksLikePersonName(desc)) return false;
             return SALARY_PATTERNS.test(desc) || EMPLOYER_PATTERNS.test(desc);
           });
 

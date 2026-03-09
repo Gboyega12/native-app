@@ -524,8 +524,12 @@ const BRAND_INDICATORS = [
   'ltd', 'plc', 'limited', 'inc', 'corp', 'co.', 'co ',
   '.com', '.co.uk', '.org', 'www.',
   'store', 'shop', 'online', 'direct', 'club', 'plus',
-  'pay', 'bill', 'fee', 'charge',
+  'charge',
 ];
+
+// Short words that could false-positive on substring match (e.g. "pay" in "payment",
+// "bill" in "billy", "fee" in "coffee"). Use word-boundary regex instead.
+const BRAND_WORD_PATTERNS = [/\bpay\b/, /\bbill\b/, /\bfee\b/];
 
 export function isPersonTransfer(description: string): boolean {
   const lower = description.toLowerCase().trim();
@@ -543,12 +547,13 @@ export function isPersonTransfer(description: string): boolean {
 
   // "standing order" is only a transfer if the destination looks like a person,
   // not a company (e.g. "STANDING ORDER TO BRITISH GAS" is a bill, not a transfer)
-  if (/\bstanding order\b/.test(lower) && !BRAND_INDICATORS.some((b) => lower.includes(b)) && !/\d/.test(lower)) {
+  if (/\bstanding order\b/.test(lower) && !BRAND_INDICATORS.some((b) => lower.includes(b)) && !BRAND_WORD_PATTERNS.some((rx) => rx.test(lower)) && !/\d/.test(lower)) {
     return true;
   }
 
   // If it contains any brand/company indicators, it's NOT a person
   if (BRAND_INDICATORS.some((b) => lower.includes(b))) return false;
+  if (BRAND_WORD_PATTERNS.some((rx) => rx.test(lower))) return false;
 
   // If it contains digits, it's likely a reference number — not a person name
   if (/\d/.test(lower)) return false;

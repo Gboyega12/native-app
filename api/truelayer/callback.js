@@ -94,8 +94,11 @@ export default async function handler(req, res) {
     const accounts = accountsData.results || [];
     const cards = cardsData.results || [];
 
-    // Date range: last 12 months
-    const to = new Date().toISOString().split('T')[0];
+    // Date range: last 12 months. Use tomorrow as upper bound so TrueLayer
+    // includes all of today's transactions regardless of timezone.
+    const toDate = new Date();
+    toDate.setDate(toDate.getDate() + 1);
+    const to = toDate.toISOString().split('T')[0];
     const fromDate = new Date();
     fromDate.setFullYear(fromDate.getFullYear() - 1);
     const from = fromDate.toISOString().split('T')[0];
