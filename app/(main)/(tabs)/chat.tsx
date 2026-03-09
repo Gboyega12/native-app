@@ -11,7 +11,8 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import Markdown from '@/lib/markdown';
-import { BocyFace, getBocyMood } from '@/components/Bocy';
+import { BocyFace, getBocyMood, type BocyMood } from '@/components/Bocy';
+import { hapticLight, hapticSuccess } from '@/lib/haptics';
 import Card from '@/components/Card';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals, FinancialProfile, UserIdentity } from '@/lib/types';
 import { solveBudgetAllocation } from '@/lib/budget-solver';
@@ -31,6 +32,17 @@ const paydayFingerprint = (pc: any): string => {
 
 /** Word-count threshold — messages longer than this get split into chunks */
 const CHUNK_WORD_THRESHOLD = 15;
+
+/** Determine Bocy's mood from the latest chat message content */
+function getChatMood(lastMsg: string | undefined, baseMood: BocyMood, isLoading: boolean): BocyMood {
+  if (isLoading) return 'thinking';
+  if (!lastMsg) return baseMood;
+  const lower = lastMsg.toLowerCase();
+  if (/payday|well done|great|nice|saved|congrat|milestone|achieved/.test(lower)) return 'celebrating';
+  if (/overspend|debt|behind|warning|careful|risk|problem/.test(lower)) return 'alert';
+  if (/plan|let me|here's|break|walk you|split/.test(lower)) return 'happy';
+  return baseMood;
+}
 
 /**
  * Split a long assistant message into multiple chat-sized chunks.
@@ -398,6 +410,54 @@ function TypingIndicator() {
         ))}
       </View>
     </View>
+  );
+}
+
+// ── Typewriter text reveal ──
+// Progressively reveals text character-by-character for AI messages.
+// Falls back to instant display once the animation completes.
+
+function TypewriterText({ text, style, delay = 0, charsPerTick = 2, onComplete }: {
+  text: string;
+  style?: any;
+  delay?: number;
+  charsPerTick?: number;
+  onComplete?: () => void;
+}) {
+  const [visibleLen, setVisibleLen] = useState(0);
+  const [done, setDone] = useState(false);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      tickRef.current = setInterval(() => {
+        setVisibleLen((prev) => {
+          const next = prev + charsPerTick;
+          if (next >= text.length) {
+            if (tickRef.current) clearInterval(tickRef.current);
+            setDone(true);
+            onComplete?.();
+            return text.length;
+          }
+          return next;
+        });
+      }, 16); // ~60fps
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+      if (tickRef.current) clearInterval(tickRef.current);
+    };
+  }, [text]);
+
+  if (done) return <Markdown>{text}</Markdown>;
+
+  // During reveal, show plain text (Markdown parsing mid-stream is unreliable)
+  return (
+    <Text style={style}>
+      {text.slice(0, visibleLen)}
+      <Text style={{ opacity: 0.4 }}>|</Text>
+    </Text>
   );
 }
 
@@ -1793,6 +1853,7 @@ export default function Chat() {
 
   const sendMessage = async (text: string, _source: 'text' | 'voice' | 'suggestion' = 'text') => {
     if (!text.trim() || loading) return;
+    hapticLight();
     trackEvent('Chat Message Sent', { source: _source });
 
     const userMsg: ChatMessage = { role: 'user', content: text.trim() };
@@ -2040,7 +2101,7 @@ export default function Chat() {
       <View style={[s.header, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
         <View style={s.headerLeftChat}>
           <View style={s.chatBocyWrap}>
-            <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
+            <BocyFace mood={getChatMood(messages[messages.length - 1]?.role === 'assistant' ? messages[messages.length - 1]?.content : undefined, getBocyMood(analysis), loading)} size="sm" breathing />
           </View>
           <Text style={s.headerTitle}>Bocy</Text>
           {loading && <ActivityIndicator size="small" color={colors.dim} style={{ marginLeft: 6 }} />}
@@ -2209,13 +2270,19 @@ export default function Chat() {
                 </View>
               ) : (
                 <>
-                  {bubbleChunks.map((chunk, ci) => (
-                    <FadeInView key={`${i}-chunk-${ci}`} delay={ci * 300}>
-                      <View style={[s.bubble, s.assistantBubble, ci > 0 && { marginTop: 4 }]}>
-                        <Markdown>{chunk}</Markdown>
-                      </View>
-                    </FadeInView>
-                  ))}
+                  {bubbleChunks.map((chunk, ci) => {
+                    const useTypewriter = isLast && !loading;
+                    return (
+                      <FadeInView key={`${i}-chunk-${ci}`} delay={ci * 300}>
+                        <View style={[s.bubble, s.assistantBubble, ci > 0 && { marginTop: 4 }]}>
+                          {useTypewriter
+                            ? <TypewriterText text={chunk} style={s.bubbleText} delay={ci * 300} />
+                            : <Markdown>{chunk}</Markdown>
+                          }
+                        </View>
+                      </FadeInView>
+                    );
+                  })}
                   {/* Voice response button */}
                   {ttsSupported && msg.content && !loading && (
                     <TouchableOpacity

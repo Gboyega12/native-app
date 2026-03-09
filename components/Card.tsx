@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { fonts, spacing, radius, cardShadow, animation, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { hapticLight } from '@/lib/haptics';
 
 // ── Smooth layout animation config ──
 export const SMOOTH_ANIM = {
@@ -56,6 +57,7 @@ export default function Card({
   const variantStyles = getVariantStyles(colors, variant, borderColor);
 
   const handlePressIn = useCallback(() => {
+    hapticLight();
     Animated.timing(scaleAnim, {
       toValue: animation.press.scale,
       duration: animation.press.duration,
@@ -265,6 +267,7 @@ export function InfoIcon({ expanded, onPress }: { expanded: boolean; onPress: ()
     <Pressable
       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       onPress={() => {
+        hapticLight();
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         onPress();
       }}

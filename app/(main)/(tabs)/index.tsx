@@ -1,12 +1,13 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, TextInput, Modal, Pressable,
+  LayoutAnimation, TextInput, Modal, Pressable, Animated, Easing,
   RefreshControl, Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { hapticMedium, hapticSuccess, hapticTick } from '@/lib/haptics';
 import { getLastResult } from '@/app/(main)/processing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { requestSync, onSyncComplete, getLastSyncTime, invalidateSyncCache } from '@/lib/sync-coordinator';
@@ -54,7 +55,7 @@ function formatTxDateAge(dateStr: string): string {
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
+  const { maxContentWidth, isTablet, horizontalPadding, width: screenWidth } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,6 +76,8 @@ export default function Home() {
   const { showWalkthrough, dismissWalkthrough } = useWalkthrough();
   const dashScrollRef = useRef<ScrollView>(null);
   const cardPositions = useRef<Record<string, number>>({});
+  const heroScrollX = useRef(new Animated.Value(0)).current;
+  const [heroPage, setHeroPage] = useState(0);
 
   // ── Connection banner dismiss ──
   // Keyed by the sorted bank names. Dismissing stores these bank names.
@@ -147,6 +150,7 @@ export default function Home() {
 
   const toggleCategory = (key: string) => {
     trackEvent('Category Toggled', { category: key });
+    hapticMedium();
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedCategories((prev) => {
       const next = new Set(prev);
@@ -158,6 +162,7 @@ export default function Home() {
 
   const toggleMove = (idx: number) => {
     trackEvent('Move Toggled', { move_index: idx });
+    hapticMedium();
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedMoves((prev) => {
       const next = new Set(prev);
@@ -962,6 +967,7 @@ export default function Home() {
       setRefreshing(true);
       invalidateSyncCache();
       await syncInBackground(user.id, true);
+      hapticSuccess();
     } catch (err: any) {
       console.warn('[home] onRefresh error:', err?.message);
     }
@@ -1593,12 +1599,42 @@ export default function Home() {
           )}
 
           {/* ══════════════════════════════════════════════
-              FOCUS CARD — one contextual card
+              FOCUS CARD — horizontal snapping pager
               ══════════════════════════════════════════════ */}
+          {(() => {
+            const cardWidth = screenWidth - 48; // 24px padding each side
+            const heroPageCount = dashboardMoves.length > 0 ? 2 : 1;
+            const parallaxShift = heroScrollX.interpolate({
+              inputRange: [0, cardWidth],
+              outputRange: [30, 0],
+              extrapolate: 'clamp',
+            });
+            return (
           <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
-          {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
-            /* ── Payday split ── */
             <AnimGlyph delay={0}>
+              <Animated.ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                scrollEventThrottle={16}
+                onScroll={Animated.event(
+                  [{ nativeEvent: { contentOffset: { x: heroScrollX } } }],
+                  { useNativeDriver: true },
+                )}
+                onMomentumScrollEnd={(e) => {
+                  const page = Math.round(e.nativeEvent.contentOffset.x / cardWidth);
+                  if (page !== heroPage) hapticTick();
+                  setHeroPage(page);
+                }}
+                style={{ marginHorizontal: -24 }}
+                contentContainerStyle={{ paddingHorizontal: 24 }}
+                decelerationRate="fast"
+                snapToInterval={cardWidth}
+                snapToAlignment="start"
+              >
+                {/* ── Page 1: Budget / Payday ── */}
+                <View style={{ width: cardWidth }}>
+          {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
               <Card variant="hero">
                 <Text style={s.heroLabel}>PAYDAY</Text>
                 <Text style={s.heroAction}>
@@ -1642,10 +1678,7 @@ export default function Home() {
                   <Text style={s.heroCtaText}>Ask Bocy about this</Text>
                 </TouchableOpacity>
               </Card>
-            </AnimGlyph>
           ) : (
-            /* ── Weekly budget status (default) ── */
-            <AnimGlyph delay={0}>
               <Card variant="hero">
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <View style={{ flex: 1 }}>
@@ -1710,32 +1743,61 @@ export default function Home() {
                     {syncDataSource === 'fallback' ? ' (using cached data)' : ''}
                   </Text>
                 )}
+              </Card>
+          )}
+                </View>
 
-                {/* Top move teaser */}
+                {/* ── Page 2: #1 Move (parallax) ── */}
                 {dashboardMoves.length > 0 && (
-                  <View style={{ marginTop: 24, paddingTop: 24, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
-                      #1 MOVE
-                    </Text>
-                    <Text style={{ fontFamily: fonts.medium, fontSize: 15, color: colors.text, lineHeight: 24 }}>
-                      {stripMd(dashboardMoves[0].action)}
-                    </Text>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green, marginTop: 8, letterSpacing: 0.3 }}>
-                      +{'\u00a3'}{(dashboardMoves[0].annualImpact || 0).toLocaleString()}/yr
-                    </Text>
+                  <View style={{ width: cardWidth }}>
+                    <Card variant="highlight">
+                      <Animated.View style={{ transform: [{ translateX: parallaxShift }] }}>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
+                          #1 MOVE
+                        </Text>
+                        <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                          {stripMd(dashboardMoves[0].action)}
+                        </Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.green, marginTop: 12, letterSpacing: 0.3 }}>
+                          +{'\u00a3'}{(dashboardMoves[0].annualImpact || 0).toLocaleString()}/yr
+                        </Text>
+                        {dashboardMoves[0].effect && (
+                          <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.text2, marginTop: 14, lineHeight: 20 }}>
+                            {stripMd(dashboardMoves[0].effect)}
+                          </Text>
+                        )}
+                      </Animated.View>
+                      <TouchableOpacity
+                        style={[s.heroCta, { marginTop: 24 }]}
+                        onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: ${stripMd(dashboardMoves[0].action)}` } })}
+                      >
+                        <Text style={s.heroCtaText}>Ask Bocy about this</Text>
+                      </TouchableOpacity>
+                    </Card>
                   </View>
                 )}
-              </Card>
+              </Animated.ScrollView>
             </AnimGlyph>
-          )}
-          </View>
 
-          {/* Dot separator */}
-          <View style={s.dotSeparator}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <View key={i} style={[s.dot, { backgroundColor: colors.border }]} />
-            ))}
+            {/* Pagination dots */}
+            <View style={s.dotSeparator}>
+              {Array.from({ length: heroPageCount }).map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    s.dot,
+                    {
+                      backgroundColor: heroPage === i ? colors.accent : colors.border,
+                      width: heroPage === i ? 12 : 3,
+                      borderRadius: heroPage === i ? 2 : 1.5,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
           </View>
+            );
+          })()}
 
           {/* ══════════════════════════════════════════════
               YOUR INSIGHTS — inline from Plan page
