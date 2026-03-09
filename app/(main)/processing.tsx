@@ -7,6 +7,7 @@ import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import type { RankedMove } from '@/lib/move-engine';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { SpendingRing } from '@/components/Charts';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyHero } from '@/components/Bocy';
 import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
@@ -650,25 +651,20 @@ function ProcessingInner() {
         <View style={styles.insightHero}>
           <BocyHero mood="celebrating" animate />
         </View>
+
+        {/* Completion ring */}
+        <View style={{ alignItems: 'center', marginBottom: spacing.lg }}>
+          <SpendingRing
+            progress={1}
+            remaining={STEPS.length}
+            budget={STEPS.length}
+            color={colors.green}
+            size={120}
+          />
+        </View>
+
         <Text style={styles.insightTitle}>Your plan is ready</Text>
         <Text style={styles.insightText}>{insight}</Text>
-
-        {/* Key numbers at a glance */}
-        <View style={styles.insightStats}>
-          <View style={styles.insightStat}>
-            <Text style={styles.insightStatValue}>
-              {STEPS.length}
-            </Text>
-            <Text style={styles.insightStatLabel}>layers analysed</Text>
-          </View>
-          <View style={styles.insightStatDivider} />
-          <View style={styles.insightStat}>
-            <Text style={[styles.insightStatValue, { color: colors.green }]}>
-              {'\u2713'}
-            </Text>
-            <Text style={styles.insightStatLabel}>plan built</Text>
-          </View>
-        </View>
 
         <TouchableOpacity
           style={styles.insightButton}

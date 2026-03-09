@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { hapticTick } from '@/lib/haptics';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyFace } from '@/components/Bocy';
 
@@ -14,6 +15,7 @@ const SLIDES = [
     title: "This isn't a\nbudgeting app",
     body: "Bocy looks at your whole financial picture, not just what you spend. It finds the one move that'll make the biggest difference right now.",
     accent: colors.accent,
+    mood: 'neutral' as const,
   },
   {
     illustration: 'plan' as const,
@@ -25,6 +27,7 @@ const SLIDES = [
       { label: 'Do', detail: 'the highest impact action first, step by step' },
     ],
     accent: colors.text2,
+    mood: 'thinking' as const,
   },
   {
     illustration: 'personal' as const,
@@ -33,44 +36,42 @@ const SLIDES = [
     body: "Everyone's situation is different. Whether you're a freelancer, a parent, or just starting out, Bocy adapts to what matters to you.",
     cta: "Let's get to know you",
     accent: colors.green,
+    mood: 'happy' as const,
   },
 ];
 
 export default function Education() {
   const router = useRouter();
-  const [current, setCurrent] = useState(0);
-  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const scrollRef = useRef<any>(null);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
 
-  // Track page view on mount
   useEffect(() => { trackScreen('Education'); }, []);
 
-  const slide = SLIDES[current];
-  const isLast = current === SLIDES.length - 1;
-
-  const animateTransition = (next: number) => {
-    Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
-      setCurrent(next);
-      Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-    });
-  };
+  const isLast = currentPage === SLIDES.length - 1;
 
   const handleNext = () => {
     if (isLast) {
-      trackEvent('Education Completed', { slides_viewed: current + 1 });
+      trackEvent('Education Completed', { slides_viewed: currentPage + 1 });
       router.push('/(main)/identity');
     } else {
-      trackEvent('Education Slide Viewed', { slide: current + 1 });
-      animateTransition(current + 1);
+      trackEvent('Education Slide Viewed', { slide: currentPage + 1 });
+      const nextPage = currentPage + 1;
+      (scrollRef.current as any)?.scrollTo({ x: nextPage * containerWidth, animated: true });
     }
   };
 
   const handleSkip = () => {
-    trackEvent('Education Skipped', { skipped_at_slide: current });
+    trackEvent('Education Skipped', { skipped_at_slide: currentPage });
     router.push('/(main)/identity');
   };
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
+    >
       {/* Skip button */}
       {!isLast && (
         <TouchableOpacity style={styles.skipBtn} onPress={handleSkip}>
@@ -78,61 +79,102 @@ export default function Education() {
         </TouchableOpacity>
       )}
 
-      <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
-        {/* Bocy character */}
-        <View style={styles.bocyHero}>
-          <BocyFace
-            mood={current === 0 ? 'neutral' : current === 1 ? 'thinking' : 'happy'}
-            size="lg"
-            breathing
-          />
-        </View>
-
-        {/* Tag */}
-        <Text style={[styles.tag, { color: slide.accent }]}>{slide.tag}</Text>
-
-        {/* Title */}
-        <Text style={styles.title}>{slide.title}</Text>
-
-        {/* Dot separator */}
-        <View style={styles.dotSeparator}>
-          {Array.from({ length: 3 }).map((_, i) => (
-            <View key={i} style={[styles.dot, { backgroundColor: slide.accent + '40' }]} />
-          ))}
-        </View>
-
-        {/* Body or bullets */}
-        {slide.body && <Text style={styles.body}>{slide.body}</Text>}
-        {slide.bullets && (
-          <View style={styles.bullets}>
-            {slide.bullets.map((b, i) => (
-              <View key={i} style={styles.bulletRow}>
-                <View style={[styles.bulletDot, { backgroundColor: slide.accent }]}>
-                  <Text style={styles.bulletNum}>{i + 1}</Text>
+      {/* ── Horizontal snap carousel ── */}
+      {containerWidth > 0 && (
+        <Animated.ScrollView
+          ref={scrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          scrollEventThrottle={16}
+          decelerationRate="fast"
+          snapToInterval={containerWidth}
+          snapToAlignment="start"
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+            { useNativeDriver: false },
+          )}
+          onMomentumScrollEnd={(e) => {
+            const page = Math.round(e.nativeEvent.contentOffset.x / containerWidth);
+            if (page !== currentPage) hapticTick();
+            setCurrentPage(page);
+          }}
+          style={styles.carousel}
+          contentContainerStyle={{ alignItems: 'center' }}
+        >
+          {SLIDES.map((slide, idx) => (
+            <View key={idx} style={[styles.slideWrap, { width: containerWidth }]}>
+              <View style={styles.content}>
+                {/* Bocy character */}
+                <View style={styles.bocyHero}>
+                  <BocyFace mood={slide.mood} size="lg" breathing />
                 </View>
-                <View style={styles.bulletContent}>
-                  <Text style={[styles.bulletLabel, { color: slide.accent }]}>{b.label}</Text>
-                  <Text style={styles.bulletDetail}>{b.detail}</Text>
+
+                {/* Tag */}
+                <Text style={[styles.tag, { color: slide.accent }]}>{slide.tag}</Text>
+
+                {/* Title */}
+                <Text style={styles.title}>{slide.title}</Text>
+
+                {/* Dot separator */}
+                <View style={styles.dotSeparator}>
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <View key={i} style={[styles.dot, { backgroundColor: slide.accent + '40' }]} />
+                  ))}
                 </View>
+
+                {/* Body or bullets */}
+                {slide.body && <Text style={styles.body}>{slide.body}</Text>}
+                {slide.bullets && (
+                  <View style={styles.bullets}>
+                    {slide.bullets.map((b, i) => (
+                      <View key={i} style={styles.bulletRow}>
+                        <View style={[styles.bulletDot, { backgroundColor: slide.accent }]}>
+                          <Text style={styles.bulletNum}>{i + 1}</Text>
+                        </View>
+                        <View style={styles.bulletContent}>
+                          <Text style={[styles.bulletLabel, { color: slide.accent }]}>{b.label}</Text>
+                          <Text style={styles.bulletDetail}>{b.detail}</Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
-            ))}
-          </View>
-        )}
-      </Animated.View>
-
-      {/* Bottom area: dots + button */}
-      <View style={styles.bottomArea}>
-        {/* Progress dots */}
-        <View style={styles.dots}>
-          {SLIDES.map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.progressDot,
-                i === current && [styles.dotActive, { backgroundColor: slide.accent }],
-              ]}
-            />
+            </View>
           ))}
+        </Animated.ScrollView>
+      )}
+
+      {/* Bottom area: animated dots + button */}
+      <View style={styles.bottomArea}>
+        {/* Animated progress dots */}
+        <View style={styles.dots}>
+          {SLIDES.map((slide, i) => {
+            if (containerWidth <= 0) {
+              return (
+                <View
+                  key={i}
+                  style={[styles.progressDot, i === 0 && [styles.dotActive, { backgroundColor: slide.accent }]]}
+                />
+              );
+            }
+            const dotWidth = scrollX.interpolate({
+              inputRange: [(i - 1) * containerWidth, i * containerWidth, (i + 1) * containerWidth],
+              outputRange: [8, 28, 8],
+              extrapolate: 'clamp',
+            });
+            const dotBg = scrollX.interpolate({
+              inputRange: [(i - 1) * containerWidth, i * containerWidth, (i + 1) * containerWidth],
+              outputRange: [colors.muted, slide.accent, colors.muted],
+              extrapolate: 'clamp',
+            });
+            return (
+              <Animated.View
+                key={i}
+                style={[styles.progressDot, { width: dotWidth, backgroundColor: dotBg }]}
+              />
+            );
+          })}
         </View>
 
         <TouchableOpacity
@@ -141,7 +183,7 @@ export default function Education() {
           activeOpacity={0.8}
         >
           <Text style={[styles.buttonText, isLast && { color: '#000000' }]}>
-            {isLast ? (slide.cta || 'Continue') : 'Next'}
+            {isLast ? (SLIDES[currentPage].cta || 'Continue') : 'Next'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -153,7 +195,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
-    paddingHorizontal: spacing.xl + 4,
     maxWidth: 640,
     alignSelf: 'center' as const,
     width: '100%',
@@ -174,6 +215,13 @@ const styles = StyleSheet.create({
     color: colors.dim,
     letterSpacing: 1,
     textTransform: 'uppercase',
+  },
+  carousel: {
+    flex: 1,
+  },
+  slideWrap: {
+    flex: 1,
+    paddingHorizontal: spacing.xl + 4,
   },
   content: {
     flex: 1,
@@ -259,6 +307,7 @@ const styles = StyleSheet.create({
   },
   bottomArea: {
     paddingBottom: spacing.xxl + spacing.sm,
+    paddingHorizontal: spacing.xl + 4,
     alignItems: 'center',
   },
   dots: {

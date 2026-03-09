@@ -6,6 +6,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { AnimGlyph, BreathingBar } from '@/components/Card';
+import { hapticLight } from '@/lib/haptics';
 
 const SITUATIONS = [
   { key: 'in_debt', label: 'In debt' },
@@ -84,12 +86,13 @@ export default function Goals() {
       return (
         <>
           <Text style={styles.question}>How would you describe your current financial situation?</Text>
-          {SITUATIONS.map((item) => (
+          {SITUATIONS.map((item, i) => (
             <OptionButton
               key={item.key}
               label={item.label}
               selected={situation === item.key}
               onPress={() => setSituation(item.key)}
+              index={i}
             />
           ))}
         </>
@@ -99,12 +102,13 @@ export default function Goals() {
       return (
         <>
           <Text style={styles.question}>What's your main goal for the next 12 months?</Text>
-          {ONE_YEAR_GOALS.map((item) => (
+          {ONE_YEAR_GOALS.map((item, i) => (
             <OptionButton
               key={item.key}
               label={item.label}
               selected={oneYearGoal === item.key}
               onPress={() => setOneYearGoal(item.key)}
+              index={i}
             />
           ))}
         </>
@@ -113,12 +117,13 @@ export default function Goals() {
     return (
       <>
         <Text style={styles.question}>Where do you want to be in 2 years?</Text>
-        {TWO_YEAR_GOALS.map((item) => (
+        {TWO_YEAR_GOALS.map((item, i) => (
           <OptionButton
             key={item.key}
             label={item.label}
             selected={twoYearGoal === item.key}
             onPress={() => setTwoYearGoal(item.key)}
+            index={i}
           />
         ))}
         <TextInput
@@ -137,6 +142,14 @@ export default function Goals() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.progress}>Step {step + 1} of 3</Text>
+        {/* Step progress bar */}
+        <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginBottom: spacing.xl }}>
+          <BreathingBar
+            color={colors.accent}
+            width={`${Math.round(((step + 1) / 3) * 100)}%`}
+            style={{ height: '100%', borderRadius: 1.5 }}
+          />
+        </View>
         {renderStep()}
 
         <TouchableOpacity
@@ -157,14 +170,16 @@ export default function Goals() {
   );
 }
 
-function OptionButton({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+function OptionButton({ label, selected, onPress, index = 0 }: { label: string; selected: boolean; onPress: () => void; index?: number }) {
   return (
-    <TouchableOpacity
-      style={[styles.option, selected && styles.optionSelected]}
-      onPress={onPress}
-    >
-      <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{label}</Text>
-    </TouchableOpacity>
+    <AnimGlyph delay={index * 50}>
+      <TouchableOpacity
+        style={[styles.option, selected && styles.optionSelected]}
+        onPress={() => { hapticLight(); onPress(); }}
+      >
+        <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{label}</Text>
+      </TouchableOpacity>
+    </AnimGlyph>
   );
 }
 

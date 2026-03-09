@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { useEffect, useState, useRef } from 'react';
+import { View, Animated, Easing, StyleSheet } from 'react-native';
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -149,6 +149,36 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Full-screen overlay that flashes on theme toggle and fades out */
+function ThemeOverlay() {
+  const { colors, isDark } = useTheme();
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [overlayBg, setOverlayBg] = useState<string | null>(null);
+  const prevTheme = useRef(isDark);
+
+  useEffect(() => {
+    if (prevTheme.current !== isDark) {
+      prevTheme.current = isDark;
+      setOverlayBg(colors.bg);
+      fadeAnim.setValue(1);
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 400,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(() => setOverlayBg(null));
+    }
+  }, [isDark]);
+
+  if (!overlayBg) return null;
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[StyleSheet.absoluteFill, { backgroundColor: overlayBg, opacity: fadeAnim, zIndex: 9999 }]}
+    />
+  );
+}
+
 function InnerLayout() {
   const { colors, isDark } = useTheme();
 
@@ -156,6 +186,7 @@ function InnerLayout() {
     <AuthGate>
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
       <StatusBar style={isDark ? 'light' : 'dark'} />
+      <ThemeOverlay />
     </AuthGate>
   );
 }

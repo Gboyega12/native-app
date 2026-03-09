@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking,
-  LayoutAnimation, Animated, Easing, Switch, ActivityIndicator,
+  LayoutAnimation, Switch, ActivityIndicator,
   Modal, Pressable, TextInput,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -13,35 +13,7 @@ import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import { useWebPush } from '@/lib/web-push';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
-
-// ── Glyph micro-animation: fade+scale on mount ──
-const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 500,
-      delay,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, []);
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          opacity: anim,
-          transform: [{
-            scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
-          }],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
-};
+import { AnimGlyph, BreathingBar } from '@/components/Card';
 
 const CONSENT_DAYS = 90;
 const WARN_DAYS = 14;
@@ -454,6 +426,16 @@ export default function Profile() {
                   {isBank ? 'Bank' : 'Credit'}
                   {expired ? ' — expired' : expiring ? ` — ${daysLeft}d left` : ` — ${daysLeft}d remaining`}
                 </Text>
+                {/* Consent health bar */}
+                {!expired && (
+                  <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
+                    <BreathingBar
+                      color={statusColor}
+                      width={`${Math.max(0, Math.min(100, Math.round((daysLeft / CONSENT_DAYS) * 100)))}%`}
+                      style={{ height: '100%', borderRadius: 1.5 }}
+                    />
+                  </View>
+                )}
               </View>
               {expired ? (
                 <TouchableOpacity style={s.accountAction} onPress={handleAddAccount} activeOpacity={0.7}>
@@ -500,6 +482,16 @@ export default function Profile() {
                     : d.account_type === 'bnpl' ? 'BNPL'
                     : d.account_type || 'Debt'}
                 </Text>
+                {/* Utilization bar for debt with credit limit */}
+                {lim > 0 && util != null && (
+                  <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
+                    <BreathingBar
+                      color={isHigh ? colors.coral : colors.accent}
+                      width={`${Math.min(100, util)}%`}
+                      style={{ height: '100%', borderRadius: 1.5 }}
+                    />
+                  </View>
+                )}
               </View>
               <TouchableOpacity
                 onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}

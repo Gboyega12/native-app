@@ -7,6 +7,8 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen, setUserProperty } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { AnimGlyph } from '@/components/Card';
+import { hapticLight } from '@/lib/haptics';
 import type {
   WorkSetup, HouseholdType, HousingStatus, FinancialExperience,
   RiskAppetite, Priority, UpcomingEvent, Dependent,
@@ -396,32 +398,33 @@ export default function Identity() {
 
           {/* Cards grid */}
           <View style={styles.grid}>
-            {currentScreen!.options.map((opt) => {
+            {currentScreen!.options.map((opt, optIdx) => {
               const sel = isSelected(opt.key);
               return (
-                <TouchableOpacity
-                  key={opt.key}
-                  style={[styles.card, sel && styles.cardSelected]}
-                  onPress={() => handleSelect(opt.key)}
-                  activeOpacity={0.7}
-                >
-                  {/* Checkbox for multi-select screens */}
-                  {isMulti && (
-                    <View style={[styles.checkbox, sel && styles.checkboxSelected]}>
-                      {sel && <Text style={styles.checkboxMark}>{'\u2713'}</Text>}
+                <AnimGlyph key={opt.key} delay={optIdx * 50}>
+                  <TouchableOpacity
+                    style={[styles.card, sel && styles.cardSelected]}
+                    onPress={() => { hapticLight(); handleSelect(opt.key); }}
+                    activeOpacity={0.7}
+                  >
+                    {/* Checkbox for multi-select screens */}
+                    {isMulti && (
+                      <View style={[styles.checkbox, sel && styles.checkboxSelected]}>
+                        {sel && <Text style={styles.checkboxMark}>{'\u2713'}</Text>}
+                      </View>
+                    )}
+                    <View style={[styles.cardIcon, sel && styles.cardIconSelected]}>
+                      <Text style={[styles.cardIconText, sel && styles.cardIconTextSelected]}>
+                        {opt.icon}
+                      </Text>
                     </View>
-                  )}
-                  <View style={[styles.cardIcon, sel && styles.cardIconSelected]}>
-                    <Text style={[styles.cardIconText, sel && styles.cardIconTextSelected]}>
-                      {opt.icon}
+                    <Text style={[styles.cardLabel, sel && styles.cardLabelSelected]}>
+                      {opt.label}
                     </Text>
-                  </View>
-                  <Text style={[styles.cardLabel, sel && styles.cardLabelSelected]}>
-                    {opt.label}
-                  </Text>
-                  <Text style={styles.cardDesc}>{opt.desc}</Text>
-                  {!isMulti && sel && <View style={styles.checkBadge}><Text style={styles.checkMark}>{'\u2713'}</Text></View>}
-                </TouchableOpacity>
+                    <Text style={styles.cardDesc}>{opt.desc}</Text>
+                    {!isMulti && sel && <View style={styles.checkBadge}><Text style={styles.checkMark}>{'\u2713'}</Text></View>}
+                  </TouchableOpacity>
+                </AnimGlyph>
               );
             })}
           </View>

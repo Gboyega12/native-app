@@ -9,6 +9,7 @@ import { getTrueLayerAuthUrl } from '@/lib/truelayer';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
+import SkeletonLine from '@/components/Skeleton';
 
 // ── Session storage helpers (web only) ──
 function saveConnectState(csv: string, count: number) {
@@ -348,11 +349,19 @@ export default function Connect() {
 
   const anyLoading = loading || loadingCSV || loadingPDF;
 
-  // Show full-screen loading when returning from TrueLayer redirect
+  // Show skeleton + status when returning from TrueLayer redirect
   if (redirectLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color={colors.accent} size="large" />
+        {!errorMsg && (
+          <View style={{ width: '100%', maxWidth: 320, gap: 16, marginBottom: spacing.xl }}>
+            <SkeletonLine width="60%" height={12} delay={0} />
+            <SkeletonLine width="100%" height={40} delay={100} />
+            <SkeletonLine width="80%" height={12} delay={200} />
+            <SkeletonLine width="100%" height={6} delay={300} style={{ borderRadius: 3 }} />
+            <SkeletonLine width="50%" height={10} delay={400} />
+          </View>
+        )}
         <Text style={styles.loadingText}>{statusMsg || 'Connecting your account...'}</Text>
         <Text style={styles.loadingHint}>This may take a few seconds</Text>
         {errorMsg ? (
