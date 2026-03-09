@@ -224,7 +224,7 @@ function buildAchievementMessage(key, ctx) {
 
     case 'debt_free':
       return {
-        headline: 'You're debt free',
+        headline: "You're debt free",
         detail: 'Every pound you were paying in interest is now yours. This changes everything.',
         subject: 'Debt free — every pound of interest is now yours',
         pushBody: 'You cleared your last debt. Every pound of interest is now yours.',

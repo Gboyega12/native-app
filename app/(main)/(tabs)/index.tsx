@@ -3770,16 +3770,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 18,
     color: c.text,
   },
-  limitEditorInput: {
-    flex: 1,
-    fontFamily: fonts.mono,
-    fontSize: 18,
-    color: c.text,
-    borderBottomWidth: 1,
-    borderBottomColor: c.accent,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-  },
   limitEditorSave: {
     backgroundColor: c.accent,
     paddingVertical: 8,

@@ -69,7 +69,7 @@ type Props = {
   visible: boolean;
   onDismiss: () => void;
   /** Ref to the dashboard ScrollView for scrolling to cards */
-  scrollRef?: React.RefObject<ScrollView>;
+  scrollRef?: React.RefObject<ScrollView | null>;
   /** Y positions of key cards on the dashboard, keyed by name */
   cardPositions?: React.MutableRefObject<Record<string, number>>;
   /** Router for tab navigation */

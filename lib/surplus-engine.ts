@@ -9,7 +9,7 @@
 //
 // UK tax year 2025/26 rates. Update annually.
 
-import type { FinancialProfile, UserIdentity } from './types';
+import type { FinancialProfile, UserIdentity } from './types.js';
 
 // ── UK Tax Constants (2025/26) ──
 

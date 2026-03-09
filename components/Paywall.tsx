@@ -53,8 +53,8 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
     (async () => {
       const offering = await getOffering();
       if (!offering) return;
-      const monthly = offering.availablePackages.find((p) => p.identifier === '$rc_monthly');
-      const yearly = offering.availablePackages.find((p) => p.identifier === '$rc_annual');
+      const monthly = offering.availablePackages.find((p: any) => p.identifier === '$rc_monthly');
+      const yearly = offering.availablePackages.find((p: any) => p.identifier === '$rc_annual');
       if (monthly) setNativeMonthlyPrice(monthly.product.priceString);
       if (yearly) setNativeYearlyPrice(yearly.product.priceString);
     })();
