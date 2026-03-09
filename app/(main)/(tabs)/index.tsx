@@ -1665,7 +1665,7 @@ export default function Home() {
             });
             const parallaxShift = heroScrollX.interpolate({
               inputRange: [0, snapInterval],
-              outputRange: [30, 0],
+              outputRange: [10, 0],
               extrapolate: 'clamp',
             });
             return (
@@ -1827,7 +1827,7 @@ export default function Home() {
 
                 {/* ── Horizontal connector dots between cards ── */}
                 {hasMoveCard && (
-                  <View style={{ width: CARD_GAP, justifyContent: 'center', alignItems: 'center' }}>
+                  <View style={{ width: CARD_GAP, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
                     <HorizontalConnectorDots scrollProgress={scrollProgress} />
                   </View>
                 )}
@@ -1856,7 +1856,7 @@ export default function Home() {
                         )}
                       </Animated.View>
                       <TouchableOpacity
-                        style={[s.heroCta, { marginTop: 24 }]}
+                        style={[s.heroCta, { marginTop: 24, flex: 0, alignSelf: 'flex-start', paddingHorizontal: 28 }]}
                         onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: ${stripMd(dashboardMoves[0].action)}` } })}
                       >
                         <Text style={s.heroCtaText}>Ask Bocy about this</Text>

@@ -441,10 +441,10 @@ export function HorizontalConnectorDots({
   const { colors } = useTheme();
   const dotColor = color || colors.border;
   const dotAccent = accentColor || colors.accent;
-  const COUNT = 5;
+  const COUNT = 3;
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
       {Array.from({ length: COUNT }).map((_, i) => {
         // Each dot lights up at a staggered point as scroll progresses 0→1
         const start = i / COUNT;
@@ -457,18 +457,18 @@ export function HorizontalConnectorDots({
         });
         const scale = scrollProgress.interpolate({
           inputRange: [Math.max(0, start), peak, Math.min(1, end)],
-          outputRange: [1, 1.6, 1],
+          outputRange: [1, 1.3, 1],
           extrapolate: 'clamp',
         });
         return (
           <Animated.View
             key={i}
             style={{
-              width: 3,
-              height: 3,
-              borderRadius: 1.5,
+              width: 2.5,
+              height: 2.5,
+              borderRadius: 1.25,
               backgroundColor: bg,
-              marginHorizontal: 2.5,
+              marginHorizontal: 1,
               transform: [{ scale }],
             }}
           />
