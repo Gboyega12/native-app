@@ -20,7 +20,7 @@ import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals } from '@/lib/types';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
-import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, HorizontalConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { DashboardSkeleton } from '@/components/Skeleton';
 import { SpendingRing, CategoryBars, WeeklySparkline } from '@/components/Charts';
@@ -1652,10 +1652,19 @@ export default function Home() {
               FOCUS CARD — horizontal snapping pager
               ══════════════════════════════════════════════ */}
           {(() => {
+            const CARD_GAP = 12;
             const cardWidth = screenWidth - 48; // 24px padding each side
-            const heroPageCount = dashboardMoves.length > 0 ? 2 : 1;
+            const snapInterval = cardWidth + CARD_GAP;
+            const hasMoveCard = dashboardMoves.length > 0;
+            const heroPageCount = hasMoveCard ? 2 : 1;
+            const HERO_MIN_HEIGHT = 280;
+            const scrollProgress = heroScrollX.interpolate({
+              inputRange: [0, snapInterval],
+              outputRange: [0, 1],
+              extrapolate: 'clamp',
+            });
             const parallaxShift = heroScrollX.interpolate({
-              inputRange: [0, cardWidth],
+              inputRange: [0, snapInterval],
               outputRange: [30, 0],
               extrapolate: 'clamp',
             });
@@ -1671,24 +1680,24 @@ export default function Home() {
                   { useNativeDriver: false },
                 )}
                 onMomentumScrollEnd={(e) => {
-                  const page = Math.round(e.nativeEvent.contentOffset.x / cardWidth);
+                  const page = Math.round(e.nativeEvent.contentOffset.x / snapInterval);
                   if (page !== heroPage) hapticTick();
                   setHeroPage(page);
                 }}
                 style={{ marginHorizontal: -24 }}
                 contentContainerStyle={{ paddingHorizontal: 24 }}
                 decelerationRate="fast"
-                snapToInterval={cardWidth}
+                snapToInterval={snapInterval}
                 snapToAlignment="start"
               >
                 {/* ── Page 1: Budget / Payday ── */}
-                <View style={{ width: cardWidth }}>
+                <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
           {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
               <Animated.View
                 {...paydayPanResponder.panHandlers}
-                style={{ transform: [{ translateY: paydayTranslateY }], opacity: paydayOpacity }}
+                style={{ transform: [{ translateY: paydayTranslateY }], opacity: paydayOpacity, flex: 1 }}
               >
-              <Card variant="hero">
+              <Card variant="hero" style={{ flex: 1 }}>
                 <Text style={s.heroLabel}>PAYDAY</Text>
                 <Text style={s.heroAction}>
                   {weeklyCtx.recentIncomeEvents.map((e) =>
@@ -1733,7 +1742,7 @@ export default function Home() {
               </Card>
               </Animated.View>
           ) : (
-              <Card variant="hero">
+              <Card variant="hero" style={{ flex: 1 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
@@ -1816,11 +1825,18 @@ export default function Home() {
           )}
                 </View>
 
+                {/* ── Horizontal connector dots between cards ── */}
+                {hasMoveCard && (
+                  <View style={{ width: CARD_GAP, justifyContent: 'center', alignItems: 'center' }}>
+                    <HorizontalConnectorDots scrollProgress={scrollProgress} />
+                  </View>
+                )}
+
                 {/* ── Page 2: #1 Move (parallax) ── */}
-                {dashboardMoves.length > 0 && (
-                  <View style={{ width: cardWidth }}>
-                    <Card variant="highlight">
-                      <Animated.View style={{ transform: [{ translateX: parallaxShift }] }}>
+                {hasMoveCard && (
+                  <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
+                    <Card variant="highlight" style={{ flex: 1 }}>
+                      <Animated.View style={{ transform: [{ translateX: parallaxShift }], flex: 1 }}>
                         <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
                           #1 MOVE
                         </Text>
@@ -1851,22 +1867,32 @@ export default function Home() {
               </Animated.ScrollView>
             </AnimGlyph>
 
-            {/* Pagination dots */}
-            <View style={s.dotSeparator}>
-              {Array.from({ length: heroPageCount }).map((_, i) => (
-                <View
-                  key={i}
-                  style={[
-                    s.dot,
-                    {
-                      backgroundColor: heroPage === i ? colors.accent : colors.border,
-                      width: heroPage === i ? 12 : 3,
-                      borderRadius: heroPage === i ? 2 : 1.5,
-                    },
-                  ]}
-                />
-              ))}
-            </View>
+            {/* Animated pagination dots */}
+            {heroPageCount > 1 && (
+              <View style={s.dotSeparator}>
+                {Array.from({ length: heroPageCount }).map((_, i) => {
+                  const dotWidth = heroScrollX.interpolate({
+                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
+                    outputRange: [3, 12, 3],
+                    extrapolate: 'clamp',
+                  });
+                  const dotBg = heroScrollX.interpolate({
+                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
+                    outputRange: [colors.border, colors.accent, colors.border],
+                    extrapolate: 'clamp',
+                  });
+                  return (
+                    <Animated.View
+                      key={i}
+                      style={[
+                        s.dot,
+                        { width: dotWidth, backgroundColor: dotBg, borderRadius: 2 },
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+            )}
           </View>
             );
           })()}

@@ -426,6 +426,58 @@ export const ConnectorDots = forwardRef<ConnectorDotsHandle, { color?: string; a
   },
 );
 
+// ── HorizontalConnectorDots ──
+// Horizontal dot bridge between hero carousel cards.
+// Dots cascade left-to-right driven by scroll progress (0 → 1).
+export function HorizontalConnectorDots({
+  scrollProgress,
+  color,
+  accentColor,
+}: {
+  scrollProgress: Animated.AnimatedInterpolation<string | number>;
+  color?: string;
+  accentColor?: string;
+}) {
+  const { colors } = useTheme();
+  const dotColor = color || colors.border;
+  const dotAccent = accentColor || colors.accent;
+  const COUNT = 5;
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 }}>
+      {Array.from({ length: COUNT }).map((_, i) => {
+        // Each dot lights up at a staggered point as scroll progresses 0→1
+        const start = i / COUNT;
+        const peak = (i + 0.5) / COUNT;
+        const end = (i + 1) / COUNT;
+        const bg = scrollProgress.interpolate({
+          inputRange: [Math.max(0, start), peak, Math.min(1, end)],
+          outputRange: [dotColor, dotAccent, dotColor],
+          extrapolate: 'clamp',
+        });
+        const scale = scrollProgress.interpolate({
+          inputRange: [Math.max(0, start), peak, Math.min(1, end)],
+          outputRange: [1, 1.6, 1],
+          extrapolate: 'clamp',
+        });
+        return (
+          <Animated.View
+            key={i}
+            style={{
+              width: 3,
+              height: 3,
+              borderRadius: 1.5,
+              backgroundColor: bg,
+              marginHorizontal: 2.5,
+              transform: [{ scale }],
+            }}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
 // ── Variant style resolver ──
 function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: string): ViewStyle {
   const base: ViewStyle = {
