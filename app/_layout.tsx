@@ -10,6 +10,7 @@ import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { registerPushToken, configureNotificationChannels } from '@/lib/notifications';
 import { registerServiceWorker } from '@/lib/register-sw';
 import { initRevenueCat } from '@/lib/revenuecat';
+import { initMixpanel } from '@/lib/mixpanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
 
@@ -75,6 +76,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       registerServiceWorker();
       initRevenueCat(session.user.id).catch((e) =>
         console.warn('[Layout] initRevenueCat error:', e),
+      );
+      initMixpanel(session.user.id, session.user.email).catch((e) =>
+        console.warn('[Layout] initMixpanel error:', e),
       );
     }
   }, [session?.user?.id]);

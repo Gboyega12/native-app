@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function SignIn() {
@@ -41,6 +42,9 @@ export default function SignIn() {
       setError(authError.message === 'Invalid login credentials'
         ? 'Wrong email or password. Please try again.'
         : authError.message);
+      trackEvent('Sign In Failed', { method: 'email' });
+    } else {
+      trackEvent('Sign In', { method: 'email' });
     }
   };
 
@@ -58,8 +62,10 @@ export default function SignIn() {
     if (oauthError) {
       setError(oauthError.message);
       setGoogleLoading(false);
+      trackEvent('Sign In Failed', { method: 'google' });
+    } else {
+      trackEvent('Sign In', { method: 'google' });
     }
-    // On success, browser redirects to Google — no need to reset loading
   };
 
   return (

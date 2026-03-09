@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function SignUp() {
@@ -38,8 +39,10 @@ export default function SignUp() {
     setLoading(false);
     if (authError) {
       setError(authError.message);
+      trackEvent('Sign Up Failed', { method: 'email' });
     } else {
       setVerificationSent(true);
+      trackEvent('Sign Up', { method: 'email' });
     }
   };
 
@@ -57,6 +60,9 @@ export default function SignUp() {
     if (oauthError) {
       setError(oauthError.message);
       setGoogleLoading(false);
+      trackEvent('Sign Up Failed', { method: 'google' });
+    } else {
+      trackEvent('Sign Up', { method: 'google' });
     }
   };
 
