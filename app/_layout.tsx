@@ -10,7 +10,7 @@ import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { registerPushToken, configureNotificationChannels } from '@/lib/notifications';
 import { registerServiceWorker } from '@/lib/register-sw';
 import { initRevenueCat } from '@/lib/revenuecat';
-import { initMixpanel } from '@/lib/mixpanel';
+import { initMixpanel, resetMixpanel } from '@/lib/mixpanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
 
@@ -53,6 +53,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     let subscription: { unsubscribe: () => void } | null = null;
     try {
       const { data } = supabase.auth.onAuthStateChange((_event, sess) => {
+        if (!sess && session) resetMixpanel(); // Reset on sign-out
         setSession(sess);
         setReady(true);
       });

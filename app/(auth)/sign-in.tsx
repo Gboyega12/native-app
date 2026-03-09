@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { trackEvent } from '@/lib/mixpanel';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function SignIn() {
@@ -18,6 +18,7 @@ export default function SignIn() {
   const [emailConfirmed, setEmailConfirmed] = useState(false);
 
   useEffect(() => {
+    trackScreen('Sign In');
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       if (sessionStorage.getItem('_emailConfirmed')) {
         sessionStorage.removeItem('_emailConfirmed');

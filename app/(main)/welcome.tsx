@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyHero } from '@/components/Bocy';
 
@@ -15,6 +16,9 @@ export default function Welcome() {
   const [lastName, setLastName] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Track page view on mount
+  useState(() => { trackScreen('Welcome'); });
+
   const handleContinue = async () => {
     if (!firstName.trim()) return;
     setLoading(true);
@@ -22,6 +26,7 @@ export default function Welcome() {
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
       const { error } = await supabase.auth.updateUser({ data: { full_name: fullName } });
       if (error) throw error;
+      trackEvent('Onboarding Name Saved');
       router.replace('/(main)/education');
     } catch {
       setLoading(false);
@@ -56,7 +61,7 @@ export default function Welcome() {
             <BenefitItem num="03" text="Guides you through each step" />
           </View>
 
-          <TouchableOpacity style={styles.button} onPress={() => setStep(1)} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.button} onPress={() => { trackEvent('Onboarding Get Started'); setStep(1); }} activeOpacity={0.8}>
             <Text style={styles.buttonText}>Get started</Text>
           </TouchableOpacity>
         </View>

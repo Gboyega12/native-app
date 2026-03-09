@@ -4,6 +4,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 const SITUATIONS = [
@@ -42,8 +43,12 @@ export default function Goals() {
   const [targetAmount, setTargetAmount] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Track page view on mount
+  useState(() => { trackScreen('Goals'); });
+
   const handleNext = async () => {
     if (step < 2) {
+      trackEvent('Goals Step Completed', { step: step + 1 });
       setStep(step + 1);
       return;
     }
@@ -63,6 +68,7 @@ export default function Goals() {
         }, { onConflict: 'user_id' });
         if (error) console.warn('[goals] upsert failed:', error.message);
       }
+      trackEvent('Goals Completed', { situation, one_year_goal: oneYearGoal, two_year_goal: twoYearGoal });
       router.push({ pathname: '/(main)/processing', params: { csvData } });
     } catch {
       setLoading(false);

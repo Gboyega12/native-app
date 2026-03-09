@@ -60,6 +60,11 @@ export function trackEvent(name: string, properties?: Record<string, any>): void
   _mixpanel?.track(name, properties);
 }
 
+/** Track a screen/page view. */
+export function trackScreen(screenName: string, properties?: Record<string, any>): void {
+  _mixpanel?.track('Screen Viewed', { screen: screenName, ...properties });
+}
+
 /** Set a user profile property. */
 export function setUserProperty(key: string, value: any): void {
   _mixpanel?.getPeople()?.set(key, value);

@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen, setUserProperty } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type {
   WorkSetup, HouseholdType, HousingStatus, FinancialExperience,
@@ -160,6 +161,9 @@ export default function Identity() {
   const [risk, setRisk] = useState<string>('');
   const [dependents, setDependents] = useState<string[]>([]);
 
+  // Track page view on mount
+  useState(() => { trackScreen('Identity'); });
+
   const selections = [workSetup, household, housing, experience, priorities, events, risk, dependents];
   const setters = [setWorkSetup, setHousehold, setHousing, setExperience, setPriorities, setEvents, setRisk, setDependents];
 
@@ -220,6 +224,8 @@ export default function Identity() {
       saveAndContinue();
       return;
     }
+    const screenLabels = ['work_setup', 'household', 'housing', 'experience', 'priorities', 'events', 'risk', 'dependents'];
+    trackEvent('Identity Step Completed', { step: screenLabels[step], step_number: step + 1 });
     animateStep(step + 1);
   };
 
@@ -291,6 +297,18 @@ export default function Identity() {
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
       }
+      trackEvent('Identity Completed', {
+        work_setup: workSetup,
+        household,
+        housing,
+        financial_experience: experience,
+        risk_appetite: risk,
+      });
+      setUserProperty('work_setup', workSetup);
+      setUserProperty('household', household);
+      setUserProperty('housing', housing);
+      setUserProperty('financial_experience', experience);
+      setUserProperty('risk_appetite', risk);
       router.push('/(main)/install-app');
     } catch (err: any) {
       console.warn('[identity] Save failed:', err?.message);

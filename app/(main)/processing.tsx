@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { View, Text, Animated, StyleSheet, Easing, TouchableOpacity } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import type { RankedMove } from '@/lib/move-engine';
@@ -109,6 +110,7 @@ function ProcessingInner() {
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    trackScreen('Processing');
     runAnalysis();
   }, []);
 
@@ -610,11 +612,21 @@ function ProcessingInner() {
         ).length,
       } as any;
 
+      trackEvent('Analysis Completed', {
+        transaction_count: result.enrichedTransactions.length,
+        monthly_income: Math.round(result.profile.monthly.income),
+        monthly_spending: Math.round(result.profile.monthly.spending),
+        surplus: Math.round(result.profile.monthly.surplus),
+        move_count: allMoves.length,
+        archetype: result.archetype.key,
+      });
+
       // Show personalised first insight — user navigates manually
       const firstInsight = buildFirstInsight(identityData, result.profile, topMove);
       setInsight(firstInsight || 'Your personalised action plan is ready.');
       // User will tap the button to navigate
     } catch (err: any) {
+      trackEvent('Analysis Failed', { error: err.message });
       setError(err.message || 'Analysis failed. Please try again.');
     }
   };

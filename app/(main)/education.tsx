@@ -4,6 +4,7 @@ import {
   Platform, UIManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyFace } from '@/components/Bocy';
 
@@ -45,6 +46,9 @@ export default function Education() {
   const [current, setCurrent] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
+  // Track page view on mount
+  useState(() => { trackScreen('Education'); });
+
   const slide = SLIDES[current];
   const isLast = current === SLIDES.length - 1;
 
@@ -57,13 +61,16 @@ export default function Education() {
 
   const handleNext = () => {
     if (isLast) {
+      trackEvent('Education Completed', { slides_viewed: current + 1 });
       router.push('/(main)/identity');
     } else {
+      trackEvent('Education Slide Viewed', { slide: current + 1 });
       animateTransition(current + 1);
     }
   };
 
   const handleSkip = () => {
+    trackEvent('Education Skipped', { skipped_at_slide: current });
     router.push('/(main)/identity');
   };
 

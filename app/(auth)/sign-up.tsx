@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { trackEvent } from '@/lib/mixpanel';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function SignUp() {
@@ -17,6 +17,9 @@ export default function SignUp() {
   const [error, setError] = useState('');
   const [verificationSent, setVerificationSent] = useState(false);
   const [resending, setResending] = useState(false);
+
+  // Track page view on mount
+  useState(() => { trackScreen('Sign Up'); });
 
   const handleSignUp = async () => {
     if (!email.trim() || !password.trim()) {

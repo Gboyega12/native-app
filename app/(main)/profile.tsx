@@ -13,6 +13,7 @@ import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
 import { restorePurchases } from '@/lib/revenuecat';
 import { useWebPush } from '@/lib/web-push';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 
 // ── Glyph micro-animation: fade+scale on mount ──
 const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
@@ -122,6 +123,7 @@ export default function Profile() {
   }, [upgraded]);
 
   useEffect(() => {
+    trackScreen('Profile');
     loadUser();
   }, []);
 
@@ -179,6 +181,7 @@ export default function Profile() {
   };
 
   const handleRemoveBank = async (bankId: string, label: string) => {
+    trackEvent('Bank Removed');
     const confirmed = Platform.OS === 'web'
       ? window.confirm(`Remove ${label}?\n\nThis will disconnect this account and remove its data. You can reconnect later.`)
       : await new Promise<boolean>((resolve) =>
@@ -205,6 +208,7 @@ export default function Profile() {
   };
 
   const handleRemoveDebtAccount = async (debtId: string, label: string) => {
+    trackEvent('Debt Account Removed');
     const confirmed = Platform.OS === 'web'
       ? window.confirm(`Remove ${label}?\n\nThis will remove this account from your profile.`)
       : await new Promise<boolean>((resolve) =>
@@ -231,6 +235,7 @@ export default function Profile() {
   };
 
   const handleAddAccount = () => {
+    trackEvent('Add Bank Tapped');
     router.push({ pathname: '/(main)/connect', params: { from: 'profile' } });
   };
 
@@ -287,6 +292,8 @@ export default function Profile() {
         return;
       }
 
+      trackEvent('Debt Account Added', { type: addDebtType });
+
       // Optimistic UI update
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setDebtAccounts((prev) => [...prev, inserted]);
@@ -307,6 +314,7 @@ export default function Profile() {
   };
 
   const handleManageSubscription = async () => {
+    trackEvent('Manage Subscription Tapped');
     setPortalLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -330,6 +338,7 @@ export default function Profile() {
   };
 
   const handleRestorePurchases = async () => {
+    trackEvent('Restore Purchases Tapped');
     setRestoringPurchases(true);
     try {
       const restored = await restorePurchases();
@@ -347,6 +356,7 @@ export default function Profile() {
 
   const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
     const newVal = !notifPrefs[key];
+    trackEvent('Notification Toggled', { type: key, enabled: newVal });
     setNotifPrefs((prev) => ({ ...prev, [key]: newVal }));
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -368,6 +378,7 @@ export default function Profile() {
 
 
   const handleSignOut = async () => {
+    trackEvent('Sign Out');
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -651,7 +662,7 @@ export default function Profile() {
           <Text style={s.groupRowLabel}>{isDark ? 'Dark mode' : 'Light mode'}</Text>
           <Switch
             value={!isDark}
-            onValueChange={toggleTheme}
+            onValueChange={() => { trackEvent('Theme Toggled'); toggleTheme(); }}
             trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
             thumbColor={isDark ? colors.thumbOff : colors.green}
           />
@@ -731,7 +742,7 @@ export default function Profile() {
       {/* ── Subscription management ── */}
       {!isSubscribed && (
         <>
-          <TouchableOpacity style={s.upgradeBtn} onPress={() => setShowPaywall(true)} activeOpacity={0.8}>
+          <TouchableOpacity style={s.upgradeBtn} onPress={() => { trackEvent('Upgrade Tapped'); setShowPaywall(true); }} activeOpacity={0.8}>
             <Text style={s.upgradeBtnText}>{isTrial ? 'Subscribe now' : 'Subscribe'}</Text>
           </TouchableOpacity>
           {(Platform.OS === 'ios' || Platform.OS === 'android') && (

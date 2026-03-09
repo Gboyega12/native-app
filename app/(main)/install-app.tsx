@@ -8,6 +8,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, Animated, Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyFace } from '@/components/Bocy';
 
@@ -52,6 +53,7 @@ export default function InstallApp() {
       router.replace('/(main)/connect');
       return;
     }
+    trackScreen('Install App');
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
   }, []);
 
@@ -73,6 +75,7 @@ export default function InstallApp() {
       deferredPrompt.prompt();
       const result = await deferredPrompt.userChoice;
       if (result.outcome === 'accepted') {
+        trackEvent('App Installed');
         setInstalled(true);
         // Brief pause to show success, then continue
         setTimeout(() => router.push('/(main)/connect'), 1200);
@@ -98,6 +101,7 @@ export default function InstallApp() {
   }, []);
 
   const handleSkip = () => {
+    trackEvent('App Install Skipped');
     router.push('/(main)/connect');
   };
 

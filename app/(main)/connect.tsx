@@ -8,6 +8,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as DocumentPicker from 'expo-document-picker';
 import { getTrueLayerAuthUrl } from '@/lib/truelayer';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 // ── Session storage helpers (web only) ──
@@ -64,6 +65,9 @@ export default function Connect() {
   const [connectedCount, setConnectedCount] = useState(params.csvData ? 1 : 0);
 
   const isFromProfile = params.from === 'profile';
+
+  // Track page view on mount
+  useState(() => { trackScreen('Connect', { from: isFromProfile ? 'profile' : 'onboarding' }); });
 
   // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
@@ -223,12 +227,14 @@ export default function Connect() {
   };
 
   const handleConnectionSuccess = (csvData: string, _label: string) => {
+    trackEvent('Bank Connect Success', { method: _label });
     // Onboarding: single account connect → proceed straight to analysis
     clearConnectState();
     router.push({ pathname: '/(main)/processing', params: { csvData } });
   };
 
   const handleTrueLayer = async () => {
+    trackEvent('Bank Connect Started', { method: 'open_banking' });
     setLoading(true);
     setErrorMsg('');
     setStatusMsg('Connecting to your bank...');
@@ -277,6 +283,7 @@ export default function Connect() {
   };
 
   const handleCSVUpload = async () => {
+    trackEvent('Bank Connect Started', { method: 'csv_upload' });
     setLoadingCSV(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -322,6 +329,7 @@ export default function Connect() {
   };
 
   const handlePDFUpload = async () => {
+    trackEvent('Bank Connect Started', { method: 'pdf_upload' });
     setLoadingPDF(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({

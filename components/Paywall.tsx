@@ -11,6 +11,7 @@ import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
 import { purchasePackage, getOffering, restorePurchases } from '@/lib/revenuecat';
 import { useSubscription } from '@/lib/subscription';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 
 const FEATURES = [
   { label: 'Personalised action plan', desc: 'Step-by-step moves ranked by impact on your finances' },
@@ -36,6 +37,11 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedPrice, setSelectedPrice] = useState<'monthly' | 'yearly'>('monthly');
 
+  const handleDismiss = () => {
+    trackEvent('Paywall Dismissed');
+    onClose();
+  };
+
   const isNative = Platform.OS === 'ios' || Platform.OS === 'android';
 
   // Fetch native prices on open (override hardcoded £ values with store prices)
@@ -57,6 +63,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   // Reset state whenever modal opens so stale loading/error don't stick
   useEffect(() => {
     if (visible) {
+      trackEvent('Paywall Shown');
       setLoading(false);
       setRestoring(false);
       setError(null);
@@ -86,6 +93,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
   // ── Native IAP via RevenueCat ──
   const handleNativePurchase = async () => {
+    trackEvent('Subscribe Tapped', { plan: selectedPrice });
     setLoading(true);
     setError(null);
     try {
@@ -93,11 +101,13 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       if (customerInfo) {
         // Purchase succeeded — RC webhook will upsert the DB row,
         // but also refresh locally for instant UI update
+        trackEvent('Subscribe Success', { plan: selectedPrice });
         await refreshTier();
         onClose();
       }
       // null = user cancelled, just stop loading
     } catch (err: any) {
+      trackEvent('Subscribe Failed', { plan: selectedPrice });
       console.warn('[Paywall] Native purchase error:', err);
       showError(err?.message || 'Purchase failed. Please try again.');
     }
@@ -106,6 +116,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
   // ── Web: Stripe Checkout redirect ──
   const handleStripeCheckout = async () => {
+    trackEvent('Subscribe Tapped', { plan: selectedPrice });
     setLoading(true);
     setError(null);
     try {
@@ -132,6 +143,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       clearTimeout(timeout);
 
       if (!res.ok) {
+        trackEvent('Subscribe Failed', { plan: selectedPrice });
         const text = await res.text().catch(() => '');
         let msg = 'Unable to start checkout. Please try again.';
         try { msg = JSON.parse(text).error || msg; } catch {}
@@ -142,6 +154,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       const data = await res.json();
 
       if (!data.url) {
+        trackEvent('Subscribe Failed', { plan: selectedPrice });
         showError(data.error || 'Unable to start checkout. Please try again.');
         return;
       }
@@ -149,6 +162,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       window.location.href = data.url;
       return; // page is navigating away; don't touch state
     } catch (err: any) {
+      trackEvent('Subscribe Failed', { plan: selectedPrice });
       console.warn('[Paywall] Checkout error:', err);
       const msg = err?.name === 'AbortError'
         ? 'Request timed out. Please try again.'
@@ -162,6 +176,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
   // ── Restore purchases (native only) ──
   const handleRestore = async () => {
+    trackEvent('Restore Purchases Tapped');
     setRestoring(true);
     setError(null);
     try {
@@ -179,14 +194,14 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={s.overlay} onPress={trialExpired ? undefined : onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleDismiss}>
+      <Pressable style={s.overlay} onPress={trialExpired ? undefined : handleDismiss}>
         <Pressable style={s.sheet} onPress={() => {}}>
           {/* Close icon — hidden when trial expired (hard gate) */}
           {!trialExpired && (
             <TouchableOpacity
               style={s.closeIcon}
-              onPress={onClose}
+              onPress={handleDismiss}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               activeOpacity={0.6}
             >
@@ -227,7 +242,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
             <View style={s.priceToggle}>
               <TouchableOpacity
                 style={[s.priceOption, selectedPrice === 'monthly' && s.priceOptionActive]}
-                onPress={() => setSelectedPrice('monthly')}
+                onPress={() => { trackEvent('Paywall Price Toggled', { plan: 'monthly' }); setSelectedPrice('monthly'); }}
                 activeOpacity={0.7}
               >
                 <Text style={[s.priceAmount, selectedPrice !== 'monthly' && s.priceAmountInactive]}>
@@ -239,7 +254,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.priceOption, selectedPrice === 'yearly' && s.priceOptionActive]}
-                onPress={() => setSelectedPrice('yearly')}
+                onPress={() => { trackEvent('Paywall Price Toggled', { plan: 'yearly' }); setSelectedPrice('yearly'); }}
                 activeOpacity={0.7}
               >
                 <Text style={[s.priceAmount, selectedPrice !== 'yearly' && s.priceAmountInactive]}>
@@ -324,7 +339,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
             {/* Dismiss — only shown during trial */}
             {!trialExpired && (
-              <TouchableOpacity style={s.closeBtn} onPress={onClose} activeOpacity={0.7}>
+              <TouchableOpacity style={s.closeBtn} onPress={handleDismiss} activeOpacity={0.7}>
                 <Text style={s.closeBtnText}>Maybe later</Text>
               </TouchableOpacity>
             )}

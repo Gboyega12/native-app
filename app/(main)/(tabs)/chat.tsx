@@ -17,6 +17,7 @@ import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals, FinancialPr
 import { solveBudgetAllocation } from '@/lib/budget-solver';
 import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo';
 import { useVoiceConversation, type VoiceState } from '@/lib/use-voice-conversation';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -914,7 +915,7 @@ export default function Chat() {
       pendingVoiceResponseRef.current = true;
       // Flash the transcribed text briefly so user sees they were heard
       setInput(text);
-      sendMessage(text);
+      sendMessage(text, 'voice');
     },
     onStateChange: (state) => {
       // Sync listening state with existing UI
@@ -932,6 +933,7 @@ export default function Chat() {
     (typeof Audio !== 'undefined' || !!window.speechSynthesis);
 
   const handleSpeak = async (msgIndex: number, text: string) => {
+    trackEvent('TTS Played');
     // If already speaking this message, stop
     if (speakingMsgIdx === msgIndex) {
       stopSpeechRef.current?.();
@@ -968,6 +970,7 @@ export default function Chat() {
   const voiceSupported = voiceConversationSupported || webSpeechAvailable;
 
   const toggleVoice = () => {
+    trackEvent('Voice Toggled');
     // Prefer cross-platform speech-to-speech hook
     if (voiceConversationSupported) {
       toggleVoiceConversation();
@@ -1035,7 +1038,7 @@ export default function Chat() {
   useEffect(() => {
     if (autoSendRef.current && input.trim() && !listening) {
       autoSendRef.current = false;
-      sendMessage(input);
+      sendMessage(input, 'voice');
     }
   }, [input, listening]);
 
@@ -1053,6 +1056,7 @@ export default function Chat() {
 
   useFocusEffect(
     useCallback(() => {
+      trackScreen('Chat');
       loadContext();
       const unsub = onSyncComplete((result) => {
         if (!result) return;
@@ -1482,6 +1486,7 @@ export default function Chat() {
   // ── Handle plan approval (via server API) ──
 
   const handleApprovePlan = async (msgIndex: number, actionIndex: number) => {
+    trackEvent('Plan Approved From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'plan_proposed') return;
@@ -1571,6 +1576,7 @@ export default function Chat() {
   // ── Handle plan dismissal (via server API) ──
 
   const handleDismissPlan = async (msgIndex: number, actionIndex: number) => {
+    trackEvent('Plan Dismissed From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action) return;
@@ -1610,6 +1616,7 @@ export default function Chat() {
   // ── Handle plan deletion (remove an already-approved plan) ──
 
   const handleDeletePlan = (msgIndex: number, actionIndex: number) => {
+    trackEvent('Plan Deleted From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'plan_proposed' || action.status !== 'approved') return;
@@ -1670,6 +1677,7 @@ export default function Chat() {
   // ── Handle budget item deletion ──
 
   const handleDeleteBudgetItem = (msgIndex: number, actionIndex: number) => {
+    trackEvent('Budget Item Deleted From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'budget_item_saved') return;
@@ -1730,6 +1738,7 @@ export default function Chat() {
   // ── Handle goal update acceptance ──
 
   const handleAcceptGoalUpdate = async (msgIndex: number, actionIndex: number) => {
+    trackEvent('Goals Updated From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'goal_update_proposed') return;
@@ -1795,6 +1804,7 @@ export default function Chat() {
   };
 
   const handleKeepGoals = (msgIndex: number, actionIndex: number) => {
+    trackEvent('Goals Kept From Chat');
     const updated = [...messages];
     const updatedActions = [...(updated[msgIndex].actions || [])];
     updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'dismissed' };
@@ -1805,8 +1815,9 @@ export default function Chat() {
 
   // ── Send message (with streaming + fallback) ──
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, _source: 'text' | 'voice' | 'suggestion' = 'text') => {
     if (!text.trim() || loading) return;
+    trackEvent('Chat Message Sent', { source: _source });
 
     const userMsg: ChatMessage = { role: 'user', content: text.trim() };
     const newMessages = [...messages, userMsg];
@@ -2004,6 +2015,7 @@ export default function Chat() {
   // ── Retry last failed message ──
 
   const retryLastMessage = () => {
+    trackEvent('Chat Message Retried');
     setError(null);
     // Remove the failed assistant message, re-send the last user message
     const withoutLastAssistant = messages.slice(0, -1);
@@ -2017,6 +2029,7 @@ export default function Chat() {
   // ── Clear conversation ──
 
   const clearChat = async () => {
+    trackEvent('Chat Cleared');
     stopSpeechRef.current?.();
     stopSpeaking();
     setSpeakingMsgIdx(null);
@@ -2114,7 +2127,7 @@ export default function Chat() {
               {/* Voice Orb — the hero CTA */}
               <VoiceOrb
                 listening={listening || voiceState === 'processing' || voiceState === 'thinking' || voiceState === 'speaking'}
-                onPress={voiceSupported ? toggleVoice : () => { setShowTextInput(true); setTimeout(() => inputRef.current?.focus(), 100); }}
+                onPress={voiceSupported ? toggleVoice : () => { trackEvent('Text Input Toggled'); setShowTextInput(true); setTimeout(() => inputRef.current?.focus(), 100); }}
                 disabled={loading && voiceState === 'idle'}
               />
 
@@ -2130,7 +2143,7 @@ export default function Chat() {
               {!listening && (
                 <TouchableOpacity
                   style={s.typeToggle}
-                  onPress={() => { setShowTextInput(!showTextInput); if (!showTextInput) setTimeout(() => inputRef.current?.focus(), 100); }}
+                  onPress={() => { trackEvent('Text Input Toggled'); setShowTextInput(!showTextInput); if (!showTextInput) setTimeout(() => inputRef.current?.focus(), 100); }}
                   activeOpacity={0.7}
                 >
                   <Text style={s.typeToggleText}>{showTextInput ? 'Hide keyboard' : 'Type instead'}</Text>
@@ -2182,7 +2195,7 @@ export default function Chat() {
                     <TouchableOpacity
                       key={i}
                       style={s.suggestedChip}
-                      onPress={() => sendMessage(q)}
+                      onPress={() => { trackEvent('Suggested Question Tapped', { question: q }); sendMessage(q, 'suggestion'); }}
                       activeOpacity={0.7}
                     >
                       <Text style={s.suggestedChipText}>{q}</Text>
@@ -2302,7 +2315,7 @@ export default function Chat() {
                 <TouchableOpacity
                   key={qi}
                   style={s.followUpChip}
-                  onPress={() => sendMessage(q)}
+                  onPress={() => { trackEvent('Suggested Question Tapped', { question: q }); sendMessage(q, 'suggestion'); }}
                   activeOpacity={0.7}
                 >
                   <Text style={s.followUpChipText}>{q}</Text>

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Text, StyleSheet, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
+import { trackScreen } from '@/lib/mixpanel';
 import { colors, fonts } from '@/theme';
 
 export default function Splash() {
@@ -11,6 +12,7 @@ export default function Splash() {
   const exitOpacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    trackScreen('Splash');
     // Phase 1: "BOCY" fades in
     Animated.timing(wordOpacity, {
       toValue: 1,

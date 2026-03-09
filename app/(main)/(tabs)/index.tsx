@@ -22,6 +22,7 @@ import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -115,6 +116,7 @@ export default function Home() {
   }, [incomeFingerprint]);
 
   const dismissConnection = () => {
+    trackEvent('Connection Warning Dismissed');
     setConnectionDismissed(true);
     if (connectionWarning) {
       AsyncStorage.setItem(CONN_DISMISS_KEY, connectionWarning.banks.sort().join(',')).catch(() => {});
@@ -137,6 +139,7 @@ export default function Home() {
   }, [weeklyCtx?.incomeArrivedThisWeek, incomeDismissed]);
 
   const toggleCategory = (key: string) => {
+    trackEvent('Category Toggled', { category: key });
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedCategories((prev) => {
       const next = new Set(prev);
@@ -147,6 +150,7 @@ export default function Home() {
   };
 
   const toggleMove = (idx: number) => {
+    trackEvent('Move Toggled', { move_index: idx });
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedMoves((prev) => {
       const next = new Set(prev);
@@ -283,6 +287,7 @@ export default function Home() {
   };
 
   const saveAddItem = async () => {
+    trackEvent('Budget Item Added', { category: addItemCategory, is_essential: addItemEssential });
     setAddItemError('');
     const amount = parseFloat(addItemAmount);
     if (!addItemDesc.trim()) {
@@ -485,6 +490,7 @@ export default function Home() {
   }, [showCatReview, unresolvedGroups.length]);
 
   const saveCatReview = async () => {
+    trackEvent('Categorization Review Saved', { count: Object.keys(catAssignments).length });
     const keys = Object.keys(catAssignments);
     if (keys.length === 0) { setShowCatReview(false); return; }
     setSavingCatReview(true);
@@ -566,6 +572,7 @@ export default function Home() {
   };
 
   const saveRecategorize = async () => {
+    trackEvent('Transaction Recategorized', { category: recatTarget });
     if (!recatTx || !recatTarget) return;
     setSavingRecat(true);
     try {
@@ -646,6 +653,7 @@ export default function Home() {
   };
 
   const doRemoveIncomeSource = async (sourceName: string) => {
+    trackEvent('Income Source Removed');
     setRemovingSource(sourceName);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -682,6 +690,7 @@ export default function Home() {
   };
 
   const handleDeleteMove = (move: Move) => {
+    trackEvent('Move Deleted');
     const doDelete = async () => {
       if (!analysis) return;
       const updatedMoves = (analysis.all_moves || []).filter(m => m.action !== move.action);
@@ -745,6 +754,7 @@ export default function Home() {
 
   useFocusEffect(
     useCallback(() => {
+      trackScreen('Home');
       // Invalidate cached sync so returning from connect screen always fetches fresh data
       invalidateSyncCache();
       loadData();
@@ -965,6 +975,7 @@ export default function Home() {
 
   // Pull-to-refresh handler — force a fresh TrueLayer fetch
   const onRefresh = useCallback(async () => {
+    trackEvent('Home Refreshed');
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -1115,6 +1126,7 @@ export default function Home() {
   const effortLabel = (e: string) => e === 'low' ? 'Quick win' : e === 'medium' ? 'Some effort' : 'Big move';
 
   const togglePlanStep = (key: string, stepIndex: number, moveAction: string, totalSteps?: number) => {
+    trackEvent('Plan Step Toggled', { action: moveAction, step: stepIndex });
     setPlanProgress((prev) => {
       const row = prev[key] || { move_key: key, move_action: moveAction, approved: true, completed_steps: [] };
       const steps = [...row.completed_steps];
@@ -1144,6 +1156,7 @@ export default function Home() {
   };
 
   const handleStartMove = async (index: number, move: Move) => {
+    trackEvent('Move Started', { action: move.action });
     const uid = userIdRef.current;
     if (!uid) return;
     const key = `move-${index}`;
@@ -1162,6 +1175,7 @@ export default function Home() {
   };
 
   const handleStopMove = async (index: number) => {
+    trackEvent('Move Stopped');
     const uid = userIdRef.current;
     if (!uid) return;
     const key = `move-${index}`;
@@ -1217,6 +1231,7 @@ export default function Home() {
   };
 
   const handleRemovePlan = async (planId: string) => {
+    trackEvent('Plan Deleted');
     const uid = userIdRef.current;
     if (!uid) return;
     LayoutAnimation.configureNext(SMOOTH_ANIM);
@@ -1448,6 +1463,7 @@ export default function Home() {
 
   // Save / reset custom weekly limit
   const saveCustomLimit = () => {
+    trackEvent('Weekly Limit Set');
     const val = parseFloat(limitInput);
     if (!isNaN(val) && val > 0) {
       setCustomWeeklyLimit(val);
@@ -1457,6 +1473,7 @@ export default function Home() {
     }
   };
   const resetCustomLimit = () => {
+    trackEvent('Weekly Limit Reset');
     setCustomWeeklyLimit(null);
     AsyncStorage.removeItem('custom_weekly_limit').catch(() => {});
     setShowLimitEditor(false);
@@ -1532,7 +1549,7 @@ export default function Home() {
           </View>
           <TouchableOpacity
             style={s.menuButton}
-            onPress={() => router.push('/(main)/profile')}
+            onPress={() => { trackEvent('Profile Opened'); router.push('/(main)/profile'); }}
             accessibilityRole="button"
             accessibilityLabel="Open profile menu"
           >
@@ -1814,7 +1831,7 @@ export default function Home() {
                               );
                             })}
                             {/* Ask Bocy button */}
-                            <TouchableOpacity style={{ marginTop: 16, paddingVertical: 10, alignItems: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.accent }} onPress={() => router.push('/(main)/(tabs)/chat')} activeOpacity={0.7}>
+                            <TouchableOpacity style={{ marginTop: 16, paddingVertical: 10, alignItems: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.accent }} onPress={() => { trackEvent('Ask Bocy From Move'); router.push('/(main)/(tabs)/chat'); }} activeOpacity={0.7}>
                               <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.accent }}>Ask Bocy about this</Text>
                             </TouchableOpacity>
                             {/* Delete plan button */}
@@ -1956,7 +1973,7 @@ export default function Home() {
                                 );
                               });
                             })()}
-                            <TouchableOpacity style={[s.heroCta, { marginTop: 16, paddingVertical: 12 }]} onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } })}>
+                            <TouchableOpacity style={[s.heroCta, { marginTop: 16, paddingVertical: 12 }]} onPress={() => { trackEvent('Ask Bocy From Move'); router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } }); }}>
                               <Text style={s.heroCtaText}>Ask Bocy about this</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={{ marginTop: 12, alignItems: 'center', paddingVertical: 8 }} onPress={() => handleStopMove(i)}>
@@ -2165,7 +2182,7 @@ export default function Home() {
                               </View>
                             )}
 
-                            <TouchableOpacity style={{ borderWidth: 1, borderColor: colors.accentDim, borderRadius: 100, paddingVertical: 12, alignItems: 'center', marginBottom: 8 }} onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } })}>
+                            <TouchableOpacity style={{ borderWidth: 1, borderColor: colors.accentDim, borderRadius: 100, paddingVertical: 12, alignItems: 'center', marginBottom: 8 }} onPress={() => { trackEvent('Ask Bocy From Move'); router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } }); }}>
                               <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.text }}>Ask Bocy about this</Text>
                             </TouchableOpacity>
 
@@ -2187,7 +2204,7 @@ export default function Home() {
                   {!showAllMoves && opportunityMoves.length > 2 && (
                     <TouchableOpacity
                       style={s.viewMoreBtn}
-                      onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setShowAllMoves(true); }}
+                      onPress={() => { trackEvent('Show All Moves Toggled'); LayoutAnimation.configureNext(SMOOTH_ANIM); setShowAllMoves(true); }}
                       activeOpacity={0.7}
                       accessibilityRole="button"
                       accessibilityLabel={`View ${opportunityMoves.length - 2} more moves`}
@@ -2243,6 +2260,7 @@ export default function Home() {
                 <View style={[s.periodToggleRow, { marginBottom: 20, marginTop: 0 }]}>
                   {(['year', 'month', 'week'] as const).map((p) => (
                     <TouchableOpacity key={p} style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]} onPress={() => {
+                      trackEvent('Budget Period Changed', { period: p });
                       LayoutAnimation.configureNext(SMOOTH_ANIM);
                       setBudgetPeriod(p);
                       connectorDotsRef.current?.pulse();
