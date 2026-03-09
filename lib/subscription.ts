@@ -4,7 +4,7 @@
 // Subscribes to Supabase Realtime so UI auto-updates when Stripe/RC webhook fires.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from './supabase.js';
+import { supabase } from './supabase';
 
 export type SubscriptionStatus = 'active' | 'inactive' | 'past_due' | 'cancelled';
 

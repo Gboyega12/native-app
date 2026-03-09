@@ -5,9 +5,9 @@
 // even when the user doesn't open the app.
 
 import { createClient } from '@supabase/supabase-js';
-import EnrichmentEngine from '../lib/enrichment-engine.js';
-import { rankMoves, determineFlowchartPosition } from '../lib/move-engine.js';
-import type { Analysis, Goals } from '../lib/types.js';
+import EnrichmentEngine from '../lib/enrichment-engine';
+import { rankMoves, determineFlowchartPosition } from '../lib/move-engine';
+import type { Analysis, Goals } from '../lib/types';
 
 export const config = { maxDuration: 30 };
 

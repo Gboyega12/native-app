@@ -2,7 +2,7 @@
 // HTML email templates for Bocy notifications.
 // Minimal, dark-themed, consistent with the app's Nothing OS aesthetic.
 
-import type { Achievement } from './achievements.js';
+import type { Achievement } from './achievements';
 
 const BRAND_COLOR = '#00d4aa';
 const BG_COLOR = '#0A0A0A';

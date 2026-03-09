@@ -1,4 +1,4 @@
-import type { FinancialProfile } from './types.js';
+import type { FinancialProfile } from './types';
 
 interface ProfileMetrics {
   savingsRate: number;

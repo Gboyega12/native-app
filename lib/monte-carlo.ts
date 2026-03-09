@@ -4,7 +4,7 @@
 //
 // Runs client-side: 1,000 sims × 60 months = 60k ops, <50ms on low-end phone.
 
-import type { FinancialProfile, Move, UserIdentity } from './types.js';
+import type { FinancialProfile, Move, UserIdentity } from './types';
 
 // ── Simulation parameters ──
 

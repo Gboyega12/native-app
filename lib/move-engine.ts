@@ -1,14 +1,14 @@
-import type { Goals, Move, GoalTrajectory, FlowchartPosition, FinancialProfile, UserIdentity } from './types.js';
-import type { LiquidityTier } from './liquidity-engine.js';
-import { MAX_TRAJECTORY_MONTHS } from './constants.js';
+import type { Goals, Move, GoalTrajectory, FlowchartPosition, FinancialProfile, UserIdentity } from './types';
+import type { LiquidityTier } from './liquidity-engine';
+import { MAX_TRAJECTORY_MONTHS } from './constants';
 import {
   estimateVolatility,
   simulateGoalTimeline,
   simulateBufferNeed,
   calcMoveConsistency,
   type VolatilityProfile,
-} from './monte-carlo.js';
-import { calcMoveMarginalUtility } from './liquidity-engine.js';
+} from './monte-carlo';
+import { calcMoveMarginalUtility } from './liquidity-engine';
 
 const GOAL_LABELS: Record<string, string> = {
   clear_debt: 'Clear all debt',

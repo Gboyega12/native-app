@@ -1,4 +1,4 @@
-import type { Analysis, BudgetCategory } from './types.js';
+import type { Analysis, BudgetCategory } from './types';
 
 // ── Milestone definitions ──
 

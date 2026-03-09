@@ -6,10 +6,10 @@
  */
 
 import { readFileSync } from 'fs';
-import { matchMerchant, isPersonTransfer } from './lib/merchant-db.js';
-import { classifyTransaction } from './lib/classifier.js';
-import { normaliseDescription } from './lib/normalise.js';
-import EnrichmentEngine, { TransactionOverride } from './lib/enrichment-engine.js';
+import { matchMerchant, isPersonTransfer } from './lib/merchant-db';
+import { classifyTransaction } from './lib/classifier';
+import { normaliseDescription } from './lib/normalise';
+import EnrichmentEngine, { TransactionOverride } from './lib/enrichment-engine';
 
 // ── Load .env manually (no dotenv dependency) ──
 try {

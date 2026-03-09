@@ -18,8 +18,8 @@ import {
   totalUtility,
   getCategoryGamma,
   getCategoryReference,
-} from './liquidity-engine.js';
-import type { FinancialProfile, UserIdentity } from './types.js';
+} from './liquidity-engine';
+import type { FinancialProfile, UserIdentity } from './types';
 
 // ── Types ──
 
