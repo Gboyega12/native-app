@@ -23,6 +23,7 @@ import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { DashboardSkeleton } from '@/components/Skeleton';
+import { SpendingRing, CategoryBars, WeeklySparkline } from '@/components/Charts';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
@@ -1448,6 +1449,24 @@ export default function Home() {
     : 0;
   const weeklyHealthy = spentThisWeek <= weeklyBudget;
 
+  // ── Daily spending sparkline data (Mon–Today) ──
+  const dailySpending = useMemo(() => {
+    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const ws = getWeekStart();
+    const result: { label: string; amount: number }[] = [];
+    const today = new Date();
+    for (let d = 0; d < 7; d++) {
+      const dayDate = new Date(ws.getTime() + d * 86400000);
+      if (dayDate > today) break;
+      const dayStr = dayDate.toISOString().split('T')[0];
+      const total = allDiscTxs
+        .filter((tx) => tx?.date?.startsWith(dayStr))
+        .reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
+      result.push({ label: dayLabels[d], amount: total });
+    }
+    return result;
+  }, [allDiscTxs]);
+
   // Save / reset custom weekly limit
   const saveCustomLimit = () => {
     trackEvent('Weekly Limit Set');
@@ -1783,6 +1802,16 @@ export default function Home() {
                     })()}
                     {syncDataSource === 'fallback' ? ' (using cached data)' : ''}
                   </Text>
+                )}
+
+                {/* Daily spending sparkline */}
+                {dailySpending.length > 1 && (
+                  <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 10 }}>
+                      DAILY SPENDING
+                    </Text>
+                    <WeeklySparkline days={dailySpending} height={40} />
+                  </View>
                 )}
               </Card>
           )}
@@ -2412,6 +2441,23 @@ export default function Home() {
                     </Text>
                   </View>
                 </View>
+
+                {/* Category breakdown bars */}
+                {(() => {
+                  const topCats = [...periodDiscData, ...periodNonDiscData]
+                    .filter((d) => d.count > 0)
+                    .sort((a, b) => b.total - a.total)
+                    .slice(0, 5)
+                    .map((d) => ({ label: d.category, spent: d.total, budget: d.budget }));
+                  return topCats.length > 0 ? (
+                    <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
+                        TOP CATEGORIES
+                      </Text>
+                      <CategoryBars items={topCats} />
+                    </View>
+                  ) : null;
+                })()}
               </Card>
             )}
           </View>
