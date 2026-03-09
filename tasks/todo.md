@@ -1,35 +1,22 @@
-# Fix Vercel Build TypeScript Errors
+# PWA Cleanup & Code Quality Overhaul
 
-## Root Cause
-Vercel's serverless function type-checker forces `moduleResolution: "node16"` when checking
-files included by `api/tsconfig.json`. That tsconfig includes `../lib/**/*.ts`, so all `lib/`
-files are checked under `node16` rules — which require `.js` extensions on relative imports.
+## Phase 1: Remove Native iOS/Android Code
+- [ ] 1. Delete native-only files (revenuecat.ts, revenuecat webhook, withIAP.cjs, eas.json, RC migration SQL)
+- [ ] 2. Clean app.json: remove ios/android sections, native-only plugins
+- [ ] 3. Clean package.json: remove native deps, EAS scripts
+- [ ] 4. Clean app/_layout.tsx: remove RevenueCat init, native push registration
+- [ ] 5. Clean components/Paywall.tsx: remove native IAP path, keep Stripe web only
+- [ ] 6. Clean app/(main)/profile.tsx: remove restorePurchases, native checks
+- [ ] 7. Clean lib/notifications.ts: remove native expo-notifications, keep web push
+- [ ] 8. Clean lib/supabase.ts: remove expo-secure-store, use web storage only
+- [ ] 9. Clean lib/mixpanel.ts: replace native SDK with web-compatible approach
+- [ ] 10. Remove Android UIManager calls from education.tsx, identity.tsx, index.tsx, plan.tsx
+- [ ] 11. Simplify Platform.OS checks: remove dead iOS/Android branches
 
-The TS2339 errors (`Property 'test' does not exist on type 'unknown'`) are **cascading** from
-the failed import of `./archetypes`. When the import can't resolve, `SUB_TRAITS` becomes
-`unknown`, causing downstream property access failures. Fixing imports fixes these too.
+## Phase 2: Code Quality Fixes
+- [ ] 12. Fix useState(() => trackScreen()) anti-pattern → useEffect (5 files)
+- [ ] 13. Fix silent empty catch blocks (subscriptions.tsx, processing.tsx, etc.)
 
-## Fix Strategy
-**Option A (chosen): Add `.js` extensions to all relative imports in `lib/`.**
-- This is the standard ESM-compatible approach
-- Works with both `bundler` and `node16` resolution
-- No config changes needed — Expo/bundler ignores the extension and resolves `.ts` anyway
-
-**Option B (rejected): Change tsconfig to exclude lib/ from api type-checking.**
-- Would hide real type errors in shared code
-- Fragile — Vercel could change behavior
-
-## Files to Edit (7 files, imports only)
-
-- [ ] `lib/enrichment-engine.ts` — 6 imports: `./merchant-db` → `./merchant-db.js`, etc.
-- [ ] `lib/move-engine.ts` — 5 imports: `./types`, `./liquidity-engine`, `./constants`, `./monte-carlo` (×2)
-- [ ] `lib/liquidity-engine.ts` — 3 imports: `./types`, `./monte-carlo`, `./surplus-engine`
-- [ ] `lib/monte-carlo.ts` — 1 import: `./types`
-- [ ] `lib/classifier.ts` — 1 import: `./merchant-db`
-- [ ] `lib/archetypes.ts` — 1 import: `./types`
-- [ ] `lib/surplus-engine.ts` — 1 import: `./types`
-
-## Verification
-- [ ] Run `npx tsc --noEmit` with root tsconfig to ensure no regressions
-- [ ] Run `npx tsc --noEmit -p api/tsconfig.json` to simulate Vercel's check
-- [ ] Commit & push to trigger Vercel rebuild
+## Phase 3: Verify & Ship
+- [ ] 14. TypeScript checks, Expo web build, tests
+- [ ] 15. Commit and push
