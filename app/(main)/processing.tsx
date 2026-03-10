@@ -197,7 +197,13 @@ function ProcessingInner() {
       let result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
 
       if (result.enrichedTransactions.length === 0) {
-        setError('No transactions found in your data. Check the file format — it should have Date, Description, and Amount columns.');
+        // Distinguish between CSV-upload issues and bank connections with no data
+        const lineCount = csvData.trim().split('\n').length;
+        if (lineCount <= 1) {
+          setError('Your bank returned no transactions. This can happen if the account is new or data is still being processed. Please try again in a few minutes.');
+        } else {
+          setError('No transactions found in your data. Check the file format \u2014 it should have Date, Description, and Amount columns.');
+        }
         return;
       }
       await delay(400);

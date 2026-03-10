@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 import SkeletonLine from '@/components/Skeleton';
+import { invalidateSyncCache } from '@/lib/sync-coordinator';
 
 // ── Session storage helpers (web only) ──
 function saveConnectState(csv: string, count: number) {
@@ -212,6 +213,8 @@ export default function Connect() {
 
       if (isFromProfile) {
         clearConnectState();
+        // Invalidate sync cache so dashboard picks up the new bank data
+        invalidateSyncCache();
         router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
         return;
       }

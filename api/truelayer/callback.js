@@ -134,6 +134,10 @@ export default async function handler(req, res) {
     ]);
     const allTx = txResults.flatMap((r) => r.results || []);
 
+    if (allTx.length === 0) {
+      console.warn(`[truelayer] No transactions returned for connection ${connectionId}. Accounts: ${accounts.length}, Cards: ${cards.length}`);
+    }
+
     // Convert to CSV
     const csvLines = ['Date,Description,Amount'];
     for (const tx of allTx) {
