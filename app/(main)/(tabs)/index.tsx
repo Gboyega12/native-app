@@ -2260,6 +2260,12 @@ export default function Home() {
                               <ExpandDots count={5} size={2.5} />
                             </View>
                             {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
+                            {move.proof && (
+                              <View style={{ backgroundColor: colors.mintDim, borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.dim, textTransform: 'uppercase', marginBottom: 6 }}>THE MATH</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2, lineHeight: 18 }}>{move.proof}</Text>
+                              </View>
+                            )}
                             {(() => {
                               // Show sub-goal progress bars when available, otherwise legacy steps
                               const sgs: MoveSubGoal[] = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move) || [];
@@ -2472,6 +2478,12 @@ export default function Home() {
                               <ExpandDots count={5} size={2.5} />
                             </View>
                             {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 24, marginBottom: 20 }}>{stripMd(move.strategy)}</Text>}
+                            {move.proof && (
+                              <View style={{ backgroundColor: colors.mintDim, borderRadius: 10, padding: 14, marginBottom: 20 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.dim, textTransform: 'uppercase', marginBottom: 6 }}>THE MATH</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2, lineHeight: 18 }}>{move.proof}</Text>
+                              </View>
+                            )}
 
                             <TouchableOpacity style={[s.heroCta, { marginBottom: 20, paddingVertical: 12 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
                               <Text style={s.heroCtaText}>Start this move</Text>
@@ -2579,21 +2591,27 @@ export default function Home() {
               ══════════════════════════════════════════════ */}
           <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; cardPositions.current.transactions = e.nativeEvent.layout.y; }}>
             <TouchableOpacity
-              activeOpacity={0.8}
+              activeOpacity={0.7}
               onPress={() => {
                 LayoutAnimation.configureNext(SMOOTH_ANIM);
                 const opening = !budgetExpanded;
                 setBudgetExpanded(opening);
                 setTxCardExpanded(opening);
               }}
-              style={s.collapsedSectionBtn}
+              style={[s.collapsedSectionBtn, !budgetExpanded && {
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 16,
+                backgroundColor: colors.mintDim,
+                paddingHorizontal: 20,
+              }]}
             >
               <Text style={s.moveSectionLabel}>SPENDING DETAILS</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: overallPctUsed > 100 ? colors.coral : colors.dim, letterSpacing: 0.3 }}>
                   {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()} / {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
                 </Text>
-                <Text style={{ fontSize: 9, color: colors.muted }}>{budgetExpanded ? '\u25B2' : '\u25BC'}</Text>
+                <Text style={{ fontSize: 12, color: colors.dim }}>{budgetExpanded ? '\u25B4' : '\u25BE'}</Text>
               </View>
             </TouchableOpacity>
 

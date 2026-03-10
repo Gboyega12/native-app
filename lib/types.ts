@@ -168,6 +168,8 @@ export interface Move {
   merchants?: string[];
   /** Structured sub-goals derived from real data at generation time */
   subGoals?: MoveSubGoal[];
+  /** Mathematical proof: human-readable breakdown showing exactly how the numbers were derived */
+  proof?: string;
 }
 
 /**
