@@ -58,6 +58,10 @@ export default function Education() {
     } else {
       trackEvent('Education Slide Viewed', { slide: currentPage + 1 });
       const nextPage = currentPage + 1;
+      // Update page state directly — onMomentumScrollEnd doesn't fire
+      // for programmatic scrollTo() on web and some native platforms,
+      // which caused the button to get stuck on the Methods slide.
+      setCurrentPage(nextPage);
       (scrollRef.current as any)?.scrollTo({ x: nextPage * containerWidth, animated: true });
     }
   };

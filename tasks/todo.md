@@ -1,74 +1,57 @@
-# Task 1: Dashboard UI reorder — lead with #1 Move
+# Task: TrueLayer Flow Recheck + Education Screen Bug Fix
 
-## Problem
-The hero carousel leads with weekly budget ("how much can I spend") while the #1 Move
-(the actual product value) is hidden behind a swipe. Budget and Transactions are separate
-collapsed sections adding visual weight.
+## Problem 1: Education "Next" button stuck on Methods screen
 
-## Plan
-1. Swap carousel pages: #1 Move → page 1, Weekly Budget → page 2
-2. Enhance Move hero card: show monthly + annual impact, effort badge
-3. Reverse parallax direction to match new page order
-4. Merge Budget + Transactions into single "SPENDING DETAILS" section
-5. Clean up dead code (ConnectorDots, txManuallyCollapsed)
-6. TypeScript check
+**Root cause:** `education.tsx` uses `onMomentumScrollEnd` to update `currentPage`, but
+`scrollTo()` (programmatic scroll) does NOT fire `onMomentumScrollEnd` on web or some
+native platforms. Result:
 
-## Files
-1. `app/(main)/(tabs)/index.tsx` — carousel, sections, imports
+1. User on page 0 (Philosophy), presses Next
+2. `scrollTo()` scrolls to page 1 (Methods) — visually correct
+3. `onMomentumScrollEnd` never fires — `currentPage` stays 0
+4. User presses Next again → `nextPage = 0 + 1 = 1` → scrolls to same page
+5. Stuck on Methods forever
 
-## Checklist
-- [x] #1 Move renders as page 1 with impact + effort badge
-- [x] Weekly Budget renders as page 2
-- [x] Parallax reversed (0→10 instead of 10→0)
-- [x] Pagination dots animate correctly for new order
-- [x] Budget + Transactions merged into "SPENDING DETAILS"
-- [x] Budget-only carousel works when no moves exist
-- [x] Dead code removed (ConnectorDots, txManuallyCollapsed, connectorDotsRef)
-- [x] TypeScript compiles clean
-- [x] Walkthrough scroll-to still works (cardPositions)
+**Fix:** Update `currentPage` directly in `handleNext()` alongside the `scrollTo()` call.
+Keep `onMomentumScrollEnd` for manual swipe detection.
 
-## Review
-Implemented and verified. 10-point subagent verification confirmed no regressions.
-All existing functionality preserved — nothing removed, just reframed.
+## Problem 2: TrueLayer connection flow audit
 
----
+Full flow: connect.tsx → TrueLayer OAuth → callback.js → bank-data.js → processing.tsx → dashboard
 
-# Task 2: Fix Open Banking zero-transaction error
+### Audit findings:
 
-## Problem
-New users connecting via Open Banking see "No transactions found in your data. Check the
-file format — it should have Date, Description, and Amount columns." when their bank
-returns 0 transactions (new account, pending auth). This is a CSV-specific error shown
-in the wrong context.
+**Working correctly:**
+- [x] Auth URL generation with state encoding (lib/truelayer.ts)
+- [x] Token exchange + 12-month transaction fetch (callback.js)
+- [x] Bank data CSV generation and storage
+- [x] Card/account balance tracking
+- [x] Session state save/restore across redirect (web)
+- [x] fetchBankData retry loop (4 attempts with backoff)
+- [x] Source param ('bank' vs 'csv') passed correctly
+- [x] Zero-transaction bypass to dashboard (processing.tsx:201-221)
+- [x] Enrichment engine with Claude AI verification
+- [x] Move ranking with UKPF flowchart
+- [x] Analysis saved to Supabase + score history + achievements
+- [x] Dashboard picks up _lastResult in-memory
+- [x] Incremental sync (sync.js) with token rotation
+- [x] 90-day consent expiry detection
+- [x] Debt account sync from card balances
+- [x] Sync coordinator deduplication + cooldown
 
-## Root Cause
-TrueLayer callback creates header-only CSV (`Date,Description,Amount`) when bank returns
-0 transactions. Processing.tsx hits `lineCount <= 1` branch and shows CSV format error
-regardless of data source.
+**Minor issues (not blocking):**
+- [ ] Empty catch blocks hide errors (bank-data.js:87, sync-coordinator.ts:62)
+- [ ] Deduplication normalizes too aggressively (sync.ts:61-74) — could merge legitimately different transactions
+- [ ] Debt payment matching uses naive substring (sync.ts:118-125)
+- [ ] No rate limiting on parallel TrueLayer API calls
+- [ ] Promise.race timeout doesn't cancel background sync (sync-coordinator.ts:46)
 
-## Plan
-1. Pass `source` param ('bank' | 'csv') from connect.tsx to processing.tsx
-2. Bank + 0 tx: bypass to dashboard (bank IS connected, tx will settle)
-3. CSV + 0 tx: show format error (existing behavior)
-4. Bank + empty data: show bank-appropriate message
-5. Write tests covering the full callback + source param flow
-
-## Files
-1. `app/(main)/connect.tsx` — pass source param
-2. `app/(main)/processing.tsx` — branch on source
-3. `__tests__/callback.test.js` — 18 new tests
+**Verdict:** The TrueLayer flow is architecturally sound. No blocking issues found.
+The zero-transaction handling added previously works correctly. Edge cases exist but
+are unlikely to affect normal users.
 
 ## Checklist
-- [x] connect.tsx passes source='bank' for Open Banking, source='csv' for uploads
-- [x] processing.tsx: bank + header-only CSV → bypass to dashboard
-- [x] processing.tsx: bank + empty data → bank-appropriate error message
-- [x] processing.tsx: csv + header-only CSV → format error (unchanged)
-- [x] PDF uploads still get source='csv' (correct)
-- [x] 18 callback tests pass
-- [x] Full test suite passes (39/39)
-- [x] TypeScript compiles clean
-
-## Review
-Root cause fixed. The source param approach is clean — no heuristics or string sniffing.
-Tests cover: successful flow, zero-tx scenario, CSV format, error handling, cleanup, and
-the processing.tsx branching logic.
+- [ ] Fix `handleNext` in education.tsx to update `currentPage` directly
+- [ ] Keep `onMomentumScrollEnd` for manual swipe sync
+- [ ] TypeScript compiles
+- [ ] Document TrueLayer audit findings (above)
