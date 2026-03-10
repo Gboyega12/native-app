@@ -144,9 +144,8 @@ function ProcessingInner() {
   const runAnalysis = async () => {
     try {
       // ── Resolve CSV data ──
-      // For bank connections: read directly from bank_data table (all connections).
-      // This avoids URL param size limits and ensures we use ALL available data,
-      // not just the latest callback's CSV.
+      // For bank connections: read from bank_data table (populated by the callback).
+      // Falls back to URL param if DB fetch fails.
       let csv = csvData;
       if (source === 'bank') {
         try {
@@ -182,7 +181,6 @@ function ProcessingInner() {
       }
 
       // ── Layer 1: Enrichment Engine ──
-      // CSV → categorise, profile, raw moves
       setCurrentStep(0);
       await delay(400);
 
