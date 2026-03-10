@@ -1823,15 +1823,31 @@ export default function Home() {
                     ? Math.max(1, Math.floor((Date.now() - new Date(heroProgress.updated_at).getTime()) / 86400000))
                     : 1;
                   const nextStep = heroSteps.find((_: string, idx: number) => !(heroProgress?.completed_steps || []).includes(idx));
+                  // Build a mathematical CTA from subGoals when available
+                  const nextSg = heroSgs.find((sg: MoveSubGoal) => !sg.completedAt);
+                  const heroCtaLabel = (() => {
+                    if (!heroActive) return 'Start this move';
+                    if (heroAllDone) return 'View completed move';
+                    if (nextSg) {
+                      const remaining = Math.round(nextSg.currentValue ?? nextSg.startValue);
+                      const payment = Math.round(heroMove.monthlyImpact || 0);
+                      const target = nextSg.target || 'debt';
+                      // e.g. "Next: pay £17 to Amex (£204 left)"
+                      return payment > 0
+                        ? `Next: pay \u00a3${payment} to ${target}`
+                        : `Next: clear ${target} (\u00a3${remaining} left)`;
+                    }
+                    return nextStep ? `Next: ${nextStep.length > 30 ? nextStep.slice(0, 30) + '\u2026' : nextStep}` : 'View progress';
+                  })();
                   return (
                   <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
                     <Card variant={heroActive ? 'active' : 'highlight'} style={{ flex: 1 }}>
                       <Animated.View style={{ transform: [{ translateX: parallaxShift }], flex: 1 }}>
                         {heroActive ? (
                           <>
-                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: heroAllDone ? colors.green : colors.accent, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
+                            <CardTitle color={heroAllDone ? colors.green : colors.accent}>
                               {heroAllDone ? 'MOVE COMPLETE \u2713' : `MOVE IN PROGRESS \u00B7 Day ${daysSinceStart}`}
-                            </Text>
+                            </CardTitle>
                             <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
                               {stripMd(heroMove.action)}
                             </Text>
@@ -1866,9 +1882,7 @@ export default function Home() {
                           </>
                         ) : (
                           <>
-                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
-                              YOUR #1 MOVE
-                            </Text>
+                            <CardTitle color={colors.green}>YOUR #1 MOVE</CardTitle>
                             <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
                               {stripMd(heroMove.action)}
                             </Text>
@@ -1925,11 +1939,7 @@ export default function Home() {
                           }
                         }}
                       >
-                        <Text style={s.heroCtaText}>
-                          {heroActive
-                            ? heroAllDone ? 'View completed move' : (nextStep ? `Next: ${nextStep.length > 30 ? nextStep.slice(0, 30) + '\u2026' : nextStep}` : 'View progress')
-                            : 'Start this move'}
-                        </Text>
+                        <Text style={s.heroCtaText}>{heroCtaLabel}</Text>
                       </TouchableOpacity>
                     </Card>
                   </View>
