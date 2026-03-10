@@ -200,24 +200,19 @@ function ProcessingInner() {
 
       if (result.enrichedTransactions.length === 0) {
         const lineCount = csvData.trim().split('\n').length;
-        if (lineCount <= 1) {
-          if (source === 'bank') {
-            // Bank connected but returned 0 transactions — new account or pending auth
-            console.warn('[processing] Bank returned header-only CSV — bypassing to dashboard');
-            trackEvent('Processing Bypassed', { reason: 'bank_no_transactions', raw_lines: lineCount });
-            router.replace('/(main)/(tabs)');
-            return;
-          }
-          // CSV upload with no data rows — this is a format issue
-          setError('No transactions found in your data. Check the file format \u2014 it should have Date, Description, and Amount columns.');
+        if (source === 'bank') {
+          // Bank connected but returned no usable transactions.
+          // Show a clear message — don't silently bypass to dashboard spinner.
+          trackEvent('Processing No Transactions', { reason: lineCount <= 1 ? 'bank_no_transactions' : 'all_filtered', raw_lines: lineCount });
+          setError(
+            lineCount <= 1
+              ? 'Your bank is connected but hasn\u2019t returned any transactions yet. This can happen with new connections \u2014 it usually resolves within a few hours.'
+              : 'Your bank returned transactions but none could be processed (they may be pending or settling). Try again in a few hours.'
+          );
           return;
         }
-        // Bank returned transactions but all were filtered (pending, £0, etc.).
-        // Don't dead-end — the bank IS connected. Navigate to dashboard which
-        // will show a "processing" state and auto-retry as transactions settle.
-        console.warn(`[processing] Enrichment filtered all ${lineCount} rows — bypassing to dashboard`);
-        trackEvent('Processing Bypassed', { reason: 'no_enriched_transactions', raw_lines: lineCount });
-        router.replace('/(main)/(tabs)');
+        // CSV/PDF upload with no usable data rows — format issue
+        setError('No transactions found in your data. Check the file format \u2014 it should have Date, Description, and Amount columns.');
         return;
       }
       await delay(400);
@@ -661,6 +656,26 @@ function ProcessingInner() {
       <View style={styles.container}>
         <Text style={styles.errorIcon}>!</Text>
         <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity
+          style={styles.insightButton}
+          onPress={() => router.replace('/(main)/(tabs)')}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.insightButtonText}>Go to dashboard</Text>
+        </TouchableOpacity>
+        {source === 'bank' && (
+          <TouchableOpacity
+            style={[styles.insightButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm }]}
+            onPress={() => {
+              setError('');
+              setCurrentStep(0);
+              runAnalysis();
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.insightButtonText, { color: colors.text }]}>Try again</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   }
