@@ -52,11 +52,34 @@ function getChatMood(lastMsg: string | undefined, baseMood: BocyMood, isLoading:
 function splitIntoBubbles(text: string): string[] {
   if (!text || !text.trim()) return [];
 
+  // GIF markdown pattern — must be kept as its own bubble
+  const GIF_RX = /^!\[.*?\]\(https?:\/\/[^\s)]+\)\s*$/;
+
   // Split by double newlines (paragraphs) first
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
 
   const chunks: string[] = [];
   for (const para of paragraphs) {
+    // If a paragraph contains a GIF line, split it so the GIF is its own bubble
+    const lines = para.split('\n');
+    const hasGif = lines.some((l) => GIF_RX.test(l.trim()));
+    if (hasGif) {
+      let textBuffer: string[] = [];
+      for (const line of lines) {
+        if (GIF_RX.test(line.trim())) {
+          if (textBuffer.length > 0) {
+            chunks.push(textBuffer.join('\n'));
+            textBuffer = [];
+          }
+          chunks.push(line.trim());
+        } else {
+          textBuffer.push(line);
+        }
+      }
+      if (textBuffer.length > 0) chunks.push(textBuffer.join('\n'));
+      continue;
+    }
+
     const wordCount = para.split(/\s+/).length;
     if (wordCount <= CHUNK_WORD_THRESHOLD) {
       chunks.push(para);
@@ -428,7 +451,11 @@ function TypewriterText({ text, style, delay = 0, charsPerTick = 2, onComplete }
   const [done, setDone] = useState(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // If the chunk is a GIF image, render it immediately (no typewriter for images)
+  const isGif = /^!\[.*?\]\(https?:\/\/[^\s)]+\)\s*$/.test(text.trim());
+
   useEffect(() => {
+    if (isGif) { setDone(true); onComplete?.(); return; }
     const timer = setTimeout(() => {
       tickRef.current = setInterval(() => {
         setVisibleLen((prev) => {

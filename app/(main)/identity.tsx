@@ -307,7 +307,7 @@ export default function Identity() {
       setUserProperty('housing', housing);
       setUserProperty('financial_experience', experience);
       setUserProperty('risk_appetite', risk);
-      router.push('/(main)/install-app');
+      router.push('/(main)/connect');
     } catch (err: any) {
       console.warn('[identity] Save failed:', err?.message);
       window.alert('Could not save. Please try again.');

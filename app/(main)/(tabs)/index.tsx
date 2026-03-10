@@ -28,6 +28,14 @@ import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 
+// Cache the beforeinstallprompt event for the install modal
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e: Event) => {
+    e.preventDefault();
+    (window as any).__pwaInstallPrompt = e;
+  });
+}
+
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 
@@ -164,6 +172,20 @@ export default function Home() {
     }
   }, [weeklyCtx?.incomeArrivedThisWeek, incomeDismissed]);
 
+  // ── Show install-app modal once after first analysis (post-onboarding) ──
+  useEffect(() => {
+    if (!analysis) return;
+    if (typeof window === 'undefined') return;
+    // Skip if already installed as standalone PWA
+    if (window.matchMedia?.('(display-mode: standalone)')?.matches || (window.navigator as any)?.standalone) return;
+    AsyncStorage.getItem('install_modal_shown').then((v) => {
+      if (!v) {
+        const timer = setTimeout(() => setShowInstallModal(true), 1500);
+        return () => clearTimeout(timer);
+      }
+    }).catch(() => {});
+  }, [!!analysis]);
+
   const toggleCategory = (key: string) => {
     trackEvent('Category Toggled', { category: key });
     hapticMedium();
@@ -244,6 +266,7 @@ export default function Home() {
   // ── Plan data (merged from plan page) ──
   const [userPlans, setUserPlans] = useState<any[]>([]);
   const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[]; sub_goals?: MoveSubGoal[]; updated_at?: string }>>({});
+  const [showInstallModal, setShowInstallModal] = useState(false);
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
@@ -3232,6 +3255,59 @@ export default function Home() {
         </Pressable>
       </Modal>
     </ScrollView>
+
+    {/* ── Install App Modal (post-onboarding) ── */}
+    <Modal visible={showInstallModal} transparent animationType="fade" onRequestClose={() => { setShowInstallModal(false); AsyncStorage.setItem('install_modal_shown', '1').catch(() => {}); }}>
+      <Pressable style={s.modalOverlay} onPress={() => { setShowInstallModal(false); AsyncStorage.setItem('install_modal_shown', '1').catch(() => {}); }}>
+        <Pressable style={[s.modalContent, { maxWidth: 380 }]} onPress={(e) => e.stopPropagation()}>
+          <Text style={[s.modalTitle, { textAlign: 'center' }]}>Add Bocy to your phone</Text>
+          <Text style={[s.modalBody, { textAlign: 'center', marginTop: 8 }]}>
+            Install on your home screen for instant access — no app store needed.
+          </Text>
+          {typeof window !== 'undefined' && /iP(hone|od|ad)/.test(navigator?.userAgent || '') && /WebKit/.test(navigator?.userAgent || '') && !/CriOS|FxiOS/.test(navigator?.userAgent || '') ? (
+            <View style={{ marginTop: 16, gap: 12 }}>
+              <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 }}>
+                1. Tap the <Text style={{ fontFamily: fonts.semibold, color: colors.text }}>Share</Text> button in Safari's toolbar
+              </Text>
+              <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 }}>
+                2. Scroll down and tap <Text style={{ fontFamily: fonts.semibold, color: colors.text }}>Add to Home Screen</Text>
+              </Text>
+              <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 }}>
+                3. Tap <Text style={{ fontFamily: fonts.semibold, color: colors.text }}>Add</Text>
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={{ backgroundColor: colors.accent, paddingVertical: 14, borderRadius: radius.md, alignItems: 'center', marginTop: 20 }}
+              onPress={async () => {
+                // Try the native install prompt (Chrome/Edge)
+                if (typeof window !== 'undefined' && (window as any).__pwaInstallPrompt) {
+                  try {
+                    (window as any).__pwaInstallPrompt.prompt();
+                    const result = await (window as any).__pwaInstallPrompt.userChoice;
+                    if (result.outcome === 'accepted') {
+                      trackEvent('App Installed', { source: 'modal' });
+                    }
+                  } catch {}
+                  (window as any).__pwaInstallPrompt = null;
+                }
+                setShowInstallModal(false);
+                AsyncStorage.setItem('install_modal_shown', '1').catch(() => {});
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.bg }}>Install app</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={{ alignItems: 'center', paddingVertical: 12, marginTop: 8 }}
+            onPress={() => { setShowInstallModal(false); AsyncStorage.setItem('install_modal_shown', '1').catch(() => {}); }}
+          >
+            <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.dim }}>Maybe later</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
 
     {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} scrollRef={dashScrollRef} cardPositions={cardPositions} router={router} />}
     </View>
