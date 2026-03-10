@@ -211,11 +211,24 @@ export default function Connect() {
       setLoading(false);
       setRedirectLoading(false);
 
+      // Check if the CSV has actual transaction rows (not just the header).
+      // Some banks (e.g. Revolut) take minutes to sync after authorization.
+      // If no transactions yet, redirect to dashboard — background sync will
+      // pick them up once the bank is ready.
+      const csvLines = (result.csv_data || '').split('\n').filter((l: string) => l.trim());
+      const hasTransactions = csvLines.length > 1; // more than just the header row
+
       if (isFromProfile) {
         clearConnectState();
-        // Invalidate sync cache so dashboard picks up the new bank data
         invalidateSyncCache();
         router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
+        return;
+      }
+
+      if (!hasTransactions) {
+        clearConnectState();
+        invalidateSyncCache();
+        router.replace({ pathname: '/(main)/(tabs)' });
         return;
       }
 
