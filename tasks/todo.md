@@ -1,78 +1,38 @@
-# Task: Deep TrueLayer Flow Recheck + Fixes
+# Fix Hero Card "Start this Move" + Living Progress Card
 
-## Problem: Line-by-line audit of TrueLayer connection → enrichment → visualization
+## Problem
+- "Start this move" button on hero card navigates to chat instead of starting the move
+- Once a move is in progress, the hero card should transform to show live progress
 
-Full flow traced: connect.tsx → TrueLayer OAuth → callback.js → bank-data.js →
-processing.tsx → enrichment-engine.ts → dashboard (index.tsx)
+## Plan
 
-## Bugs Found & Fixed
+### Step 1: Fix hero card button to actually start the move
+- [ ] **File**: `app/(main)/(tabs)/index.tsx` ~line 1834
+- Change `onPress` from `router.push(chat)` to `handleStartMove(originalIndex, move)`
+- Need to resolve the index mapping: `dashboardMoves[0]` → original `moves` array index
+  - Use `moves.indexOf(dashboardMoves[0])` since filter preserves object references
 
-### 1. Description newline sanitization (callback.js:145, sync.js:135)
-**Problem:** TrueLayer descriptions containing `\n` would break CSV format — each newline
-creates an extra malformed row. Only commas were stripped, not newlines.
-**Fix:** Added `.replace(/[\r\n]+/g, ' ')` to description sanitization in both files.
+### Step 2: Transform hero card when move is in progress
+- [ ] **File**: `app/(main)/(tabs)/index.tsx` ~lines 1782-1840
+- Check if `dashboardMoves[0]` is already approved via `planProgress`
+- If in progress, render the "Living Progress" variant:
+  - Header: `MOVE IN PROGRESS · Day N` (calculate days since started)
+  - Keep move title + impact numbers (evolving: "£X saved so far · £Y target")
+  - Progress bar: sub-goals completed / total (or steps completed / total)
+  - Social proof nudge: "You're ahead of X% of people on this move"
+  - CTA: Next concrete action step → "Next: [step] →"
+  - If all done, show completion state
 
-### 2. Aggressive deduplication (sync.js:308-317, sync.js:342-365, sync.ts:61-74)
-**Problem:** Set-based dedup collapsed legitimate duplicate transactions (e.g., two £3.50
-coffees at Costa on the same day) into one. Any transaction with the same date+description+amount
-was treated as a duplicate.
-**Fix:** Count-based dedup — keep `max(count_source_a, count_source_b)` per key. This
-preserves legitimate duplicates within one account while still merging the same transaction
-appearing across multiple accounts. Applied to:
-- Per-connection CSV merge (sync.js: existing stored CSV + new 30-day sync)
-- Cross-connection CSV merge (sync.js: combining all connections)
-- Fallback CSV merge (sync.ts: loading cached data from multiple bank_data rows)
+### Step 3: Celebration micro-interaction on start
+- [ ] Brief scale pulse animation when card transforms from "start" to "in progress"
+- Use existing `LayoutAnimation.configureNext(SMOOTH_ANIM)` + optional Animated scale
 
-### 3. Silent error swallowing (bank-data.js:87)
-**Problem:** Empty `catch {}` block hid errors during account_type derivation and old
-connection cleanup. If the DB was down or query had issues, no diagnostics logged.
-**Fix:** Added `console.warn` with error message.
+### Step 4: Wire progress CTA to scroll to in-progress section
+- [ ] "View progress" / next step button scrolls to expanded move card below
 
-## Audit: What's Working Correctly
-
-### Connection (truelayer.ts → connect.tsx → callback.js)
-- [x] Auth URL with scopes: accounts, balance, transactions, cards
-- [x] State encoding: connectionId|origin for redirect
-- [x] Token exchange: authorization_code grant
-- [x] 12-month transaction fetch (accounts + cards in parallel)
-- [x] CSV conversion: CREDIT→positive, else→negative
-- [x] Bank data storage with refresh_token, provider_name, account_type
-- [x] Card/account balance tracking (overdraft detection)
-- [x] Old connection cleanup per provider
-
-### Processing (processing.tsx → enrichment-engine.ts)
-- [x] Source param ('bank' vs 'csv') correctly distinguishes error messages
-- [x] Zero-transaction bypass to dashboard for bank connections
-- [x] CSV parsing: flexible header detection (date, desc/narr/memo, amount/debit/credit)
-- [x] Date parsing: YYYY-MM-DD, DD/MM/YYYY, named dates
-- [x] Transaction filtering: 1-year cutoff, zero amounts, empty descriptions
-- [x] Rejection logging for debugging zero-tx scenarios
-- [x] Multi-stage enrichment: user overrides → merchant DB → fuzzy match → keyword → default
-- [x] Credit card full-payer detection (prevents double-counting)
-- [x] Claude AI classification for low-confidence transactions (batches of 25)
-- [x] Move ranking with UKPF flowchart + goal trajectories
-- [x] Analysis saved to Supabase + score history + achievements
-
-### Sync (sync.js → sync.ts → sync-coordinator.ts)
-- [x] Token rotation: new refresh_token persisted BEFORE data fetches
-- [x] 30-day incremental window with retry on TrueLayer endpoint failure
-- [x] Consent expiry: 90-day window from created_at (not updated_at)
-- [x] Fallback to stored CSV if TrueLayer sync fails
-- [x] Re-enrichment of merged data
-- [x] Debt account sync from card balances
-- [x] Reactive engine for feedback loop
-
-## Checklist
-- [x] Newline sanitization added to callback.js and sync.js
-- [x] Count-based dedup in sync.js per-connection merge
-- [x] Count-based dedup in sync.js cross-connection merge
-- [x] Count-based dedup in sync.ts fallback merge
-- [x] Logging added to bank-data.js catch block
-- [x] TypeScript compiles clean
-- [x] 39/39 tests pass
-
-## Review
-Three real bugs fixed. The core TrueLayer flow is architecturally sound — token
-management, error handling, fallback paths, and enrichment pipeline all work correctly.
-The dedup fix is the most impactful: users with repeated purchases at the same merchant
-for the same amount on the same day were losing transactions.
+### Step 5: Verify
+- [ ] Button starts the move (not navigates to chat)
+- [ ] Hero card transforms after starting
+- [ ] Progress bar reflects sub-goal/step completion
+- [ ] Day counter works
+- [ ] TypeScript compiles clean

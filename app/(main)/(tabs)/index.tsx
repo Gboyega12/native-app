@@ -243,7 +243,7 @@ export default function Home() {
   const [reactiveEventIndex, setReactiveEventIndex] = useState(0);
   // ── Plan data (merged from plan page) ──
   const [userPlans, setUserPlans] = useState<any[]>([]);
-  const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[]; sub_goals?: MoveSubGoal[] }>>({});
+  const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[]; sub_goals?: MoveSubGoal[]; updated_at?: string }>>({});
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
@@ -912,6 +912,7 @@ export default function Home() {
               approved: row.approved,
               completed_steps: row.completed_steps || [],
               sub_goals: row.sub_goals && Array.isArray(row.sub_goals) ? row.sub_goals : undefined,
+              updated_at: row.updated_at,
             };
           }
         }
@@ -1200,7 +1201,7 @@ export default function Home() {
     const key = `move-${index}`;
     if (planProgress[key]?.approved) return;
     const sgs = hydrateSubGoals(move);
-    const row = { move_key: key, move_action: move.action, approved: true, completed_steps: [] as number[], sub_goals: sgs };
+    const row = { move_key: key, move_action: move.action, approved: true, completed_steps: [] as number[], sub_goals: sgs, updated_at: new Date().toISOString() };
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setPlanProgress((prev) => ({ ...prev, [key]: row }));
     const upsertData: any = {
@@ -1780,64 +1781,137 @@ export default function Home() {
                 snapToAlignment="start"
               >
                 {/* ── Page 1: #1 Move (hero) ── */}
-                {hasMoveCard && (
+                {hasMoveCard && (() => {
+                  const heroMove = dashboardMoves[0];
+                  const heroIdx = moves.indexOf(heroMove);
+                  const heroKey = `move-${heroIdx}`;
+                  const heroProgress = planProgress[heroKey];
+                  const heroActive = !!heroProgress?.approved;
+                  const heroSgs = heroProgress?.sub_goals || hydrateSubGoals(heroMove) || [];
+                  const heroSteps = heroMove.steps || [];
+                  const heroHasSgs = heroSgs.length > 0;
+                  const heroDoneCount = heroHasSgs
+                    ? heroSgs.filter((sg: MoveSubGoal) => sg.completedAt).length
+                    : (heroProgress?.completed_steps || []).length;
+                  const heroTotal = heroHasSgs ? heroSgs.length : heroSteps.length;
+                  const heroFraction = heroTotal > 0 ? heroDoneCount / heroTotal : 0;
+                  const heroAllDone = heroTotal > 0 && heroDoneCount >= heroTotal;
+                  const daysSinceStart = heroProgress?.updated_at
+                    ? Math.max(1, Math.floor((Date.now() - new Date(heroProgress.updated_at).getTime()) / 86400000))
+                    : 1;
+                  const nextStep = heroSteps.find((_: string, idx: number) => !(heroProgress?.completed_steps || []).includes(idx));
+                  return (
                   <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
-                    <Card variant="highlight" style={{ flex: 1 }}>
+                    <Card variant={heroActive ? 'active' : 'highlight'} style={{ flex: 1 }}>
                       <Animated.View style={{ transform: [{ translateX: parallaxShift }], flex: 1 }}>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
-                          YOUR #1 MOVE
-                        </Text>
-                        <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
-                          {stripMd(dashboardMoves[0].action)}
-                        </Text>
-                        <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
-                          <View>
-                            <AnimatedNumber
-                              value={dashboardMoves[0].monthlyImpact || 0}
-                              prefix={'\u00a3'}
-                              style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                            />
-                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
-                          </View>
-                          <View>
-                            <AnimatedNumber
-                              value={dashboardMoves[0].annualImpact || 0}
-                              prefix={'\u00a3'}
-                              style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                            />
-                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
-                          </View>
-                        </View>
-                        {dashboardMoves[0].effort && (
-                          <View style={{ marginTop: 14 }}>
-                            <View style={{
-                              alignSelf: 'flex-start',
-                              paddingHorizontal: 10,
-                              paddingVertical: 4,
-                              borderRadius: 12,
-                              backgroundColor: dashboardMoves[0].effort === 'low' ? 'rgba(147,130,220,0.12)' : dashboardMoves[0].effort === 'high' ? 'rgba(76,175,80,0.12)' : 'rgba(150,150,150,0.12)',
-                            }}>
-                              <Text style={{
-                                fontFamily: fonts.mono,
-                                fontSize: 10,
-                                letterSpacing: 0.5,
-                                color: dashboardMoves[0].effort === 'low' ? '#9382DC' : dashboardMoves[0].effort === 'high' ? colors.green : colors.dim,
-                              }}>
-                                {dashboardMoves[0].effort === 'low' ? 'Quick win' : dashboardMoves[0].effort === 'high' ? 'Big move' : 'Some effort'}
-                              </Text>
+                        {heroActive ? (
+                          <>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: heroAllDone ? colors.green : colors.accent, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
+                              {heroAllDone ? 'MOVE COMPLETE \u2713' : `MOVE IN PROGRESS \u00B7 Day ${daysSinceStart}`}
+                            </Text>
+                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                              {stripMd(heroMove.action)}
+                            </Text>
+                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.monthlyImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
+                              </View>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.annualImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
+                              </View>
                             </View>
-                          </View>
+                            {heroTotal > 0 && (
+                              <View style={{ marginTop: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                  <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                    <View style={{ width: `${Math.round(heroFraction * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: heroAllDone ? colors.green : colors.accent }} />
+                                  </View>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{heroDoneCount}/{heroTotal}</Text>
+                                </View>
+                              </View>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
+                              YOUR #1 MOVE
+                            </Text>
+                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                              {stripMd(heroMove.action)}
+                            </Text>
+                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.monthlyImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
+                              </View>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.annualImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
+                              </View>
+                            </View>
+                            {heroMove.effort && (
+                              <View style={{ marginTop: 14 }}>
+                                <View style={{
+                                  alignSelf: 'flex-start',
+                                  paddingHorizontal: 10,
+                                  paddingVertical: 4,
+                                  borderRadius: 12,
+                                  backgroundColor: heroMove.effort === 'low' ? 'rgba(147,130,220,0.12)' : heroMove.effort === 'high' ? 'rgba(76,175,80,0.12)' : 'rgba(150,150,150,0.12)',
+                                }}>
+                                  <Text style={{
+                                    fontFamily: fonts.mono,
+                                    fontSize: 10,
+                                    letterSpacing: 0.5,
+                                    color: heroMove.effort === 'low' ? '#9382DC' : heroMove.effort === 'high' ? colors.green : colors.dim,
+                                  }}>
+                                    {heroMove.effort === 'low' ? 'Quick win' : heroMove.effort === 'high' ? 'Big move' : 'Some effort'}
+                                  </Text>
+                                </View>
+                              </View>
+                            )}
+                          </>
                         )}
                       </Animated.View>
                       <TouchableOpacity
                         style={[s.heroCta, { marginTop: 24 }]}
-                        onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: ${stripMd(dashboardMoves[0].action)}` } })}
+                        onPress={() => {
+                          if (heroActive) {
+                            // Scroll to in-progress section
+                            const y = cardPositions.current.moves;
+                            if (y != null) dashScrollRef.current?.scrollTo({ y, animated: true });
+                          } else {
+                            handleStartMove(heroIdx, heroMove);
+                          }
+                        }}
                       >
-                        <Text style={s.heroCtaText}>Start this move</Text>
+                        <Text style={s.heroCtaText}>
+                          {heroActive
+                            ? heroAllDone ? 'View completed move' : (nextStep ? `Next: ${nextStep.length > 30 ? nextStep.slice(0, 30) + '\u2026' : nextStep}` : 'View progress')
+                            : 'Start this move'}
+                        </Text>
                       </TouchableOpacity>
                     </Card>
                   </View>
-                )}
+                  );
+                })()}
 
                 {/* ── Horizontal connector dots between cards ── */}
                 {hasMoveCard && (
