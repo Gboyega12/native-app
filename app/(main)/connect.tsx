@@ -233,7 +233,8 @@ export default function Connect() {
     trackEvent('Bank Connect Success', { method: _label });
     // Onboarding: single account connect → proceed straight to analysis
     clearConnectState();
-    router.push({ pathname: '/(main)/processing', params: { csvData } });
+    const source = _label === 'Bank account' ? 'bank' : 'csv';
+    router.push({ pathname: '/(main)/processing', params: { csvData, source } });
   };
 
   const handleTrueLayer = async () => {

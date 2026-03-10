@@ -101,7 +101,7 @@ const DotMatrix = () => {
 
 function ProcessingInner() {
   const router = useRouter();
-  const { csvData } = useLocalSearchParams<{ csvData: string }>();
+  const { csvData, source } = useLocalSearchParams<{ csvData: string; source?: string }>();
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState('');
   const [enrichProgress, setEnrichProgress] = useState('');
@@ -144,7 +144,9 @@ function ProcessingInner() {
   const runAnalysis = async () => {
     try {
       if (!csvData || csvData.trim().length < 10) {
-        setError('No transaction data found. Please go back and upload a bank statement.');
+        setError(source === 'bank'
+          ? 'Your bank returned no transactions yet. This can happen with new accounts \u2014 try again in a few hours.'
+          : 'No transaction data found. Please go back and upload a bank statement.');
         return;
       }
 
@@ -199,6 +201,13 @@ function ProcessingInner() {
       if (result.enrichedTransactions.length === 0) {
         const lineCount = csvData.trim().split('\n').length;
         if (lineCount <= 1) {
+          if (source === 'bank') {
+            // Bank connected but returned 0 transactions — new account or pending auth
+            console.warn('[processing] Bank returned header-only CSV — bypassing to dashboard');
+            trackEvent('Processing Bypassed', { reason: 'bank_no_transactions', raw_lines: lineCount });
+            router.replace('/(main)/(tabs)');
+            return;
+          }
           // CSV upload with no data rows — this is a format issue
           setError('No transactions found in your data. Check the file format \u2014 it should have Date, Description, and Amount columns.');
           return;
