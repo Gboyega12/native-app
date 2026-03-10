@@ -365,7 +365,7 @@ export default function Plan() {
       loadData();
       // Subscribe to sync completions from other screens
       const unsub = onSyncComplete((result) => {
-        if (!result) return;
+        if (!result?.analysis) return;
         setAnalysis(result.analysis);
         applyReactiveResult(result.reactive);
       });
@@ -434,7 +434,7 @@ export default function Plan() {
     try {
       setSyncing(true);
       const result = await requestSync(userId);
-      if (!result) { setSyncing(false); return; }
+      if (!result?.analysis) { setSyncing(false); return; }
 
       // Apply dismissed-move filter
       const moves = result.analysis.all_moves || [];

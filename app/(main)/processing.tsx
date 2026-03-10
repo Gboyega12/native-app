@@ -197,13 +197,18 @@ function ProcessingInner() {
       let result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
 
       if (result.enrichedTransactions.length === 0) {
-        // Distinguish between CSV-upload issues and bank connections with no data
         const lineCount = csvData.trim().split('\n').length;
         if (lineCount <= 1) {
-          setError('Your bank returned no transactions. This can happen if the account is new or data is still being processed. Please try again in a few minutes.');
-        } else {
+          // CSV upload with no data rows — this is a format issue
           setError('No transactions found in your data. Check the file format \u2014 it should have Date, Description, and Amount columns.');
+          return;
         }
+        // Bank returned transactions but all were filtered (pending, £0, etc.).
+        // Don't dead-end — the bank IS connected. Navigate to dashboard which
+        // will show a "processing" state and auto-retry as transactions settle.
+        console.warn(`[processing] Enrichment filtered all ${lineCount} rows — bypassing to dashboard`);
+        trackEvent('Processing Bypassed', { reason: 'no_enriched_transactions', raw_lines: lineCount });
+        router.replace('/(main)/(tabs)');
         return;
       }
       await delay(400);

@@ -32,8 +32,8 @@ export interface WeeklyContext {
 }
 
 export interface SyncResult {
-  /** The raw analysis (before budget-adjustment merge). */
-  analysis: Analysis;
+  /** The raw analysis (before budget-adjustment merge). Null when bank is connected but enrichment found no usable transactions yet. */
+  analysis: Analysis | null;
   /** Debt accounts synced from TrueLayer card balances. */
   debtAccounts: any[];
   /** Real-time weekly budget context for adaptive spending guidance. */
@@ -317,7 +317,24 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
 
   // ── 3. Enrich ──
   const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
-  if (result.enrichedTransactions.length === 0) return null;
+  if (result.enrichedTransactions.length === 0) {
+    // Bank is connected but all transactions were filtered out (pending, £0, etc.).
+    // Return a partial result so the caller knows the bank IS connected — don't
+    // return null which makes the dashboard think there's no connection at all.
+    console.warn('[sync] Enrichment returned 0 transactions — bank connected but no usable data yet');
+    connectionIssues.push('no_transactions_yet');
+    return {
+      analysis: null,
+      debtAccounts: [],
+      weeklyContext: { adaptiveBudget: 0, staticBudget: 0, committedThisWeek: 0, discretionaryThisWeek: 0, incomeArrivedThisWeek: false, recentIncomeEvents: [] },
+      dataSource,
+      latestTransactionDate: null,
+      connectionIssues,
+      expiredBankNames,
+      expiringConnections,
+      reactive: null,
+    };
+  }
 
   // ── 3b. Reconcile debt payments ──
   // Match BNPL/debt payments in transactions against manual debt accounts

@@ -1117,7 +1117,7 @@ export default function Chat() {
       trackScreen('Chat');
       loadContext();
       const unsub = onSyncComplete((result) => {
-        if (!result) return;
+        if (!result?.analysis) return;
         setAnalysis(result.analysis);
       });
       return () => unsub();
@@ -1344,7 +1344,7 @@ export default function Chat() {
     try {
       // Force-sync to ensure chat always has the freshest transaction data
       const syncResult = await requestSync(user.id, true);
-      if (syncResult) {
+      if (syncResult?.analysis) {
         // Update analysis with fresh sync data
         const freshA = syncResult.analysis;
         setAnalysis(freshA);

@@ -76,9 +76,11 @@ export default function Home() {
   const [connectionWarning, setConnectionWarning] = useState<{ message: string; banks: string[] } | null>(null);
   const [connectionDismissed, setConnectionDismissed] = useState(false);
   const [incomeDismissed, setIncomeDismissed] = useState(false);
+  const [hasBankConnection, setHasBankConnection] = useState(false);
   const { showWalkthrough, dismissWalkthrough } = useWalkthrough();
   const dashScrollRef = useRef<ScrollView>(null);
   const cardPositions = useRef<Record<string, number>>({});
+  const syncRetryRef = useRef<number>(0);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);
 
@@ -931,6 +933,21 @@ export default function Home() {
         setAnalysis(mergeAdjustments(lastResult, adjustments));
       }
 
+      // Check if user has a bank connection even if no analysis exists yet.
+      // This distinguishes "never connected" from "connected but transactions
+      // are still settling" so the dashboard can show the right empty state.
+      if (!data && !lastResult) {
+        try {
+          const { count } = await supabase
+            .from('bank_data')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', user.id);
+          setHasBankConnection((count ?? 0) > 0);
+        } catch {
+          setHasBankConnection(false);
+        }
+      }
+
       // Fetch previous month's snapshot for real income comparison
       try {
         const now = new Date();
@@ -950,10 +967,10 @@ export default function Home() {
         setPrevSnapshot(null);
       }
 
-      // Trigger background sync if user has any analysis data
-      if (data || lastResult) {
-        syncInBackground(user.id);
-      }
+      // Trigger background sync if user has any data or a bank connection.
+      // This also handles the "bank connected but no analysis yet" case,
+      // where sync will retry enrichment as new transactions settle.
+      syncInBackground(user.id);
     } catch (err: any) {
       console.warn('[home] loadData error:', err?.message);
       setAnalysis(null);
@@ -1086,6 +1103,24 @@ export default function Home() {
 
       // Only update analysis if sync returned materially different data
       // to avoid a visual flash when the numbers haven't changed
+      if (!result.analysis) {
+        // Bank is connected but enrichment found no usable transactions yet.
+        // Schedule a retry — transactions may take time to settle from the bank.
+        if (result.connectionIssues?.includes('no_transactions_yet')) {
+          setHasBankConnection(true);
+          const retryCount = (syncRetryRef.current ?? 0);
+          if (retryCount < 5) {
+            syncRetryRef.current = retryCount + 1;
+            const delayMs = Math.min(30_000 * Math.pow(1.5, retryCount), 120_000);
+            console.log(`[home] No transactions yet — retry ${retryCount + 1}/5 in ${Math.round(delayMs / 1000)}s`);
+            setTimeout(() => syncInBackground(userId, true), delayMs);
+          }
+        }
+        setSyncing(false);
+        return;
+      }
+      // Reset retry counter on successful analysis
+      syncRetryRef.current = 0;
       const fresh = mergeAdjustments(result.analysis, budgetAdjustments);
       setAnalysis((prev) => {
         if (
@@ -1626,15 +1661,27 @@ export default function Home() {
       {!analysis ? (
         <View style={s.emptyState}>
           <View style={s.emptyBocyWrap}>
-            <BocyFace mood="neutral" size="lg" breathing />
+            <BocyFace mood={hasBankConnection ? 'thinking' : 'neutral'} size="lg" breathing />
           </View>
-          <Text style={s.emptyTitle}>Your #1 financial move awaits</Text>
-          <Text style={s.emptyDesc}>
-            Connect your bank account so Bocy can analyse your transactions and find the most impactful action you can take right now.
-          </Text>
-          <TouchableOpacity style={s.ctaButton} onPress={() => router.push('/(main)/connect')}>
-            <Text style={s.ctaText}>Connect your bank</Text>
-          </TouchableOpacity>
+          {hasBankConnection ? (
+            <>
+              <Text style={s.emptyTitle}>Analysing your transactions</Text>
+              <Text style={s.emptyDesc}>
+                Your bank is connected. Transactions can take a little while to appear — Bocy will have your plan ready as soon as they settle.
+              </Text>
+              <ActivityIndicator size="small" color={colors.accent} style={{ marginTop: spacing.md }} />
+            </>
+          ) : (
+            <>
+              <Text style={s.emptyTitle}>Your #1 financial move awaits</Text>
+              <Text style={s.emptyDesc}>
+                Connect your bank account so Bocy can analyse your transactions and find the most impactful action you can take right now.
+              </Text>
+              <TouchableOpacity style={s.ctaButton} onPress={() => router.push('/(main)/connect')}>
+                <Text style={s.ctaText}>Connect your bank</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       ) : (
         <>

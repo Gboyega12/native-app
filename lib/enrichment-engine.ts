@@ -147,6 +147,9 @@ const EnrichmentEngine = {
     const cutoff = new Date(now);
     cutoff.setFullYear(cutoff.getFullYear() - 1);
 
+    // Track rejection reasons for debugging zero-transaction scenarios
+    let rejected = { noDate: 0, tooOld: 0, emptyDesc: 0, zeroAmount: 0, accepted: 0 };
+
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
@@ -155,7 +158,8 @@ const EnrichmentEngine = {
       const dateStr = parts[dateIdx >= 0 ? dateIdx : 0] || '';
       const desc = parts[descIdx >= 0 ? descIdx : 1] || '';
       const date = parseDate(dateStr);
-      if (!date || date < cutoff) continue;
+      if (!date) { rejected.noDate++; continue; }
+      if (date < cutoff) { rejected.tooOld++; continue; }
 
       let amount = 0;
       if (debitIdx >= 0 && creditIdx >= 0) {
@@ -166,10 +170,20 @@ const EnrichmentEngine = {
         amount = parseFloat((parts[amountIdx >= 0 ? amountIdx : 2] || '').replace(/[^0-9.\-]/g, '')) || 0;
       }
 
-      if (desc && amount !== 0) {
-        transactions.push({ date: date.toISOString(), description: desc.trim(), amount });
-      }
+      if (!desc) { rejected.emptyDesc++; continue; }
+      if (amount === 0) { rejected.zeroAmount++; continue; }
+
+      rejected.accepted++;
+      transactions.push({ date: date.toISOString(), description: desc.trim(), amount });
     }
+
+    const totalRejected = rejected.noDate + rejected.tooOld + rejected.emptyDesc + rejected.zeroAmount;
+    if (totalRejected > 0 && transactions.length === 0) {
+      console.warn(`[enrichment] All ${totalRejected} transactions rejected: ${rejected.noDate} bad date, ${rejected.tooOld} too old, ${rejected.emptyDesc} empty desc, ${rejected.zeroAmount} zero amount`);
+    } else if (totalRejected > 0) {
+      console.log(`[enrichment] Parsed ${transactions.length} transactions, rejected ${totalRejected} (${rejected.noDate} bad date, ${rejected.tooOld} too old, ${rejected.emptyDesc} empty desc, ${rejected.zeroAmount} zero amount)`);
+    }
+
     return transactions;
   },
 
