@@ -143,7 +143,38 @@ function ProcessingInner() {
 
   const runAnalysis = async () => {
     try {
-      if (!csvData || csvData.trim().length < 10) {
+      // ── Resolve CSV data ──
+      // For bank connections: read directly from bank_data table (all connections).
+      // This avoids URL param size limits and ensures we use ALL available data,
+      // not just the latest callback's CSV.
+      let csv = csvData;
+      if (source === 'bank') {
+        try {
+          const { data: { user: bankUser } } = await supabase.auth.getUser();
+          if (bankUser) {
+            const { data: bankRows } = await supabase
+              .from('bank_data')
+              .select('csv_data')
+              .eq('user_id', bankUser.id)
+              .order('created_at', { ascending: false });
+            if (bankRows && bankRows.length > 0) {
+              const allLines: string[] = [];
+              for (const row of bankRows) {
+                if (!row.csv_data) continue;
+                const lines = row.csv_data.split('\n').slice(1).filter((l: string) => l.trim());
+                allLines.push(...lines);
+              }
+              if (allLines.length > 0) {
+                csv = ['Date,Description,Amount', ...allLines].join('\n');
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[processing] Failed to fetch bank_data from DB, using URL param:', e);
+        }
+      }
+
+      if (!csv || csv.trim().length < 10) {
         setError(source === 'bank'
           ? 'Your bank returned no transactions yet. This can happen with new accounts \u2014 try again in a few hours.'
           : 'No transaction data found. Please go back and upload a bank statement.');
@@ -196,22 +227,13 @@ function ProcessingInner() {
       }
 
       setCurrentStep(1);
-      let result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
+      let result = EnrichmentEngine.enrich(csv, overrides, debtAccountsData, identityData);
 
       if (result.enrichedTransactions.length === 0) {
-        const lineCount = csvData.trim().split('\n').length;
         if (source === 'bank') {
-          // Bank connected but returned no usable transactions.
-          // Show a clear message — don't silently bypass to dashboard spinner.
-          trackEvent('Processing No Transactions', { reason: lineCount <= 1 ? 'bank_no_transactions' : 'all_filtered', raw_lines: lineCount });
-          setError(
-            lineCount <= 1
-              ? 'Your bank is connected but hasn\u2019t returned any transactions yet. This can happen with new connections \u2014 it usually resolves within a few hours.'
-              : 'Your bank returned transactions but none could be processed (they may be pending or settling). Try again in a few hours.'
-          );
+          setError('Your bank is connected but hasn\u2019t returned any usable transactions yet. This can happen with new connections \u2014 try again in a few hours.');
           return;
         }
-        // CSV/PDF upload with no usable data rows — format issue
         setError('No transactions found in your data. Check the file format \u2014 it should have Date, Description, and Amount columns.');
         return;
       }
