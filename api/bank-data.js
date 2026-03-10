@@ -84,7 +84,9 @@ export default async function handler(req, res) {
             .eq('account_type', acType)
             .neq('connection_id', connectionId);
         }
-      } catch {}
+      } catch (derivErr) {
+        console.warn('[bank-data] Non-critical: account_type derivation or cleanup failed:', derivErr.message || derivErr);
+      }
     }
 
     return res.json({ success: true, csv_data: data.csv_data });

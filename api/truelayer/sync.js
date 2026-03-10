@@ -132,7 +132,7 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
     const csvLines = [];
     for (const tx of allTx) {
       const date = tx.timestamp ? tx.timestamp.split('T')[0] : '';
-      const desc = (tx.merchant_name || tx.description || '').replace(/,/g, ' ');
+      const desc = (tx.merchant_name || tx.description || '').replace(/,/g, ' ').replace(/[\r\n]+/g, ' ');
       const amount = tx.transaction_type === 'CREDIT' ? Math.abs(tx.amount) : -Math.abs(tx.amount);
       csvLines.push(`${date},${desc},${amount}`);
     }
@@ -300,18 +300,32 @@ export default async function handler(req, res) {
       if (result.csvLines.length > 0) {
         // Merge new transactions with existing stored CSV (incremental sync).
         // The new 30-day window overlaps with stored data, so deduplicate.
+        // Use count-based dedup: keep max(existing, new) per key so legitimate
+        // duplicate transactions (e.g. two coffees same day/amount) aren't lost.
         const existingLines = [];
         if (row.csv_data) {
           const lines = row.csv_data.split('\n');
           existingLines.push(...lines.slice(1).filter((l) => l.trim()));
         }
-        const allLines = [...existingLines, ...result.csvLines];
-        const seen = new Set();
+        const normalise = (line) => line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
+        const countByKey = (lines) => {
+          const counts = new Map();
+          const lineByKey = new Map();
+          for (const line of lines) {
+            const key = normalise(line);
+            counts.set(key, (counts.get(key) || 0) + 1);
+            if (!lineByKey.has(key)) lineByKey.set(key, line);
+          }
+          return { counts, lineByKey };
+        };
+        const existing = countByKey(existingLines);
+        const fresh = countByKey(result.csvLines);
+        const allKeys = new Set([...existing.counts.keys(), ...fresh.counts.keys()]);
         const unique = [];
-        for (const line of allLines) {
-          const key = line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
-          if (!seen.has(key)) {
-            seen.add(key);
+        for (const key of allKeys) {
+          const maxCount = Math.max(existing.counts.get(key) || 0, fresh.counts.get(key) || 0);
+          const line = fresh.lineByKey.get(key) || existing.lineByKey.get(key);
+          for (let i = 0; i < maxCount; i++) {
             unique.push(line);
           }
         }
@@ -339,15 +353,34 @@ export default async function handler(req, res) {
       });
     }
 
-    // Deduplicate transactions across connections (same date+amount+desc = same tx)
-    const seenKeys = new Set();
+    // Deduplicate transactions across connections.
+    // Use per-connection counts so legitimate duplicates within one account
+    // (e.g. two coffees same day/amount) are preserved, while the same
+    // transaction appearing in two accounts is still merged.
+    const normKey = (l) => l.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
+    const connCountMaps = results
+      .filter(({ result: r }) => r && !r.tokenOnlyRecovery && r.csvLines.length > 0)
+      .map(({ result: r }) => {
+        const m = new Map();
+        const ref = new Map();
+        for (const line of r.csvLines) {
+          const k = normKey(line);
+          m.set(k, (m.get(k) || 0) + 1);
+          if (!ref.has(k)) ref.set(k, line);
+        }
+        return { m, ref };
+      });
+    const allTxKeys = new Set();
+    for (const { m } of connCountMaps) for (const k of m.keys()) allTxKeys.add(k);
     const uniqueLines = [];
-    for (const line of mergedCsvLines) {
-      const key = line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
-      if (!seenKeys.has(key)) {
-        seenKeys.add(key);
-        uniqueLines.push(line);
+    for (const k of allTxKeys) {
+      let best = 0;
+      let line = '';
+      for (const { m, ref } of connCountMaps) {
+        const c = m.get(k) || 0;
+        if (c > best) { best = c; line = ref.get(k) || line; }
       }
+      for (let i = 0; i < best; i++) uniqueLines.push(line);
     }
 
     // Return merged CSV across all connections

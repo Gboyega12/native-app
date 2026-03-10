@@ -55,17 +55,51 @@ export interface SyncResult {
 /**
  * Deduplicate CSV lines that appear across multiple bank_data rows.
  * Uses date + amount + normalised description as a composite key.
- * Two transactions with the same date, amount, and description are
- * treated as the same transaction regardless of which account they came from.
+ *
+ * Count-based: if the same key appears N times in one row and M times
+ * in another, we keep max(N, M) — not N+M — so cross-account duplicates
+ * are merged while legitimate same-day/same-amount transactions within
+ * one account are preserved.
  */
-function deduplicateCSVLines(csvLines: string[]): string[] {
+function deduplicateCSVLines(csvLines: string[], perRowLines?: string[][]): string[] {
+  const normalise = (l: string) => l.trim().toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ');
+
+  // If per-row breakdown is provided, use count-based dedup
+  if (perRowLines && perRowLines.length > 0) {
+    const rowMaps = perRowLines.map((lines) => {
+      const counts = new Map<string, number>();
+      const ref = new Map<string, string>();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const key = normalise(trimmed);
+        counts.set(key, (counts.get(key) || 0) + 1);
+        if (!ref.has(key)) ref.set(key, trimmed);
+      }
+      return { counts, ref };
+    });
+    const allKeys = new Set<string>();
+    for (const { counts } of rowMaps) for (const k of counts.keys()) allKeys.add(k);
+    const unique: string[] = [];
+    for (const k of allKeys) {
+      let best = 0;
+      let line = '';
+      for (const { counts, ref } of rowMaps) {
+        const c = counts.get(k) || 0;
+        if (c > best) { best = c; line = ref.get(k) || line; }
+      }
+      for (let i = 0; i < best; i++) unique.push(line);
+    }
+    return unique;
+  }
+
+  // Fallback: simple Set-based dedup (single source)
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const line of csvLines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    // Normalise: lowercase, collapse whitespace, strip quotes
-    const key = trimmed.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ');
+    const key = normalise(trimmed);
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(trimmed);
@@ -251,14 +285,16 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
       if (bankRows && bankRows.length > 0) {
+        const perRowLines: string[][] = [];
         const rawLines: string[] = [];
         for (const row of bankRows) {
           if (!row.csv_data) continue;
-          const lines = row.csv_data.split('\n');
-          rawLines.push(...lines.slice(1).filter((l: string) => l.trim()));
+          const lines = row.csv_data.split('\n').slice(1).filter((l: string) => l.trim());
+          perRowLines.push(lines);
+          rawLines.push(...lines);
         }
-        // Deduplicate transactions that appear in multiple connected accounts
-        const uniqueLines = deduplicateCSVLines(rawLines);
+        // Deduplicate across accounts while preserving legitimate duplicates within each
+        const uniqueLines = deduplicateCSVLines(rawLines, perRowLines);
         csvData = ['Date,Description,Amount', ...uniqueLines].join('\n');
       }
     } catch (e: any) {

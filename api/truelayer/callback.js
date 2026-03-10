@@ -142,7 +142,7 @@ export default async function handler(req, res) {
     const csvLines = ['Date,Description,Amount'];
     for (const tx of allTx) {
       const date = tx.timestamp ? tx.timestamp.split('T')[0] : '';
-      const desc = (tx.merchant_name || tx.description || '').replace(/,/g, ' ');
+      const desc = (tx.merchant_name || tx.description || '').replace(/,/g, ' ').replace(/[\r\n]+/g, ' ');
       const amount = tx.transaction_type === 'CREDIT' ? Math.abs(tx.amount) : -Math.abs(tx.amount);
       csvLines.push(`${date},${desc},${amount}`);
     }
