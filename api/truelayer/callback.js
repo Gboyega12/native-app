@@ -92,51 +92,69 @@ export default async function handler(req, res) {
     fromDate.setFullYear(fromDate.getFullYear() - 1);
     const from = fromDate.toISOString().split('T')[0];
 
-    // Wait 7s upfront for the bank to propagate consent before fetching data.
-    // This avoids racing against the bank's sync pipeline and eliminates
-    // the need for retry loops.
+    // Wait 7s upfront for the bank to propagate consent, then fetch.
+    // If we still get 0 transactions, retry once after 5s (some banks like
+    // Revolut need extra time).
     console.log('[truelayer] Waiting 7s for consent propagation...');
     await new Promise((r) => setTimeout(r, 7000));
 
-    const [accountsRes, cardsRes] = await Promise.all([
-      fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
-      fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
-    ]);
-    const accountsData = await accountsRes.json();
-    const cardsData = await cardsRes.json();
+    async function fetchAllData() {
+      const [accountsRes, cardsRes] = await Promise.all([
+        fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
+        fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
+      ]);
+      const accountsData = await accountsRes.json();
+      const cardsData = await cardsRes.json();
 
-    const accounts = accountsData.results || [];
-    const cards = cardsData.results || [];
+      const accts = accountsData.results || [];
+      const crds = cardsData.results || [];
 
-    // Fetch transactions + balances in parallel
-    const txPromises = [
-      ...accounts.map((a) =>
-        fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
-      ),
-      ...cards.map((c) =>
-        fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
-      ),
-    ];
+      const txPromises = [
+        ...accts.map((a) =>
+          fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        ),
+        ...crds.map((c) =>
+          fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers }).then((r) => r.json())
+        ),
+      ];
 
-    const cardBalancePromises = cards.map((c) =>
-      fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/balance`, { headers })
-        .then((r) => r.json())
-        .then((data) => ({ card: c, balance: (data.results || [])[0] || null }))
-        .catch(() => ({ card: c, balance: null }))
-    );
-    const accountBalancePromises = accounts.map((a) =>
-      fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/balance`, { headers })
-        .then((r) => r.json())
-        .then((data) => ({ account: a, balance: (data.results || [])[0] || null }))
-        .catch(() => ({ account: a, balance: null }))
-    );
+      const cardBalancePromises = crds.map((c) =>
+        fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/balance`, { headers })
+          .then((r) => r.json())
+          .then((data) => ({ card: c, balance: (data.results || [])[0] || null }))
+          .catch(() => ({ card: c, balance: null }))
+      );
+      const accountBalancePromises = accts.map((a) =>
+        fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/balance`, { headers })
+          .then((r) => r.json())
+          .then((data) => ({ account: a, balance: (data.results || [])[0] || null }))
+          .catch(() => ({ account: a, balance: null }))
+      );
 
-    const [txResults, cardBalanceResults, accountBalanceResults] = await Promise.all([
-      Promise.all(txPromises),
-      Promise.all(cardBalancePromises),
-      Promise.all(accountBalancePromises),
-    ]);
-    const allTx = txResults.flatMap((r) => r.results || []);
+      const [txResults, cbResults, abResults] = await Promise.all([
+        Promise.all(txPromises),
+        Promise.all(cardBalancePromises),
+        Promise.all(accountBalancePromises),
+      ]);
+
+      return {
+        accounts: accts,
+        cards: crds,
+        allTx: txResults.flatMap((r) => r.results || []),
+        cardBalanceResults: cbResults,
+        accountBalanceResults: abResults,
+      };
+    }
+
+    let { accounts, cards, allTx, cardBalanceResults, accountBalanceResults } = await fetchAllData();
+
+    // Retry once if we got accounts/cards but 0 transactions
+    if (allTx.length === 0 && (accounts.length > 0 || cards.length > 0)) {
+      console.log('[truelayer] 0 transactions after 7s — retrying in 5s...');
+      await new Promise((r) => setTimeout(r, 5000));
+      ({ accounts, cards, allTx, cardBalanceResults, accountBalanceResults } = await fetchAllData());
+      console.log(`[truelayer] Retry result: ${allTx.length} transactions`);
+    }
 
     // Convert to CSV
     const csvLines = ['Date,Description,Amount'];
