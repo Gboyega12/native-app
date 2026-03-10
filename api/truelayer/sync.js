@@ -83,12 +83,9 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
     // Extract provider name from TrueLayer account/card data
     const providerName = accounts[0]?.provider?.display_name || cards[0]?.provider?.display_name || null;
 
-    // Use tomorrow as the upper bound so TrueLayer includes all of today's transactions.
-    // Date-only strings (e.g. "2026-03-09") are interpreted as start-of-day UTC,
-    // which can exclude same-day transactions depending on the bank's timezone.
-    const toDate = new Date();
-    toDate.setDate(toDate.getDate() + 1);
-    const to = toDate.toISOString().split('T')[0];
+    // Use today as the upper bound.
+    // TrueLayer rejects future dates with invalid_date_range.
+    const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
     // Re-syncs only need 30 days of data (incremental update).
     // The initial 12-month pull happens in callback.js at connection time.
