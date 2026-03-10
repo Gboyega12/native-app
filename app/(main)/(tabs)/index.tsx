@@ -20,7 +20,7 @@ import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals } from '@/lib/types';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
-import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, ConnectorDots, HorizontalConnectorDots, type ConnectorDotsHandle } from '@/components/Card';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { DashboardSkeleton } from '@/components/Skeleton';
 import { SpendingRing, CategoryBars, WeeklySparkline } from '@/components/Charts';
@@ -248,8 +248,6 @@ export default function Home() {
   const [breakdownExpanded, setBreakdownExpanded] = useState(false);
   const [budgetPeriod, setBudgetPeriod] = useState<'year' | 'month' | 'week'>('month');
   const budgetPeriodInitialised = useRef(false);
-  const connectorDotsRef = useRef<ConnectorDotsHandle>(null);
-  const txManuallyCollapsed = useRef(false);
 
   // Default budget period matches salary frequency
   useEffect(() => {
@@ -2461,7 +2459,6 @@ export default function Home() {
                       trackEvent('Budget Period Changed', { period: p });
                       LayoutAnimation.configureNext(SMOOTH_ANIM);
                       setBudgetPeriod(p);
-                      connectorDotsRef.current?.pulse();
                     }}>
                       <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>{p === 'year' ? 'Annual' : p === 'month' ? 'Monthly' : 'Weekly'}</Text>
                     </TouchableOpacity>
