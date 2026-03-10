@@ -15,3 +15,15 @@
 
 - **Steps must follow the page's visual order** (top to bottom), not feature priority. Users expect a chronological scroll through the UI.
 - **Modals block the content they explain.** Use lighter overlays or absolute positioning so the card being explained remains visible alongside the tooltip.
+
+## Data Flow
+
+- **Open Banking and CSV share the same processing pipeline.** The `csvData` param in processing.tsx is source-agnostic. When error messages differ by source (bank vs file upload), pass a `source` param to disambiguate — don't try to detect the source from CSV content.
+- **Zero transactions from a bank is not an error.** New accounts, pending auth, and settling transactions are all legitimate reasons for 0 tx. The bank IS connected — bypass to dashboard and let sync retry later.
+- **Header-only CSV (`Date,Description,Amount`) has `lineCount === 1`.** This is the sentinel for "no data rows" in processing.tsx. When source is 'bank', this should bypass to dashboard, not show a file format error.
+
+## Workflow Compliance
+
+- **Always write plan to `tasks/todo.md` BEFORE implementing.** Even when using inline TodoWrite for progress tracking, the spec should live in `tasks/todo.md` with checkable items.
+- **Update `tasks/lessons.md` after every correction or non-obvious discovery.** Don't wait until asked — capture the pattern immediately.
+- **Enter plan mode for 3+ step tasks.** Both the UI reorder and bug fix qualified but were implemented without formal plan mode. The work was correct but didn't follow the prescribed workflow.
