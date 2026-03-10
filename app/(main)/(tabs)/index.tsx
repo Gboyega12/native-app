@@ -1856,7 +1856,7 @@ export default function Home() {
                         )}
                       </Animated.View>
                       <TouchableOpacity
-                        style={[s.heroCta, { marginTop: 24, flex: 0, alignSelf: 'flex-start', paddingHorizontal: 28 }]}
+                        style={[s.heroCta, { marginTop: 24 }]}
                         onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: ${stripMd(dashboardMoves[0].action)}` } })}
                       >
                         <Text style={s.heroCtaText}>Ask Bocy about this</Text>
@@ -3491,7 +3491,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginTop: 28,
   },
   heroCta: {
-    flex: 2,
     backgroundColor: c.accent,
     paddingVertical: 14,
     borderRadius: 100,
