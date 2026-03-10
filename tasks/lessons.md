@@ -26,6 +26,11 @@
 - **Set-based CSV deduplication loses legitimate duplicate transactions.** Two coffees at the same place on the same day for the same amount have identical `date,description,amount` keys. Use count-based dedup: track per-source occurrence counts and keep `max(count_a, count_b)` for each key.
 - **Dedup context matters.** Per-connection merge (existing + new sync): count-based (overlapping windows). Cross-connection merge: count-based (preserves within-account dupes). The key insight: `max(source_a, source_b)` is always safe — it preserves legitimate duplicates while still merging true cross-source dupes.
 
+## Dashboard UX
+
+- **Never leave users on an infinite spinner.** When the dashboard detects "bank connected, no analysis" and retries sync, it MUST have an escape hatch after retries exhaust. Show "Try again" + "Upload a statement instead" buttons. Also add a safety timeout (3 minutes) in case sync never triggers the retry path at all.
+- **Processing.tsx bypass creates an orphan state.** When processing.tsx detects 0 enriched transactions and bypasses to dashboard via `router.replace`, the dashboard has no analysis and no way to create one. The sync retry loop is the only recovery path — and it gives up after 5 attempts (~6 minutes). After that, the user is stuck forever.
+
 ## Workflow Compliance
 
 - **Always write plan to `tasks/todo.md` BEFORE implementing.** Even when using inline TodoWrite for progress tracking, the spec should live in `tasks/todo.md` with checkable items.

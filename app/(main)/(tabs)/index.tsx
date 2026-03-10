@@ -81,8 +81,19 @@ export default function Home() {
   const dashScrollRef = useRef<ScrollView>(null);
   const cardPositions = useRef<Record<string, number>>({});
   const syncRetryRef = useRef<number>(0);
+  const [retriesExhausted, setRetriesExhausted] = useState(false);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);
+
+  // ── Safety timeout: if bank is connected but no analysis after 3 minutes, show escape hatch ──
+  useEffect(() => {
+    if (analysis || !hasBankConnection || retriesExhausted) return;
+    const timer = setTimeout(() => {
+      setRetriesExhausted(true);
+      console.warn('[home] Safety timeout — showing action buttons after 3 minutes');
+    }, 3 * 60 * 1000);
+    return () => clearTimeout(timer);
+  }, [analysis, hasBankConnection, retriesExhausted]);
 
   // ── Connection banner dismiss ──
   // Keyed by the sorted bank names. Dismissing stores these bank names.
@@ -1109,9 +1120,14 @@ export default function Home() {
           const retryCount = (syncRetryRef.current ?? 0);
           if (retryCount < 5) {
             syncRetryRef.current = retryCount + 1;
+            setRetriesExhausted(false);
             const delayMs = Math.min(30_000 * Math.pow(1.5, retryCount), 120_000);
             console.log(`[home] No transactions yet — retry ${retryCount + 1}/5 in ${Math.round(delayMs / 1000)}s`);
             setTimeout(() => syncInBackground(userId, true), delayMs);
+          } else {
+            // All retries exhausted — show escape hatch
+            setRetriesExhausted(true);
+            console.warn('[home] All sync retries exhausted — showing action buttons');
           }
         }
         setSyncing(false);
@@ -1119,6 +1135,7 @@ export default function Home() {
       }
       // Reset retry counter on successful analysis
       syncRetryRef.current = 0;
+      setRetriesExhausted(false);
       const fresh = mergeAdjustments(result.analysis, budgetAdjustments);
       setAnalysis((prev) => {
         if (
@@ -1662,13 +1679,40 @@ export default function Home() {
             <BocyFace mood={hasBankConnection ? 'thinking' : 'neutral'} size="lg" breathing />
           </View>
           {hasBankConnection ? (
-            <>
-              <Text style={s.emptyTitle}>Analysing your transactions</Text>
-              <Text style={s.emptyDesc}>
-                Your bank is connected. Transactions can take a little while to appear — Bocy will have your plan ready as soon as they settle.
-              </Text>
-              <ActivityIndicator size="small" color={colors.accent} style={{ marginTop: spacing.md }} />
-            </>
+            retriesExhausted ? (
+              <>
+                <Text style={s.emptyTitle}>Transactions aren't available yet</Text>
+                <Text style={s.emptyDesc}>
+                  Your bank is connected but hasn't returned any transactions yet. This can happen with new connections — it usually resolves within a few hours.
+                </Text>
+                <TouchableOpacity
+                  style={s.ctaButton}
+                  onPress={() => {
+                    syncRetryRef.current = 0;
+                    setRetriesExhausted(false);
+                    supabase.auth.getUser().then(({ data: { user } }) => {
+                      if (user) syncInBackground(user.id, true);
+                    });
+                  }}
+                >
+                  <Text style={s.ctaText}>Try again</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.ctaButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm }]}
+                  onPress={() => router.push('/(main)/connect')}
+                >
+                  <Text style={[s.ctaText, { color: colors.text }]}>Upload a statement instead</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={s.emptyTitle}>Analysing your transactions</Text>
+                <Text style={s.emptyDesc}>
+                  Your bank is connected. Transactions can take a little while to appear — Bocy will have your plan ready as soon as they settle.
+                </Text>
+                <ActivityIndicator size="small" color={colors.accent} style={{ marginTop: spacing.md }} />
+              </>
+            )
           ) : (
             <>
               <Text style={s.emptyTitle}>Your #1 financial move awaits</Text>
