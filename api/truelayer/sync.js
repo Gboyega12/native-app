@@ -98,12 +98,24 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
     const txPromises = [
       ...accounts.map((a) =>
         fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers })
-          .then((r) => r.json())
+          .then(async (r) => {
+            const body = await r.json();
+            if (!r.ok || body.error) {
+              console.error(`[sync] Transactions error for account ${a.account_id}:`, { status: r.status, body: JSON.stringify(body) });
+            }
+            return body;
+          })
           .catch((err) => { console.warn(`[sync] Transaction fetch failed for account ${a.account_id}:`, err.message); return { results: [] }; })
       ),
       ...cards.map((c) =>
         fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers })
-          .then((r) => r.json())
+          .then(async (r) => {
+            const body = await r.json();
+            if (!r.ok || body.error) {
+              console.error(`[sync] Transactions error for card ${c.account_id}:`, { status: r.status, body: JSON.stringify(body) });
+            }
+            return body;
+          })
           .catch((err) => { console.warn(`[sync] Transaction fetch failed for card ${c.account_id}:`, err.message); return { results: [] }; })
       ),
     ];

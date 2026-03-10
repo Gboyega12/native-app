@@ -223,6 +223,8 @@ export default async function handler(req, res) {
         // Build the cleanup query with all required filters in a single chain.
         // Supabase query builder is immutable — .eq() returns a NEW object,
         // so conditional chaining via variable reassignment doesn't work.
+        // Only clean up when we can positively identify the provider.
+        // Falling back to account_type alone risks deleting unrelated connections.
         if (providerName) {
           await admin
             .from('bank_data')
@@ -231,17 +233,7 @@ export default async function handler(req, res) {
             .eq('source', 'truelayer')
             .eq('provider_name', providerName)
             .neq('connection_id', connectionId);
-        } else if (accountType) {
-          await admin
-            .from('bank_data')
-            .delete()
-            .eq('user_id', postUserId)
-            .eq('source', 'truelayer')
-            .eq('account_type', accountType)
-            .neq('connection_id', connectionId);
         }
-        // If neither providerName nor accountType is known, skip cleanup
-        // to avoid deleting unrelated connections.
       } catch (cleanupErr) {
         console.warn('[callback] Non-critical: old connection cleanup failed:', cleanupErr.message);
       }

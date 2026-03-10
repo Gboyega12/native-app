@@ -64,6 +64,8 @@ export default async function handler(req, res) {
         // Clean up old connections for the same provider.
         // This handles the web flow where callback didn't have user_id
         // and couldn't run cleanup at insert time.
+        // Only clean up when we can positively identify the provider to avoid
+        // deleting unrelated connections.
         if (row?.provider_name) {
           await admin
             .from('bank_data')
@@ -71,17 +73,6 @@ export default async function handler(req, res) {
             .eq('user_id', userId)
             .eq('source', 'truelayer')
             .eq('provider_name', row.provider_name)
-            .neq('connection_id', connectionId);
-        } else if (row?.account_type || (!row?.account_type && !row?.provider_name)) {
-          // If no provider_name, use account_type. If neither, still clean up
-          // expired rows that have no provider_name (orphaned from before schema fix).
-          const acType = row?.account_type || (row?.card_balances?.length > 0 ? 'credit' : 'bank');
-          await admin
-            .from('bank_data')
-            .delete()
-            .eq('user_id', userId)
-            .eq('source', 'truelayer')
-            .eq('account_type', acType)
             .neq('connection_id', connectionId);
         }
       } catch (derivErr) {
