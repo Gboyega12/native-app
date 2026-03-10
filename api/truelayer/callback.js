@@ -92,11 +92,11 @@ export default async function handler(req, res) {
     fromDate.setFullYear(fromDate.getFullYear() - 1);
     const from = fromDate.toISOString().split('T')[0];
 
-    // Wait 7s upfront for the bank to propagate consent, then fetch.
-    // If we still get 0 transactions, retry once after 5s (some banks like
-    // Revolut need extra time).
-    console.log('[truelayer] Waiting 7s for consent propagation...');
-    await new Promise((r) => setTimeout(r, 7000));
+    // Wait 12s upfront for the bank to propagate consent, then fetch.
+    // Some banks (e.g. Revolut) need extra time to sync after authorization.
+    // If we still get 0 transactions, retry once after 5s.
+    console.log('[truelayer] Waiting 12s for consent propagation...');
+    await new Promise((r) => setTimeout(r, 12000));
 
     async function fetchAllData() {
       const [accountsRes, cardsRes] = await Promise.all([
