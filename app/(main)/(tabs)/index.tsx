@@ -3742,15 +3742,19 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   heroCta: {
     backgroundColor: c.accent,
-    paddingVertical: 14,
+    paddingVertical: 15,
+    paddingHorizontal: spacing.xl,
     borderRadius: 100,
     alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
   },
   heroCtaText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: c.bg,
     letterSpacing: 0.2,
+    textAlign: 'center',
   },
   heroSecondary: {
     flex: 1,
