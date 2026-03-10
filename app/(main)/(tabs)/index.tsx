@@ -1712,7 +1712,7 @@ export default function Home() {
             });
             const parallaxShift = heroScrollX.interpolate({
               inputRange: [0, snapInterval],
-              outputRange: [10, 0],
+              outputRange: [0, 10],
               extrapolate: 'clamp',
             });
             return (
@@ -1737,7 +1737,74 @@ export default function Home() {
                 snapToInterval={snapInterval}
                 snapToAlignment="start"
               >
-                {/* ── Page 1: Budget / Payday ── */}
+                {/* ── Page 1: #1 Move (hero) ── */}
+                {hasMoveCard && (
+                  <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
+                    <Card variant="highlight" style={{ flex: 1 }}>
+                      <Animated.View style={{ transform: [{ translateX: parallaxShift }], flex: 1 }}>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
+                          YOUR #1 MOVE
+                        </Text>
+                        <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                          {stripMd(dashboardMoves[0].action)}
+                        </Text>
+                        <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
+                          <View>
+                            <AnimatedNumber
+                              value={dashboardMoves[0].monthlyImpact || 0}
+                              prefix={'\u00a3'}
+                              style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                            />
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
+                          </View>
+                          <View>
+                            <AnimatedNumber
+                              value={dashboardMoves[0].annualImpact || 0}
+                              prefix={'\u00a3'}
+                              style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                            />
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
+                          </View>
+                        </View>
+                        {dashboardMoves[0].effort && (
+                          <View style={{ marginTop: 14 }}>
+                            <View style={{
+                              alignSelf: 'flex-start',
+                              paddingHorizontal: 10,
+                              paddingVertical: 4,
+                              borderRadius: 12,
+                              backgroundColor: dashboardMoves[0].effort === 'low' ? 'rgba(147,130,220,0.12)' : dashboardMoves[0].effort === 'high' ? 'rgba(76,175,80,0.12)' : 'rgba(150,150,150,0.12)',
+                            }}>
+                              <Text style={{
+                                fontFamily: fonts.mono,
+                                fontSize: 10,
+                                letterSpacing: 0.5,
+                                color: dashboardMoves[0].effort === 'low' ? '#9382DC' : dashboardMoves[0].effort === 'high' ? colors.green : colors.dim,
+                              }}>
+                                {dashboardMoves[0].effort === 'low' ? 'Quick win' : dashboardMoves[0].effort === 'high' ? 'Big move' : 'Some effort'}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </Animated.View>
+                      <TouchableOpacity
+                        style={[s.heroCta, { marginTop: 24 }]}
+                        onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: ${stripMd(dashboardMoves[0].action)}` } })}
+                      >
+                        <Text style={s.heroCtaText}>Start this move</Text>
+                      </TouchableOpacity>
+                    </Card>
+                  </View>
+                )}
+
+                {/* ── Horizontal connector dots between cards ── */}
+                {hasMoveCard && (
+                  <View style={{ width: CARD_GAP, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
+                    <HorizontalConnectorDots scrollProgress={scrollProgress} />
+                  </View>
+                )}
+
+                {/* ── Page 2: Budget / Payday ── */}
                 <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
           {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
               <Animated.View
@@ -1871,46 +1938,6 @@ export default function Home() {
               </Card>
           )}
                 </View>
-
-                {/* ── Horizontal connector dots between cards ── */}
-                {hasMoveCard && (
-                  <View style={{ width: CARD_GAP, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
-                    <HorizontalConnectorDots scrollProgress={scrollProgress} />
-                  </View>
-                )}
-
-                {/* ── Page 2: #1 Move (parallax) ── */}
-                {hasMoveCard && (
-                  <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
-                    <Card variant="highlight" style={{ flex: 1 }}>
-                      <Animated.View style={{ transform: [{ translateX: parallaxShift }], flex: 1 }}>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.green, letterSpacing: 2.5, textTransform: 'uppercase', marginBottom: 10 }}>
-                          #1 MOVE
-                        </Text>
-                        <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
-                          {stripMd(dashboardMoves[0].action)}
-                        </Text>
-                        <AnimatedNumber
-                          value={dashboardMoves[0].annualImpact || 0}
-                          prefix={'+\u00a3'}
-                          suffix="/yr"
-                          style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.green, marginTop: 12, letterSpacing: 0.3 }}
-                        />
-                        {dashboardMoves[0].effect && (
-                          <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.text2, marginTop: 14, lineHeight: 20 }}>
-                            {stripMd(dashboardMoves[0].effect)}
-                          </Text>
-                        )}
-                      </Animated.View>
-                      <TouchableOpacity
-                        style={[s.heroCta, { marginTop: 24 }]}
-                        onPress={() => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: ${stripMd(dashboardMoves[0].action)}` } })}
-                      >
-                        <Text style={s.heroCtaText}>Ask Bocy about this</Text>
-                      </TouchableOpacity>
-                    </Card>
-                  </View>
-                )}
               </Animated.ScrollView>
             </AnimGlyph>
 
@@ -2399,21 +2426,20 @@ export default function Home() {
           </View>
 
           {/* ══════════════════════════════════════════════
-              BUDGET — collapsed by default
+              SPENDING DETAILS — merged Budget + Transactions, collapsed by default
               ══════════════════════════════════════════════ */}
-          <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; }}>
+          <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; cardPositions.current.transactions = e.nativeEvent.layout.y; }}>
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={() => {
                 LayoutAnimation.configureNext(SMOOTH_ANIM);
                 const opening = !budgetExpanded;
                 setBudgetExpanded(opening);
-                if (opening && !txManuallyCollapsed.current) setTxCardExpanded(true);
-                if (!opening) { setTxCardExpanded(false); txManuallyCollapsed.current = false; }
+                setTxCardExpanded(opening);
               }}
               style={s.collapsedSectionBtn}
             >
-              <Text style={s.moveSectionLabel}>BUDGET</Text>
+              <Text style={s.moveSectionLabel}>SPENDING DETAILS</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: overallPctUsed > 100 ? colors.coral : colors.dim, letterSpacing: 0.3 }}>
                   {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()} / {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
@@ -2530,102 +2556,78 @@ export default function Home() {
                     </View>
                   ) : null;
                 })()}
+
+                {/* ── Transactions (inline within Spending Details) ── */}
+                <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
+                    TRANSACTIONS
+                  </Text>
+                  {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
+                    const key = `nd-${item.category}`;
+                    const isExp = expandedCategories.has(key);
+                    return (
+                      <View key={`nd-${i}`}>
+                        <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
+                          <View style={s.dataRowLeft}>
+                            <Text style={[s.catArrow, { color: colors.text }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
+                            <Text style={s.dataLabel}>{item.category}</Text>
+                          </View>
+                          <Text style={[s.dataValue, { color: colors.text }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
+                        </TouchableOpacity>
+                        {isExp && (
+                          <>
+                            <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
+                              <ExpandDots count={4} size={2} />
+                            </View>
+                            {item.txs.map((tx, j) => (
+                              <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'essential' }); setRecatTarget(''); setRecatEssential(true); }} activeOpacity={0.7}>
+                                <View style={s.txLeft}>
+                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
+                                  <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                                </View>
+                                <Text style={[s.txAmount, { color: colors.text2 }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </>
+                        )}
+                      </View>
+                    );
+                  })}
+                  {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
+                    const key = `d-${item.category}`;
+                    const isExp = expandedCategories.has(key);
+                    return (
+                      <View key={`d-${i}`}>
+                        <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
+                          <View style={s.dataRowLeft}>
+                            <Text style={[s.catArrow, { color: colors.dim }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
+                            <Text style={s.dataLabel}>{item.category}</Text>
+                          </View>
+                          <Text style={[s.dataValue, { color: colors.dim }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
+                        </TouchableOpacity>
+                        {isExp && (
+                          <>
+                            <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
+                              <ExpandDots count={4} size={2} />
+                            </View>
+                            {item.txs.map((tx, j) => (
+                              <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'lifestyle' }); setRecatTarget(''); setRecatEssential(false); }} activeOpacity={0.7}>
+                                <View style={s.txLeft}>
+                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
+                                  <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                                </View>
+                                <Text style={[s.txAmount, { color: colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </>
+                        )}
+                      </View>
+                    );
+                  })}
+                  <Text style={s.cardFooter}>Hold a transaction to re-categorise</Text>
+                </View>
               </Card>
             )}
-          </View>
-
-          {/* Vertical connector pipe between Budget and Transactions */}
-          <View style={{ alignItems: 'center', marginVertical: -4 }}>
-            <ConnectorDots ref={connectorDotsRef} />
-          </View>
-
-          {/* ── Transactions — collapsed by default ── */}
-          <View onLayout={(e) => { cardPositions.current.transactions = e.nativeEvent.layout.y; }}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => {
-              LayoutAnimation.configureNext(SMOOTH_ANIM);
-              setTxCardExpanded(prev => {
-                if (prev) txManuallyCollapsed.current = true;
-                return !prev;
-              });
-            }}
-            style={s.collapsedSectionBtn}
-          >
-            <Text style={s.moveSectionLabel}>TRANSACTIONS</Text>
-            <Text style={{ fontSize: 10, color: colors.muted }}>{txCardExpanded ? '\u25B2' : '\u25BC'}</Text>
-          </TouchableOpacity>
-
-          {txCardExpanded && (
-            <Card style={{ marginBottom: spacing.md }}>
-              <View style={{ position: 'absolute', top: 16, right: 20, zIndex: 1 }}>
-                <ExpandDots count={6} size={3} />
-              </View>
-              {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
-                const key = `nd-${item.category}`;
-                const isExp = expandedCategories.has(key);
-                return (
-                  <View key={`nd-${i}`}>
-                    <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
-                      <View style={s.dataRowLeft}>
-                        <Text style={[s.catArrow, { color: colors.text }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
-                        <Text style={s.dataLabel}>{item.category}</Text>
-                      </View>
-                      <Text style={[s.dataValue, { color: colors.text }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
-                    </TouchableOpacity>
-                    {isExp && (
-                      <>
-                        <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
-                          <ExpandDots count={4} size={2} />
-                        </View>
-                        {item.txs.map((tx, j) => (
-                          <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'essential' }); setRecatTarget(''); setRecatEssential(true); }} activeOpacity={0.7}>
-                            <View style={s.txLeft}>
-                              <Text style={s.txMerchant}>{tx.merchant}</Text>
-                              <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                            </View>
-                            <Text style={[s.txAmount, { color: colors.text2 }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </>
-                    )}
-                  </View>
-                );
-              })}
-              {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
-                const key = `d-${item.category}`;
-                const isExp = expandedCategories.has(key);
-                return (
-                  <View key={`d-${i}`}>
-                    <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
-                      <View style={s.dataRowLeft}>
-                        <Text style={[s.catArrow, { color: colors.dim }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
-                        <Text style={s.dataLabel}>{item.category}</Text>
-                      </View>
-                      <Text style={[s.dataValue, { color: colors.dim }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
-                    </TouchableOpacity>
-                    {isExp && (
-                      <>
-                        <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
-                          <ExpandDots count={4} size={2} />
-                        </View>
-                        {item.txs.map((tx, j) => (
-                          <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'lifestyle' }); setRecatTarget(''); setRecatEssential(false); }} activeOpacity={0.7}>
-                            <View style={s.txLeft}>
-                              <Text style={s.txMerchant}>{tx.merchant}</Text>
-                              <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                            </View>
-                            <Text style={[s.txAmount, { color: colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </>
-                    )}
-                  </View>
-                );
-              })}
-              <Text style={s.cardFooter}>Hold a transaction to re-categorise</Text>
-            </Card>
-          )}
           </View>
 
           {/* Add budget item modal */}
