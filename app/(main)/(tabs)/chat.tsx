@@ -31,7 +31,9 @@ const paydayFingerprint = (pc: any): string => {
 
 
 /** Word-count threshold — messages longer than this get split into chunks */
-const CHUNK_WORD_THRESHOLD = 15;
+const CHUNK_WORD_THRESHOLD = 12;
+/** Hard cap on chat bubbles per assistant message — keeps replies conversational */
+const MAX_BUBBLES = 2;
 
 /** Determine Bocy's mood from the latest chat message content */
 function getChatMood(lastMsg: string | undefined, baseMood: BocyMood, isLoading: boolean): BocyMood {
@@ -100,7 +102,9 @@ function splitIntoBubbles(text: string): string[] {
     }
   }
 
-  return chunks.length > 0 ? chunks : [text];
+  // Hard cap: never more than MAX_BUBBLES to keep replies conversational
+  const result = chunks.length > 0 ? chunks : [text];
+  return result.slice(0, MAX_BUBBLES);
 }
 
 /**
