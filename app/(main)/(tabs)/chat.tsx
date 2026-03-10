@@ -2299,9 +2299,10 @@ export default function Chat() {
                 <>
                   {bubbleChunks.map((chunk, ci) => {
                     const useTypewriter = isLast && !loading;
+                    const isGifChunk = /^!\[.*?\]\(https?:\/\/[^\s)]+\)\s*$/.test(chunk.trim());
                     return (
                       <FadeInView key={`${i}-chunk-${ci}`} delay={ci * 300}>
-                        <View style={[s.bubble, s.assistantBubble, ci > 0 && { marginTop: 4 }]}>
+                        <View style={[s.bubble, s.assistantBubble, ci > 0 && { marginTop: 4 }, isGifChunk && s.gifBubble]}>
                           {useTypewriter
                             ? <TypewriterText text={chunk} style={s.bubbleText} delay={ci * 300} />
                             : <Markdown>{chunk}</Markdown>
@@ -2871,6 +2872,13 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     borderBottomRightRadius: 18,
+  },
+  gifBubble: {
+    width: '80%',
+    maxWidth: '80%',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    overflow: 'hidden' as const,
   },
   bubbleText: {
     fontFamily: fonts.regular,
