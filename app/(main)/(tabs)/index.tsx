@@ -89,6 +89,7 @@ export default function Home() {
   const dashScrollRef = useRef<ScrollView>(null);
   const cardPositions = useRef<Record<string, number>>({});
   const syncRetryRef = useRef<number>(0);
+  const reviewSavedRef = useRef(false); // Guards against stale sync overwriting optimistic review state
   const [retriesExhausted, setRetriesExhausted] = useState(false);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);
@@ -703,15 +704,20 @@ export default function Home() {
         setAnalysis(updated);
       }
 
+      // Guard: prevent any in-flight stale sync from clobbering optimistic state
+      reviewSavedRef.current = true;
+
       // ── Completion celebration ──
       hapticSuccess();
       setSaveSuccess(true);
       await new Promise((resolve) => setTimeout(resolve, 600));
 
-      // ── Sync — no timeout race, await full completion ──
-      try {
-        await syncInBackground(user.id, true);
-      } catch {}
+      // ── Prevent stale sync from overwriting optimistic state ──
+      // Overrides are saved to DB. Invalidate cache so the next sync
+      // (on next app focus or pull-to-refresh) will pick them up.
+      // We don't re-sync here to avoid a race where an in-flight sync
+      // (from loadData) overwrites our optimistic update with stale data.
+      invalidateSyncCache();
 
       setShowReviewModal(false);
       setCatAssignments({});
@@ -790,6 +796,8 @@ export default function Home() {
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
+        reviewSavedRef.current = true;
+        invalidateSyncCache();
       }
 
       setRecatTx(null);
@@ -1273,6 +1281,28 @@ export default function Home() {
       setRetriesExhausted(false);
       const fresh = mergeAdjustments(result.analysis, budgetAdjustments);
       setAnalysis((prev) => {
+        // If a review was just saved, the optimistic UI has the correct state.
+        // This sync may have started BEFORE overrides were written — don't
+        // clobber the optimistic state with stale data.
+        if (reviewSavedRef.current) {
+          reviewSavedRef.current = false;
+          // Only accept the sync result if it has FEWER unresolved items
+          // (meaning it correctly applied the overrides)
+          const countUnresolved = (a: Analysis | null) => {
+            if (!a) return 0;
+            let c = 0;
+            for (const sec of [a.discretionary, a.non_discretionary]) {
+              const items = (sec as any)?.items;
+              if (!Array.isArray(items)) continue;
+              const other = items.find((i: any) => i?.category === 'Other');
+              if (other) c += other.txs || 0;
+            }
+            c += ((a as any)?.ambiguous_transfers?.length || 0);
+            return c;
+          };
+          if (countUnresolved(fresh) >= countUnresolved(prev)) return prev;
+        }
+
         // Count unresolved items to detect reclassifications/overrides
         const unresolvedCount = (a: Analysis | null) => {
           if (!a) return 0;
@@ -3157,23 +3187,8 @@ export default function Home() {
           {/* ── Unified review modal ── */}
           <Modal visible={reviewModalVisible} transparent animationType="none">
             <Animated.View style={[s.catReviewOverlay, { opacity: reviewModalFade }]}>
-            <Pressable
-              style={{ flex: 1, justifyContent: 'center', padding: spacing.md }}
-              onPress={() => {
-                const hasUnsaved = Object.keys(catAssignments).length > 0 || Object.keys(transferAssignments).length > 0;
-                if (hasUnsaved) {
-                  hapticWarning();
-                  Alert.alert('Discard changes?', `You have ${Object.keys(catAssignments).length + Object.keys(transferAssignments).length} unsaved categorisations.`, [
-                    { text: 'Keep editing', style: 'cancel' },
-                    { text: 'Discard', style: 'destructive', onPress: () => { setShowReviewModal(false); setCatAssignments({}); setTransferAssignments({}); } },
-                  ]);
-                } else {
-                  setShowReviewModal(false);
-                }
-              }}
-            >
+              <View style={s.catReviewOverlayInner}>
               <Animated.View style={[s.catReviewContainer, { transform: [{ translateY: reviewModalSlide }] }]}>
-              <Pressable onPress={() => {}}>
                 {/* Header */}
                 <View style={s.catReviewHeader}>
                   <View style={{ flex: 1 }}>
@@ -3417,9 +3432,8 @@ export default function Home() {
                     </TouchableOpacity>
                   );
                 })()}
-              </Pressable>
               </Animated.View>
-            </Pressable>
+              </View>
             </Animated.View>
           </Modal>
 
@@ -5356,6 +5370,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   catReviewOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',
+  },
+  catReviewOverlayInner: {
+    flex: 1,
+    justifyContent: 'center' as const,
+    padding: spacing.md,
   },
   catReviewContainer: {
     backgroundColor: c.surface,
