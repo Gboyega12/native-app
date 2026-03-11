@@ -711,7 +711,7 @@ export default function Home() {
 
         // Remove resolved ambiguous transfers
         (updated as any).ambiguous_transfers = ambiguousTransfers.filter(
-          (t) => !transferAssignments[t.counterparty]
+          (t) => t && !transferAssignments[t.counterparty]
         );
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
