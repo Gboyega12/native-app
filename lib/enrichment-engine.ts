@@ -5,7 +5,7 @@ import {
 import { classifyTransaction } from './classifier.js';
 import { normaliseDescription } from './normalise.js';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes.js';
-import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants.js';
+import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS, PLATFORM_FEES } from './constants.js';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -1812,6 +1812,172 @@ const EnrichmentEngine = {
             proof: consistencyProof,
           });
         }
+      }
+    }
+
+    // ── Investment awareness moves (data-driven, no product advice) ──
+
+    // 5. Investment scatter — multiple savings/investment platforms detected
+    // Groups outbound savings + investment transactions by merchant to show the breakdown
+    const investTxs = txs.filter((t) => t.isSavings && t.amount < 0 && !t.isTransfer);
+    const investByPlatform: Record<string, { total: number; count: number; merchant: string }> = {};
+    for (const t of investTxs) {
+      const key = t.merchant || t.description;
+      if (!investByPlatform[key]) investByPlatform[key] = { total: 0, count: 0, merchant: key };
+      investByPlatform[key].total += Math.abs(t.amount);
+      investByPlatform[key].count++;
+    }
+    const platforms = Object.values(investByPlatform)
+      .map((p) => ({ ...p, monthly: Math.round(p.total / Math.max(1, ANALYSIS_MONTHS)) }))
+      .filter((p) => p.monthly >= 10) // ignore sub-£10/mo noise
+      .sort((a, b) => b.monthly - a.monthly);
+    const totalInvestMonthly = platforms.reduce((s, p) => s + p.monthly, 0);
+
+    if (platforms.length >= T.investScatterMinPlatforms && totalInvestMonthly >= T.investScatterMinMonthly) {
+      const breakdown = platforms.map((p) => `${p.merchant}: £${p.monthly}/mo`).join(', ');
+      const annualTotal = totalInvestMonthly * 12;
+      const scatterProof = `${platforms.length} savings/investment destinations detected over ${ANALYSIS_MONTHS} months. `
+        + `Total outflow: £${totalInvestMonthly}/mo (£${annualTotal.toLocaleString()}/yr). `
+        + `Breakdown: ${breakdown}.`;
+      moves.push({
+        action: `£${totalInvestMonthly}/month going to ${platforms.length} platforms — ${breakdown}`,
+        annualImpact: 0, // Awareness move — no direct saving, but enables fee/ISA optimisation
+        monthlyImpact: 0,
+        effort: 'low',
+        category: 'invest',
+        merchants: platforms.map((p) => p.merchant),
+        strategy: `You're deploying capital across ${platforms.length} platforms. Total: £${totalInvestMonthly}/month (£${annualTotal.toLocaleString()}/year). This is the aggregate number — use it to check your ISA allowance, platform fees, and whether each account is earning its keep.`,
+        steps: [
+          'Review whether each platform serves a distinct purpose (ISA, LISA, crypto, pension)',
+          'Check whether you\'re duplicating ISA wrappers across platforms',
+          'I\'ll track your outflow to each platform monthly',
+        ],
+        effect: `Visibility across ${platforms.length} accounts. No action required unless fees or tax wrappers overlap.`,
+        proof: scatterProof,
+      });
+    }
+
+    // 6. LISA bonus math — detect LISA contributions and calculate government bonus capture
+    if (platforms.length > 0) {
+      // Detect LISA contributions from transaction descriptions
+      const lisaTxs = investTxs.filter((t) => {
+        const desc = t.description.toLowerCase();
+        return desc.includes('lisa') || desc.includes('lifetime isa') || desc.includes('lifetime savings');
+      });
+      const lisaTotal = lisaTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
+      const lisaMonthly = Math.round(lisaTotal / Math.max(1, ANALYSIS_MONTHS));
+      const lisaAnnualised = lisaMonthly * 12;
+      const lisaLimit = T.lisaAnnualLimit;
+      const lisaBonus = Math.round(Math.min(lisaAnnualised, lisaLimit) * T.lisaBonusRate);
+      const lisaGap = Math.max(0, lisaLimit - lisaAnnualised);
+      const lisaGapMonthly = Math.round(lisaGap / 12);
+
+      if (lisaTxs.length > 0 && lisaGap > 0) {
+        // User has a LISA but isn't maxing it — show the unclaimed bonus
+        const lisaProof = `LISA contributions detected: £${lisaMonthly}/mo (£${lisaAnnualised}/yr annualised). `
+          + `LISA annual limit: £${lisaLimit.toLocaleString()}. Gap: £${lisaGap.toLocaleString()}/yr (£${lisaGapMonthly}/mo). `
+          + `Government bonus at ${T.lisaBonusRate * 100}%: currently claiming £${lisaBonus}/yr. `
+          + `Missing: £${Math.round(lisaGap * T.lisaBonusRate)}/yr in free money.`;
+        moves.push({
+          action: `Increase LISA by £${lisaGapMonthly}/month to claim £${Math.round(lisaGap * T.lisaBonusRate)}/year in government bonus`,
+          annualImpact: Math.round(lisaGap * T.lisaBonusRate),
+          monthlyImpact: Math.round(lisaGap * T.lisaBonusRate / 12),
+          effort: 'low',
+          category: 'invest',
+          merchants: [],
+          strategy: `You're contributing £${lisaMonthly}/month to your LISA but the annual limit is £${lisaLimit.toLocaleString()}. Every £1 in gets a 25p government bonus up to £${lisaLimit.toLocaleString()}/year. You're leaving £${Math.round(lisaGap * T.lisaBonusRate)}/year on the table.`,
+          steps: [
+            `Increase LISA contributions by £${lisaGapMonthly}/month to max £${Math.round(lisaLimit / 12)}/month`,
+            'The 25% bonus is added automatically by your LISA provider',
+            'I\'ll track your annual LISA total against the £4,000 limit',
+          ],
+          effect: `£${Math.round(lisaGap * T.lisaBonusRate)}/year in government bonus — that's a guaranteed 25% return.`,
+          proof: lisaProof,
+          subGoals: [{
+            type: 'savings_reach',
+            target: 'LISA annual limit',
+            startValue: lisaAnnualised,
+            targetValue: lisaLimit,
+          }],
+        });
+      } else if (lisaTxs.length === 0 && (buyingHome || (p.surplus > 200 && p.income > 0 && p.income <= 4167))) {
+        // No LISA detected but user is buying a home or is below £50k income threshold
+        // LISA eligibility: 18-39 years old, first-time buyer or retirement
+        const maxBonus = Math.round(lisaLimit * T.lisaBonusRate);
+        const monthlyNeeded = Math.round(lisaLimit / 12);
+        moves.push({
+          action: `A LISA would add £${maxBonus}/year in government bonus on up to £${lisaLimit.toLocaleString()}/year`,
+          annualImpact: maxBonus,
+          monthlyImpact: Math.round(maxBonus / 12),
+          effort: 'medium',
+          category: 'invest',
+          merchants: [],
+          strategy: `${buyingHome ? 'You\'re saving for a first home. ' : ''}A Lifetime ISA adds a 25% government bonus on contributions up to £${lisaLimit.toLocaleString()}/year. That's £${maxBonus}/year in free money. Eligible for first-time buyers (property ≤£450k) or retirement (age 60+). Penalty for early withdrawal: 25% of total (you lose bonus + 6.25% of your money).`,
+          steps: [
+            `Contribute up to £${monthlyNeeded}/month (£${lisaLimit.toLocaleString()}/year)`,
+            'The 25% bonus is applied within 4-9 weeks of each contribution',
+            'This counts toward your overall £20,000 ISA allowance',
+          ],
+          effect: `£${maxBonus}/year guaranteed return on contributions.`,
+          proof: `LISA limit: £${lisaLimit.toLocaleString()}/yr. Bonus: ${T.lisaBonusRate * 100}% = £${maxBonus}/yr. `
+            + `Monthly equivalent: £${monthlyNeeded}/mo. Counts toward £${T.isaAnnualLimit.toLocaleString()} total ISA allowance.`,
+        });
+      }
+    }
+
+    // 7. Platform fee awareness — compare fees across detected platforms
+    if (platforms.length >= 2) {
+      // Calculate annual fee cost for each detected platform
+      const platformCosts = platforms
+        .map((p) => {
+          const feeData = PLATFORM_FEES[p.merchant];
+          if (!feeData) return null;
+          // Estimate holdings from monthly contributions × 12 months (conservative floor)
+          // In reality holdings grow over time, but we use 1 year of flow as minimum estimate
+          const estimatedHoldings = p.monthly * 12;
+          const annualFee = Math.round(estimatedHoldings * feeData.annualPct);
+          return {
+            merchant: p.merchant,
+            monthly: p.monthly,
+            estimatedHoldings,
+            annualPct: feeData.annualPct,
+            label: feeData.label,
+            annualFee,
+            notes: feeData.notes,
+          };
+        })
+        .filter(Boolean) as { merchant: string; monthly: number; estimatedHoldings: number; annualPct: number; label: string; annualFee: number; notes: string }[];
+
+      // Only surface if there's a meaningful fee difference between platforms
+      const hasFees = platformCosts.filter((p) => p.annualPct > 0);
+      const noFees = platformCosts.filter((p) => p.annualPct === 0);
+      const totalFees = hasFees.reduce((s, p) => s + p.annualFee, 0);
+
+      if (hasFees.length > 0 && noFees.length > 0 && totalFees > 0) {
+        const feeBreakdown = platformCosts.map((p) =>
+          `${p.merchant}: ${p.label} on ~£${p.estimatedHoldings.toLocaleString()} = £${p.annualFee}/yr`
+        ).join('. ');
+        const feeProof = `Platform fees based on ${ANALYSIS_MONTHS}-month contribution flow (conservative estimate of holdings). `
+          + feeBreakdown + `. `
+          + `Total annual platform fees: £${totalFees}. `
+          + `Note: actual fees depend on total holdings, not just recent contributions — real cost may be higher.`;
+
+        moves.push({
+          action: `Platform fees costing ~£${totalFees}/year across ${hasFees.length} platform${hasFees.length > 1 ? 's' : ''}`,
+          annualImpact: totalFees,
+          monthlyImpact: Math.round(totalFees / 12),
+          effort: 'medium',
+          category: 'invest',
+          merchants: platformCosts.map((p) => p.merchant),
+          strategy: `You're using platforms with different fee structures. ${hasFees.map(p => `${p.merchant} charges ${p.label}`).join('; ')}. ${noFees.map(p => `${p.merchant} charges ${p.label}`).join('; ')}. The same investments on a cheaper platform cost less — the maths is below.`,
+          steps: [
+            'Compare what each platform holds (ISA, GIA, pension) — not all are portable',
+            'Check if the fee difference justifies a transfer (some charge exit fees)',
+            'I\'ll surface the fee comparison each time your contributions change',
+          ],
+          effect: `~£${totalFees}/year in platform fees. Whether to consolidate depends on what each account holds.`,
+          proof: feeProof,
+        });
       }
     }
 
