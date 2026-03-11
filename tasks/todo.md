@@ -1,27 +1,30 @@
-# Unified Review Modal — Plan
+# Unified Review Modal — Plan v2
 
 ## Problems Identified
 
 ### P1: "Done" doesn't persist — modal comes back
-**Root cause**: The override matching in `enrichTransaction()` uses `descLower.includes(pattern)` where `pattern` is the raw merchant name saved as `match_description`. But `match_description` is saved from `group.merchants` — which are **raw transaction descriptions** like `"CARD PAYMENT TO TESCO STORES 1234 ON 05 MAR"`. During re-enrichment, `descLower` is the full description, and `pattern` is also the full description lowercased — so `includes()` should match.
+**Root cause**: `syncInBackground` is raced against an 8-second timeout. If sync takes longer, the modal closes with optimistic UI, but Supabase still has the **old** analysis. On next app open, stale analysis loads, and the modal reappears.
 
-BUT: the background `syncInBackground` is raced against an 8-second timeout. If the sync takes longer, the modal closes with optimistic UI, but the Supabase `analyses` table still has the **old** analysis. On next app open/loadData(), the stale analysis is loaded, and the modal reappears as if nothing was saved.
-
-**Additionally**: The optimistic UI update (lines 608-628) filters `tx.merchant || tx.description` against `assignedMerchants`. But `TransactionDetail.merchant` was set by the enrichment engine as `tx.merchant || tx.description` — so it might be the enriched merchant name, not the raw description. The override was saved with the raw description from `group.merchants`. These could mismatch.
+**Additionally**: Optimistic UI filters `tx.merchant || tx.description` against `assignedMerchants`, but the override was saved with the raw description from `group.merchants` — these can mismatch.
 
 **Fix**:
-1. Don't close modal until sync actually completes (show "Saving..." state throughout)
-2. After sync, refresh analysis from the newly written data rather than relying on optimistic update
+1. Don't close modal until sync actually completes (show "Saving..." state)
+2. After sync, refresh analysis from newly written data
 3. Remove the 8-second timeout race — let it finish
 
 ### P2: Duplicates in modal
 **Root causes**:
-1. `normalizeMerchant()` in the modal runs on `tx.merchant` (enriched merchant name), but the enrichment engine may have already normalized differently — creating groups that don't match the DB-level merchant
-2. The `confidence`/`classifiedBy` fields I added are **optional** on TransactionDetail. For users with cached analysis (before this deploy), those fields are `undefined`. The filter `tx?.confidence === 'low' || tx?.classifiedBy === 'default'` would exclude ALL transactions for cached users — the modal would be empty, not duplicated. But for fresh enrichment, these fields should be populated.
-3. The real duplicate issue is likely that `normalizeMerchant` was previously too weak — raw descriptions like `"TESCO STORES 1234"` and `"TESCO STORES 5678"` created separate groups. My improvement to strip 4+ digit suffixes helps, but lowercasing might cause display issues.
+1. `unresolvedGroups` iterates BOTH `analysis.discretionary` AND `analysis.non_discretionary` — no dedup guard
+2. `confidence`/`classifiedBy` fields are optional — cached users (pre-deploy) have `undefined`, causing the filter to exclude ALL transactions (empty modal)
+3. `normalizeMerchant` may create different groups than enrichment engine
 
-### P3: Two separate banners + two separate modals = confusing
-User sees "X uncategorised transactions — Fix now" AND "Y recurring transfers need clarification — Review" as two separate banners with two separate flows. Should be one unified experience.
+**Fix**:
+1. Dedup transactions by composite key (`date+description+amount`) when collecting
+2. Backwards-compatible filter: if `confidence` undefined, include all 'Other' as fallback
+3. Use `&&` not `||`: `confidence === 'low' && classifiedBy === 'default'`
+
+### P3: Two banners + two modals = confusing
+User sees separate "Fix uncategorised" and "Review transfers" flows. Should be one unified experience.
 
 ---
 
@@ -34,7 +37,6 @@ User sees "X uncategorised transactions — Fix now" AND "Y recurring transfers 
 │ Tap to review                               │
 └─────────────────────────────────────────────┘
 ```
-- Combines: uncategorised transactions + ambiguous transfers
 - Count = unresolvedGroups.length + ambiguousTransfers.length
 - One tap opens the unified modal
 
@@ -43,6 +45,9 @@ User sees "X uncategorised transactions — Fix now" AND "Y recurring transfers 
 ┌──────────────────────────────────────────┐
 │ Review items                        ✕    │
 │ Help us get your numbers right           │
+│                                          │
+│ ─── Progress: 3 of 5 reviewed ───────── │
+│ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░           │
 │                                          │
 │ ┌──────────────────────────────────────┐ │
 │ │ UNCATEGORISED (3)                    │ │
@@ -60,97 +65,159 @@ User sees "X uncategorised transactions — Fix now" AND "Y recurring transfers 
 │ │ RECURRING TRANSFERS (2)              │ │
 │ │                                      │ │
 │ │ ┌──────────────────────────────────┐ │ │
-│ │ │ ✓ John Smith     Sending · £650/mo│ │ │
+│ │ │ ✓ John Smith     Sending · £650  │ │ │
 │ │ │ [Rent ✓] [Debt] [Own account]    │ │ │
 │ │ └──────────────────────────────────┘ │ │
 │ │ ┌──────────────────────────────────┐ │ │
-│ │ │ Jane Doe       Receiving · £200/mo│ │ │
+│ │ │ Jane Doe       Receiving · £200  │ │ │
 │ │ │ [Household] [Income] [Transfer]  │ │ │
 │ │ └──────────────────────────────────┘ │ │
 │ └──────────────────────────────────────┘ │
 │                                          │
 │ ┌──────────────────────────────────────┐ │
-│ │         Done (4 reviewed)            │ │
+│ │       ✓ Done (5 reviewed)            │ │
 │ └──────────────────────────────────────┘ │
 └──────────────────────────────────────────┘
 ```
 
-### Key UX decisions:
-1. **Section headers** — "UNCATEGORISED" and "RECURRING TRANSFERS" in small caps, with counts
-2. **Either section can be empty** — if no uncategorised items, only transfers show (and vice versa)
-3. **AI suggestions pre-applied** — spinner at top while loading, then chips show with suggestions already selected
-4. **Accept All button** — appears after AI finishes suggesting, saves everything in one tap
-5. **"Done" saves both** — single save function handles both category overrides AND transfer classifications
-6. **Saving state** — "Done" button shows spinner and text "Saving..." until sync actually completes (no premature close)
-7. **No 8-second timeout** — wait for sync to finish. If it fails, show error toast and keep modal open
+---
 
-### Save flow (unified):
-```
-User taps "Done"
-  → Button shows "Saving..." with spinner
-  → Save category overrides to transaction_overrides (batch)
-  → Save transfer overrides to transaction_overrides (batch)
-  → Trigger syncInBackground(userId, true) — NO timeout race
-  → On success: close modal, analysis auto-refreshes from sync result
-  → On failure: show error toast, keep modal open, let user retry
-```
+## UX Polish Spec
 
-### Backwards compatibility for confidence/classifiedBy:
-The filter for unresolved groups should handle cached analysis (where these fields are undefined):
+### Animation Language (matching codebase patterns)
+All animations use vanilla `Animated` API with `Easing.out(Easing.cubic)`.
+
+| Element | Animation | Duration | Easing |
+|---------|-----------|----------|--------|
+| Modal overlay | Fade 0→1 | 320ms | cubic |
+| Modal card | Fade 0→1 + translateY 40→0 | 320ms | cubic |
+| Modal dismiss | Fade 1→0 + translateY 0→40 | 200ms | cubic |
+| Category chip press | Scale 1→0.92→1 | 140ms→210ms | cubic |
+| AI suggestion chips | Staggered fade+scale (0.6→1) | 420ms, 50ms stagger | cubic |
+| Progress bar fill | Width 0%→N% | 800ms | cubic |
+| Progress bar pulse | Opacity 0.6↔0.95 loop | 2000ms | sin (BreathingBar) |
+| Completion checkmark | Scale 0→1.2→1 bounce | 300ms | spring |
+| Item resolve fade | Opacity + subtle scale | 260ms | cubic |
+
+### Haptic Feedback
+| Interaction | Haptic | Function |
+|-------------|--------|----------|
+| Chip tap (select category) | Light tap | `hapticLight()` |
+| Accept All tap | Medium tap | `hapticMedium()` |
+| Save complete | Success notification | `hapticSuccess()` |
+| Dismiss with unsaved | Warning notification | `hapticWarning()` |
+| AI suggestion arrival | Tick | `hapticTick()` |
+
+### Progress Indicator
+- **BreathingBar** component reused from Card.tsx
+- Shows "X of Y reviewed" text above the bar
+- Bar animates width as user categorizes items
+- Pulses gently (breathing) when incomplete
+- Solid (no pulse) when all reviewed
+- Progress = items with a selection / total items
+
+### Smart Category Ordering
+Instead of 18 flat chips, show categories intelligently:
+1. AI suggestion first (if available), pre-selected with accent border
+2. Top 3-4 most likely categories based on merchant type
+3. "More..." chip that expands to show remaining categories
+4. Keeps cognitive load to 4-5 chips per item (vs 18)
+
+### Dismiss Confirmation
+- If user taps ✕ with unsaved selections:
+  - `hapticWarning()` fires
+  - `Alert.alert("Discard changes?", "You have X unsaved categorisations.", [{text: "Keep editing"}, {text: "Discard", style: "destructive"}])`
+- If no selections made: dismiss immediately (no alert)
+
+### Error & Retry State
+- On save failure: `Alert.alert("Couldn't save", "Check your connection and try again.")`
+- "Done" button stays enabled for retry
+- Modal stays open — no data lost
+
+### Completion Celebration
+When save succeeds:
+1. `hapticSuccess()` fires
+2. Button text briefly flashes "✓ Saved!" with checkmark scale-in (300ms spring)
+3. 600ms pause to register success
+4. Modal fade-out (200ms)
+
+### Backwards Compatibility
 ```typescript
-// If confidence/classifiedBy present → use them to filter
-// If absent (old cached data) → include all 'Other' transactions (safe fallback)
+// Handle cached analysis (pre-deploy) where confidence/classifiedBy undefined
 if (tx.confidence !== undefined) {
-  // New enrichment: only show truly unclassifiable
   if (tx.confidence === 'low' && tx.classifiedBy === 'default') txs.push(tx);
 } else {
-  // Legacy cached data: show all 'Other' (conservative)
+  // Legacy: include all 'Other' transactions (conservative fallback)
   txs.push(tx);
 }
+```
+
+### Transaction Dedup Guard
+```typescript
+const seen = new Set<string>();
+// In the collection loop:
+const key = `${tx.date}|${tx.description}|${tx.amount}`;
+if (seen.has(key)) continue;
+seen.add(key);
+txs.push(tx);
 ```
 
 ---
 
 ## Implementation Checklist
 
-### State changes
-- [ ] Remove `showTransferReview` state — merge into `showCatReview` (rename to `showReviewModal`)
-- [ ] Remove `transferAssignments` as separate state — merge into unified `reviewAssignments` OR keep both but save together
-- [ ] Single `showReviewModal` boolean controls the unified modal
-- [ ] Single banner that combines both counts
+### Phase 1: Structural (fixes + unification)
+- [ ] Fix backwards compatibility: handle undefined confidence/classifiedBy
+- [ ] Add transaction dedup guard in unresolvedGroups memo
+- [ ] Remove `showTransferReview` state — merge into `showReviewModal`
+- [ ] Remove 8-second timeout from save — await sync completion
+- [ ] Merge `saveCatReview` + `saveTransferReview` → unified `saveReview`
+- [ ] Replace two banners with single unified banner
+- [ ] Delete separate transfer review modal JSX
+- [ ] Rebuild as unified modal with two sections (conditionally shown)
 
-### Banner
-- [ ] Replace two separate banners with one unified banner
-- [ ] Count = unresolvedGroups.length + ambiguousTransfers.length
-- [ ] Only shows when count > 0
+### Phase 2: Animation + Haptics
+- [ ] Add modal entrance animation (fade + translateY, 320ms, matching InsightModal)
+- [ ] Add modal exit animation (fade + translateY, 200ms)
+- [ ] Add category chip press animation (scale 0.92, 140ms)
+- [ ] Add AI suggestion staggered reveal (fade+scale, 420ms, 50ms stagger)
+- [ ] Add haptic feedback to all interactions per spec
+- [ ] Add item resolve visual feedback (subtle scale + opacity)
 
-### Modal JSX
-- [ ] Delete the separate transfer review modal
-- [ ] Rebuild the categorisation modal as unified with two sections
-- [ ] Section headers: "UNCATEGORISED (N)" and "RECURRING TRANSFERS (N)"
-- [ ] Conditionally show each section (hide if empty)
-- [ ] Transfer items show direction label + frequency-based amount + type chips
-- [ ] Category items show merchant + count + amount + category chips
+### Phase 3: Progress + Smart UX
+- [ ] Add progress indicator (BreathingBar reuse) with "X of Y" text
+- [ ] Implement smart category ordering (AI first, top matches, "More..." expand)
+- [ ] Add dismiss confirmation (Alert.alert when unsaved selections exist)
+- [ ] Add error state (Alert.alert on save failure, keep modal open)
+- [ ] Add completion celebration (hapticSuccess + "✓ Saved!" flash + delayed close)
+- [ ] Add bottom safe area padding (SafeAreaView or useSafeAreaInsets)
 
-### Save function
-- [ ] Merge `saveCatReview` and `saveTransferReview` into single `saveReview`
-- [ ] Remove 8-second timeout — await sync completion fully
-- [ ] Show "Saving..." state on Done button until sync finishes
-- [ ] On sync failure: show error, keep modal open
-- [ ] On sync success: close modal (analysis auto-updates via sync result)
-
-### Duplicate fix
-- [ ] Fix backwards compatibility: handle undefined confidence/classifiedBy for cached analysis
-- [ ] Use `&&` not `||` for filter: `confidence === 'low' && classifiedBy === 'default'`
-
-### Cleanup
-- [ ] Remove unused styles for the old transfer review modal (if any unique ones)
-- [ ] Remove unused state declarations
-- [ ] Update tracking events to reflect unified modal
+### Phase 4: Polish + Accessibility
+- [ ] Add accessibilityLabel to all interactive elements
+- [ ] Add accessibilityRole="button" to chips
+- [ ] Add accessibilityState={{ selected }} to category chips
+- [ ] Test keyboard dismiss on ScrollView
+- [ ] Clean up unused styles/state from old modals
+- [ ] Verify no regressions on dashboard layout
 
 ---
 
-## Files to modify
-1. `app/(main)/(tabs)/index.tsx` — modal JSX, state, save functions, banner
-2. `lib/types.ts` — no changes needed (already updated)
-3. `lib/enrichment-engine.ts` — no changes needed (already preserves confidence/classifiedBy)
+## Files to Modify
+1. `app/(main)/(tabs)/index.tsx` — modal JSX, state, save functions, banner, animations
+2. `lib/haptics.ts` — no changes needed (already has all functions)
+3. `components/Card.tsx` — no changes (reuse BreathingBar, animation patterns)
+4. `theme/index.ts` — no changes (animation tokens already defined)
+
+## Animation Constants Reference
+```typescript
+// From theme/index.ts — use these, don't create new ones
+animation.press.scale    // 0.985 (we'll use 0.92 for chips — smaller target = more feedback)
+animation.press.duration // 140ms
+animation.entrance.duration // 420ms
+animation.entrance.stagger  // 50ms
+animation.expand.duration   // 260ms
+// Modal timing from InsightModal pattern
+MODAL_FADE_IN  = 320  // ms
+MODAL_FADE_OUT = 200  // ms
+MODAL_SLIDE    = 40   // px translateY
+```

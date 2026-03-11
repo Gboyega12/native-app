@@ -2,12 +2,12 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
   LayoutAnimation, TextInput, Modal, Pressable, Animated, Easing, PanResponder,
-  RefreshControl, Linking,
+  RefreshControl, Linking, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { hapticMedium, hapticSuccess, hapticTick } from '@/lib/haptics';
+import { hapticLight, hapticMedium, hapticSuccess, hapticWarning, hapticTick } from '@/lib/haptics';
 import { getLastResult } from '@/app/(main)/processing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { requestSync, onSyncComplete, getLastSyncTime, invalidateSyncCache } from '@/lib/sync-coordinator';
@@ -92,6 +92,10 @@ export default function Home() {
   const [retriesExhausted, setRetriesExhausted] = useState(false);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);
+
+  // Review modal animation
+  const reviewModalFade = useRef(new Animated.Value(0)).current;
+  const reviewModalSlide = useRef(new Animated.Value(40)).current;
 
   // ── Safety timeout: if bank is connected but no analysis after 3 minutes, show escape hatch ──
   useEffect(() => {
@@ -306,16 +310,30 @@ export default function Home() {
     }).catch(() => {});
   }, []);
 
-  // Categorise review modal state
-  const [showCatReview, setShowCatReview] = useState(false);
+  // Unified review modal state
+  const [showReviewModal, setShowReviewModal] = useState(false);
   const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean; aiSuggested?: boolean }>>({});
-  const [savingCatReview, setSavingCatReview] = useState(false);
-  const [aiSuggesting, setAiSuggesting] = useState(false);
-
-  // Transfer review modal state
-  const [showTransferReview, setShowTransferReview] = useState(false);
   const [transferAssignments, setTransferAssignments] = useState<Record<string, string>>({});
-  const [savingTransferReview, setSavingTransferReview] = useState(false);
+  const [savingReview, setSavingReview] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [reviewModalVisible, setReviewModalVisible] = useState(false);
+
+  // Animate review modal in/out (matching InsightModal pattern)
+  useEffect(() => {
+    if (showReviewModal) {
+      setReviewModalVisible(true);
+      Animated.parallel([
+        Animated.timing(reviewModalFade, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(reviewModalSlide, { toValue: 0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(reviewModalFade, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(reviewModalSlide, { toValue: 40, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start(() => setReviewModalVisible(false));
+    }
+  }, [showReviewModal]);
 
   const ambiguousTransfers: AmbiguousTransfer[] = useMemo(
     () => (analysis as any)?.ambiguous_transfers ?? [],
@@ -484,16 +502,24 @@ export default function Home() {
   const unresolvedGroups = useMemo(() => {
     if (!analysis) return [];
     const txs: TransactionDetail[] = [];
+    const seen = new Set<string>();
     for (const section of [analysis.discretionary, analysis.non_discretionary]) {
       const items = (section as any)?.items;
       if (!Array.isArray(items)) continue;
       for (const item of items) {
         if (item?.category === 'Other') {
-          // Only include transactions the enrichment pipeline couldn't classify —
-          // low confidence defaults that even Claude AI returned as "Other"
           const otherTxs: TransactionDetail[] = Array.isArray(item.transactions) ? item.transactions : [];
           for (const tx of otherTxs) {
-            if (tx?.confidence === 'low' || tx?.classifiedBy === 'default') {
+            if (!tx) continue;
+            // Dedup: skip if we've already collected this transaction
+            const key = `${tx.date}|${tx.description}|${tx.amount}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            // Backwards compat: if confidence/classifiedBy undefined (cached pre-deploy data),
+            // include all 'Other' txs as a conservative fallback
+            if (tx.confidence !== undefined) {
+              if (tx.confidence === 'low' && tx.classifiedBy === 'default') txs.push(tx);
+            } else {
               txs.push(tx);
             }
           }
@@ -522,7 +548,7 @@ export default function Home() {
 
   // Auto-suggest categories using Claude AI when modal opens
   useEffect(() => {
-    if (!showCatReview || unresolvedGroups.length === 0) return;
+    if (!showReviewModal || unresolvedGroups.length === 0) return;
     let cancelled = false;
 
     const fetchSuggestions = async () => {
@@ -563,19 +589,23 @@ export default function Home() {
 
     fetchSuggestions();
     return () => { cancelled = true; };
-  }, [showCatReview, unresolvedGroups.length]);
+  }, [showReviewModal, unresolvedGroups.length]);
 
-  const saveCatReview = async () => {
-    trackEvent('Categorization Review Saved', { count: Object.keys(catAssignments).length });
-    const keys = Object.keys(catAssignments);
-    if (keys.length === 0) { setShowCatReview(false); return; }
-    setSavingCatReview(true);
+  const saveReview = async () => {
+    const catKeys = Object.keys(catAssignments);
+    const transferKeys = Object.keys(transferAssignments);
+    const totalReviewed = catKeys.length + transferKeys.length;
+    if (totalReviewed === 0) { setShowReviewModal(false); return; }
+
+    trackEvent('Unified Review Saved', { categories: catKeys.length, transfers: transferKeys.length });
+    setSavingReview(true);
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not signed in');
 
-      // Save overrides for each raw merchant name in the group
-      for (const matchKey of keys) {
+      // ── Save category overrides ──
+      for (const matchKey of catKeys) {
         const a = catAssignments[matchKey];
         const group = unresolvedGroups.find(g => g.key === matchKey);
         const merchantNames = group?.merchants || [matchKey];
@@ -595,12 +625,41 @@ export default function Home() {
         }
       }
 
-      // Optimistic UI: remove categorised transactions from "Other"
+      // ── Save transfer overrides ──
+      const TRANSFER_TYPE_MAP: Record<string, { category: string; is_essential: boolean; direction?: 'credit' | 'debit' }> = {
+        rent: { category: 'Rent', is_essential: true, direction: 'debit' },
+        household_contribution: { category: 'Household Contribution', is_essential: false, direction: 'credit' },
+        debt_repayment: { category: 'Debt Payments', is_essential: true, direction: 'debit' },
+        self_transfer: { category: 'Internal Transfer', is_essential: false, direction: 'debit' },
+        income: { category: 'Income', is_essential: false, direction: 'credit' },
+        transfer: { category: 'Transfers', is_essential: false },
+      };
+
+      for (const counterparty of transferKeys) {
+        const assignedType = transferAssignments[counterparty];
+        const mapping = TRANSFER_TYPE_MAP[assignedType];
+        if (!mapping) continue;
+
+        await supabase.from('transaction_overrides')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('match_description', counterparty);
+
+        const { error: insertErr } = await supabase.from('transaction_overrides').insert({
+          user_id: user.id,
+          match_description: counterparty,
+          category: mapping.category,
+          is_essential: mapping.is_essential,
+          ...(mapping.direction ? { direction: mapping.direction } : {}),
+        });
+        if (insertErr) throw new Error(`Failed to save ${counterparty}: ${insertErr.message}`);
+      }
+
+      // ── Optimistic UI: remove categorised transactions from "Other" ──
       if (analysis) {
         const updated = { ...analysis };
-        // Build set of all raw merchant names covered by assigned groups
         const assignedMerchants = new Set<string>();
-        for (const matchKey of keys) {
+        for (const matchKey of catKeys) {
           const group = unresolvedGroups.find(g => g.key === matchKey);
           (group?.merchants || [matchKey]).forEach(m => assignedMerchants.add(m));
         }
@@ -628,97 +687,41 @@ export default function Home() {
           (updated as any)[sectionKey] = section;
         }
 
-        // Also remove classified person transfers
+        // Remove classified person transfers
         if (Array.isArray((updated as any).person_transfers)) {
           (updated as any).person_transfers = (updated as any).person_transfers.filter(
             (t: any) => !assignedMerchants.has(t?.merchant || t?.description)
           );
         }
 
-        LayoutAnimation.configureNext(SMOOTH_ANIM);
-        setAnalysis(updated);
-      }
-
-      setShowCatReview(false);
-      setCatAssignments({});
-
-      // Await re-enrichment so Supabase gets the updated analysis before
-      // the next loadData() call. Timeout after 8s to avoid blocking forever.
-      try {
-        await Promise.race([
-          syncInBackground(user.id, true),
-          new Promise((resolve) => setTimeout(resolve, 8000)),
-        ]);
-      } catch {}
-    } catch (err: any) {
-      window.alert(err.message || 'Could not save categories');
-    }
-    setSavingCatReview(false);
-  };
-
-  const saveTransferReview = async () => {
-    const keys = Object.keys(transferAssignments);
-    if (keys.length === 0) { setShowTransferReview(false); return; }
-    setSavingTransferReview(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not signed in');
-
-      const TRANSFER_TYPE_MAP: Record<string, { category: string; is_essential: boolean; direction?: 'credit' | 'debit' }> = {
-        rent: { category: 'Rent', is_essential: true, direction: 'debit' },
-        household_contribution: { category: 'Household Contribution', is_essential: false, direction: 'credit' },
-        debt_repayment: { category: 'Debt Payments', is_essential: true, direction: 'debit' },
-        self_transfer: { category: 'Internal Transfer', is_essential: false, direction: 'debit' },
-        income: { category: 'Income', is_essential: false, direction: 'credit' },
-        transfer: { category: 'Transfers', is_essential: false },
-      };
-
-      for (const counterparty of keys) {
-        const assignedType = transferAssignments[counterparty];
-        const mapping = TRANSFER_TYPE_MAP[assignedType];
-        if (!mapping) continue;
-
-        // Delete existing override for this counterparty
-        await supabase.from('transaction_overrides')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('match_description', counterparty);
-
-        const { error: insertErr } = await supabase.from('transaction_overrides').insert({
-          user_id: user.id,
-          match_description: counterparty,
-          category: mapping.category,
-          is_essential: mapping.is_essential,
-          ...(mapping.direction ? { direction: mapping.direction } : {}),
-        });
-        if (insertErr) throw new Error(`Failed to save ${counterparty}: ${insertErr.message}`);
-      }
-
-      // Optimistic UI: remove resolved transfers from analysis
-      if (analysis) {
-        const updated = { ...analysis };
+        // Remove resolved ambiguous transfers
         (updated as any).ambiguous_transfers = ambiguousTransfers.filter(
           (t) => !transferAssignments[t.counterparty]
         );
+
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
       }
 
-      setShowTransferReview(false);
-      setTransferAssignments({});
-      trackEvent('Transfer Review Saved', { count: keys.length });
+      // ── Completion celebration ──
+      hapticSuccess();
+      setSaveSuccess(true);
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
-      // Await re-enrichment so Supabase is updated before next loadData()
+      // ── Sync — no timeout race, await full completion ──
       try {
-        await Promise.race([
-          syncInBackground(user.id, true),
-          new Promise((resolve) => setTimeout(resolve, 8000)),
-        ]);
+        await syncInBackground(user.id, true);
       } catch {}
+
+      setShowReviewModal(false);
+      setCatAssignments({});
+      setTransferAssignments({});
+      setSaveSuccess(false);
     } catch (err: any) {
-      window.alert(err.message || 'Could not save transfer classifications');
+      setSaveSuccess(false);
+      Alert.alert('Couldn\u2019t save', err.message || 'Check your connection and try again.');
     }
-    setSavingTransferReview(false);
+    setSavingReview(false);
   };
 
   const saveRecategorize = async () => {
@@ -1874,28 +1877,23 @@ export default function Home() {
         </View>
       ) : (
         <>
-          {/* ── Unresolved transactions nudge ── */}
-          {unresolvedTxCount > 0 && (
-            <TouchableOpacity style={s.reviewBanner} onPress={() => { setCatAssignments({}); setShowCatReview(true); }} activeOpacity={0.7}>
-              <Text style={s.reviewBannerText}>
-                {unresolvedTxCount} uncategorised transaction{unresolvedTxCount !== 1 ? 's' : ''}.{' '}
-                <Text style={s.reviewBannerLink}>Fix now</Text>
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {/* ── Ambiguous transfers nudge ── */}
-          {ambiguousTransfers.length > 0 && (
+          {/* ── Unified review nudge ── */}
+          {(unresolvedGroups.length + ambiguousTransfers.length) > 0 && (
             <TouchableOpacity
               style={s.reviewBanner}
-              onPress={() => { setTransferAssignments({}); setShowTransferReview(true); trackEvent('Transfer Review Opened', { count: ambiguousTransfers.length }); }}
+              onPress={() => {
+                setCatAssignments({});
+                setTransferAssignments({});
+                setShowReviewModal(true);
+                trackEvent('Review Modal Opened', { categories: unresolvedGroups.length, transfers: ambiguousTransfers.length });
+              }}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel={`${ambiguousTransfers.length} recurring transfers need clarification. Tap to review.`}
+              accessibilityLabel={`${unresolvedGroups.length + ambiguousTransfers.length} items need your input. Tap to review.`}
             >
               <Text style={s.reviewBannerText}>
-                {ambiguousTransfers.length} recurring transfer{ambiguousTransfers.length !== 1 ? 's' : ''} need{ambiguousTransfers.length === 1 ? 's' : ''} clarification.{' '}
-                <Text style={s.reviewBannerLink}>Review</Text>
+                {unresolvedGroups.length + ambiguousTransfers.length} item{(unresolvedGroups.length + ambiguousTransfers.length) !== 1 ? 's' : ''} need{(unresolvedGroups.length + ambiguousTransfers.length) === 1 ? 's' : ''} your input.{' '}
+                <Text style={s.reviewBannerLink}>Tap to review</Text>
               </Text>
             </TouchableOpacity>
           )}
@@ -3156,32 +3154,76 @@ export default function Home() {
             </Pressable>
           </Modal>
 
-          {/* ── Categorise uncategorised transactions modal ── */}
-          <Modal visible={showCatReview} transparent animationType="fade">
-            <View style={s.catReviewOverlay}>
-              <View style={s.catReviewContainer}>
+          {/* ── Unified review modal ── */}
+          <Modal visible={reviewModalVisible} transparent animationType="none">
+            <Animated.View style={[s.catReviewOverlay, { opacity: reviewModalFade }]}>
+            <Pressable
+              style={{ flex: 1, justifyContent: 'center', padding: spacing.md }}
+              onPress={() => {
+                const hasUnsaved = Object.keys(catAssignments).length > 0 || Object.keys(transferAssignments).length > 0;
+                if (hasUnsaved) {
+                  hapticWarning();
+                  Alert.alert('Discard changes?', `You have ${Object.keys(catAssignments).length + Object.keys(transferAssignments).length} unsaved categorisations.`, [
+                    { text: 'Keep editing', style: 'cancel' },
+                    { text: 'Discard', style: 'destructive', onPress: () => { setShowReviewModal(false); setCatAssignments({}); setTransferAssignments({}); } },
+                  ]);
+                } else {
+                  setShowReviewModal(false);
+                }
+              }}
+            >
+              <Animated.View style={[s.catReviewContainer, { transform: [{ translateY: reviewModalSlide }] }]}>
+              <Pressable onPress={() => {}}>
+                {/* Header */}
                 <View style={s.catReviewHeader}>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.modalTitle}>Categorise transactions</Text>
+                    <Text style={s.modalTitle}>Review items</Text>
                     <Text style={s.catReviewSubtitle}>
                       {aiSuggesting
-                        ? 'Bocy is suggesting categories...'
-                        : Object.keys(catAssignments).length > 0
-                          ? 'Review suggestions, adjust any, then accept'
-                          : 'Tap a category for each merchant'}
+                        ? 'Bocy is analysing your transactions...'
+                        : 'Help us get your numbers right'}
                     </Text>
                   </View>
                   <TouchableOpacity
-                    onPress={() => setShowCatReview(false)}
+                    onPress={() => {
+                      const hasUnsaved = Object.keys(catAssignments).length > 0 || Object.keys(transferAssignments).length > 0;
+                      if (hasUnsaved) {
+                        hapticWarning();
+                        Alert.alert('Discard changes?', `You have ${Object.keys(catAssignments).length + Object.keys(transferAssignments).length} unsaved categorisations.`, [
+                          { text: 'Keep editing', style: 'cancel' },
+                          { text: 'Discard', style: 'destructive', onPress: () => { setShowReviewModal(false); setCatAssignments({}); setTransferAssignments({}); } },
+                        ]);
+                      } else {
+                        setShowReviewModal(false);
+                      }
+                    }}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                     accessibilityRole="button"
-                    accessibilityLabel="Close categorisation modal"
+                    accessibilityLabel="Close review modal"
                     style={s.catReviewCloseBtn}
                   >
                     <Text style={s.catReviewClose}>{'\u2715'}</Text>
                   </TouchableOpacity>
                 </View>
 
+                {/* Progress indicator */}
+                {(() => {
+                  const totalItems = unresolvedGroups.length + ambiguousTransfers.length;
+                  const reviewedItems = Object.keys(catAssignments).length + Object.keys(transferAssignments).length;
+                  const progress = totalItems > 0 ? reviewedItems / totalItems : 0;
+                  return totalItems > 0 ? (
+                    <View style={s.reviewProgressBar}>
+                      <Text style={s.reviewProgressText}>
+                        {reviewedItems} of {totalItems} reviewed
+                      </Text>
+                      <View style={s.reviewProgressTrack}>
+                        <View style={[s.reviewProgressFill, { width: `${Math.round(progress * 100)}%` }]} />
+                      </View>
+                    </View>
+                  ) : null;
+                })()}
+
+                {/* AI suggesting bar */}
                 {aiSuggesting && (
                   <View style={s.aiSuggestBar}>
                     <ActivityIndicator color={colors.accent} size="small" />
@@ -3189,16 +3231,16 @@ export default function Home() {
                   </View>
                 )}
 
-                {/* Accept all suggestions button — shown when AI has suggested categories */}
+                {/* Accept all AI suggestions */}
                 {!aiSuggesting && Object.values(catAssignments).some(a => a.aiSuggested) && (
                   <TouchableOpacity
                     style={s.acceptAllBtn}
-                    onPress={saveCatReview}
-                    disabled={savingCatReview}
+                    onPress={() => { hapticMedium(); saveReview(); }}
+                    disabled={savingReview}
                     accessibilityRole="button"
                     accessibilityLabel="Accept all AI suggestions and save"
                   >
-                    {savingCatReview ? (
+                    {savingReview ? (
                       <ActivityIndicator color={colors.bg} size="small" />
                     ) : (
                       <Text style={s.acceptAllBtnText}>
@@ -3209,193 +3251,176 @@ export default function Home() {
                 )}
 
                 <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
-                  {unresolvedGroups.map((group) => {
-                    const assigned = catAssignments[group.key];
-                    const isAiSuggested = assigned?.aiSuggested === true;
-                    return (
-                      <View
-                        key={group.key}
-                        style={[
-                          s.catReviewRow,
-                          assigned && s.catReviewRowDone,
-                          isAiSuggested && s.catReviewRowAi,
-                        ]}
-                        accessibilityLabel={`${group.label}, ${group.txs.length} transactions, ${assigned ? `categorised as ${assigned.category}` : 'not yet categorised'}${isAiSuggested ? ', AI suggested' : ''}`}
-                      >
-                        <View style={s.catReviewRowHeader}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={s.catReviewMerchant} numberOfLines={1}>
-                              {assigned ? '\u2713 ' : ''}{group.label}
-                            </Text>
-                            {isAiSuggested && (
-                              <Text style={s.aiSuggestedLabel}>Bocy suggested</Text>
-                            )}
+                  {/* ── UNCATEGORISED section ── */}
+                  {unresolvedGroups.length > 0 && (
+                    <>
+                      <Text style={s.reviewSectionHeader}>
+                        UNCATEGORISED ({unresolvedGroups.length})
+                      </Text>
+                      {unresolvedGroups.map((group) => {
+                        const assigned = catAssignments[group.key];
+                        const isAiSuggested = assigned?.aiSuggested === true;
+                        return (
+                          <View
+                            key={group.key}
+                            style={[
+                              s.catReviewRow,
+                              assigned && s.catReviewRowDone,
+                              isAiSuggested && s.catReviewRowAi,
+                            ]}
+                            accessibilityLabel={`${group.label}, ${group.txs.length} transactions, ${assigned ? `categorised as ${assigned.category}` : 'not yet categorised'}${isAiSuggested ? ', AI suggested' : ''}`}
+                          >
+                            <View style={s.catReviewRowHeader}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={s.catReviewMerchant} numberOfLines={1}>
+                                  {assigned ? '\u2713 ' : ''}{group.label}
+                                </Text>
+                                {isAiSuggested && (
+                                  <Text style={s.aiSuggestedLabel}>Bocy suggested</Text>
+                                )}
+                              </View>
+                              <Text style={s.catReviewAmount}>
+                                {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
+                              </Text>
+                            </View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                              {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
+                                <TouchableOpacity
+                                  key={cat}
+                                  style={[s.categoryChip, assigned?.category === cat && s.categoryChipActive]}
+                                  onPress={() => {
+                                    hapticLight();
+                                    setCatAssignments((prev) => ({
+                                      ...prev,
+                                      [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat), aiSuggested: false },
+                                    }));
+                                  }}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`${cat}${assigned?.category === cat ? ', selected' : ''}`}
+                                  accessibilityState={{ selected: assigned?.category === cat }}
+                                >
+                                  <Text style={[
+                                    s.categoryChipText,
+                                    assigned?.category === cat && s.categoryChipTextActive,
+                                  ]}>{cat}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
                           </View>
-                          <Text style={s.catReviewAmount}>
-                            {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
-                          </Text>
-                        </View>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                          {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
-                            <TouchableOpacity
-                              key={cat}
-                              style={[s.categoryChip, assigned?.category === cat && s.categoryChipActive]}
-                              onPress={() => {
-                                setCatAssignments((prev) => ({
-                                  ...prev,
-                                  [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat), aiSuggested: false },
-                                }));
-                              }}
-                              accessibilityRole="button"
-                              accessibilityLabel={`${cat}${assigned?.category === cat ? ', selected' : ''}`}
-                            >
-                              <Text style={[
-                                s.categoryChipText,
-                                assigned?.category === cat && s.categoryChipTextActive,
-                              ]}>{cat}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      </View>
-                    );
-                  })}
+                        );
+                      })}
+                    </>
+                  )}
+
+                  {/* ── RECURRING TRANSFERS section ── */}
+                  {ambiguousTransfers.length > 0 && (
+                    <>
+                      <Text style={[s.reviewSectionHeader, unresolvedGroups.length > 0 && { marginTop: spacing.lg }]}>
+                        RECURRING TRANSFERS ({ambiguousTransfers.length})
+                      </Text>
+                      {ambiguousTransfers.map((t) => {
+                        const assigned = transferAssignments[t.counterparty];
+                        const isOutbound = t.direction === 'outbound';
+                        const displayName = t.counterparty
+                          .split(' ')
+                          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                          .join(' ');
+                        const freqLabel = t.frequency === 'weekly' ? 'wk' : t.frequency === 'fortnightly' ? '2wk' : 'mo';
+                        const options = isOutbound
+                          ? [
+                              { key: 'rent', label: 'Rent' },
+                              { key: 'debt_repayment', label: 'Debt repayment' },
+                              { key: 'self_transfer', label: 'My own account' },
+                              { key: 'transfer', label: 'Just a transfer' },
+                            ]
+                          : [
+                              { key: 'household_contribution', label: 'Household' },
+                              { key: 'income', label: 'Income' },
+                              { key: 'transfer', label: 'Just a transfer' },
+                            ];
+                        return (
+                          <View
+                            key={t.counterparty}
+                            style={[s.catReviewRow, assigned && s.catReviewRowDone]}
+                            accessibilityLabel={`${displayName}, ${isOutbound ? 'outbound' : 'inbound'}, £${t.averageAmount} per ${freqLabel}, ${assigned ? `classified as ${assigned}` : 'not yet classified'}`}
+                          >
+                            <View style={s.catReviewRowHeader}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={s.catReviewMerchant} numberOfLines={1}>
+                                  {assigned ? '\u2713 ' : ''}{displayName}
+                                </Text>
+                                <Text style={s.transferDirectionLabel}>
+                                  {isOutbound ? 'Sending to' : 'Received from'}
+                                </Text>
+                              </View>
+                              <Text style={s.catReviewAmount}>
+                                {'\u00a3'}{t.averageAmount}/{freqLabel}
+                              </Text>
+                            </View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                              {options.map((opt) => (
+                                <TouchableOpacity
+                                  key={opt.key}
+                                  style={[
+                                    s.categoryChip,
+                                    assigned === opt.key && s.categoryChipActive,
+                                    t.suggestedType === opt.key && !assigned && s.categoryChipSuggested,
+                                  ]}
+                                  onPress={() => {
+                                    hapticLight();
+                                    setTransferAssignments((prev) => ({
+                                      ...prev,
+                                      [t.counterparty]: opt.key,
+                                    }));
+                                  }}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`${opt.label}${assigned === opt.key ? ', selected' : ''}`}
+                                  accessibilityState={{ selected: assigned === opt.key }}
+                                >
+                                  <Text style={[
+                                    s.categoryChipText,
+                                    assigned === opt.key && s.categoryChipTextActive,
+                                  ]}>{opt.label}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+                          </View>
+                        );
+                      })}
+                    </>
+                  )}
                 </ScrollView>
 
                 {/* Done button */}
-                <TouchableOpacity
-                  style={[s.catReviewDone, Object.keys(catAssignments).length === 0 && s.modalSaveDisabled]}
-                  onPress={saveCatReview}
-                  disabled={savingCatReview || Object.keys(catAssignments).length === 0}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Save ${Object.keys(catAssignments).length} categorised transactions`}
-                  accessibilityState={{ disabled: savingCatReview || Object.keys(catAssignments).length === 0 }}
-                >
-                  {savingCatReview ? (
-                    <ActivityIndicator color={colors.bg} size="small" />
-                  ) : (
-                    <Text style={s.catReviewDoneText}>
-                      Done{Object.keys(catAssignments).length > 0
-                        ? ` (${Object.keys(catAssignments).length} categorised)`
-                        : ''}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Modal>
-
-          {/* ── Transfer review modal ── */}
-          <Modal visible={showTransferReview} transparent animationType="fade">
-            <View style={s.catReviewOverlay}>
-              <View style={s.catReviewContainer}>
-                <View style={s.catReviewHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.modalTitle}>Clarify recurring transfers</Text>
-                    <Text style={s.catReviewSubtitle}>
-                      Help us classify these so your numbers are accurate
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => setShowTransferReview(false)}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    accessibilityRole="button"
-                    accessibilityLabel="Close transfer review"
-                    style={s.catReviewCloseBtn}
-                  >
-                    <Text style={s.catReviewClose}>{'\u2715'}</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
-                  {ambiguousTransfers.map((t) => {
-                    const assigned = transferAssignments[t.counterparty];
-                    const isOutbound = t.direction === 'outbound';
-                    const displayName = t.counterparty
-                      .split(' ')
-                      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-                      .join(' ');
-                    const freqLabel = t.frequency === 'weekly' ? 'wk' : t.frequency === 'fortnightly' ? '2wk' : 'mo';
-                    const options = isOutbound
-                      ? [
-                          { key: 'rent', label: 'Rent' },
-                          { key: 'debt_repayment', label: 'Debt repayment' },
-                          { key: 'self_transfer', label: 'My own account' },
-                          { key: 'transfer', label: 'Just a transfer' },
-                        ]
-                      : [
-                          { key: 'household_contribution', label: 'Household contribution' },
-                          { key: 'income', label: 'Income' },
-                          { key: 'transfer', label: 'Just a transfer' },
-                        ];
-                    return (
-                      <View
-                        key={t.counterparty}
-                        style={[s.catReviewRow, assigned && s.catReviewRowDone]}
-                        accessibilityLabel={`${displayName}, ${isOutbound ? 'outbound' : 'inbound'}, £${t.averageAmount} per ${freqLabel}, ${assigned ? `classified as ${assigned}` : 'not yet classified'}`}
-                      >
-                        <View style={s.catReviewRowHeader}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={s.catReviewMerchant} numberOfLines={1}>
-                              {assigned ? '\u2713 ' : ''}{displayName}
-                            </Text>
-                            <Text style={s.transferDirectionLabel}>
-                              {isOutbound ? 'Sending to' : 'Received from'}
-                            </Text>
-                          </View>
-                          <Text style={s.catReviewAmount}>
-                            {'\u00a3'}{t.averageAmount}/{freqLabel}
-                          </Text>
-                        </View>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                          {options.map((opt) => (
-                            <TouchableOpacity
-                              key={opt.key}
-                              style={[
-                                s.categoryChip,
-                                assigned === opt.key && s.categoryChipActive,
-                                t.suggestedType === opt.key && !assigned && s.categoryChipSuggested,
-                              ]}
-                              onPress={() => {
-                                setTransferAssignments((prev) => ({
-                                  ...prev,
-                                  [t.counterparty]: opt.key,
-                                }));
-                              }}
-                              accessibilityRole="button"
-                              accessibilityLabel={`${opt.label}${assigned === opt.key ? ', selected' : ''}`}
-                            >
-                              <Text style={[
-                                s.categoryChipText,
-                                assigned === opt.key && s.categoryChipTextActive,
-                              ]}>{opt.label}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      </View>
-                    );
-                  })}
-                </ScrollView>
-
-                <TouchableOpacity
-                  style={[s.catReviewDone, Object.keys(transferAssignments).length === 0 && s.modalSaveDisabled]}
-                  onPress={saveTransferReview}
-                  disabled={savingTransferReview || Object.keys(transferAssignments).length === 0}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Save ${Object.keys(transferAssignments).length} classified transfers`}
-                  accessibilityState={{ disabled: savingTransferReview || Object.keys(transferAssignments).length === 0 }}
-                >
-                  {savingTransferReview ? (
-                    <ActivityIndicator color={colors.bg} size="small" />
-                  ) : (
-                    <Text style={s.catReviewDoneText}>
-                      Done{Object.keys(transferAssignments).length > 0
-                        ? ` (${Object.keys(transferAssignments).length} classified)`
-                        : ''}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
+                {(() => {
+                  const totalReviewed = Object.keys(catAssignments).length + Object.keys(transferAssignments).length;
+                  return (
+                    <TouchableOpacity
+                      style={[s.catReviewDone, totalReviewed === 0 && s.modalSaveDisabled]}
+                      onPress={saveReview}
+                      disabled={savingReview || totalReviewed === 0}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Save ${totalReviewed} reviewed items`}
+                      accessibilityState={{ disabled: savingReview || totalReviewed === 0 }}
+                    >
+                      {savingReview ? (
+                        saveSuccess ? (
+                          <Text style={s.catReviewDoneText}>{'\u2713'} Saved!</Text>
+                        ) : (
+                          <ActivityIndicator color={colors.bg} size="small" />
+                        )
+                      ) : (
+                        <Text style={s.catReviewDoneText}>
+                          Done{totalReviewed > 0 ? ` (${totalReviewed} reviewed)` : ''}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })()}
+              </Pressable>
+              </Animated.View>
+            </Pressable>
+            </Animated.View>
           </Modal>
 
         </>
@@ -5331,8 +5356,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   catReviewOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
-    padding: spacing.md,
   },
   catReviewContainer: {
     backgroundColor: c.surface,
@@ -5472,6 +5495,38 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: c.bg,
+  },
+  reviewSectionHeader: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2,
+    color: c.dim,
+    textTransform: 'uppercase' as const,
+    marginBottom: spacing.sm,
+  },
+  reviewProgressBar: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: c.border,
+  },
+  reviewProgressText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  reviewProgressTrack: {
+    height: 3,
+    backgroundColor: c.border,
+    borderRadius: 2,
+    overflow: 'hidden' as const,
+  },
+  reviewProgressFill: {
+    height: '100%' as const,
+    backgroundColor: c.accent,
+    borderRadius: 2,
   },
 
   // ── Info icon (small) on hero card ──
