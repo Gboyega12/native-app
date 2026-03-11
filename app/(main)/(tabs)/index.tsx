@@ -459,14 +459,21 @@ export default function Home() {
   // Normalize merchant names so similar transactions group together
   const normalizeMerchant = (raw: string) => {
     let n = raw.trim();
-    // Remove common bank prefixes
-    n = n.replace(/^(PAYMENT TO |DIRECT DEBIT |DEBIT CARD PAYMENT |CARD PAYMENT TO |CARD PAYMENT |CONTACTLESS |POS )/i, '');
-    // Remove trailing reference numbers (6+ digits)
-    n = n.replace(/\s+\d{6,}$/, '');
-    // Remove trailing dates (dd/mm or dd-mm patterns)
+    // Remove common bank prefixes (Revolut, Monzo, HSBC, etc. patterns)
+    n = n.replace(/^(PAYMENT TO |DIRECT DEBIT |DEBIT CARD PAYMENT |CARD PAYMENT TO |CARD PAYMENT |CONTACTLESS |POS |MOBILE-|BGC |FPO |STO |FPI |DPC |BBP |FASTER PAYMENT |STANDING ORDER )/i, '');
+    // Remove trailing reference numbers (4+ digits, often transaction IDs)
+    n = n.replace(/\s+[\dA-Z]{4,}$/, '');
+    // Remove trailing card suffixes (e.g., "ON 28 DEC", "CD 1234", "GBP 12.34")
+    n = n.replace(/\s+(ON \d{1,2} [A-Z]{3}|CD \d{4}|GBP \d+\.?\d*|REF\s*\S+)$/i, '');
+    // Remove trailing dates (dd/mm, dd-mm, ddMMMyy patterns)
     n = n.replace(/\s+\d{2}[\/\-]\d{2}([\/\-]\d{2,4})?$/, '');
-    // Collapse whitespace
-    n = n.replace(/\s+/g, ' ').trim();
+    n = n.replace(/\s+\d{2}[A-Z]{3}\d{2,4}$/i, '');
+    // Remove location suffixes (city/country codes like "LONDON GB", "LDN GBR")
+    n = n.replace(/\s+[A-Z]{2,3}\s+[A-Z]{2,3}$/, '');
+    // Remove asterisk/star separators common in card processors ("AMZN*", "SQ *")
+    n = n.replace(/^([A-Z]+)\s*\*\s*/, '$1 ');
+    // Collapse whitespace and lowercase for matching
+    n = n.replace(/\s+/g, ' ').trim().toLowerCase();
     return n;
   };
 
@@ -3182,6 +3189,25 @@ export default function Home() {
                   </View>
                 )}
 
+                {/* Accept all suggestions button — shown when AI has suggested categories */}
+                {!aiSuggesting && Object.values(catAssignments).some(a => a.aiSuggested) && (
+                  <TouchableOpacity
+                    style={s.acceptAllBtn}
+                    onPress={saveCatReview}
+                    disabled={savingCatReview}
+                    accessibilityRole="button"
+                    accessibilityLabel="Accept all AI suggestions and save"
+                  >
+                    {savingCatReview ? (
+                      <ActivityIndicator color={colors.bg} size="small" />
+                    ) : (
+                      <Text style={s.acceptAllBtnText}>
+                        Accept all ({Object.keys(catAssignments).length})
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
+
                 <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
                   {unresolvedGroups.map((group) => {
                     const assigned = catAssignments[group.key];
@@ -5432,6 +5458,20 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 11,
     color: c.text2,
     letterSpacing: 0.3,
+  },
+  acceptAllBtn: {
+    backgroundColor: c.accent,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    alignItems: 'center' as const,
+  },
+  acceptAllBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.bg,
   },
 
   // ── Info icon (small) on hero card ──

@@ -122,10 +122,31 @@ export function rankMoves(
   goals: Goals | null,
   identity?: UserIdentity | null,
   debtAccounts?: any[],
+  archetypeKey?: string,
 ): RankedMove[] {
   if (!decisionStack || decisionStack.length === 0) return [];
 
   const ukpf = determineFlowchartPosition(profile, goals, debtAccounts, identity);
+
+  // ── Cohort multiplier ──
+  // Different archetypes need different move categories prioritised.
+  // Without this, pure annualImpact ranking skews towards savings moves
+  // for everyone, even debt-juggler users who need debt moves first.
+  const cohortBoosts: Record<string, number> = {};
+  if (archetypeKey) {
+    if (['debt_juggler', 'edge_walker'].includes(archetypeKey)) {
+      cohortBoosts['debt'] = 2.0;
+      cohortBoosts['break_even'] = 1.8;
+      cohortBoosts['spending'] = 1.5;
+    } else if (['subscription_collector', 'impulse_surfer', 'convenience_seeker', 'comfort_spender'].includes(archetypeKey)) {
+      cohortBoosts['spending'] = 1.8;
+      cohortBoosts['debt'] = 1.3;
+    } else if (['side_hustler'].includes(archetypeKey)) {
+      cohortBoosts['spending'] = 1.5;
+      cohortBoosts['savings'] = 1.3;
+    }
+    // quiet_builder, lifestyle_investor, balanced_realist: no extra boosts — savings/invest ranking is already natural
+  }
 
   // Compute volatility once for all moves
   let vol: VolatilityProfile | null = null;
@@ -160,11 +181,15 @@ export function rankMoves(
     );
     score *= marginal;
 
-    // UKPF tiebreaker — small boost for matching the user's flowchart priority
+    // UKPF priority — strong boost for matching the user's flowchart position
     const moveCategory = move.category || 'spending';
     if (moveCategory === ukpf.priority) {
-      score *= 1.15;
+      score *= 1.5;
     }
+
+    // Cohort boost — archetype-driven reweighting
+    const cohortMult = cohortBoosts[moveCategory] || 1.0;
+    score *= cohortMult;
 
     // Goal alignment boost
     if (goals?.one_year_goal === 'clear_debt' && moveCategory === 'debt') score *= 1.3;
@@ -201,6 +226,21 @@ export function rankMoves(
 
   // Sort by UKPF-weighted score (now includes consistency)
   scored.sort((a, b) => b.ukpfScore - a.ukpfScore);
+
+  // ── Category diversity enforcement ──
+  // Ensure top 5 moves span at least 2 categories. If the top 5 are all
+  // one category, promote the highest-scoring move from a different category.
+  if (scored.length >= 5) {
+    const top5Categories = new Set(scored.slice(0, 5).map(m => m.category || 'spending'));
+    if (top5Categories.size < 2) {
+      const dominantCat = scored[0].category || 'spending';
+      const altIdx = scored.findIndex((m, i) => i >= 5 && (m.category || 'spending') !== dominantCat);
+      if (altIdx > 0) {
+        const [alt] = scored.splice(altIdx, 1);
+        scored.splice(4, 0, alt); // Insert at position 5
+      }
+    }
+  }
 
   // Assign ranks
   scored.forEach((m, i) => { m.rank = i + 1; });
