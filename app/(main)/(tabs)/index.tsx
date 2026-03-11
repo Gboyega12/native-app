@@ -18,7 +18,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals } from '@/lib/types';
-import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, AmbiguousTransfer } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
@@ -317,8 +317,8 @@ export default function Home() {
   const [transferAssignments, setTransferAssignments] = useState<Record<string, string>>({});
   const [savingTransferReview, setSavingTransferReview] = useState(false);
 
-  const ambiguousTransfers = useMemo(
-    () => (analysis as any)?.ambiguous_transfers || [],
+  const ambiguousTransfers: AmbiguousTransfer[] = useMemo(
+    () => (analysis as any)?.ambiguous_transfers ?? [],
     [analysis],
   );
 
@@ -667,8 +667,8 @@ export default function Home() {
       // Optimistic UI: remove resolved transfers from analysis
       if (analysis) {
         const updated = { ...analysis };
-        (updated as any).ambiguous_transfers = (ambiguousTransfers as any[]).filter(
-          (t: any) => !transferAssignments[t.counterparty]
+        (updated as any).ambiguous_transfers = ambiguousTransfers.filter(
+          (t) => !transferAssignments[t.counterparty]
         );
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
@@ -1833,9 +1833,15 @@ export default function Home() {
 
           {/* ── Ambiguous transfers nudge ── */}
           {ambiguousTransfers.length > 0 && (
-            <TouchableOpacity style={s.reviewBanner} onPress={() => { setTransferAssignments({}); setShowTransferReview(true); }} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={s.reviewBanner}
+              onPress={() => { setTransferAssignments({}); setShowTransferReview(true); trackEvent('Transfer Review Opened', { count: ambiguousTransfers.length }); }}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`${ambiguousTransfers.length} recurring transfers need clarification. Tap to review.`}
+            >
               <Text style={s.reviewBannerText}>
-                {ambiguousTransfers.length} recurring transfer{ambiguousTransfers.length !== 1 ? 's' : ''} need clarification.{' '}
+                {ambiguousTransfers.length} recurring transfer{ambiguousTransfers.length !== 1 ? 's' : ''} need{ambiguousTransfers.length === 1 ? 's' : ''} clarification.{' '}
                 <Text style={s.reviewBannerLink}>Review</Text>
               </Text>
             </TouchableOpacity>
@@ -3220,6 +3226,8 @@ export default function Home() {
                   <TouchableOpacity
                     onPress={() => setShowTransferReview(false)}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close transfer review"
                     style={s.catReviewCloseBtn}
                   >
                     <Text style={s.catReviewClose}>{'\u2715'}</Text>
@@ -3227,9 +3235,14 @@ export default function Home() {
                 </View>
 
                 <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
-                  {(ambiguousTransfers as any[]).map((t: any) => {
+                  {ambiguousTransfers.map((t) => {
                     const assigned = transferAssignments[t.counterparty];
                     const isOutbound = t.direction === 'outbound';
+                    const displayName = t.counterparty
+                      .split(' ')
+                      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+                      .join(' ');
+                    const freqLabel = t.frequency === 'weekly' ? 'wk' : t.frequency === 'fortnightly' ? '2wk' : 'mo';
                     const options = isOutbound
                       ? [
                           { key: 'rent', label: 'Rent' },
@@ -3246,15 +3259,19 @@ export default function Home() {
                       <View
                         key={t.counterparty}
                         style={[s.catReviewRow, assigned && s.catReviewRowDone]}
+                        accessibilityLabel={`${displayName}, ${isOutbound ? 'outbound' : 'inbound'}, £${t.averageAmount} per ${freqLabel}, ${assigned ? `classified as ${assigned}` : 'not yet classified'}`}
                       >
                         <View style={s.catReviewRowHeader}>
                           <View style={{ flex: 1 }}>
                             <Text style={s.catReviewMerchant} numberOfLines={1}>
-                              {assigned ? '\u2713 ' : ''}{isOutbound ? '\u2192 ' : '\u2190 '}{t.counterparty}
+                              {assigned ? '\u2713 ' : ''}{displayName}
+                            </Text>
+                            <Text style={s.transferDirectionLabel}>
+                              {isOutbound ? 'Sending to' : 'Received from'}
                             </Text>
                           </View>
                           <Text style={s.catReviewAmount}>
-                            {t.count}x {'\u00b7'} {'\u00a3'}{t.averageAmount}/{t.frequency === 'weekly' ? 'wk' : t.frequency === 'fortnightly' ? '2wk' : 'mo'}
+                            {'\u00a3'}{t.averageAmount}/{freqLabel}
                           </Text>
                         </View>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
@@ -3272,6 +3289,8 @@ export default function Home() {
                                   [t.counterparty]: opt.key,
                                 }));
                               }}
+                              accessibilityRole="button"
+                              accessibilityLabel={`${opt.label}${assigned === opt.key ? ', selected' : ''}`}
                             >
                               <Text style={[
                                 s.categoryChipText,
@@ -3289,6 +3308,9 @@ export default function Home() {
                   style={[s.catReviewDone, Object.keys(transferAssignments).length === 0 && s.modalSaveDisabled]}
                   onPress={saveTransferReview}
                   disabled={savingTransferReview || Object.keys(transferAssignments).length === 0}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Save ${Object.keys(transferAssignments).length} classified transfers`}
+                  accessibilityState={{ disabled: savingTransferReview || Object.keys(transferAssignments).length === 0 }}
                 >
                   {savingTransferReview ? (
                     <ActivityIndicator color={colors.bg} size="small" />
@@ -5056,8 +5078,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderColor: c.accent,
   },
   categoryChipSuggested: {
-    borderColor: c.accent,
-    borderStyle: 'dashed' as const,
+    borderColor: c.accentDim,
+    backgroundColor: c.mintDim,
   },
   categoryChipText: {
     fontFamily: fonts.mono,
@@ -5300,6 +5322,14 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 9,
     color: c.green,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase' as const,
+    marginTop: 2,
+  },
+  transferDirectionLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: c.dim,
     letterSpacing: 0.5,
     textTransform: 'uppercase' as const,
     marginTop: 2,

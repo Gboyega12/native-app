@@ -291,3 +291,12 @@ CREATE POLICY "Users can delete own budget adjustments"
 
 -- No additional ALL policy needed.
 -- Server-side writes (chat tool) use the service role client (which bypasses RLS).
+
+
+-- ============================================================
+-- Migration: add direction column to transaction_overrides
+-- Allows overrides to match only credits or debits (e.g. inbound
+-- from partner = household contribution, outbound = rent).
+-- ============================================================
+ALTER TABLE transaction_overrides
+  ADD COLUMN IF NOT EXISTS direction TEXT CHECK (direction IN ('credit', 'debit'));
