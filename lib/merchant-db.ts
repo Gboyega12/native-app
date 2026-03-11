@@ -604,6 +604,49 @@ export function isLikelyIncomeCredit(description: string): boolean {
     || matchesBenefitKeywords(description);
 }
 
+// ── Credit card / debt brand extraction ──
+// Matches an account name (e.g. "John's Capital One Card") against known
+// credit card and debt provider brands from the merchant DB.
+const DEBT_BRANDS: { patterns: string[]; brand: string }[] = [
+  { patterns: ['amex', 'american express', 'american exp'], brand: 'American Express' },
+  { patterns: ['barclaycard'], brand: 'Barclaycard' },
+  { patterns: ['mbna'], brand: 'MBNA' },
+  { patterns: ['capital one'], brand: 'Capital One' },
+  { patterns: ['vanquis'], brand: 'Vanquis' },
+  { patterns: ['aqua card', 'aqua credit', 'aqua'], brand: 'Aqua' },
+  { patterns: ['newday', 'new day'], brand: 'NewDay' },
+  { patterns: ['virgin money', 'virgin credit'], brand: 'Virgin Money' },
+  { patterns: ['tesco bank', 'tesco credit'], brand: 'Tesco Bank' },
+  { patterns: ['sainsburys bank', "sainsbury's bank"], brand: "Sainsbury's Bank" },
+  { patterns: ['black horse', 'bhfc'], brand: 'Black Horse Finance' },
+  { patterns: ['moneybarn'], brand: 'Moneybarn' },
+  { patterns: ['bmw financial', 'bmw finance'], brand: 'BMW Finance' },
+  { patterns: ['vw financial', 'vw finance', 'volkswagen finance'], brand: 'VW Finance' },
+  { patterns: ['mercedes finance', 'mercedes-benz finance'], brand: 'Mercedes Finance' },
+  { patterns: ['close brothers', 'close motor'], brand: 'Close Brothers' },
+  { patterns: ['motonovo', 'moto novo'], brand: 'MotoNovo' },
+  { patterns: ['hsbc'], brand: 'HSBC' },
+  { patterns: ['barclays'], brand: 'Barclays' },
+  { patterns: ['lloyds'], brand: 'Lloyds' },
+  { patterns: ['natwest'], brand: 'NatWest' },
+  { patterns: ['nationwide'], brand: 'Nationwide' },
+  { patterns: ['halifax'], brand: 'Halifax' },
+  { patterns: ['santander'], brand: 'Santander' },
+  { patterns: ['tsb'], brand: 'TSB' },
+  { patterns: ['monzo'], brand: 'Monzo' },
+  { patterns: ['starling'], brand: 'Starling' },
+  { patterns: ['revolut'], brand: 'Revolut' },
+  { patterns: ['chase'], brand: 'Chase' },
+];
+
+export function extractCreditCardBrand(accountName: string): string | null {
+  const lower = accountName.toLowerCase();
+  for (const { patterns, brand } of DEBT_BRANDS) {
+    if (patterns.some((p) => lower.includes(p))) return brand;
+  }
+  return null;
+}
+
 // ── Fuzzy Merchant Matching ──
 // Catches merchants with slight misspellings or word-order variations
 // not covered by exact pattern matching. Only activates when exact

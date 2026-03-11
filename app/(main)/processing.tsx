@@ -193,7 +193,7 @@ function ProcessingInner() {
           const [overrideRes, adjustmentRes] = await Promise.all([
             supabase
               .from('transaction_overrides')
-              .select('match_description, category, is_essential')
+              .select('match_description, category, is_essential, direction')
               .eq('user_id', authUser.id),
             supabase
               .from('budget_adjustments')
@@ -471,6 +471,7 @@ function ProcessingInner() {
         all_moves: allMoves,
         behavioral_patterns: result.behavioralPatterns,
         goal_context: goalTrajectory,
+        ambiguous_transfers: result.ambiguousTransfers,
       };
 
       if (user?.id) {

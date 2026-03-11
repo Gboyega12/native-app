@@ -443,6 +443,7 @@ async function executeOverride(input, userId) {
     category: input.category,
     is_essential: input.is_essential,
     notes: input.notes || null,
+    ...(input.direction ? { direction: input.direction } : {}),
   });
 
   if (error) {
@@ -858,6 +859,20 @@ Tools:
     prompt += `\n- When the user provides an amount, use save_budget_item to record it. Only then.`;
     prompt += `\n- Low-confidence gaps (insurance, water) — only ask if the user is specifically discussing budgets or expenses. Don't lead with these.`;
     prompt += `\n- Once a gap is filled via save_budget_item, it won't appear in future conversations.`;
+  }
+
+  // ── Ambiguous recurring transfers ──
+  if (ctx.ambiguous_transfers?.length) {
+    prompt += `\n\n⚠ AMBIGUOUS RECURRING TRANSFERS — These recurring person-to-person transfers need clarification:`;
+    for (const t of ctx.ambiguous_transfers) {
+      const dir = t.direction === 'inbound' ? 'received from' : 'sent to';
+      prompt += `\n- £${t.averageAmount}/${t.frequency} ${dir} "${t.counterparty}" (${t.count} occurrences)`;
+      if (t.suggestedType) prompt += ` — likely: ${t.suggestedType.replace(/_/g, ' ')}`;
+    }
+    prompt += `\n\nThese may be rent payments to/from a partner, household contributions, debt repayments, or transfers to the user's own accounts.`;
+    prompt += `\n- If the user asks about income accuracy or missing rent, mention these transfers and suggest they tap "Review" on the dashboard banner.`;
+    prompt += `\n- Inbound recurring person transfers may be inflating the income figure if they are household contributions, not real income.`;
+    prompt += `\n- Outbound recurring person transfers may be rent or debt repayments being counted as generic transfers.`;
   }
 
   // ── All moves (action plan) ──

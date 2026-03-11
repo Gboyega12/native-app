@@ -1,6 +1,6 @@
 import {
   matchMerchant, fuzzyMatchMerchant, isPersonTransfer,
-  isLikelyIncomeCredit, matchesSalaryKeywords,
+  isLikelyIncomeCredit, matchesSalaryKeywords, extractCreditCardBrand,
 } from './merchant-db.js';
 import { classifyTransaction } from './classifier.js';
 import { normaliseDescription } from './normalise.js';
@@ -20,6 +20,7 @@ import type {
   BudgetCategory,
   EssentialGap,
   VerifiedBill,
+  AmbiguousTransfer,
 } from './types.js';
 
 function splitCSVLine(line: string): string[] {
@@ -56,7 +57,17 @@ export type TransactionOverride = {
   match_description: string;
   category: string;
   is_essential: boolean;
+  direction?: 'credit' | 'debit';
 };
+
+function debtDisplayName(d: { account_name?: string; institution?: string; account_type?: string }): string {
+  if (d.institution) return d.institution;
+  const brand = extractCreditCardBrand(d.account_name || '');
+  if (brand) return brand;
+  if (d.account_type === 'credit_card') return 'Credit Card';
+  if (d.account_type === 'car_finance') return 'Car Finance';
+  return d.account_name || 'Debt';
+}
 
 const EnrichmentEngine = {
   enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[], identity?: any): EnrichmentResult {
@@ -70,6 +81,7 @@ const EnrichmentEngine = {
     this._reclassifyCreditCardPayoffs(enriched, debtAccounts);
 
     const recurring = this.detectRecurring(enriched);
+    const ambiguousTransfers = this.detectAmbiguousTransfers(enriched, overrides, identity);
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
     const patterns = this.detectBehavioralPatterns(profile);
@@ -103,6 +115,7 @@ const EnrichmentEngine = {
       enrichmentMetrics,
       essentialGaps,
       verifiedBills: verifiedBills.length > 0 ? verifiedBills : undefined,
+      ambiguousTransfers: ambiguousTransfers.length > 0 ? ambiguousTransfers : undefined,
     };
   },
 
@@ -194,9 +207,16 @@ const EnrichmentEngine = {
       const normDesc = normaliseDescription(tx.description);
       const override = overrides.find((o) => {
         const pattern = o.match_description.toLowerCase();
-        return descLower.includes(pattern) || normDesc.includes(pattern);
+        const textMatch = descLower.includes(pattern) || normDesc.includes(pattern);
+        if (!textMatch) return false;
+        // Direction filter: only match credits or debits when specified
+        if (o.direction === 'credit' && tx.amount <= 0) return false;
+        if (o.direction === 'debit' && tx.amount > 0) return false;
+        return true;
       });
       if (override) {
+        const isHouseholdContribution = override.category === 'Household Contribution';
+        const isInternalTransfer = override.category === 'Internal Transfer';
         return {
           date: tx.date,
           description: tx.description,
@@ -207,8 +227,8 @@ const EnrichmentEngine = {
           isSubscription: false,
           isBNPL: override.category === 'BNPL',
           isDebt: override.category === 'Debt Payments',
-          isIncome: tx.amount > 0,
-          isTransfer: false,
+          isIncome: tx.amount > 0 && !isHouseholdContribution && !isInternalTransfer,
+          isTransfer: isHouseholdContribution || isInternalTransfer || override.category === 'Transfers',
           isRefund: false,
           isSavings: override.category === 'Savings' || override.category === 'Investments',
           confidence: 'high' as const,
@@ -435,6 +455,110 @@ const EnrichmentEngine = {
       }
     }
     return recurring;
+  },
+
+  detectAmbiguousTransfers(
+    transactions: EnrichedTransaction[],
+    overrides?: TransactionOverride[],
+    identity?: any,
+  ): AmbiguousTransfer[] {
+    // Group transactions flagged as person transfers by counterparty name
+    const groups: Record<string, EnrichedTransaction[]> = {};
+    for (const tx of transactions) {
+      if (!tx.isTransfer && !tx.isIncome) continue;
+      // Only consider person-name-like descriptions
+      if (!isPersonTransfer(tx.description)) continue;
+      // Normalise counterparty: strip prefixes, lowercase
+      const key = tx.description.toLowerCase()
+        .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
+        .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b|\bfaster payment\b|\bbank transfer\b|\btransfer to\b|\btransfer from\b|\bstanding order\b/g, '')
+        .trim()
+        .replace(/\s+/g, ' ');
+      if (!key || key.length < 3) continue;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(tx);
+    }
+
+    // Filter out counterparties that already have overrides
+    const overridePatterns = (overrides || []).map((o) => o.match_description.toLowerCase());
+
+    const results: AmbiguousTransfer[] = [];
+    for (const [counterparty, txs] of Object.entries(groups)) {
+      if (txs.length < 3) continue;
+
+      // Skip if already overridden
+      if (overridePatterns.some((p) => counterparty.includes(p) || p.includes(counterparty))) continue;
+
+      // Check direction consistency (all inbound or all outbound)
+      const credits = txs.filter((t) => t.amount > 0);
+      const debits = txs.filter((t) => t.amount <= 0);
+      const direction: 'inbound' | 'outbound' = credits.length >= debits.length ? 'inbound' : 'outbound';
+      const dirTxs = direction === 'inbound' ? credits : debits;
+      if (dirTxs.length < 3) continue;
+
+      // Amount consistency — CV must be low
+      const amounts = dirTxs.map((t) => Math.abs(t.amount));
+      const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length;
+      const stdDev = Math.sqrt(amounts.reduce((s, a) => s + (a - avgAmount) ** 2, 0) / amounts.length);
+      const cv = avgAmount > 0 ? stdDev / avgAmount : 1;
+      if (cv > 0.15) continue;
+
+      // Frequency detection
+      const sorted = dirTxs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const intervals: number[] = [];
+      for (let i = 1; i < sorted.length; i++) {
+        intervals.push((new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()) / (1000 * 60 * 60 * 24));
+      }
+      const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      let frequency: 'weekly' | 'fortnightly' | 'monthly' | null = null;
+      if (avgInterval >= 5 && avgInterval <= 10) frequency = 'weekly';
+      else if (avgInterval >= 12 && avgInterval <= 17) frequency = 'fortnightly';
+      else if (avgInterval >= 25 && avgInterval <= 35) frequency = 'monthly';
+      if (!frequency) continue;
+
+      // Suggest type based on identity context
+      const id = identity || {};
+      let suggestedType: AmbiguousTransfer['suggestedType'] = null;
+
+      if (direction === 'outbound') {
+        // Monthly equivalent for rent-range check
+        const monthlyEquiv = frequency === 'weekly' ? avgAmount * 52 / 12
+          : frequency === 'fortnightly' ? avgAmount * 26 / 12
+          : avgAmount;
+        const isRenting = id.housing === 'renting' || id.housing === 'shared_house';
+        if (isRenting && monthlyEquiv >= 300 && monthlyEquiv <= 2000) {
+          suggestedType = 'rent';
+        }
+        // Self-transfer: fuzzy match user name against counterparty
+        if (id.full_name) {
+          const userName = id.full_name.toLowerCase().replace(/\s+/g, ' ').trim();
+          const nameParts = userName.split(' ');
+          const counterParts = counterparty.split(' ');
+          const overlap = nameParts.filter((n: string) => counterParts.some((c: string) => c === n || (n.length > 2 && c.startsWith(n))));
+          if (overlap.length >= 2 || (overlap.length === 1 && nameParts.length <= 2)) {
+            suggestedType = 'self_transfer';
+          }
+        }
+      } else {
+        // Inbound: if user has a partner, suggest household contribution
+        const hasPartner = id.household === 'couple_shared' || id.household === 'couple_separate' || id.household === 'family';
+        if (hasPartner) {
+          suggestedType = 'household_contribution';
+        }
+      }
+
+      results.push({
+        counterparty,
+        direction,
+        frequency,
+        averageAmount: Math.round(avgAmount),
+        count: dirTxs.length,
+        sampleDescriptions: dirTxs.slice(0, 3).map((t) => t.description),
+        suggestedType,
+      });
+    }
+
+    return results;
   },
 
   buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): FinancialProfile {
@@ -1192,7 +1316,7 @@ const EnrichmentEngine = {
         // Sort debts smallest balance first (snowball order)
         const sortedDebts = [...connectedDebts].sort((a, b) => (a.outstanding_balance || 0) - (b.outstanding_balance || 0));
         const smallestDebt = sortedDebts[0];
-        const smallestName = smallestDebt?.account_name || smallestDebt?.institution || 'Debt';
+        const smallestName = debtDisplayName(smallestDebt || {});
         const smallestBalance = Math.round(smallestDebt?.outstanding_balance || 0);
         const smallestMin = Math.round(smallestDebt?.minimum_payment || 0);
         // Minimums on all other debts
@@ -1210,7 +1334,7 @@ const EnrichmentEngine = {
         const interestSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
         const debtSubGoals: MoveSubGoal[] = sortedDebts.map((d) => ({
           type: 'debt_clear' as const,
-          target: d.account_name || d.institution || 'Debt',
+          target: debtDisplayName(d),
           startValue: Math.round(d.outstanding_balance || 0),
           targetValue: 0,
         }));
@@ -1255,7 +1379,7 @@ const EnrichmentEngine = {
         });
       } else {
         const singleDebt = connectedDebts[0];
-        const singleName = singleDebt?.account_name || singleDebt?.institution || 'Debt';
+        const singleName = debtDisplayName(singleDebt || {});
         const singleBalance = Math.round(singleDebt?.outstanding_balance || 0);
         const singleMin = Math.round(singleDebt?.minimum_payment || 0);
         // Compute real overpayment from surplus, capped sensibly

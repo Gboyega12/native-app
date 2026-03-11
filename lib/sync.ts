@@ -318,7 +318,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     const [overrideRes, adjustmentRes] = await Promise.all([
       supabase
         .from('transaction_overrides')
-        .select('match_description, category, is_essential')
+        .select('match_description, category, is_essential, direction')
         .eq('user_id', userId),
       supabase
         .from('budget_adjustments')
@@ -455,6 +455,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     income_cv: result.profile.monthly.incomeCV,
     essential_gaps: result.essentialGaps,
     verified_bills: result.verifiedBills,
+    ambiguous_transfers: result.ambiguousTransfers,
   };
 
   // ── 6. Upsert to Supabase ──

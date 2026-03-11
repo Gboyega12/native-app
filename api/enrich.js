@@ -91,7 +91,7 @@ export default async function handler(req, res) {
     // ── 2. Fetch user config ──
     const [overrideRes, adjustmentRes, debtRes, idRes, goalsRes] = await Promise.all([
       admin.from('transaction_overrides')
-        .select('match_description, category, is_essential')
+        .select('match_description, category, is_essential, direction')
         .eq('user_id', userId),
       admin.from('budget_adjustments')
         .select('description, category, monthly_amount, is_essential')

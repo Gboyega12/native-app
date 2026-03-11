@@ -1,79 +1,128 @@
-# Fix: CTA Math, Spending Details Peek, Surgical Recommendations
+# Recurring Person Transfers & Debt Display Fix
 
-## Problem Statement
-
-Three interconnected quality issues:
-
-1. **CTA Payment Math**: Debt CTA says "Pay £17 to Amex" — that's just `debtPayments * 0.15` (interest savings heuristic), not a real actionable payment. Should compute real surplus-based allocation.
-
-2. **Spending Details Visibility**: Collapsed section looks like a footer bar — bare `TouchableOpacity`, no border/bg, muted colors. Users don't discover it.
-
-3. **Recommendation Quality**: Moves are generated with blunt heuristics:
-   - Transport: recommends cutting 20% even for daily office commuters on TfL (non-negotiable cost). Includes one-time travel fares in the monthly average.
-   - Subscriptions: includes essential bills (water, energy) and one-time charges. Doesn't verify recurrence pattern.
-   - All moves use flat % cuts without proving the math is achievable.
+## Problem
+1. Recurring person-to-person transfers (rent to/from partner, debt repayments, self-transfers) are misclassified — either treated as generic transfers or mistaken for income.
+2. Debt payment display shows user names ("pay £8 to John Doe") instead of bank/card names ("pay £8 to Capital One").
 
 ---
 
-## Plan
+## Implementation Plan
 
-### Fix 1: CTA Payment Math (`enrichment-engine.ts`)
+### Part A: Detect Ambiguous Recurring Person Transfers
 
-**In `genDecisionStack` — debt snowball move (line ~1149):**
+**File: `lib/enrichment-engine.ts`**
 
-Currently: `monthlyImpact = debtPayments * 0.15` (interest savings heuristic — not a real payment)
+- [ ] **A1. New type `AmbiguousTransfer`** (~line 59)
+  ```typescript
+  export type AmbiguousTransfer = {
+    counterparty: string;
+    direction: 'inbound' | 'outbound';
+    frequency: 'weekly' | 'fortnightly' | 'monthly';
+    averageAmount: number;
+    count: number;
+    sampleDescriptions: string[];
+    suggestedType: 'rent' | 'household_contribution' | 'debt_repayment' | 'self_transfer' | null;
+  };
+  ```
 
-Change to: compute real surplus-based allocation using snowball method
-- Sort debts by balance (smallest first)
-- Calculate: `realPayment = min(smallestDebt.minimum_payment + max(0, surplus), smallestDebt.outstanding_balance)`
-- `monthlyImpact = realPayment` (the actual recommended payment amount)
-- `annualImpact` = keep as interest savings estimate (this IS the financial benefit metric)
+- [ ] **A2. New function `detectAmbiguousTransfers()`** (after `detectRecurring()` ~line 438)
+  1. Group ALL transactions (including transfers + income) by person name counterparty
+  2. For each group with 3+ transactions:
+     - Calculate intervals → frequency (weekly/fortnightly/monthly)
+     - Calculate amount CV — skip if CV > 0.15
+     - Determine direction (all inbound or all outbound)
+  3. Cross-reference with identity:
+     - `housing='renting'|'shared_house'` AND outbound AND rent-range → suggest `rent`
+     - Couple/family AND inbound AND regular → suggest `household_contribution`
+     - User name fuzzy-matches counterparty → suggest `self_transfer`
+     - Otherwise → `null`
+  4. Filter out counterparties with existing `transaction_override`
+  5. Return `AmbiguousTransfer[]`
 
-**For single debt (line ~1190):**
-- Use `min(surplus * 0.5, overpay_cap)` + minimum payment — already partially correct but `monthlyImpact` is still the interest savings. Fix to be the real overpayment amount.
+- [ ] **A3. Add `ambiguousTransfers` to `EnrichmentResult`**
+  Call in `enrich()` after `detectRecurring()`, pass identity data.
 
-**Fallback**: surplus ≤ 0 → use minimum_payment (still honest and actionable)
+- [ ] **A4. Return from `api/enrich.js`**
+  Include `ambiguousTransfers` in response JSON.
 
-### Fix 2: Spending Details Peek Card (`index.tsx`)
+### Part B: Override Model — Pattern-Level + Direction
 
-**Collapsed state styling (lines 2577-2600, styles at 3575-3581):**
+**File: `lib/enrichment-engine.ts`**
 
-Add to `collapsedSectionBtn` or inline on the `TouchableOpacity`:
-- `borderWidth: 1, borderColor: c.border`
-- `borderRadius: 16`
-- `backgroundColor: c.mintDim`
-- `paddingHorizontal: 20`
+- [ ] **B1. Extend `TransactionOverride` type**
+  Add `direction?: 'credit' | 'debit'` field.
 
-Chevron: increase from 9px → 12px, use `c.dim` instead of `c.muted`.
+- [ ] **B2. Update override matching in `enrichTransaction()`**
+  When `direction` is set, also check `tx.amount` sign.
 
-### Fix 3: Surgical Recommendation Filtering (`enrichment-engine.ts`)
+- [ ] **B3. Handle `Household Contribution` category**
+  Set `isTransfer: true, isIncome: false` so it doesn't inflate income.
 
-#### 3a. Subscriptions — exclude essential bills + require recurrence proof
+### Part C: Review Banner + Modal UI
 
-Filter `subs` before generating the subscription move:
-- Exclude categories: Energy, Water, Council Tax, Insurance, Rent, Mortgage, Broadband & Phone, TV Licence
-- Require `count >= 2` (must have appeared at least twice — proves actual recurrence)
-- Exclude `frequency === 'irregular'` (one-time charges)
+**File: `app/(main)/(tabs)/index.tsx`**
 
-Use filtered list for count check, saving calculation, and breakdown.
+- [ ] **C1. State for ambiguous transfers** (~line 310)
+  ```typescript
+  const [ambiguousTransfers, setAmbiguousTransfers] = useState<AmbiguousTransfer[]>([]);
+  const [showTransferReview, setShowTransferReview] = useState(false);
+  const [transferAssignments, setTransferAssignments] = useState<Record<string, string>>({});
+  ```
 
-#### 3b. Transport — exclude essential commute + one-time fares
+- [ ] **C2. Banner** (below categorisation banner, ~line 1762)
+  Same style as `reviewBanner`. Text: "{N} recurring transfers need clarification. **Review**"
+  Banner disappears when all resolved.
 
-Separate transport spending into:
-1. **Essential commute** (TfL, National Rail, regular rail operators) — non-negotiable for office workers
-2. **One-time travel** (merchant appears only once, amount > £30) — exclude from monthly average
-3. **Optimisable transport** (Uber, Bolt, taxis, excess discretionary transport)
+- [ ] **C3. Modal — stepper through each ambiguous transfer**
+  Same pattern as cat review modal. For each transfer show:
+  - Counterparty name, direction, amount, frequency
+  - Quick-select chips:
+    - **Outbound:** Rent | Debt repayment | My own account | Just a transfer
+    - **Inbound:** Household contribution | Income | Just a transfer
+  - Pre-select `suggestedType` chip if exists
 
-Only recommend cutting the optimisable portion. For office workers, change strategy to "optimise commute method" (railcards, annual tickets, cycle-to-work).
+- [ ] **C4. Save function**
+  On "Done":
+  - Insert `transaction_overrides` with direction:
+    - Rent → `{ category: 'Rent', is_essential: true, direction: 'debit' }`
+    - Household contribution → `{ category: 'Household Contribution', is_essential: false, direction: 'credit' }`
+    - Debt repayment → `{ category: 'Debt Payments', is_essential: true, direction: 'debit' }`
+    - My own account → `{ category: 'Internal Transfer', is_essential: false, direction: 'debit' }`
+    - Just a transfer → `{ category: 'Transfers', is_essential: false }` (suppress future prompts)
+  - Re-enrich in background
+  - Clear state → banner disappears
 
-#### 3c. Mathematical proof for all moves
+### Part D: Chat Awareness
 
-Add `proof?: string` to Move type. For each move, attach a human-readable breakdown:
-- Subscriptions: "4 recurring subs × avg £12/mo = £48. Cut 2 lowest-value = £24/mo."
-- Transport: "£180/mo total − £120 commute − £15 one-time = £45 discretionary. 20% = £9/mo."
-- Debt: "Surplus £60 + minimum £25 = £85/mo → £847 cleared in 10 months."
+**File: `api/chat/index.js`**
 
-Display in expanded move card.
+- [ ] **D1. Add ambiguous transfer context to system prompt**
+  Include unresolved transfers. Suggest user taps "Review" on dashboard.
+
+- [ ] **D2. Update chat override saving**
+  Include `direction` field when saving person transfer overrides.
+
+### Part E: Debt Payment Display Fix
+
+- [ ] **E1. New helper `debtDisplayName()`** in `lib/enrichment-engine.ts`
+  ```typescript
+  function debtDisplayName(d: { account_name?: string; institution?: string; account_type?: string }): string {
+    if (d.institution) return d.institution;
+    const brand = extractCreditCardBrand(d.account_name || '');
+    if (brand) return brand;
+    if (d.account_type === 'credit_card') return 'Credit Card';
+    if (d.account_type === 'car_finance') return 'Car Finance';
+    return d.account_name || 'Debt';
+  }
+  ```
+
+- [ ] **E2. `extractCreditCardBrand()` in `lib/merchant-db.ts`**
+  Match account_name against existing CC brand patterns (Capital One, Barclaycard, MBNA, Amex, etc. at lines 217-240).
+
+- [ ] **E3. Apply `debtDisplayName()` everywhere**
+  - `enrichment-engine.ts:1195` (smallestName)
+  - `enrichment-engine.ts:1213` (debtSubGoals target)
+  - `reactive-engine.ts:152` (debtByName lookup)
 
 ---
 
@@ -81,21 +130,21 @@ Display in expanded move card.
 
 | File | Change |
 |------|--------|
-| `lib/types.ts` | Add `proof?: string` to Move type |
-| `lib/enrichment-engine.ts` | Fix `genDecisionStack` — debt math, sub filtering, transport filtering, proof generation |
-| `app/(main)/(tabs)/index.tsx` | Peek card styles; display proof in move cards |
-
----
+| `lib/enrichment-engine.ts` | AmbiguousTransfer type, detectAmbiguousTransfers(), override direction, debtDisplayName() |
+| `lib/merchant-db.ts` | extractCreditCardBrand() |
+| `lib/reactive-engine.ts` | Use debtDisplayName() for display |
+| `app/(main)/(tabs)/index.tsx` | Transfer review banner + modal |
+| `api/enrich.js` | Return ambiguousTransfers |
+| `api/chat/index.js` | Chat awareness + direction on overrides |
 
 ## Verification
-
-- [ ] Debt CTA: surplus=60, min=25, balance=847 → "Pay £85 to Amex"
-- [ ] Debt CTA: surplus=0, min=25 → "Pay £25 to Amex"
-- [ ] Debt CTA: surplus=500, balance=100 → caps at "Pay £100"
-- [ ] Subs: water/energy excluded from recommendations
-- [ ] Subs: one-time charge (count=1) excluded
-- [ ] Transport: TfL commute excluded from cut target
-- [ ] Transport: one-time travel fare excluded
-- [ ] Spending details has border, bg, rounded corners when collapsed
-- [ ] All moves have proof string
+- [ ] Recurring transfers from partner not counted as income
+- [ ] Recurring transfers to partner classified as rent when confirmed
+- [ ] Self-transfers detected and excluded from spending
+- [ ] Debt repayments to people classified correctly
+- [ ] Banner appears, modal works, banner disappears after review
+- [ ] Chat references ambiguous transfers when relevant
+- [ ] Debt display shows "Capital One" not "John Doe"
+- [ ] Existing overrides still work (no regressions)
+- [ ] Pattern overrides respect direction (inbound vs outbound)
 - [ ] TypeScript compiles

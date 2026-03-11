@@ -15,6 +15,7 @@ import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
 import { checkAchievements, type ScoreSnapshot } from '@/lib/achievements';
 import { estimateVolatility, simulateGoalTimeline, simulateBufferNeed, type VolatilityProfile } from '@/lib/monte-carlo';
 import { calcMoveMarginalUtility, type LiquidityTier } from '@/lib/liquidity-engine';
+import { extractCreditCardBrand } from '@/lib/merchant-db';
 
 // ── Types ──
 
@@ -149,7 +150,7 @@ async function verifySubGoalsFromData(
   // Build debt balance lookup by account name
   const debtByName: Record<string, number> = {};
   for (const d of debtAccounts) {
-    const name = d.account_name || d.institution || 'Debt';
+    const name = d.institution || extractCreditCardBrand(d.account_name || '') || (d.account_type === 'credit_card' ? 'Credit Card' : d.account_name || 'Debt');
     debtByName[name] = d.outstanding_balance || 0;
   }
 
