@@ -331,6 +331,46 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     console.warn('[sync] Failed to fetch user config:', e?.message || e);
   }
 
+  // ── 2b. Sync debt accounts from card balances BEFORE enrichment ──
+  // This must happen before we query debt_accounts so the enrichment engine
+  // and move ranking have access to connected credit card data on the first sync.
+  const syncedDebt: any[] = [];
+  try {
+    const { data: bankRows } = await supabase
+      .from('bank_data')
+      .select('card_balances, provider_name')
+      .eq('user_id', userId)
+      .not('card_balances', 'is', null);
+
+    if (bankRows && bankRows.length > 0) {
+      for (const row of bankRows) {
+        if (!Array.isArray(row.card_balances)) continue;
+        for (const card of row.card_balances) {
+          const cardName = card.name || row.provider_name || 'Card';
+          const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
+            user_id: userId,
+            account_name: cardName,
+            account_type: card.type || 'credit_card',
+            outstanding_balance: card.balance,
+            credit_limit: card.limit,
+            source: 'truelayer',
+            last_updated: new Date().toISOString(),
+          }, { onConflict: 'user_id,account_name' });
+          if (!upsertErr) {
+            syncedDebt.push({
+              account_name: cardName,
+              account_type: card.type || 'credit_card',
+              outstanding_balance: card.balance,
+              credit_limit: card.limit,
+            });
+          }
+        }
+      }
+    }
+  } catch (e: any) {
+    console.warn('[sync] Failed to sync debt accounts from card balances:', e?.message || e);
+  }
+
   let debtAccountsData: any[] = [];
   let identityData: any = null;
   try {
@@ -530,45 +570,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   // ── 9. Income arrival detection + adaptive weekly context ──
   const weeklyContext = buildWeeklyContext(result, rawAnalysis);
 
-  // ── 10. Sync debt accounts from card balances ──
-  const syncedDebt: any[] = [];
-  try {
-    const { data: bankRows } = await supabase
-      .from('bank_data')
-      .select('card_balances, provider_name')
-      .eq('user_id', userId)
-      .not('card_balances', 'is', null);
-
-    if (bankRows && bankRows.length > 0) {
-      for (const row of bankRows) {
-        if (!Array.isArray(row.card_balances)) continue;
-        for (const card of row.card_balances) {
-          // Prefer provider name over card name — TrueLayer often returns
-          // the cardholder's name in display_name instead of the card brand.
-          const cardName = card.name || row.provider_name || 'Card';
-          const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
-            user_id: userId,
-            account_name: cardName,
-            account_type: card.type || 'credit_card',
-            outstanding_balance: card.balance,
-            credit_limit: card.limit,
-            source: 'truelayer',
-            last_updated: new Date().toISOString(),
-          }, { onConflict: 'user_id,account_name' });
-          if (!upsertErr) {
-            syncedDebt.push({
-              account_name: cardName,
-              account_type: card.type || 'credit_card',
-              outstanding_balance: card.balance,
-              credit_limit: card.limit,
-            });
-          }
-        }
-      }
-    }
-  } catch (e: any) {
-    console.warn('[sync] Failed to sync debt accounts from card balances:', e?.message || e);
-  }
+  // ── 10. (Moved earlier — card balance sync now happens before enrichment) ──
 
   // ── 11. Reactive engine — close the feedback loop ──
   let reactive: ReactiveResult | null = null;

@@ -679,6 +679,7 @@ export default function Home() {
         }
 
         for (const sectionKey of ['discretionary', 'non_discretionary'] as const) {
+          if (!(updated as any)[sectionKey]) continue;
           const section = { ...(updated as any)[sectionKey] };
           section.items = [...(section.items || [])];
           const otherIdx = section.items.findIndex((i: BudgetCategory) => i.category === 'Other');

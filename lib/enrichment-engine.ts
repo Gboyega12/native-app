@@ -495,7 +495,7 @@ const EnrichmentEngine = {
 
     const results: AmbiguousTransfer[] = [];
     for (const [counterparty, txs] of Object.entries(groups)) {
-      if (txs.length < 3) continue;
+      if (txs.length < 2) continue;
 
       // Skip if already overridden
       if (overridePatterns.some((p) => counterparty.includes(p) || p.includes(counterparty))) continue;
@@ -505,7 +505,7 @@ const EnrichmentEngine = {
       const debits = txs.filter((t) => t.amount <= 0);
       const direction: 'inbound' | 'outbound' = credits.length >= debits.length ? 'inbound' : 'outbound';
       const dirTxs = direction === 'inbound' ? credits : debits;
-      if (dirTxs.length < 3) continue;
+      if (dirTxs.length < 2) continue;
 
       // Amount consistency — CV must be low
       const amounts = dirTxs.map((t) => Math.abs(t.amount));
