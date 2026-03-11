@@ -68,7 +68,7 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null, de
 
   // Level 4: High-interest debt (credit cards, BNPL) — pay it off
   // Skip this level if user has good debt (low utilization, paying on time for rewards)
-  if (debtCount >= 1 && !isGoodDebt && (situation === 'in_debt' || debtPayments > 100)) {
+  if (debtCount >= 1 && !isGoodDebt && (situation === 'in_debt' || debtPayments > 50)) {
     return { level: 4, label: 'Clear high-interest debt', priority: 'debt' };
   }
 

@@ -1449,6 +1449,37 @@ const EnrichmentEngine = {
       }
     }
 
+    // Transaction-only debt fallback — when debt payments show in transactions
+    // but no credit card account is connected via TrueLayer, generate a move
+    // from the transaction data alone so debt is never invisible.
+    if (m.debtAccountCount > 0 && activeDebts.length === 0 && p.debtPayments > 0) {
+      const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
+      // Estimate balance from observed payment pattern (conservative: 12x monthly payment)
+      const estimatedBalance = Math.round(p.debtPayments * 12);
+      const surplusAlloc = Math.round(Math.min(Math.max(0, p.surplus) * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
+      const recommendedPayment = Math.max(Math.round(p.debtPayments + surplusAlloc), Math.round(p.debtPayments));
+      const monthsToClear = recommendedPayment > 0 ? Math.ceil(estimatedBalance / recommendedPayment) : 0;
+      const interestSaving = Math.round(p.debtPayments * 0.19); // assume ~19% APR for unsecured debt
+
+      const proof = `£${Math.round(p.debtPayments)}/mo detected in debt payments across ${m.debtAccountCount} account${m.debtAccountCount !== 1 ? 's' : ''}. `
+        + `No balance data available — connect your credit card for a precise payoff plan. `
+        + `Estimated balance: ~£${estimatedBalance} (12× monthly payment). `
+        + `At £${recommendedPayment}/mo, clears in ~${monthsToClear} months.`;
+
+      moves.push({
+        action: `Attack your debt: pay £${recommendedPayment}/month to clear ~£${estimatedBalance} in ${monthsToClear} months`,
+        annualImpact: interestSaving * 12,
+        monthlyImpact: recommendedPayment,
+        effort: 'medium',
+        category: 'debt',
+        merchants: debtMerchants,
+        strategy: `£${Math.round(p.debtPayments)}/month going to debt payments. Connect your credit card account for exact balances and a precise snowball plan.`,
+        steps: ['Connect your credit card so I can see the exact balance', `Meanwhile, direct £${surplusAlloc > 0 ? surplusAlloc : 'any spare'}/month extra at your highest-rate debt`, 'I\'ll build a full payoff plan once I can see your balances'],
+        effect: `Could save ~£${interestSaving * 12}/year in interest.`,
+        proof,
+      });
+    }
+
     // Transport — surgical: separate essential commute from optimisable transport
     if (m.transport > T.transportMin && !isRemote) {
       const transportTxs = txs.filter((t) => t.category === 'Transport' && t.amount < 0);
