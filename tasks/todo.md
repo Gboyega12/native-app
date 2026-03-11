@@ -22,16 +22,21 @@
 ## Plan
 
 ### Step 1: Persist ambiguous_transfers to database
-- [ ] Add `ambiguous_transfers`, `essential_gaps`, `verified_bills` to `fields` object in `sync.ts:463-480`
+- [x] Add `ambiguous_transfers`, `essential_gaps`, `verified_bills` to `fields` object in `sync.ts:463-480`
 
 ### Step 2: Fix Done button — allow dismiss when nothing selected
-- [ ] When `totalReviewed === 0`, Done button closes modal instead of being disabled
-- [ ] Keep disabled state only while `savingReview` is true
+- [x] When `totalReviewed === 0`, Done button closes modal instead of being disabled
+- [x] Keep disabled state only while `savingReview` is true
 
 ### Step 3: Fix Cancel/X and overlay dismiss
-- [ ] Add `onRequestClose` prop to the review Modal
-- [ ] Make overlay background tappable to dismiss (with unsaved-changes guard)
+- [x] Add `onRequestClose` prop to the review Modal
+- [x] Make overlay background tappable to dismiss (with unsaved-changes guard)
+- [x] Extract shared `dismissReviewModal` callback (reused by X, overlay, onRequestClose)
 
 ### Step 4: Verify
-- [ ] TypeScript compiles cleanly
-- [ ] Review all changes for correctness
+- [x] TypeScript compiles cleanly (`npx tsc --noEmit` — 0 errors)
+
+## Review
+All three bugs fixed with minimal, focused changes:
+- `sync.ts`: 3 lines added to persist missing fields
+- `index.tsx`: shared dismiss handler + Modal/overlay/Done button fixes

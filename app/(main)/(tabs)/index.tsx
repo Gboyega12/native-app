@@ -592,6 +592,19 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [showReviewModal, unresolvedGroups.length]);
 
+  const dismissReviewModal = useCallback(() => {
+    const hasUnsaved = Object.keys(catAssignments).length > 0 || Object.keys(transferAssignments).length > 0;
+    if (hasUnsaved) {
+      hapticWarning();
+      Alert.alert('Discard changes?', `You have ${Object.keys(catAssignments).length + Object.keys(transferAssignments).length} unsaved categorisations.`, [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => { setShowReviewModal(false); setCatAssignments({}); setTransferAssignments({}); } },
+      ]);
+    } else {
+      setShowReviewModal(false);
+    }
+  }, [catAssignments, transferAssignments]);
+
   const saveReview = async () => {
     const catKeys = Object.keys(catAssignments);
     const transferKeys = Object.keys(transferAssignments);
@@ -3185,10 +3198,10 @@ export default function Home() {
           </Modal>
 
           {/* ── Unified review modal ── */}
-          <Modal visible={reviewModalVisible} transparent animationType="none">
+          <Modal visible={reviewModalVisible} transparent animationType="none" onRequestClose={dismissReviewModal}>
             <Animated.View style={[s.catReviewOverlay, { opacity: reviewModalFade }]}>
-              <View style={s.catReviewOverlayInner}>
-              <Animated.View style={[s.catReviewContainer, { transform: [{ translateY: reviewModalSlide }] }]}>
+              <Pressable style={s.catReviewOverlayInner} onPress={dismissReviewModal}>
+              <Animated.View style={[s.catReviewContainer, { transform: [{ translateY: reviewModalSlide }] }]} onStartShouldSetResponder={() => true}>
                 {/* Header */}
                 <View style={s.catReviewHeader}>
                   <View style={{ flex: 1 }}>
@@ -3200,18 +3213,7 @@ export default function Home() {
                     </Text>
                   </View>
                   <TouchableOpacity
-                    onPress={() => {
-                      const hasUnsaved = Object.keys(catAssignments).length > 0 || Object.keys(transferAssignments).length > 0;
-                      if (hasUnsaved) {
-                        hapticWarning();
-                        Alert.alert('Discard changes?', `You have ${Object.keys(catAssignments).length + Object.keys(transferAssignments).length} unsaved categorisations.`, [
-                          { text: 'Keep editing', style: 'cancel' },
-                          { text: 'Discard', style: 'destructive', onPress: () => { setShowReviewModal(false); setCatAssignments({}); setTransferAssignments({}); } },
-                        ]);
-                      } else {
-                        setShowReviewModal(false);
-                      }
-                    }}
+                    onPress={dismissReviewModal}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                     accessibilityRole="button"
                     accessibilityLabel="Close review modal"
@@ -3393,12 +3395,12 @@ export default function Home() {
                   const totalReviewed = Object.keys(catAssignments).length + Object.keys(transferAssignments).length;
                   return (
                     <TouchableOpacity
-                      style={[s.catReviewDone, totalReviewed === 0 && s.modalSaveDisabled]}
-                      onPress={saveReview}
-                      disabled={savingReview || totalReviewed === 0}
+                      style={[s.catReviewDone]}
+                      onPress={totalReviewed === 0 ? () => setShowReviewModal(false) : saveReview}
+                      disabled={savingReview}
                       accessibilityRole="button"
-                      accessibilityLabel={`Save ${totalReviewed} reviewed items`}
-                      accessibilityState={{ disabled: savingReview || totalReviewed === 0 }}
+                      accessibilityLabel={totalReviewed > 0 ? `Save ${totalReviewed} reviewed items` : 'Close review'}
+                      accessibilityState={{ disabled: savingReview }}
                     >
                       {savingReview ? (
                         saveSuccess ? (
@@ -3415,7 +3417,7 @@ export default function Home() {
                   );
                 })()}
               </Animated.View>
-              </View>
+              </Pressable>
             </Animated.View>
           </Modal>
 
