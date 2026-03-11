@@ -1401,10 +1401,14 @@ export default function Chat() {
         ctx.income_cv = freshA.income_cv;
         ctx.archetype = freshA.archetype;
         ctx.decision_score = freshA.decision_score;
-        ctx.all_moves = freshA.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string }) => ({
+        ctx.all_moves = freshA.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string; category?: string; strategy?: string; proof?: string; effect?: string }) => ({
           action: m.action,
           monthlyImpact: m.monthlyImpact,
           effort: m.effort,
+          category: m.category,
+          strategy: m.strategy,
+          proof: m.proof,
+          effect: m.effect,
         }));
         ctx.top_move = freshA.top_move ? { action: freshA.top_move.action, monthlyImpact: freshA.top_move.monthlyImpact } : undefined;
         ctx.behavioral_patterns = freshA.behavioral_patterns;

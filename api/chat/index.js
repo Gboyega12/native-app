@@ -880,8 +880,13 @@ Tools:
   if (ctx.all_moves?.length) {
     prompt += `\n\nInsights from analysis (ranked by mathematical impact):`;
     for (const m of ctx.all_moves) {
-      prompt += `\n- ${m.action} → saves £${Math.round(m.monthlyImpact)}/month (effort: ${m.effort})`;
+      let line = `\n- [${m.category || 'general'}] ${m.action} → £${Math.round(m.monthlyImpact)}/month (effort: ${m.effort})`;
+      if (m.proof) line += `\n  Proof: ${m.proof}`;
+      if (m.strategy) line += `\n  Context: ${m.strategy}`;
+      if (m.effect) line += `\n  Effect: ${m.effect}`;
+      prompt += line;
     }
+    prompt += `\nWhen the user asks about savings, investments, fees, LISA, idle cash, or platform costs, reference the specific numbers from the proof field above. Always show your working.`;
   }
 
   // ── Recent transfers / uncategorised (for override matching) ──

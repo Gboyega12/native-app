@@ -388,6 +388,13 @@ export default function Connect() {
     return (
       <View style={styles.container}>
         <View style={styles.content}>
+          <TouchableOpacity
+            onPress={() => router.canGoBack() ? router.back() : router.replace('/(main)/profile')}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.backButton}
+          >
+            <Text style={styles.backButtonText}>{'\u2190'}</Text>
+          </TouchableOpacity>
           <Text style={styles.title}>Add a connection</Text>
           <Text style={styles.subtitle}>
             Connect a bank account for transactions or a credit card for balance tracking.
@@ -615,6 +622,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    marginBottom: spacing.md,
+  },
+  backButtonText: {
+    fontFamily: fonts.regular,
+    fontSize: 22,
+    color: colors.accent,
   },
   content: {
     flex: 1,
