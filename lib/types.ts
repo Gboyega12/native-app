@@ -97,6 +97,8 @@ export interface FinancialProfile {
     discretionary: BudgetSection;
   };
   incomeSources: IncomeSource[];
+  /** Transfers (person-to-person, internal) — excluded from income/spending totals but visible in UI */
+  transfers: { date: string; merchant: string; description: string; amount: number; category: string }[];
   subscriptions: RecurringItem[];
   metrics: {
     savingsRate: number;

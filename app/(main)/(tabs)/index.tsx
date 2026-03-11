@@ -618,8 +618,8 @@ export default function Home() {
       setShowCatReview(false);
       setCatAssignments({});
 
-      // Re-enrich in background so scores/moves update
-      syncInBackground(user.id);
+      // Force re-enrich so overrides are applied immediately (don't use cached result)
+      syncInBackground(user.id, true);
     } catch (err: any) {
       window.alert(err.message || 'Could not save categories');
     }
@@ -678,8 +678,8 @@ export default function Home() {
       setTransferAssignments({});
       trackEvent('Transfer Review Saved', { count: keys.length });
 
-      // Re-enrich in background
-      syncInBackground(user.id);
+      // Force re-enrich so overrides are applied immediately
+      syncInBackground(user.id, true);
     } catch (err: any) {
       window.alert(err.message || 'Could not save transfer classifications');
     }
@@ -757,9 +757,9 @@ export default function Home() {
       setRecatTx(null);
       setRecatTarget('');
 
-      // Trigger background re-enrichment so score/moves reflect the correction
+      // Force re-enrich so overrides are applied immediately
       if (user) {
-        syncInBackground(user.id);
+        syncInBackground(user.id, true);
       }
     } catch (err: any) {
       console.warn('[home] Recategorize failed:', err?.message);
@@ -1232,12 +1232,25 @@ export default function Home() {
       setRetriesExhausted(false);
       const fresh = mergeAdjustments(result.analysis, budgetAdjustments);
       setAnalysis((prev) => {
+        // Count "Other" items in each analysis to detect reclassifications
+        const otherCount = (a: Analysis | null) => {
+          if (!a) return 0;
+          let count = 0;
+          for (const section of [a.discretionary, a.non_discretionary]) {
+            const items = (section as any)?.items;
+            if (!Array.isArray(items)) continue;
+            const other = items.find((i: any) => i?.category === 'Other');
+            if (other) count += other.txs || 0;
+          }
+          return count;
+        };
         if (
           prev &&
           prev.monthly_income === fresh.monthly_income &&
           prev.monthly_spending === fresh.monthly_spending &&
           prev.surplus === fresh.surplus &&
-          prev.decision_score === fresh.decision_score
+          prev.decision_score === fresh.decision_score &&
+          otherCount(prev) === otherCount(fresh)
         ) {
           return prev; // No material change — skip re-render
         }

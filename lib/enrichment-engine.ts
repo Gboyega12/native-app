@@ -217,6 +217,10 @@ const EnrichmentEngine = {
       if (override) {
         const isHouseholdContribution = override.category === 'Household Contribution';
         const isInternalTransfer = override.category === 'Internal Transfer';
+        const isTransferCat = override.category === 'Transfers';
+        // Transfers between people/own accounts are NOT income and NOT spending.
+        // They still appear in the transaction list (the UI handles visibility).
+        const isTransfer = isHouseholdContribution || isInternalTransfer || isTransferCat;
         return {
           date: tx.date,
           description: tx.description,
@@ -227,8 +231,8 @@ const EnrichmentEngine = {
           isSubscription: false,
           isBNPL: override.category === 'BNPL',
           isDebt: override.category === 'Debt Payments',
-          isIncome: tx.amount > 0 && !isHouseholdContribution && !isInternalTransfer,
-          isTransfer: isHouseholdContribution || isInternalTransfer || override.category === 'Transfers',
+          isIncome: tx.amount > 0 && !isTransfer,
+          isTransfer,
           isRefund: false,
           isSavings: override.category === 'Savings' || override.category === 'Investments',
           confidence: 'high' as const,
@@ -571,6 +575,8 @@ const EnrichmentEngine = {
 
     const spending = recent.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
     const income = recent.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer && !t.isDebt);
+    // Track transfers separately — excluded from totals but visible in the UI
+    const transfers = recent.filter((t) => t.isTransfer);
 
     const dates = recent.map((t) => new Date(t.date).getTime()).filter(Boolean);
     const span = dates.length >= 2
@@ -760,6 +766,13 @@ const EnrichmentEngine = {
         discretionary: { total: discTotal, items: discItems.sort((a, b) => b.monthly - a.monthly) },
       },
       incomeSources,
+      transfers: transfers.map((t) => ({
+        date: t.date,
+        merchant: t.merchant || t.description,
+        description: t.description,
+        amount: t.amount,
+        category: t.category,
+      })),
       subscriptions,
       metrics,
     };

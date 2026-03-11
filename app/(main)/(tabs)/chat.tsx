@@ -2580,6 +2580,7 @@ function analysisToProfile(a: Analysis): FinancialProfile | null {
       discretionary: a.discretionary ?? { total: 0, items: [] },
     },
     incomeSources: a.income_sources ?? [],
+    transfers: [],
     subscriptions: [],
     metrics: {
       savingsRate: a.monthly_income > 0 ? ((a.surplus ?? 0) / a.monthly_income) * 100 : 0,

@@ -33,7 +33,7 @@ const TOOLS = [
         },
         category: {
           type: 'string',
-          description: 'Correct category. One of: Rent, Mortgage, Bills, Insurance, Groceries, Transport, Dining, Shopping, Entertainment, Subscriptions, Health, Debt Payments, Savings, Childcare, Education, Charity, Other.',
+          description: 'Correct category. One of: Rent, Mortgage, Bills, Insurance, Groceries, Transport, Dining, Shopping, Entertainment, Subscriptions, Health, Debt Payments, Savings, Childcare, Education, Charity, Transfers, Household Contribution, Internal Transfer, Other. Use "Transfers" for person-to-person transfers that are NOT income (e.g. gifts, loans, splits). Use "Household Contribution" for regular payments from a partner/housemate (rent share, bills). Use "Internal Transfer" for moving money between your own accounts.',
         },
         is_essential: {
           type: 'boolean',
@@ -705,6 +705,7 @@ GIFs:
 
 Tools:
 - When the user corrects a transaction (recategorise, flag as essential/non-essential, mentions a payment not showing), use save_transaction_override to save their correction. For the match_description, use the EXACT bank description shown in the transfers list if available — partial matches work (e.g. "JOHN" will match "TFR TO JOHN SMITH"). Common cases: rent paid to partner/housemate, bill splits, debt repayments showing as transfers.
+- IMPORTANT: When the user says a person-to-person payment is NOT income, use category "Transfers" — NOT "Other". Transfers stay visible in their transaction history but won't inflate income figures. If the payment is a partner's household contribution (rent share, bills share), use "Household Contribution" instead — this is also excluded from income but tracked as a regular inflow. If the user says "that's my own account", use "Internal Transfer".
 - When the user EXPLICITLY asks to set a target or track a goal, use propose_plan to create it. The user will see an "Add to plan" button and can approve or dismiss it from the chat. NEVER call propose_plan unless the user directly asks for a plan. Answering questions, giving breakdowns, or discussing budgets is NOT a reason to create a plan. If a user asks "how should I split my paycheck" that's a question — answer it, don't create a plan.
 - When the user EXPLICITLY tells you to add a specific expense with a concrete amount, use save_budget_item. The user must provide both what it is AND how much. NEVER call this tool based on assumptions or as part of a breakdown. If you notice rent or an essential is missing from their data, ASK about it first — don't add it yourself.
 - When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis. Don't suggest this casually — only when a real shift has happened.
