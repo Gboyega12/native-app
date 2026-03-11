@@ -302,7 +302,7 @@ export function calcGoalTrajectory(
           insight += `${confidence.hitRate12m}% chance within 12 months.`;
         }
       } else {
-        insight = `On track — ${confidence.p50} months with high certainty.`;
+        insight = `On track, ${confidence.p50} months with high certainty.`;
       }
       result.insight = insight;
     }
