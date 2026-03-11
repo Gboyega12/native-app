@@ -1214,7 +1214,7 @@ const EnrichmentEngine = {
         category: 'spending',
         merchants: subNames,
         strategy: `${discretionarySubCount} discretionary subscriptions costing \u00a3${Math.round(discretionarySubTotal)}/month. Biggest: ${subBreakdown}. Essential bills excluded.`,
-        steps: ['Review your subscriptions — I\'ve listed them below', 'Cancel the ones you haven\'t used in 30 days', 'Rotate streaming services monthly — I\'ll remind you'],
+        steps: ['Review your subscriptions below', 'Cancel the ones you haven\'t used in 30 days', 'Rotate streaming services monthly and I\'ll remind you'],
         effect: `Saves \u00a3${saving}/month (\u00a3${saving * 12}/year).`,
         subGoals,
         proof,
@@ -1340,7 +1340,7 @@ const EnrichmentEngine = {
           effort: 'low',
           category: 'savings',
           merchants: debtMerchants,
-          strategy: `${actualDebtCount} credit cards with ${Math.round(overallUtil)}% utilisation — well managed. Focus on maximising points and cashback.`,
+          strategy: `${actualDebtCount} credit cards with ${Math.round(overallUtil)}% utilisation, well managed. Focus on maximising points and cashback.`,
           steps: ['Route all regular spending through your rewards card', 'Always pay in full to avoid interest', 'Review whether your card gives the best rewards for your spend', 'I\'ll flag if utilisation creeps up'],
           effect: `Earn more from spending you're already doing.`,
         });
@@ -1380,13 +1380,13 @@ const EnrichmentEngine = {
           + `. Clears \u00a3${smallestBalance} in ${monthsToClear} month${monthsToClear !== 1 ? 's' : ''}.`;
 
         moves.push({
-          action: `Pay \u00a3${recommendedPayment} to ${smallestName} — clear \u00a3${smallestBalance} in ${monthsToClear} months`,
+          action: `Pay \u00a3${recommendedPayment} to ${smallestName} and clear \u00a3${smallestBalance} in ${monthsToClear} months`,
           annualImpact: interestSaving * 12,
           monthlyImpact: recommendedPayment,
           effort: 'high',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `${actualDebtCount} debt accounts. Smallest: ${smallestName} (\u00a3${smallestBalance}).${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''} Snowball method: clear smallest first, then roll payments into next debt.`,
+          strategy: `${actualDebtCount} debt accounts. Smallest: ${smallestName} (\u00a3${smallestBalance}).${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% which is hurting your credit score.` : ''} Snowball method: clear smallest first, then roll payments into next debt.`,
           steps: ['Pay minimums on all debts except the smallest', `Direct \u00a3${recommendedPayment}/month at ${smallestName}`, `When it's cleared in ~${monthsToClear} months, roll that \u00a3${recommendedPayment} into the next debt`, 'I\'ll track your progress and adjust automatically'],
           effect: `Clears ${smallestName} in ${monthsToClear} months. Saves \u00a3${interestSaving * 12}/year in interest across all debts.`,
           subGoals: debtSubGoals.length > 0 ? debtSubGoals : undefined,
@@ -1406,7 +1406,7 @@ const EnrichmentEngine = {
           effort: 'low',
           category: 'savings',
           merchants: debtMerchants,
-          strategy: `1 card with ${Math.round(overallUtil)}% utilisation — excellent management. You're earning rewards without paying interest.`,
+          strategy: `1 card with ${Math.round(overallUtil)}% utilisation, excellent management. You're earning rewards without paying interest.`,
           steps: ['Keep paying the full balance each month', 'Use this card for all eligible spending', 'Check if a different rewards card offers better value', 'I\'ll track your utilisation'],
           effect: 'Continue earning rewards on responsible credit card use.',
         });
@@ -1429,13 +1429,13 @@ const EnrichmentEngine = {
           + `Clears in ${monthsToClear} month${monthsToClear !== 1 ? 's' : ''}.`;
 
         moves.push({
-          action: `Pay \u00a3${recommendedPayment}/month to ${singleName} — clear in ${monthsToClear} months`,
+          action: `Pay \u00a3${recommendedPayment}/month to ${singleName} to clear in ${monthsToClear} months`,
           annualImpact: interestSaving * 12,
           monthlyImpact: recommendedPayment,
           effort: 'medium',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `${singleName}: \u00a3${singleBalance} balance.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''} Overpaying clears it ${monthsToClear > 0 ? `in ${monthsToClear} months` : 'faster'}.`,
+          strategy: `${singleName}: \u00a3${singleBalance} balance.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}%, priority to reduce this.` : ''} Overpaying clears it ${monthsToClear > 0 ? `in ${monthsToClear} months` : 'faster'}.`,
           steps: ['Check if overpayments are allowed without penalty', `Set up \u00a3${recommendedPayment}/month standing order`, 'I\'ll redirect savings from other moves into this automatically'],
           effect: `Clears \u00a3${singleBalance} in ${monthsToClear} months. Saves \u00a3${interestSaving * 12}/year in interest.`,
           proof,
@@ -1533,7 +1533,7 @@ const EnrichmentEngine = {
             effort: 'low',
             category: 'spending',
             merchants: transportMerchants.filter((m) => isCommuteMerchant(m)),
-            strategy: `\u00a3${commuteMonthly}/month on commuting. Your commute is essential — but the method can be optimised.`,
+            strategy: `\u00a3${commuteMonthly}/month on commuting. Your commute is essential but the method can be optimised.`,
             steps: ['Check if a railcard (26-30, Two Together, etc.) applies to you', 'Compare annual vs monthly season ticket cost', 'Look into cycle-to-work scheme for some days', 'Check if your employer offers travel loan for annual tickets'],
             effect: `Saves \u00a3${railcardSaving}/month without changing your commute.`,
             proof,
@@ -1559,7 +1559,7 @@ const EnrichmentEngine = {
         : isSingleParent
           ? 'As a single parent, a bigger buffer protects your family from surprises.'
           : hasChildren
-            ? 'With children, unexpected costs come up — a solid buffer is essential.'
+            ? 'With children, unexpected costs come up so a solid buffer is essential.'
             : '';
       const bufferProof = `Spending: \u00a3${Math.round(p.spending)}/mo. Buffer target: ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} = \u00a3${bufferTarget}. `
         + `Surplus: \u00a3${Math.round(p.surplus)}/mo \u00d7 ${Math.round(T.bufferAutoSavePct * 100)}% = \u00a3${autoSave}/mo auto-save. `
@@ -1572,7 +1572,7 @@ const EnrichmentEngine = {
         category: 'buffer',
         merchants: [],
         strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Monthly surplus is \u00a3${Math.round(p.surplus)}.${reason ? ' ' + reason : ''} Target: ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses.`,
-        steps: ['Set aside this amount on payday — I\'ll track it', `Target ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses (\u00a3${bufferTarget})`, 'I\'ll update your progress each month'],
+        steps: ['Set aside this amount on payday and I\'ll track it', `Target ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses (\u00a3${bufferTarget})`, 'I\'ll update your progress each month'],
         effect: `\u00a3${bufferTarget} safety net in ${monthsToTarget} months.`,
         proof: bufferProof,
         subGoals: [{
@@ -1623,7 +1623,7 @@ const EnrichmentEngine = {
         + `Theoretical yield on idle cash: £${annualIdle} × ${(T.boeBaseRate * 100).toFixed(1)}% = £${opportunityCost}/year. `
         + `This is the mathematical cost of cash sitting in a non-interest-bearing account.`;
       moves.push({
-        action: `£${monthlySurplus}/month (£${annualIdle.toLocaleString()}/year) accumulating undeployed — £${opportunityCost}/year opportunity cost`,
+        action: `Move £${monthlySurplus}/month surplus into a savings account to earn £${opportunityCost}/year`,
         annualImpact: opportunityCost,
         monthlyImpact: Math.round(opportunityCost / 12),
         effort: 'low',
@@ -1679,16 +1679,16 @@ const EnrichmentEngine = {
         }).join('. ') + `. Potential saving if consolidated: £${potentialSaving}/mo (£${potentialSaving * 12}/year).`;
 
         moves.push({
-          action: `You have overlapping subscriptions in ${duplicateGroups.length} categor${duplicateGroups.length === 1 ? 'y' : 'ies'} — £${totalDupSpend}/month total`,
+          action: `Consolidate overlapping subscriptions in ${duplicateGroups.length} categor${duplicateGroups.length === 1 ? 'y' : 'ies'} to save £${potentialSaving}/month`,
           annualImpact: potentialSaving * 12,
           monthlyImpact: potentialSaving,
           effort: 'low',
           category: 'spending',
           merchants: duplicateGroups.flatMap((g) => g.names),
-          strategy: `Detected multiple active subscriptions in the same category: ${dupDescription}. You decide which to keep — the numbers are here.`,
+          strategy: `Detected multiple active subscriptions in the same category: ${dupDescription}. You decide which to keep.`,
           steps: [
             `Review your ${duplicateGroups.map(g => g.category).join(' and ')} subscriptions`,
-            'Decide which you actually use — cancel the rest',
+            'Decide which you actually use and cancel the rest',
             'I\'ll confirm when the charges stop appearing',
           ],
           effect: `Up to £${potentialSaving}/month (£${potentialSaving * 12}/year) freed if consolidated.`,
@@ -1728,7 +1728,7 @@ const EnrichmentEngine = {
           effort: 'medium',
           category: 'savings',
           merchants: [],
-          strategy: `Savings rate is ${Math.round(currentRate)}%. The ${targetRate}% threshold is where compound effects accelerate — buffer builds faster, debt clears sooner, and surplus compounds. Gap is £${delta}/month.`,
+          strategy: `Savings rate is ${Math.round(currentRate)}%. At ${targetRate}%, compound effects accelerate: buffer builds faster, debt clears sooner, surplus compounds. Gap is £${delta}/month.`,
           steps: [
             `Find £${delta}/month in discretionary spending or income growth`,
             'Automate the additional amount on payday',
@@ -1789,13 +1789,13 @@ const EnrichmentEngine = {
             + `Stability score: ${stabilityScore}/100.`;
 
           const actionText = isDecelerating && !isErratic
-            ? `Savings momentum declining — surplus dropped ${Math.abs(trendPct)}% over ${monthKeys.length} months`
+            ? `Set a fixed £${Math.round(meanSurplus * 0.7)}/month savings amount to reverse ${Math.abs(trendPct)}% decline`
             : isErratic && isDecelerating
-              ? `Savings erratic (stability: ${stabilityScore}/100) and declining ${Math.abs(trendPct)}%`
-              : `Savings erratic — stability score ${stabilityScore}/100 (target: 70+)`;
+              ? `Lock in £${Math.round(meanSurplus * 0.7)}/month on payday to stabilise declining savings`
+              : `Automate £${Math.round(meanSurplus * 0.7)}/month on payday to smooth out erratic savings`;
 
           const strategyText = isDecelerating
-            ? `Your surplus has fallen from ~£${Math.round(firstAvg)}/mo to ~£${Math.round(secondAvg)}/mo. ${isErratic ? `Variability is also high (CV: ${(cv * 100).toFixed(0)}%). ` : ''}Identify what changed — spending increase or income drop.`
+            ? `Your surplus has fallen from ~£${Math.round(firstAvg)}/mo to ~£${Math.round(secondAvg)}/mo. ${isErratic ? `Variability is also high (CV: ${(cv * 100).toFixed(0)}%). ` : ''}Identify what changed: spending increase or income drop.`
             : `Your monthly surplus swings between £${Math.round(Math.min(...monthlySurpluses))} and £${Math.round(Math.max(...monthlySurpluses))}. High variability makes budgeting unreliable. A fixed savings amount on payday smooths this out.`;
 
           const targetSaving = Math.round(meanSurplus * 0.2); // Stabilising saves ~20% of mean surplus through consistency
@@ -1844,13 +1844,13 @@ const EnrichmentEngine = {
         + `Total outflow: £${totalInvestMonthly}/mo (£${annualTotal.toLocaleString()}/yr). `
         + `Breakdown: ${breakdown}.`;
       moves.push({
-        action: `£${totalInvestMonthly}/month going to ${platforms.length} platforms — ${breakdown}`,
+        action: `Review £${totalInvestMonthly}/month going to ${platforms.length} platforms for fee overlap`,
         annualImpact: 0, // Awareness move — no direct saving, but enables fee/ISA optimisation
         monthlyImpact: 0,
         effort: 'low',
         category: 'invest',
         merchants: platforms.map((p) => p.merchant),
-        strategy: `You're deploying capital across ${platforms.length} platforms. Total: £${totalInvestMonthly}/month (£${annualTotal.toLocaleString()}/year). This is the aggregate number — use it to check your ISA allowance, platform fees, and whether each account is earning its keep.`,
+        strategy: `You're deploying capital across ${platforms.length} platforms. Total: £${totalInvestMonthly}/month (£${annualTotal.toLocaleString()}/year). Use this to check your ISA allowance, platform fees, and whether each account is earning its keep.`,
         steps: [
           'Review whether each platform serves a distinct purpose (ISA, LISA, crypto, pension)',
           'Check whether you\'re duplicating ISA wrappers across platforms',
@@ -1895,7 +1895,7 @@ const EnrichmentEngine = {
             'The 25% bonus is added automatically by your LISA provider',
             'I\'ll track your annual LISA total against the £4,000 limit',
           ],
-          effect: `£${Math.round(lisaGap * T.lisaBonusRate)}/year in government bonus — that's a guaranteed 25% return.`,
+          effect: `£${Math.round(lisaGap * T.lisaBonusRate)}/year in government bonus, a guaranteed 25% return.`,
           proof: lisaProof,
           subGoals: [{
             type: 'savings_reach',
@@ -1964,7 +1964,7 @@ const EnrichmentEngine = {
         const feeProof = `Platform fees based on ${ANALYSIS_MONTHS}-month contribution flow (conservative estimate of holdings). `
           + feeBreakdown + `. `
           + `Total annual platform fees: £${totalFees}. `
-          + `Note: actual fees depend on total holdings, not just recent contributions — real cost may be higher.`;
+          + `Note: actual fees depend on total holdings, not just recent contributions. Real cost may be higher.`;
 
         moves.push({
           action: `Platform fees costing ~£${totalFees}/year across ${hasFees.length} platform${hasFees.length > 1 ? 's' : ''}`,
@@ -1973,9 +1973,9 @@ const EnrichmentEngine = {
           effort: 'medium',
           category: 'invest',
           merchants: platformCosts.map((p) => p.merchant),
-          strategy: `You're using platforms with different fee structures. ${hasFees.map(p => `${p.merchant} charges ${p.label}`).join('; ')}. ${noFees.map(p => `${p.merchant} charges ${p.label}`).join('; ')}. The same investments on a cheaper platform cost less — the maths is below.`,
+          strategy: `You're using platforms with different fee structures. ${hasFees.map(p => `${p.merchant} charges ${p.label}`).join('; ')}. ${noFees.map(p => `${p.merchant} charges ${p.label}`).join('; ')}. The same investments on a cheaper platform cost less.`,
           steps: [
-            'Compare what each platform holds (ISA, GIA, pension) — not all are portable',
+            'Compare what each platform holds (ISA, GIA, pension) as not all are portable',
             'Check if the fee difference justifies a transfer (some charge exit fees)',
             'I\'ll surface the fee comparison each time your contributions change',
           ],
@@ -2018,7 +2018,7 @@ const EnrichmentEngine = {
       const monthsToDeposit = p.surplus > 0 ? Math.ceil(depositTarget * 0.1 / p.surplus) : 0;
       const depositAmount = Math.round(depositTarget * 0.1);
       moves.push({
-        action: `Build a house deposit — save \u00a3${Math.round(p.surplus * 0.6)}/month toward \u00a3${depositAmount}`,
+        action: `Save \u00a3${Math.round(p.surplus * 0.6)}/month toward a \u00a3${depositAmount} house deposit`,
         annualImpact: Math.round(p.surplus * 0.6 * 12),
         monthlyImpact: Math.round(p.surplus * 0.6),
         effort: 'medium',
@@ -2089,7 +2089,7 @@ const EnrichmentEngine = {
         merchants: [],
         strategy: 'As self-employed, your tax isn\'t deducted automatically. Setting aside 25% prevents a January surprise.',
         steps: ['Open a separate savings account for tax', 'Transfer 25% of every payment received', 'I\'ll track your tax reserve vs estimated liability'],
-        effect: 'No tax bill shock — always prepared for self-assessment.',
+        effect: 'No tax bill shock. Always prepared for self-assessment.',
       });
     }
 
@@ -2153,7 +2153,7 @@ const EnrichmentEngine = {
           merchants: [],
           strategy: taxOnInterest > 0
             ? `At 4% interest, your surplus generates ~\u00a3${annualSavingsInterest}/year. Your personal savings allowance is \u00a3${psa} (${isHigherRate ? 'higher' : 'basic'} rate). Interest above this is taxed at ${isHigherRate ? 40 : 20}%. Tax-free wrappers avoid this.`
-            : `At 4% interest, your surplus generates ~\u00a3${annualSavingsInterest}/year — within your \u00a3${psa} personal savings allowance, so no tax is due.`,
+            : `At 4% interest, your surplus generates ~\u00a3${annualSavingsInterest}/year, within your \u00a3${psa} personal savings allowance, so no tax is due.`,
           steps: [`Your personal savings allowance is \u00a3${psa} as a ${isHigherRate ? 'higher' : 'basic'} rate taxpayer`, 'Interest from ISAs and Premium Bonds does not count against this', 'This allowance is separate from the ISA allowance'],
           effect: taxOnInterest > 0
             ? `\u00a3${taxOnInterest}/year in tax on savings interest above the allowance.`

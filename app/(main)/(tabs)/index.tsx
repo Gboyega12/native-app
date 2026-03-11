@@ -3246,24 +3246,6 @@ export default function Home() {
                   </View>
                 )}
 
-                {/* Accept all AI suggestions */}
-                {!aiSuggesting && Object.values(catAssignments).some(a => a.aiSuggested) && (
-                  <TouchableOpacity
-                    style={s.acceptAllBtn}
-                    onPress={() => { hapticMedium(); saveReview(); }}
-                    disabled={savingReview}
-                    accessibilityRole="button"
-                    accessibilityLabel="Accept all AI suggestions and save"
-                  >
-                    {savingReview ? (
-                      <ActivityIndicator color={colors.bg} size="small" />
-                    ) : (
-                      <Text style={s.acceptAllBtnText}>
-                        Accept all ({Object.keys(catAssignments).length})
-                      </Text>
-                    )}
-                  </TouchableOpacity>
-                )}
 
                 <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
                   {/* ── UNCATEGORISED section ── */}

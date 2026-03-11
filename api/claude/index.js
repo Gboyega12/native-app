@@ -222,7 +222,7 @@ RULES:
 - Groceries, transport, health, childcare, education → essential
 - Restaurants, takeaways, coffee shops, shopping, entertainment → NOT essential
 - Gambling, betting → "Gambling", NOT essential
-  IMPORTANT: ONLY use "Gambling" when the merchant is a known bookmaker or gambling operator (e.g. Bet365, Ladbrokes, Paddy Power). Game purchases, arcades, amusement parks, and lottery-adjacent merchants should be "Entertainment" or "Shopping". When in doubt, NEVER guess "Gambling" — prefer "Entertainment" or "Other" instead.
+  IMPORTANT: ONLY use "Gambling" when the merchant is a known bookmaker or gambling operator (e.g. Bet365, Ladbrokes, Paddy Power). Game purchases, arcades, amusement parks, and lottery-adjacent merchants should be "Entertainment" or "Shopping". When in doubt, NEVER guess "Gambling". Prefer "Entertainment" or "Other" instead.
 - If genuinely uncertain, use "Other"
 - Use your world knowledge of UK merchants, brands, and services
 
@@ -311,14 +311,16 @@ RULES:
 - Name ACTUAL merchants from the merchants list (e.g. "Cancel Netflix, Spotify, Adobe" not "cancel some subscriptions")
 - Include SPECIFIC £ amounts (already provided in the data)
 - Tie every action to the user's goal with a timeline (e.g. "→ reach 1-month buffer in 4 months")
-- Keep the action field under 80 characters — it's a headline
-- Rewrite the strategy as 1-2 definite sentences — no hedging, no "you might want to"
+- Keep the action field under 80 characters. It's a headline.
+- Rewrite the strategy as 1-2 definite sentences. No hedging, no "you might want to".
 - Rewrite the effect as a measurable outcome with timeline
 - Keep the steps array as 3-4 concrete, executable actions
 - Use British English and £ symbol
-- NEVER use markdown formatting — no **bold**, no *italic*, no backticks. Output plain text only.
-- NEVER give regulated financial guidance — suggest consulting a qualified financial planner for investment decisions
-- NEVER mention specific financial institutions or products (e.g. no "Monzo", "Chase", "Marcus", "Chip", "Vanguard", no savings account interest rates, no ISA providers). Keep recommendations institution-neutral
+- NEVER use markdown formatting. No **bold**, no *italic*, no backticks. Output plain text only.
+- NEVER use em-dashes (\u2014) or en-dashes (\u2013). Use commas, full stops, or natural connectors like "and", "to", "so" instead.
+- Write like a human. Short sentences. No robotic phrasing. No dashes as separators.
+- NEVER give regulated financial guidance. Suggest consulting a qualified financial planner for investment decisions.
+- NEVER mention specific financial institutions or products (e.g. no "Monzo", "Chase", "Marcus", "Chip", "Vanguard", no savings account interest rates, no ISA providers). Keep recommendations institution-neutral.
 
 MERCHANT CLEANUP RULES:
 - The "merchants" array may contain raw bank descriptions. Clean them into proper brand names.
@@ -347,7 +349,7 @@ USER CONTEXT:
     prompt += `\nMonthly impact: £${m.monthlyImpact}`;
     prompt += `\nAnnual impact: £${m.annualImpact}`;
     prompt += `\nEffort: ${sanitize(m.effort, 10)}`;
-    prompt += `\nMerchants (raw — clean these up): ${(m.merchants || []).map((s) => sanitize(s, 50)).join(', ') || 'none detected'}`;
+    prompt += `\nMerchants (raw, clean these up): ${(m.merchants || []).map((s) => sanitize(s, 50)).join(', ') || 'none detected'}`;
     prompt += `\nStrategy: ${sanitize(m.strategy, 300)}`;
     prompt += `\nSteps: ${(m.steps || []).map((s) => sanitize(s, 100)).join('; ')}`;
     prompt += `\nEffect: ${sanitize(m.effect, 200)}`;
@@ -369,7 +371,7 @@ USER CONTEXT:
   "merchants": ["Clean Merchant Name 1", "Clean Merchant Name 2"]
 }
 
-Return exactly ${moves.length} objects in the same order as the input moves. Do NOT change monthlyImpact, annualImpact, effort, or category — only rewrite action, strategy, steps, effect, timeline, and merchants.`;
+Return exactly ${moves.length} objects in the same order as the input moves. Do NOT change monthlyImpact, annualImpact, effort, or category. Only rewrite action, strategy, steps, effect, timeline, and merchants.`;
 
   return prompt;
 }

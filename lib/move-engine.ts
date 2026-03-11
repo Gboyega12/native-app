@@ -262,7 +262,7 @@ export function calcGoalTrajectory(
   if (currentMonths < 0) {
     insight = `At current pace, you won't reach your goal. This move adds \u00a3${moveSaving}/month to get you moving.`;
   } else if (monthsSaved > 0) {
-    insight = `This move cuts ${monthsSaved} months off your timeline \u2014 from ${currentMonths} to ${newMonths} months.`;
+    insight = `This move cuts ${monthsSaved} months off your timeline, from ${currentMonths} to ${newMonths} months.`;
   } else {
     insight = `You're on track (${currentMonths} months). This move accelerates it.`;
   }
