@@ -215,7 +215,7 @@ function ProcessingInner() {
         if (idUser) {
           const [idRes, debtRes] = await Promise.all([
             supabase.from('user_identity').select('*').eq('user_id', idUser.id).maybeSingle(),
-            supabase.from('debt_accounts').select('account_name, account_type, outstanding_balance, credit_limit').eq('user_id', idUser.id),
+            supabase.from('debt_accounts').select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment').eq('user_id', idUser.id),
           ]);
           if (idRes.data) identityData = idRes.data;
           if (debtRes.data) debtAccountsData = debtRes.data;

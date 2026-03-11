@@ -1314,6 +1314,7 @@ const EnrichmentEngine = {
 
     // Estimate minimum payment when TrueLayer doesn't provide it (~2.5% of balance, min £25)
     const estimateMinimum = (d: any): number => {
+      if (!d) return 0;
       if (d.minimum_payment && d.minimum_payment > 0) return d.minimum_payment;
       const bal = d.outstanding_balance || 0;
       if (bal <= 0) return 0;
@@ -1325,7 +1326,7 @@ const EnrichmentEngine = {
     const actualDebtCount = Math.max(m.debtAccountCount, activeDebts.length);
 
     // Debt snowball — only for bad/medium debt, not for good debt users
-    if (actualDebtCount >= 2) {
+    if (actualDebtCount >= 2 && activeDebts.length >= 2) {
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       if (isGoodDebt) {
         // Low utilization, paying on time — good debt for points
@@ -1391,8 +1392,8 @@ const EnrichmentEngine = {
       }
     }
 
-    // Single debt account (only if there's an active balance)
-    if (actualDebtCount === 1) {
+    // Single debt account (only if there's an active balance and actual debt record exists)
+    if (actualDebtCount === 1 && activeDebts.length > 0) {
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       if (isGoodDebt) {
         moves.push({
