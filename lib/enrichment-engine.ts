@@ -62,11 +62,17 @@ export type TransactionOverride = {
 
 function debtDisplayName(d: { account_name?: string; institution?: string; account_type?: string }): string {
   if (d.institution) return d.institution;
-  const brand = extractCreditCardBrand(d.account_name || '');
+  const name = d.account_name || '';
+  const brand = extractCreditCardBrand(name);
   if (brand) return brand;
+  // If account_name looks like a person name (no brand keywords, 2-3 alpha words),
+  // skip it — TrueLayer often returns the cardholder name instead of the card product.
+  const isLikelyPerson = isPersonTransfer(name);
+  if (!isLikelyPerson && name) return name;
   if (d.account_type === 'credit_card') return 'Credit Card';
   if (d.account_type === 'car_finance') return 'Car Finance';
-  return d.account_name || 'Debt';
+  if (d.account_type === 'overdraft') return 'Overdraft';
+  return isLikelyPerson ? 'Credit Card' : (name || 'Debt');
 }
 
 const EnrichmentEngine = {
@@ -1297,16 +1303,26 @@ const EnrichmentEngine = {
     // ── Debt analysis with good/bad debt differentiation ──
     // Include both synced and manual debt accounts for holistic view
     const connectedDebts = debtAccounts || [];
+    // Filter out £0-balance debts — fully paid cards shouldn't generate payoff moves
+    const activeDebts = connectedDebts.filter((d: any) => (d.outstanding_balance || 0) > 0);
     const totalLimit = connectedDebts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
-    const totalBalance = connectedDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+    const totalBalance = activeDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
     const overallUtil = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : -1;
     const isGoodDebt = overallUtil >= 0 && overallUtil <= 30;
     const isMediumUtil = overallUtil > 30 && overallUtil <= 75;
     const isHighUtil = overallUtil > 75;
 
+    // Estimate minimum payment when TrueLayer doesn't provide it (~2.5% of balance, min £25)
+    const estimateMinimum = (d: any): number => {
+      if (d.minimum_payment && d.minimum_payment > 0) return d.minimum_payment;
+      const bal = d.outstanding_balance || 0;
+      if (bal <= 0) return 0;
+      return Math.max(25, Math.round(bal * 0.025));
+    };
+
     // Use the higher of transaction-detected debt count or actual debt accounts
     // This ensures manually-added debts (without matching transactions) are counted
-    const actualDebtCount = Math.max(m.debtAccountCount, connectedDebts.length);
+    const actualDebtCount = Math.max(m.debtAccountCount, activeDebts.length);
 
     // Debt snowball — only for bad/medium debt, not for good debt users
     if (actualDebtCount >= 2) {
@@ -1326,14 +1342,14 @@ const EnrichmentEngine = {
         });
       } else {
         // Real surplus-based snowball payment calculation
-        // Sort debts smallest balance first (snowball order)
-        const sortedDebts = [...connectedDebts].sort((a, b) => (a.outstanding_balance || 0) - (b.outstanding_balance || 0));
+        // Sort debts smallest balance first (snowball order), excluding £0 balances
+        const sortedDebts = [...activeDebts].sort((a, b) => (a.outstanding_balance || 0) - (b.outstanding_balance || 0));
         const smallestDebt = sortedDebts[0];
         const smallestName = debtDisplayName(smallestDebt || {});
         const smallestBalance = Math.round(smallestDebt?.outstanding_balance || 0);
-        const smallestMin = Math.round(smallestDebt?.minimum_payment || 0);
+        const smallestMin = Math.round(estimateMinimum(smallestDebt));
         // Minimums on all other debts
-        const otherMinimums = sortedDebts.slice(1).reduce((s, d) => s + Math.round(d.minimum_payment || 0), 0);
+        const otherMinimums = sortedDebts.slice(1).reduce((s, d) => s + Math.round(estimateMinimum(d)), 0);
         // Direct all available surplus to the smallest debt on top of its minimum
         const surplusForDebt = Math.max(0, p.surplus);
         const realPayment = Math.min(
@@ -1375,7 +1391,7 @@ const EnrichmentEngine = {
       }
     }
 
-    // Single debt account
+    // Single debt account (only if there's an active balance)
     if (actualDebtCount === 1) {
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       if (isGoodDebt) {
@@ -1391,10 +1407,10 @@ const EnrichmentEngine = {
           effect: 'Continue earning rewards on responsible credit card use.',
         });
       } else {
-        const singleDebt = connectedDebts[0];
+        const singleDebt = activeDebts[0];
         const singleName = debtDisplayName(singleDebt || {});
         const singleBalance = Math.round(singleDebt?.outstanding_balance || 0);
-        const singleMin = Math.round(singleDebt?.minimum_payment || 0);
+        const singleMin = Math.round(estimateMinimum(singleDebt));
         // Compute real overpayment from surplus, capped sensibly
         const surplusAlloc = Math.round(Math.min(Math.max(0, p.surplus) * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
         const totalPayment = Math.min(singleMin + surplusAlloc, singleBalance);

@@ -456,6 +456,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     essential_gaps: result.essentialGaps,
     verified_bills: result.verifiedBills,
     ambiguous_transfers: result.ambiguousTransfers,
+    person_transfers: result.profile.transfers,
   };
 
   // ── 6. Upsert to Supabase ──
@@ -475,6 +476,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     income_floor: rawAnalysis.income_floor,
     is_variable_income: rawAnalysis.is_variable_income,
     income_cv: rawAnalysis.income_cv,
+    person_transfers: rawAnalysis.person_transfers,
   };
 
   try {
@@ -530,7 +532,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   try {
     const { data: bankRows } = await supabase
       .from('bank_data')
-      .select('card_balances')
+      .select('card_balances, provider_name')
       .eq('user_id', userId)
       .not('card_balances', 'is', null);
 
@@ -538,9 +540,12 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       for (const row of bankRows) {
         if (!Array.isArray(row.card_balances)) continue;
         for (const card of row.card_balances) {
+          // Prefer provider name over card name — TrueLayer often returns
+          // the cardholder's name in display_name instead of the card brand.
+          const cardName = card.name || row.provider_name || 'Card';
           const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
             user_id: userId,
-            account_name: card.name || 'Card',
+            account_name: cardName,
             account_type: card.type || 'credit_card',
             outstanding_balance: card.balance,
             credit_limit: card.limit,
@@ -549,7 +554,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
           }, { onConflict: 'user_id,account_name' });
           if (!upsertErr) {
             syncedDebt.push({
-              account_name: card.name || 'Card',
+              account_name: cardName,
               account_type: card.type || 'credit_card',
               outstanding_balance: card.balance,
               credit_limit: card.limit,

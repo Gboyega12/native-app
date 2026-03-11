@@ -300,3 +300,12 @@ CREATE POLICY "Users can delete own budget adjustments"
 -- ============================================================
 ALTER TABLE transaction_overrides
   ADD COLUMN IF NOT EXISTS direction TEXT CHECK (direction IN ('credit', 'debit'));
+
+
+-- ============================================================
+-- Migration: add person_transfers column to analyses
+-- Stores person-to-person transfers for UI display (excluded
+-- from income/spending totals but visible for categorisation).
+-- ============================================================
+ALTER TABLE analyses
+  ADD COLUMN IF NOT EXISTS person_transfers JSONB DEFAULT '[]';

@@ -149,7 +149,7 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
     const cardBalances = cardBalanceResults
       .filter((r) => r.balance)
       .map((r) => ({
-        name: r.card.display_name || r.card.provider?.display_name || 'Card',
+        name: r.card.provider?.display_name || r.card.card_network || r.card.display_name || 'Card',
         type: 'credit_card',
         balance: r.balance.current != null ? Math.abs(r.balance.current) : null,
         limit: r.balance.credit_limit || null,

@@ -301,6 +301,8 @@ export interface Analysis {
   verified_bills?: VerifiedBill[];
   /** Recurring person transfers needing user clarification */
   ambiguous_transfers?: AmbiguousTransfer[];
+  /** Person-to-person transfers (excluded from income/spending but visible in UI) */
+  person_transfers?: { date: string; merchant: string; description: string; amount: number; category: string }[];
 }
 
 // ── Goal Trajectory ──

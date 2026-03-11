@@ -471,6 +471,8 @@ export default function Home() {
   };
 
   // ── Unresolved transaction groups (for categorise modal) ──
+  // Includes both "Other" category items AND person transfers (which are
+  // invisible in budget sections but need user classification).
   const unresolvedGroups = useMemo(() => {
     if (!analysis) return [];
     const txs: TransactionDetail[] = [];
@@ -481,6 +483,14 @@ export default function Home() {
         if (item?.category === 'Other') {
           txs.push(...(Array.isArray(item.transactions) ? item.transactions : []));
         }
+      }
+    }
+    // Also include person transfers — they're excluded from budget sections
+    // but users need a way to see and reclassify them
+    const personTransfers = (analysis as any)?.person_transfers;
+    if (Array.isArray(personTransfers)) {
+      for (const t of personTransfers) {
+        if (t) txs.push(t as TransactionDetail);
       }
     }
     // Group by normalized merchant/description — user assigns one category per group
@@ -611,6 +621,13 @@ export default function Home() {
           (updated as any)[sectionKey] = section;
         }
 
+        // Also remove classified person transfers
+        if (Array.isArray((updated as any).person_transfers)) {
+          (updated as any).person_transfers = (updated as any).person_transfers.filter(
+            (t: any) => !assignedMerchants.has(t?.merchant || t?.description)
+          );
+        }
+
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
       }
@@ -618,8 +635,14 @@ export default function Home() {
       setShowCatReview(false);
       setCatAssignments({});
 
-      // Force re-enrich so overrides are applied immediately (don't use cached result)
-      syncInBackground(user.id, true);
+      // Await re-enrichment so Supabase gets the updated analysis before
+      // the next loadData() call. Timeout after 8s to avoid blocking forever.
+      try {
+        await Promise.race([
+          syncInBackground(user.id, true),
+          new Promise((resolve) => setTimeout(resolve, 8000)),
+        ]);
+      } catch {}
     } catch (err: any) {
       window.alert(err.message || 'Could not save categories');
     }
@@ -678,8 +701,13 @@ export default function Home() {
       setTransferAssignments({});
       trackEvent('Transfer Review Saved', { count: keys.length });
 
-      // Force re-enrich so overrides are applied immediately
-      syncInBackground(user.id, true);
+      // Await re-enrichment so Supabase is updated before next loadData()
+      try {
+        await Promise.race([
+          syncInBackground(user.id, true),
+          new Promise((resolve) => setTimeout(resolve, 8000)),
+        ]);
+      } catch {}
     } catch (err: any) {
       window.alert(err.message || 'Could not save transfer classifications');
     }
@@ -1071,9 +1099,9 @@ export default function Home() {
       }
 
       // Trigger background sync if user has any data or a bank connection.
-      // This also handles the "bank connected but no analysis yet" case,
-      // where sync will retry enrichment as new transactions settle.
-      syncInBackground(user.id);
+      // Force-sync when data was previously stale (fallback) to retry TrueLayer.
+      const shouldForce = syncDataSource === 'fallback';
+      syncInBackground(user.id, shouldForce);
     } catch (err: any) {
       console.warn('[home] loadData error:', err?.message);
       setAnalysis(null);
@@ -1131,11 +1159,14 @@ export default function Home() {
           nextWarning = { message: 'some_expired', banks };
         }
       } else if (result.dataSource === 'fallback') {
-        // Sync failed transiently or used cached data.
-        // Don't show the connection warning banner for stale fallback data —
-        // the syncError text below handles this with a "pull down to retry"
-        // message, which is more appropriate than suggesting "reconnect"
-        // for what is likely a transient TrueLayer failure.
+        // Sync fell back to cached data. If data is >24h old, escalate to
+        // reconnect prompt — persistent failures likely mean a dead token.
+        if (result.latestTransactionDate) {
+          const ageMs = Date.now() - new Date(result.latestTransactionDate).getTime();
+          if (ageMs > 24 * 60 * 60 * 1000) {
+            nextWarning = { message: 'all_expired', banks: result.expiredBankNames ?? [] };
+          }
+        }
       } else if (result.expiringConnections?.length > 0) {
         // Proactive warning: connections approaching 90-day consent expiry
         const expiringBanks = result.expiringConnections.map(
@@ -1232,8 +1263,8 @@ export default function Home() {
       setRetriesExhausted(false);
       const fresh = mergeAdjustments(result.analysis, budgetAdjustments);
       setAnalysis((prev) => {
-        // Count "Other" items in each analysis to detect reclassifications
-        const otherCount = (a: Analysis | null) => {
+        // Count unresolved items to detect reclassifications/overrides
+        const unresolvedCount = (a: Analysis | null) => {
           if (!a) return 0;
           let count = 0;
           for (const section of [a.discretionary, a.non_discretionary]) {
@@ -1242,6 +1273,8 @@ export default function Home() {
             const other = items.find((i: any) => i?.category === 'Other');
             if (other) count += other.txs || 0;
           }
+          count += ((a as any)?.person_transfers?.length || 0);
+          count += ((a as any)?.ambiguous_transfers?.length || 0);
           return count;
         };
         if (
@@ -1250,7 +1283,7 @@ export default function Home() {
           prev.monthly_spending === fresh.monthly_spending &&
           prev.surplus === fresh.surplus &&
           prev.decision_score === fresh.decision_score &&
-          otherCount(prev) === otherCount(fresh)
+          unresolvedCount(prev) === unresolvedCount(fresh)
         ) {
           return prev; // No material change — skip re-render
         }

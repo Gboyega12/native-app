@@ -555,14 +555,17 @@ export function isPersonTransfer(description: string): boolean {
   if (BRAND_INDICATORS.some((b) => lower.includes(b))) return false;
   if (BRAND_WORD_PATTERNS.some((rx) => rx.test(lower))) return false;
 
-  // If it contains digits, it's likely a reference number — not a person name
-  if (/\d/.test(lower)) return false;
-
-  // Clean the description: strip common prefixes
+  // Clean the description: strip bank prefixes, method codes, and trailing references
   const cleaned = lower
     .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
-    .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b/g, '')
+    .replace(/^(mobile-|bgc-?|fpo-?|sto-?|dd-?|so-?|tfr-?|cr-?|dr-?)\s*/i, '')
+    .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b|\bfpo\b|\bbgc\b|\bsto\b/g, '')
+    .replace(/\s+(ref|reference|no|id)[\s:]*[a-z0-9]+$/i, '') // strip trailing refs
+    .replace(/\s+\d[\w-]*$/i, '') // strip trailing reference numbers
     .trim();
+
+  // If after cleaning there are still digits embedded in the core text, skip
+  if (/\d/.test(cleaned)) return false;
 
   // Match 2-3 purely alphabetic words (typical person name pattern).
   // Single words are too ambiguous — "aldi", "pharmacy", "barbershop"
@@ -570,7 +573,7 @@ export function isPersonTransfer(description: string): boolean {
   // Allow single-letter initials (e.g. "Maria G", "J Smith", "A J Smith")
   // as long as at least one word is a full name (2+ chars).
   const words = cleaned.split(/\s+/).filter(Boolean);
-  if (words.length >= 2 && words.length <= 3) {
+  if (words.length >= 2 && words.length <= 4) {
     const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w));
     const hasFullName = words.some((w) => w.length >= 2);
     if (allAlpha && hasFullName) return true;
