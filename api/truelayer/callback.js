@@ -251,13 +251,13 @@ export default async function handler(req, res) {
           available: r.balance.available || null,
         }));
 
+      // Debt-exposed accounts (overdraft/overdrawn) → stored alongside card balances
       const accountBalances = accountBalanceResults
         .filter((r) => r.balance)
         .map((r) => {
           const bal = r.balance;
           const hasOverdraft = bal.overdraft != null && bal.overdraft > 0;
           const isOverdrawn = bal.current != null && bal.current < 0;
-          // Only include accounts with debt exposure (overdraft facility or negative balance)
           if (!hasOverdraft && !isOverdrawn) return null;
           return {
             name: r.account.display_name || r.account.provider?.display_name || 'Account',
@@ -269,12 +269,27 @@ export default async function handler(req, res) {
         })
         .filter(Boolean);
 
+      // All account balances (current + savings) — for surplus/idle cash analysis
+      const allAccountBalances = accountBalanceResults
+        .filter((r) => r.balance && r.balance.current != null)
+        .map((r) => ({
+          name: r.account.provider?.display_name || r.account.display_name || 'Account',
+          type: r.account.account_type || 'current',
+          balance: r.balance.current,
+          available: r.balance.available || null,
+          overdraft: r.balance.overdraft || null,
+        }));
+
       const allBalances = [...cardBalances, ...accountBalances];
 
-      if (allBalances.length > 0) {
-        console.log('[callback] Balances:', JSON.stringify(allBalances));
+      const updatePayload = {};
+      if (allBalances.length > 0) updatePayload.card_balances = allBalances;
+      if (allAccountBalances.length > 0) updatePayload.account_balances = allAccountBalances;
+
+      if (Object.keys(updatePayload).length > 0) {
+        console.log('[callback] Balances:', JSON.stringify(updatePayload));
         await admin.from('bank_data')
-          .update({ card_balances: allBalances })
+          .update(updatePayload)
           .eq('connection_id', connectionId);
       }
     } catch (debtErr) {

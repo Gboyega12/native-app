@@ -29,6 +29,12 @@ export const MOVE_THRESHOLDS = {
   bufferMinTarget: 500,
   highSaverThreshold: 15,
   highSaverInterestRate: 0.045,
+  // Savings optimization moves
+  boeBaseRate: 0.045,                // Bank of England base rate (public data, used for opportunity cost math)
+  savingsRateTarget: 20,             // Next-tier target for savings rate acceleration
+  idleCashMinSurplus: 100,           // Min monthly surplus before idle cash move triggers
+  duplicateSubMinSavings: 10,        // Min £/mo savings before duplicate sub move triggers
+  savingsConsistencyMinMonths: 3,    // Min months of data for consistency scoring
 } as const;
 
 // ── Analysis window ──

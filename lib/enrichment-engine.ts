@@ -1606,6 +1606,215 @@ const EnrichmentEngine = {
       });
     }
 
+    // ── Savings optimization moves (mathematical, no product advice) ──
+
+    // 1. Undeployed surplus — idle cash accumulating beyond buffer needs
+    // Triggers when user has surplus, buffer target is met, and no high-utilisation debt
+    if (p.surplus >= T.idleCashMinSurplus && m.savingsRate >= T.bufferSavingsRateThreshold && !isHighUtil) {
+      const monthlySurplus = Math.round(p.surplus);
+      const annualIdle = monthlySurplus * 12;
+      const opportunityCost = Math.round(annualIdle * T.boeBaseRate);
+      const idleProof = `Monthly surplus: £${monthlySurplus}. Annual accumulation: £${annualIdle}. `
+        + `Bank of England base rate: ${(T.boeBaseRate * 100).toFixed(1)}%. `
+        + `Theoretical yield on idle cash: £${annualIdle} × ${(T.boeBaseRate * 100).toFixed(1)}% = £${opportunityCost}/year. `
+        + `This is the mathematical cost of cash sitting in a non-interest-bearing account.`;
+      moves.push({
+        action: `£${monthlySurplus}/month (£${annualIdle.toLocaleString()}/year) accumulating undeployed — £${opportunityCost}/year opportunity cost`,
+        annualImpact: opportunityCost,
+        monthlyImpact: Math.round(opportunityCost / 12),
+        effort: 'low',
+        category: 'savings',
+        merchants: [],
+        strategy: `Your surplus of £${monthlySurplus}/month exceeds your buffer needs. Cash beyond your buffer earns nothing in a current account. At the base rate of ${(T.boeBaseRate * 100).toFixed(1)}%, the mathematical cost of inaction is £${opportunityCost}/year.`,
+        steps: [
+          `You accumulate £${monthlySurplus}/month beyond buffer requirements`,
+          'Move surplus to one of your existing savings accounts on payday',
+          'I\'ll track whether your surplus is being deployed each month',
+        ],
+        effect: `£${opportunityCost}/year in theoretical yield currently uncaptured.`,
+        proof: idleProof,
+        subGoals: [{
+          type: 'savings_reach',
+          target: 'Deployed savings',
+          startValue: 0,
+          targetValue: annualIdle,
+        }],
+      });
+    }
+
+    // 2. Subscription duplicate detection — same-category recurring charges
+    if (discretionarySubs.length >= 2) {
+      const subsByCategory: Record<string, typeof discretionarySubs> = {};
+      for (const sub of discretionarySubs) {
+        const cat = sub.category || 'Other';
+        if (!subsByCategory[cat]) subsByCategory[cat] = [];
+        subsByCategory[cat].push(sub);
+      }
+      const duplicateGroups = Object.entries(subsByCategory)
+        .filter(([_, subs]) => subs.length >= 2)
+        .map(([cat, subs]) => ({
+          category: cat,
+          count: subs.length,
+          total: Math.round(subs.reduce((s, sub) => s + sub.averageAmount, 0)),
+          names: subs.map((s) => s.merchant).filter(Boolean),
+        }))
+        .filter((g) => g.total >= T.duplicateSubMinSavings);
+
+      if (duplicateGroups.length > 0) {
+        const totalDupSpend = duplicateGroups.reduce((s, g) => s + g.total, 0);
+        // Estimate: keeping one per category saves all but the cheapest in each group
+        const potentialSaving = duplicateGroups.reduce((s, g) => {
+          const sorted = subsByCategory[g.category].sort((a, b) => a.averageAmount - b.averageAmount);
+          // Keep cheapest, the rest is potential saving
+          return s + sorted.slice(1).reduce((ss, sub) => ss + Math.round(sub.averageAmount), 0);
+        }, 0);
+        const dupDescription = duplicateGroups.map((g) => `${g.count} ${g.category} (${g.names.join(', ')}: £${g.total}/mo)`).join('; ');
+        const dupProof = duplicateGroups.map((g) => {
+          const sorted = subsByCategory[g.category].sort((a, b) => a.averageAmount - b.averageAmount);
+          return `${g.category}: ${sorted.map(s => `${s.merchant} £${Math.round(s.averageAmount)}/mo`).join(' + ')} = £${g.total}/mo total`;
+        }).join('. ') + `. Potential saving if consolidated: £${potentialSaving}/mo (£${potentialSaving * 12}/year).`;
+
+        moves.push({
+          action: `You have overlapping subscriptions in ${duplicateGroups.length} categor${duplicateGroups.length === 1 ? 'y' : 'ies'} — £${totalDupSpend}/month total`,
+          annualImpact: potentialSaving * 12,
+          monthlyImpact: potentialSaving,
+          effort: 'low',
+          category: 'spending',
+          merchants: duplicateGroups.flatMap((g) => g.names),
+          strategy: `Detected multiple active subscriptions in the same category: ${dupDescription}. You decide which to keep — the numbers are here.`,
+          steps: [
+            `Review your ${duplicateGroups.map(g => g.category).join(' and ')} subscriptions`,
+            'Decide which you actually use — cancel the rest',
+            'I\'ll confirm when the charges stop appearing',
+          ],
+          effect: `Up to £${potentialSaving}/month (£${potentialSaving * 12}/year) freed if consolidated.`,
+          proof: dupProof,
+          subGoals: duplicateGroups.flatMap((g) => {
+            const sorted = subsByCategory[g.category].sort((a, b) => b.averageAmount - a.averageAmount);
+            // Suggest cancelling all but the cheapest as sub-goals
+            return sorted.slice(0, -1).map((sub) => ({
+              type: 'sub_cancel' as const,
+              target: sub.merchant,
+              startValue: Math.round(sub.averageAmount),
+              targetValue: 0,
+            }));
+          }),
+        });
+      }
+    }
+
+    // 3. Savings rate acceleration — gap to next meaningful tier
+    // Shows the exact £ delta needed to reach the next savings rate milestone
+    if (p.surplus > 0 && p.income > 0 && m.savingsRate < T.savingsRateTarget) {
+      const currentRate = m.savingsRate;
+      const targetRate = T.savingsRateTarget;
+      // £ needed per month to reach target rate: (targetRate/100 × income) - current surplus
+      const targetSurplus = (targetRate / 100) * p.income;
+      const delta = Math.round(targetSurplus - p.surplus);
+      if (delta > 0 && delta < p.spending * 0.5) { // Only if achievable (less than halving spending)
+        const annualGain = delta * 12;
+        const rateProof = `Current savings rate: ${Math.round(currentRate)}% (£${Math.round(p.surplus)}/mo surplus on £${Math.round(p.income)}/mo income). `
+          + `Target: ${targetRate}% = £${Math.round(targetSurplus)}/mo surplus. `
+          + `Gap: £${Math.round(targetSurplus)} - £${Math.round(p.surplus)} = £${delta}/mo additional savings needed. `
+          + `Annual impact: £${delta} × 12 = £${annualGain}.`;
+        moves.push({
+          action: `Increase monthly savings by £${delta} to reach ${targetRate}% savings rate`,
+          annualImpact: annualGain,
+          monthlyImpact: delta,
+          effort: 'medium',
+          category: 'savings',
+          merchants: [],
+          strategy: `Savings rate is ${Math.round(currentRate)}%. The ${targetRate}% threshold is where compound effects accelerate — buffer builds faster, debt clears sooner, and surplus compounds. Gap is £${delta}/month.`,
+          steps: [
+            `Find £${delta}/month in discretionary spending or income growth`,
+            'Automate the additional amount on payday',
+            'I\'ll track your rate each month against the target',
+          ],
+          effect: `Savings rate moves from ${Math.round(currentRate)}% to ${targetRate}%.`,
+          proof: rateProof,
+          subGoals: [{
+            type: 'savings_reach',
+            target: `${targetRate}% savings rate`,
+            startValue: Math.round(currentRate),
+            targetValue: targetRate,
+          }],
+        });
+      }
+    }
+
+    // 4. Savings consistency — coefficient of variation across months
+    // Measures how stable the user's savings behaviour is
+    if (txs.length > 0) {
+      // Bucket transactions by calendar month to compute per-month surplus
+      const monthBuckets: Record<string, { income: number; spending: number }> = {};
+      for (const tx of txs) {
+        const d = new Date(tx.date);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        if (!monthBuckets[key]) monthBuckets[key] = { income: 0, spending: 0 };
+        if (tx.isIncome && !tx.isRefund && !tx.isTransfer && !tx.isDebt) {
+          monthBuckets[key].income += tx.amount;
+        } else if (tx.amount < 0 && !tx.isTransfer && !tx.isRefund && !tx.isSavings) {
+          monthBuckets[key].spending += Math.abs(tx.amount);
+        }
+      }
+      const monthKeys = Object.keys(monthBuckets).sort();
+      if (monthKeys.length >= T.savingsConsistencyMinMonths) {
+        const monthlySurpluses = monthKeys.map((k) => monthBuckets[k].income - monthBuckets[k].spending);
+        const meanSurplus = monthlySurpluses.reduce((a, b) => a + b, 0) / monthlySurpluses.length;
+        const variance = monthlySurpluses.reduce((s, v) => s + Math.pow(v - meanSurplus, 2), 0) / monthlySurpluses.length;
+        const sd = Math.sqrt(variance);
+        const cv = meanSurplus > 0 ? sd / meanSurplus : 0;
+        // Detect trend: compare first half avg to second half avg
+        const half = Math.floor(monthlySurpluses.length / 2);
+        const firstHalf = monthlySurpluses.slice(0, half);
+        const secondHalf = monthlySurpluses.slice(half);
+        const firstAvg = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+        const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+        const trend = secondAvg - firstAvg;
+        const trendPct = firstAvg !== 0 ? Math.round((trend / Math.abs(firstAvg)) * 100) : 0;
+        const isErratic = cv > 0.5;
+        const isDecelerating = trendPct < -15;
+        const monthlyValues = monthKeys.map((k, i) => `${k}: £${Math.round(monthlySurpluses[i])}`).join(', ');
+
+        // Only generate move if there's something actionable (erratic or decelerating)
+        if ((isErratic || isDecelerating) && meanSurplus > 0) {
+          const stabilityScore = Math.max(0, Math.round((1 - Math.min(cv, 1)) * 100));
+          const consistencyProof = `Monthly surplus over ${monthKeys.length} months: ${monthlyValues}. `
+            + `Mean: £${Math.round(meanSurplus)}/mo. SD: £${Math.round(sd)}. CV: ${(cv * 100).toFixed(0)}%. `
+            + `Trend: ${trendPct > 0 ? '+' : ''}${trendPct}% (${trendPct > 0 ? 'accelerating' : trendPct < 0 ? 'decelerating' : 'flat'}). `
+            + `Stability score: ${stabilityScore}/100.`;
+
+          const actionText = isDecelerating && !isErratic
+            ? `Savings momentum declining — surplus dropped ${Math.abs(trendPct)}% over ${monthKeys.length} months`
+            : isErratic && isDecelerating
+              ? `Savings erratic (stability: ${stabilityScore}/100) and declining ${Math.abs(trendPct)}%`
+              : `Savings erratic — stability score ${stabilityScore}/100 (target: 70+)`;
+
+          const strategyText = isDecelerating
+            ? `Your surplus has fallen from ~£${Math.round(firstAvg)}/mo to ~£${Math.round(secondAvg)}/mo. ${isErratic ? `Variability is also high (CV: ${(cv * 100).toFixed(0)}%). ` : ''}Identify what changed — spending increase or income drop.`
+            : `Your monthly surplus swings between £${Math.round(Math.min(...monthlySurpluses))} and £${Math.round(Math.max(...monthlySurpluses))}. High variability makes budgeting unreliable. A fixed savings amount on payday smooths this out.`;
+
+          const targetSaving = Math.round(meanSurplus * 0.2); // Stabilising saves ~20% of mean surplus through consistency
+          moves.push({
+            action: actionText,
+            annualImpact: targetSaving * 12,
+            monthlyImpact: targetSaving,
+            effort: 'medium',
+            category: 'savings',
+            merchants: [],
+            strategy: strategyText,
+            steps: [
+              'Set a fixed savings amount on payday (even if less than your average surplus)',
+              `Target £${Math.round(meanSurplus * 0.7)}/month as a consistent baseline`,
+              'I\'ll track your consistency score each month',
+            ],
+            effect: `Consistency score from ${stabilityScore}/100 toward 70+. Predictable saving compounds faster than erratic surpluses.`,
+            proof: consistencyProof,
+          });
+        }
+      }
+    }
+
     // Coffee
     if (m.coffeeAndCafes > T.coffeeMin) {
       const saving = Math.round(m.coffeeAndCafes * T.coffeeCutPct);

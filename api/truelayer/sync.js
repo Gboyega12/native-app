@@ -173,9 +173,21 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
       })
       .filter(Boolean);
 
+    // All account balances (current + savings) for surplus analysis
+    const allAccountBalances = accountBalanceResults
+      .filter((r) => r.balance && r.balance.current != null)
+      .map((r) => ({
+        name: r.account.provider?.display_name || r.account.display_name || 'Account',
+        type: r.account.account_type || 'current',
+        balance: r.balance.current,
+        available: r.balance.available || null,
+        overdraft: r.balance.overdraft || null,
+      }));
+
     return {
       csvLines,
       balances: [...cardBalances, ...accountBalances],
+      accountBalances: allAccountBalances,
       newRefreshToken,
       txCount: allTx.length,
       providerName,
@@ -342,6 +354,9 @@ export default async function handler(req, res) {
       }
       if (result.balances.length > 0) {
         updateFields.card_balances = result.balances;
+      }
+      if (result.accountBalances && result.accountBalances.length > 0) {
+        updateFields.account_balances = result.accountBalances;
       }
       // Backfill provider_name if missing (older rows created before the column existed)
       if (!row.provider_name && result.providerName) {

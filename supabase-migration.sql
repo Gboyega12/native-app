@@ -309,3 +309,13 @@ ALTER TABLE transaction_overrides
 -- ============================================================
 ALTER TABLE analyses
   ADD COLUMN IF NOT EXISTS person_transfers JSONB DEFAULT '[]';
+
+
+-- ============================================================
+-- Migration: add account_balances column to bank_data
+-- Stores current/savings account balances from TrueLayer for
+-- surplus and idle cash analysis (separate from card_balances
+-- which tracks debt exposure).
+-- ============================================================
+ALTER TABLE bank_data
+  ADD COLUMN IF NOT EXISTS account_balances JSONB;
