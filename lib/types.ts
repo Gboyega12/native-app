@@ -44,6 +44,9 @@ export interface TransactionDetail {
   merchant: string;
   description: string;
   amount: number;
+  /** Preserved from enrichment so the dashboard can filter truly unclassifiable items */
+  confidence?: 'high' | 'medium' | 'low';
+  classifiedBy?: 'user_override' | 'merchant_db' | 'fuzzy_match' | 'keyword' | 'claude_ai' | 'default';
 }
 
 export interface BudgetCategory {

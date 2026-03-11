@@ -122,31 +122,10 @@ export function rankMoves(
   goals: Goals | null,
   identity?: UserIdentity | null,
   debtAccounts?: any[],
-  archetypeKey?: string,
 ): RankedMove[] {
   if (!decisionStack || decisionStack.length === 0) return [];
 
   const ukpf = determineFlowchartPosition(profile, goals, debtAccounts, identity);
-
-  // ── Cohort multiplier ──
-  // Different archetypes need different move categories prioritised.
-  // Without this, pure annualImpact ranking skews towards savings moves
-  // for everyone, even debt-juggler users who need debt moves first.
-  const cohortBoosts: Record<string, number> = {};
-  if (archetypeKey) {
-    if (['debt_juggler', 'edge_walker'].includes(archetypeKey)) {
-      cohortBoosts['debt'] = 2.0;
-      cohortBoosts['break_even'] = 1.8;
-      cohortBoosts['spending'] = 1.5;
-    } else if (['subscription_collector', 'impulse_surfer', 'convenience_seeker', 'comfort_spender'].includes(archetypeKey)) {
-      cohortBoosts['spending'] = 1.8;
-      cohortBoosts['debt'] = 1.3;
-    } else if (['side_hustler'].includes(archetypeKey)) {
-      cohortBoosts['spending'] = 1.5;
-      cohortBoosts['savings'] = 1.3;
-    }
-    // quiet_builder, lifestyle_investor, balanced_realist: no extra boosts — savings/invest ranking is already natural
-  }
 
   // Compute volatility once for all moves
   let vol: VolatilityProfile | null = null;
@@ -181,15 +160,11 @@ export function rankMoves(
     );
     score *= marginal;
 
-    // UKPF priority — strong boost for matching the user's flowchart position
+    // UKPF tiebreaker — small boost for matching the user's flowchart priority
     const moveCategory = move.category || 'spending';
     if (moveCategory === ukpf.priority) {
-      score *= 1.5;
+      score *= 1.15;
     }
-
-    // Cohort boost — archetype-driven reweighting
-    const cohortMult = cohortBoosts[moveCategory] || 1.0;
-    score *= cohortMult;
 
     // Goal alignment boost
     if (goals?.one_year_goal === 'clear_debt' && moveCategory === 'debt') score *= 1.3;

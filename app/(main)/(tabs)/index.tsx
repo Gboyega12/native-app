@@ -478,8 +478,9 @@ export default function Home() {
   };
 
   // ── Unresolved transaction groups (for categorise modal) ──
-  // Includes both "Other" category items AND person transfers (which are
-  // invisible in budget sections but need user classification).
+  // Only shows truly unclassifiable items — transactions the enrichment engine
+  // AND Claude AI couldn't identify. Medium/high confidence results are auto-applied.
+  // Users can always re-categorise from the budget section.
   const unresolvedGroups = useMemo(() => {
     if (!analysis) return [];
     const txs: TransactionDetail[] = [];
@@ -488,16 +489,15 @@ export default function Home() {
       if (!Array.isArray(items)) continue;
       for (const item of items) {
         if (item?.category === 'Other') {
-          txs.push(...(Array.isArray(item.transactions) ? item.transactions : []));
+          // Only include transactions the enrichment pipeline couldn't classify —
+          // low confidence defaults that even Claude AI returned as "Other"
+          const otherTxs: TransactionDetail[] = Array.isArray(item.transactions) ? item.transactions : [];
+          for (const tx of otherTxs) {
+            if (tx?.confidence === 'low' || tx?.classifiedBy === 'default') {
+              txs.push(tx);
+            }
+          }
         }
-      }
-    }
-    // Also include person transfers — they're excluded from budget sections
-    // but users need a way to see and reclassify them
-    const personTransfers = (analysis as any)?.person_transfers;
-    if (Array.isArray(personTransfers)) {
-      for (const t of personTransfers) {
-        if (t) txs.push(t as TransactionDetail);
       }
     }
     // Group by normalized merchant/description — user assigns one category per group

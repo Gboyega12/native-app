@@ -21,6 +21,7 @@ import type {
   EssentialGap,
   VerifiedBill,
   AmbiguousTransfer,
+  TransactionDetail,
 } from './types.js';
 
 function splitCSVLine(line: string): string[] {
@@ -597,7 +598,7 @@ const EnrichmentEngine = {
     const surplus = monthlyIncome - monthlySpending;
 
     // Group spending by category for budget card display
-    const catTotals: Record<string, { total: number; count: number; transactions: { date: string; merchant: string; description: string; amount: number }[] }> = {};
+    const catTotals: Record<string, { total: number; count: number; transactions: TransactionDetail[] }> = {};
     for (const tx of spending) {
       const cat = tx.category || 'Other';
       if (!catTotals[cat]) catTotals[cat] = { total: 0, count: 0, transactions: [] };
@@ -608,6 +609,8 @@ const EnrichmentEngine = {
         merchant: tx.merchant || tx.description,
         description: tx.description,
         amount: tx.amount,
+        confidence: tx.confidence,
+        classifiedBy: tx.classifiedBy,
       });
     }
 

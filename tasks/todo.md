@@ -1,50 +1,43 @@
-# Fix: Cohort Balance, Auto-categorization, and Duplicate Grouping
+# Fix: Move Engine + Categorization Modal UX
 
-## Issue 1: Move recommendations skewed towards savings optimizers
+## Correction: Move Engine (Reverting Previous Changes)
 
-### Root Cause
-`rankMoves()` in `lib/move-engine.ts` gives UKPF priority match only a **1.15x** boost (line 166), and goal alignment only **1.3x** (lines 170-174). Base score is `annualImpact / 100`, so a savings move worth £2000/yr still outranks a debt move worth £500/yr even for a debt-juggler.
+### Problem with Previous Approach
+The previous commit added archetype-based cohort multipliers to `rankMoves()`. This was **redundant** because the engine already has a sophisticated multi-layer ranking system:
+1. **UKPF waterfall** → sets priority category (debt/buffer/savings/invest)
+2. **CRRA marginal utility** → liquidity-adjusted diminishing returns per category
+3. **Monte Carlo consistency** → weights reliable/low-effort moves higher
+4. **Goal alignment** → 1.3x boost for matching user's 1-year goal
 
-`genDecisionStack()` generates moves across all categories (spending, debt, savings, invest). The problem is ranking doesn't sufficiently reweight by cohort.
-
-### Fix
-In `lib/move-engine.ts` `rankMoves()`:
-- [ ] Add **cohort multiplier** based on archetype: debt_juggler/edge_walker → 2.0x debt moves, subscription_collector/impulse_surfer/comfort_spender/convenience_seeker → 1.8x spending moves, quiet_builder/lifestyle_investor → current weights fine
-- [ ] Increase UKPF priority from 1.15x to **1.5x** — this is the strongest signal for what the user needs
-- [ ] Add **category diversity enforcement**: top 5 must span at least 2 categories
-- [ ] Pass archetype into `rankMoves()` from `processing.tsx` (currently not passed)
-
-## Issue 2: Enrichment modal shows easily identifiable transactions
-
-### Root Cause
-`unresolvedGroups` in `index.tsx` (line 476) collects all `category === 'Other'` items. The Claude AI classify call (line 516-559) gets them 98% right when the modal opens. But user must manually tap each suggestion.
+Adding cohort boosts on top creates **multiplicative stacking** (e.g. debt_juggler at UKPF level 4 would get 1.5x UKPF × 2.0x cohort = 3.0x, distorting scores). The CRRA model already accounts for where each pound delivers most value.
 
 ### Fix
-- [ ] Auto-apply Claude AI suggestions as **pre-selected defaults** — modal opens with suggestions already applied
-- [ ] Only require explicit user action for items Claude couldn't classify (returned 'Other')
-- [ ] Add "Accept all" button at top of modal for one-tap bulk approval
+In `lib/move-engine.ts`:
+- [x] **Remove `archetypeKey` parameter** from `rankMoves()`
+- [x] **Remove cohort boost logic** (lines 131-149)
+- [x] **Revert UKPF boost from 1.5x back to 1.15x** — CRRA handles the heavy lifting
+- [x] **Keep category diversity enforcement** — sensible UX guard
+- [x] **Update call sites**: `processing.tsx`, `sync.ts`, `api/enrich.js`
 
-## Issue 3: Duplicate transactions in categorization modal
+## Correction: Modal UX (Auto-Apply Enrichment)
 
-### Root Cause
-`normalizeMerchant()` may not strip reference numbers, dates, card suffixes aggressively enough, creating separate groups for the same merchant.
+### Problem
+Showing 300 transactions in the categorize modal is bad UX. The enrichment engine + Claude AI processing pipeline already correctly classifies 98% of transactions. Users shouldn't review what the system already knows.
 
 ### Fix
-- [ ] Audit `normalizeMerchant()` — improve stripping of reference numbers, dates, suffixes
-- [ ] When user assigns category to one group, auto-cascade to similar merchant names in the modal
+In `app/(main)/(tabs)/index.tsx`:
+- [x] **Change `unresolvedGroups` filter**: Only include transactions where `confidence === 'low'` AND `classifiedBy === 'default'` (truly unclassifiable)
+- [x] **Remove person transfers from modal** — they already have their own transfer review modal
+- [x] **Keep "Accept all" button** — still useful for the few remaining items
+- [x] **Keep improved `normalizeMerchant()`** — still valuable for grouping
 
----
-
-## Implementation Order
-1. Issue 1 (cohort balance) — most impactful, affects all users
-2. Issue 2 (auto-apply suggestions) — reduces friction massively
-3. Issue 3 (duplicate grouping) — dependent on Issue 2
+### Result
+- Medium/high confidence enrichment results are auto-applied (no modal)
+- Only genuinely unidentifiable transactions require user input
+- Users can always re-categorize from the budget section
 
 ## Verification
-- [ ] Debt-focused user sees debt moves ranked highest
-- [ ] Spending-focused user sees spending cuts ranked highest
-- [ ] Savings-focused user sees savings/invest moves ranked highest
-- [ ] Modal opens with AI suggestions pre-applied
-- [ ] "Accept all" works for bulk categorization
-- [ ] Similar merchants are grouped properly
 - [ ] TypeScript compiles
+- [ ] `rankMoves()` signature matches all call sites
+- [ ] Modal only shows truly unclassifiable items
+- [ ] No regressions in move ranking (CRRA + Monte Carlo + UKPF still works)

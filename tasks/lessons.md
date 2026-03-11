@@ -31,6 +31,16 @@
 - **Never leave users on an infinite spinner.** When the dashboard detects "bank connected, no analysis" and retries sync, it MUST have an escape hatch after retries exhaust. Show "Try again" + "Upload a statement instead" buttons. Also add a safety timeout (3 minutes) in case sync never triggers the retry path at all.
 - **Processing.tsx bypass creates an orphan state.** When processing.tsx detects 0 enriched transactions and bypasses to dashboard via `router.replace`, the dashboard has no analysis and no way to create one. The sync retry loop is the only recovery path — and it gives up after 5 attempts (~6 minutes). After that, the user is stuck forever.
 
+## Insights Engine
+
+- **Don't add simplistic multipliers on top of a principled scoring system.** The move engine uses CRRA marginal utility, Monte Carlo consistency, UKPF waterfall, and goal alignment. Adding archetype-based cohort boosts creates multiplicative stacking (e.g. 1.5x UKPF × 2.0x cohort = 3.0x) that distorts the CRRA model's carefully calibrated outputs. Trust the existing economic model.
+- **Research the existing architecture before adding features.** The move engine had 4 integrated layers (UKPF → CRRA → Monte Carlo → Goal alignment) that I didn't fully understand before adding cohort boosts. Always map the full system before modifying it.
+
+## Modal UX
+
+- **Don't show users things the system already knows.** If enrichment + Claude AI classifies 98% of transactions correctly, auto-apply those results. Only surface truly unclassifiable items in review modals. Users can always re-categorize from the budget section.
+- **Preserve enrichment metadata through the pipeline.** `TransactionDetail` originally stripped `confidence` and `classifiedBy` when mapping from `EnrichedTransaction`. Without these fields, the dashboard can't distinguish auto-classifiable items from truly unresolved ones.
+
 ## Workflow Compliance
 
 - **Always write plan to `tasks/todo.md` BEFORE implementing.** Even when using inline TodoWrite for progress tracking, the spec should live in `tasks/todo.md` with checkable items.
