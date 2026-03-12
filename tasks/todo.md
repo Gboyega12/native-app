@@ -216,40 +216,65 @@ The move engine uses heuristics and magic numbers where it should use real maths
 ## UX Improvements
 
 ### 13. Categorisation → Budget Sync Feedback
-**Problem:** After saving category reviews, there's no confirmation the re-sync completed. Optimistic updates remove transactions from "Other" but don't add them to the target category.
+**Problem:** After saving category reviews, there's no confirmation the re-sync completed. Optimistic update (lines 634-676) removes transactions from "Other" but doesn't add them to the target category — the budget looks like money vanished.
 
-**Fix:**
-- [ ] Show a brief toast "Budget updated" once the re-sync completes after saving category reviews
-- [ ] Update optimistic update logic to add transactions to target categories, not just remove from Other
+**Already done:** `saveReview()` triggers `syncInBackground()` after saving (commit `474fc81`). Haptic + checkmark animation fires at line 679.
 
-**Files:** `app/(main)/(tabs)/index.tsx` (or wherever category review save lives)
+**Recommended fix:**
+- [ ] In the optimistic update block (lines 634-676), after removing transactions from "Other", find-or-create the target category in the correct section (`discretionary`/`non_discretionary` based on `a.isEssential`) and push the transactions into it. Recalculate `monthly` and `txs` on the target category, and `section.total`.
+- [ ] After `syncInBackground` completes (it's fire-and-forget currently), chain a `.then()` or use a callback/ref to trigger a lightweight toast: "Budget updated". Use the existing `LayoutAnimation` pattern — no new toast library needed, a timed `<Text>` overlay that auto-dismisses after 2s is sufficient.
+
+**Files:** `app/(main)/(tabs)/index.tsx` (lines 634-700)
 
 ### 14. Banner Persistence — Eliminate Flash
-**Problem:** Async fingerprint check on every render cycle causes a flash as the banner briefly appears then hides. Current dismissal model (fingerprint-based) is non-obvious to users.
+**Problem:** `useEffect` at line 118 runs `AsyncStorage.getItem()` on every `connectionWarning` change. This is async — the banner renders visible for a frame before the stored fingerprint resolves and hides it. The flash is most noticeable on slower devices.
 
-**Fix:**
-- [ ] Replace async fingerprint check with a synchronous in-memory cache, hydrated once at mount
-- [ ] Consider snackbar-style dismissal ("Dismissed for 24h") instead of fingerprint approach — simpler mental model
+**Recommended fix:**
+- [ ] Add a module-level `let dismissCache: Record<string, string> = {}` outside the component. On mount (single `useEffect([], [])`), hydrate it from AsyncStorage once: `dismissCache[CONN_DISMISS_KEY] = await AsyncStorage.getItem(CONN_DISMISS_KEY)`.
+- [ ] Replace the async check at line 118 with a synchronous read: `const stored = dismissCache[CONN_DISMISS_KEY]; setConnectionDismissed(stored === currentFingerprint);` — no `.then()`, no flash.
+- [ ] Update `dismissConnection()` (line 157) to write both to `dismissCache` and AsyncStorage simultaneously.
+- [ ] Same pattern for `INCOME_DISMISS_KEY` at line 150.
+- [ ] Initialise `connectionDismissed` state to `true` (hidden by default) instead of `false`. Flip to `false` only after the synchronous cache confirms it shouldn't be dismissed. This eliminates the flash entirely — banner starts hidden, appears only when confirmed.
 
-**Files:** `app/(main)/(tabs)/index.tsx`
+**Files:** `app/(main)/(tabs)/index.tsx` (lines 112-163)
 
 ### 15. Connect Page Guard — Skip to TrueLayer
-**Problem:** Banner navigates to the connect page, but the user already knows they need to reconnect. Extra step adds friction.
+**Problem:** Banner tap at line 1805 navigates to `/(main)/connect` with no params. The connect page guard (line 97) checks `!isFromProfile && !isRedirecting` — since `from` isn't passed, an existing user with an analysis gets bounced home at line 106. Even after fixing the guard, the user lands on a connect page and has to manually tap "Connect via Open Banking" — an unnecessary intermediate step.
 
-**Fix:**
-- [ ] Consider making the banner navigate directly to the TrueLayer reconnect flow for the specific expired bank, skipping the connect page entirely
-- [ ] Reduce reconnection to fewest possible taps
+**Recommended fix (two-phase):**
 
-**Files:** `app/(main)/(tabs)/index.tsx`, `app/(main)/connect.tsx`
+*Phase 1 — make it work (Step 12):*
+- [ ] Pass `from: 'banner'` in the banner's `onPress` at line 1805: `router.push({ pathname: '/(main)/connect', params: { from: 'banner' } })`
+- [ ] In `connect.tsx` line 68, expand check: `const isFromProfile = params.from === 'profile' || params.from === 'banner';` — this skips the guard at line 97 and ensures redirect-back at line 214 fires.
+- [ ] At line 218, branch on `from`: if `'banner'`, redirect to `/(main)/(tabs)` (home) instead of `/(main)/profile`.
+
+*Phase 2 — skip the page entirely (this step):*
+- [ ] Extract `handleTrueLayer()` logic from `connect.tsx` into a shared util (or just call TrueLayer's auth URL builder directly from `index.tsx`).
+- [ ] Banner tap generates a `connection_id`, builds the TrueLayer auth URL, and opens it via `Linking.openURL()` — user goes straight to bank selection.
+- [ ] TrueLayer callback redirects back to connect page (existing deep link), which handles the token exchange as normal, then redirects home.
+- [ ] **Tradeoff:** This couples index.tsx to TrueLayer URL construction. May not be worth it if Phase 1 feels smooth enough. Recommend implementing Phase 1 first, then evaluating.
+
+**Files:** `app/(main)/(tabs)/index.tsx` (line 1805), `app/(main)/connect.tsx` (lines 68, 97, 214-218)
 
 ### 16. Banner Timing — Debounce State Changes
-**Problem:** Banner shows/hides during sync transitions, causing flicker.
+**Problem:** During sync, `connectionWarning` flips from `null` → `{...}` → `null` as the sync starts (clears old state), detects issues, then resolves. Each flip triggers a re-render and the banner visibly appears then disappears within ~1s.
 
-**Fix:**
-- [ ] Debounce banner state changes with ~500ms delay before showing any banner
-- [ ] Prevents flicker during sync transitions
+**Recommended fix:**
+- [ ] Add a `useRef` + `setTimeout` debounce wrapper around the banner visibility. Instead of rendering directly on `connectionWarning && !connectionDismissed`, derive a `showConnectionBanner` state that only becomes `true` after `connectionWarning` has been truthy for 500ms continuously.
+- [ ] Pattern:
+  ```
+  useEffect(() => {
+    if (connectionWarning && !connectionDismissed) {
+      const timer = setTimeout(() => setShowConnectionBanner(true), 500);
+      return () => clearTimeout(timer);
+    }
+    setShowConnectionBanner(false);
+  }, [connectionWarning, connectionDismissed]);
+  ```
+- [ ] Replace the condition at line 1803 with `showConnectionBanner`.
+- [ ] Same debounce for income banner if it has the same flicker issue.
 
-**Files:** `app/(main)/(tabs)/index.tsx`
+**Files:** `app/(main)/(tabs)/index.tsx` (lines 1802-1821)
 
 ---
 
