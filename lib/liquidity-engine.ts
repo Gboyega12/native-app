@@ -426,14 +426,8 @@ function calcTaxEfficiencyMultiplier(
   }
 
   // ── Debt overpayment ──
-  // Guaranteed return at the interest rate. Higher rates = more valuable.
-  if (cat === 'debt' && (action.includes('overpay') || action.includes('attack') || action.includes('snowball'))) {
-    // Estimate: credit card ~19% guaranteed return is better than any investment
-    const isCardDebt = action.includes('credit') || action.includes('card');
-    const estRate = isCardDebt ? 0.19 : 0.08;
-    // Express as multiplier: 19% guaranteed return = 1.19x per pound
-    return 1.0 + (estRate * 0.3); // conservative: 30% of the rate as a multiplier
-  }
+  // Rate-based return is now handled by calcOpportunityCostMultiplier in move-engine.
+  // No additional tax multiplier here to avoid double-counting.
 
   return 1.0;
 }

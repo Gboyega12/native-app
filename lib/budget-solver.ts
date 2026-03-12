@@ -221,11 +221,13 @@ export function solveBudgetAllocation(
       bufferPct = 0.20; savingsPct = 0.40; investPct = 0.40;
     }
 
-    // Risk appetite adjustment
+    // Risk appetite adjustment (shift between buffer and invest, keeping total = 1.0)
     if (riskAppetite === 'conservative') {
-      bufferPct += 0.10; investPct -= 0.10;
+      const shift = Math.min(0.10, investPct); // can't shift more than invest has
+      bufferPct += shift; investPct -= shift;
     } else if (riskAppetite === 'growth') {
-      investPct += 0.10; bufferPct -= 0.10;
+      const shift = Math.min(0.10, bufferPct); // can't shift more than buffer has
+      investPct += shift; bufferPct -= shift;
     }
 
     const bufferShare = surplus * bufferPct;

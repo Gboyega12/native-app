@@ -1282,8 +1282,10 @@ const EnrichmentEngine = {
         // If surplus is 0, at least recommend the minimum payment
         const recommendedPayment = Math.max(realPayment, targetMin);
         const monthsToClear = calcPayoffMonths(targetBalance, targetAPR, recommendedPayment);
-        // Real interest savings from overpaying: compare minimum-only vs recommended payment
-        const interestSaving = Math.round(calcInterestSaved(targetBalance, targetAPR, targetMin, recommendedPayment) / 12);
+        // Real interest savings: lifetime saving ÷ payoff years = true annual saving
+        const lifetimeSaving = calcInterestSaved(targetBalance, targetAPR, targetMin, recommendedPayment);
+        const payoffYears = Math.max(1, monthsToClear / 12);
+        const interestSaving = Math.round(lifetimeSaving / payoffYears);
         const debtSubGoals: MoveSubGoal[] = sortedDebts.map((d) => ({
           type: 'debt_clear' as const,
           target: debtDisplayName(d),
@@ -1300,14 +1302,14 @@ const EnrichmentEngine = {
 
         moves.push({
           action: `Pay \u00a3${recommendedPayment} to ${targetName} and clear \u00a3${targetBalance} in ${monthsToClear} months`,
-          annualImpact: interestSaving * 12,
+          annualImpact: interestSaving,
           monthlyImpact: recommendedPayment,
           effort: 'high',
           category: 'debt',
           merchants: debtMerchants,
           strategy: `${actualDebtCount} debt accounts. Highest rate: ${targetName} at ${Math.round(targetAPR * 100)}% APR (\u00a3${targetBalance}).${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% which is hurting your credit score.` : ''} Avalanche method: clear highest-rate debt first to minimise total interest.`,
           steps: ['Pay minimums on all debts except the highest-rate one', `Direct \u00a3${recommendedPayment}/month at ${targetName}`, `When it's cleared in ~${monthsToClear} months, roll that \u00a3${recommendedPayment} into the next highest-rate debt`, 'I\'ll track your progress and adjust automatically'],
-          effect: `Clears ${targetName} in ${monthsToClear} months. Saves \u00a3${interestSaving * 12}/year in interest across all debts.`,
+          effect: `Clears ${targetName} in ${monthsToClear} months. Saves \u00a3${interestSaving}/year in interest across all debts.`,
           subGoals: debtSubGoals.length > 0 ? debtSubGoals : undefined,
           proof,
         });
@@ -1340,8 +1342,10 @@ const EnrichmentEngine = {
         const totalPayment = Math.min(singleMin + surplusAlloc, singleBalance);
         const recommendedPayment = Math.max(totalPayment, singleMin);
         const monthsToClear = calcPayoffMonths(singleBalance, singleAPR, recommendedPayment);
-        // Real interest saving from overpaying vs minimum-only
-        const interestSaving = Math.round(calcInterestSaved(singleBalance, singleAPR, singleMin, recommendedPayment) / 12);
+        // Real interest saving: lifetime saving ÷ payoff years = true annual saving
+        const singleLifetimeSaving = calcInterestSaved(singleBalance, singleAPR, singleMin, recommendedPayment);
+        const singlePayoffYears = Math.max(1, monthsToClear / 12);
+        const interestSaving = Math.round(singleLifetimeSaving / singlePayoffYears);
 
         const proof = `${singleName} balance: \u00a3${singleBalance}. Minimum: \u00a3${singleMin}/mo. `
           + `Surplus allocation: \u00a3${surplusAlloc}/mo (${Math.round(T.singleDebtOverpayMaxSurplusPct * 100)}% of \u00a3${Math.round(Math.max(0, p.surplus))} surplus, capped at \u00a3${T.singleDebtOverpayCap}). `
@@ -1350,14 +1354,14 @@ const EnrichmentEngine = {
 
         moves.push({
           action: `Pay \u00a3${recommendedPayment}/month to ${singleName} to clear in ${monthsToClear} months`,
-          annualImpact: interestSaving * 12,
+          annualImpact: interestSaving,
           monthlyImpact: recommendedPayment,
           effort: 'medium',
           category: 'debt',
           merchants: debtMerchants,
           strategy: `${singleName}: \u00a3${singleBalance} at ${Math.round(singleAPR * 100)}% APR.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}%, priority to reduce this.` : ''} Overpaying clears it ${monthsToClear > 0 ? `in ${monthsToClear} months` : 'faster'}.`,
           steps: ['Check if overpayments are allowed without penalty', `Set up \u00a3${recommendedPayment}/month standing order`, 'I\'ll redirect savings from other moves into this automatically'],
-          effect: `Clears \u00a3${singleBalance} in ${monthsToClear} months. Saves \u00a3${interestSaving * 12}/year in interest.`,
+          effect: `Clears \u00a3${singleBalance} in ${monthsToClear} months. Saves \u00a3${interestSaving}/year in interest.`,
           proof,
           subGoals: singleDebt ? [{
             type: 'debt_clear',
@@ -1380,7 +1384,9 @@ const EnrichmentEngine = {
       const recommendedPayment = Math.max(Math.round(p.debtPayments + surplusAlloc), Math.round(p.debtPayments));
       const fallbackAPR = DEFAULT_APR.credit_card; // use credit card default when no account data
       const monthsToClear = calcPayoffMonths(estimatedBalance, fallbackAPR, recommendedPayment);
-      const interestSaving = Math.round(calcInterestSaved(estimatedBalance, fallbackAPR, Math.round(p.debtPayments), recommendedPayment) / 12);
+      const fbLifetimeSaving = calcInterestSaved(estimatedBalance, fallbackAPR, Math.round(p.debtPayments), recommendedPayment);
+      const fbPayoffYears = Math.max(1, monthsToClear / 12);
+      const interestSaving = Math.round(fbLifetimeSaving / fbPayoffYears);
 
       const proof = `£${Math.round(p.debtPayments)}/mo detected in debt payments across ${m.debtAccountCount} account${m.debtAccountCount !== 1 ? 's' : ''}. `
         + `No balance data available — connect your credit card for a precise payoff plan. `
@@ -1389,14 +1395,14 @@ const EnrichmentEngine = {
 
       moves.push({
         action: `Attack your debt: pay £${recommendedPayment}/month to clear ~£${estimatedBalance} in ${monthsToClear} months`,
-        annualImpact: interestSaving * 12,
+        annualImpact: interestSaving,
         monthlyImpact: recommendedPayment,
         effort: 'medium',
         category: 'debt',
         merchants: debtMerchants,
         strategy: `£${Math.round(p.debtPayments)}/month going to debt payments. Connect your credit card account for exact balances and a precise snowball plan.`,
         steps: ['Connect your credit card so I can see the exact balance', `Meanwhile, direct £${surplusAlloc > 0 ? surplusAlloc : 'any spare'}/month extra at your highest-rate debt`, 'I\'ll build a full payoff plan once I can see your balances'],
-        effect: `Could save ~£${interestSaving * 12}/year in interest.`,
+        effect: `Could save ~£${interestSaving}/year in interest.`,
         proof,
       });
     }
@@ -2359,8 +2365,8 @@ const EnrichmentEngine = {
   },
 
   /** Compute data-driven cut percentage for a spending category.
-   *  Uses month-to-month variance: achievable reduction = 1 - (min/avg), capped at 0.5.
-   *  Falls back to the constant if < 3 months of data. */
+   *  Uses month-to-month variance: achievable reduction based on P25 (not min,
+   *  to avoid zero-month distortion). Falls back to constant if < 3 months of data. */
   _dataDrivenCutPct(txs: EnrichedTransaction[], category: string, fallbackPct: number): number {
     // Group spending by YYYY-MM
     const byMonth: Record<string, number> = {};
@@ -2370,12 +2376,15 @@ const EnrichmentEngine = {
         byMonth[month] = (byMonth[month] || 0) + Math.abs(t.amount);
       }
     }
-    const months = Object.values(byMonth);
-    if (months.length < 3) return fallbackPct; // insufficient data
-    const avg = months.reduce((s, v) => s + v, 0) / months.length;
+    const sorted = Object.values(byMonth).sort((a, b) => a - b);
+    if (sorted.length < 3) return fallbackPct; // insufficient data
+    const avg = sorted.reduce((s, v) => s + v, 0) / sorted.length;
     if (avg <= 0) return fallbackPct;
-    const min = Math.min(...months);
-    const achievable = 1 - (min / avg);
+    // Use P25 (25th percentile) as achievable floor instead of min
+    // This avoids zero-month anomalies and single-spike distortion
+    const p25Idx = Math.floor(sorted.length * 0.25);
+    const p25 = sorted[p25Idx];
+    const achievable = 1 - (p25 / avg);
     return Math.min(0.5, Math.max(0.05, achievable)); // floor 5%, cap 50%
   },
 

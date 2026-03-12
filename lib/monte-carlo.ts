@@ -92,30 +92,13 @@ export function estimateVolatility(
     if (hasIrregular) incomeCV = Math.max(incomeCV, 0.15);
   }
 
-  // Spending CVs: use real data if available (from budget reality items),
-  // fall back to heuristic estimates.
-  let essentialCV = 0.08; // default: low variance (rent/mortgage are fixed)
-  let discretionaryCV = 0.22; // default: higher variance (varies by month)
-
-  // If we have per-category item data, compute actual CV from monthly totals
-  const essentialItems = profile.budgetReality?.nonDiscretionary?.items || [];
-  const discretionaryItems = profile.budgetReality?.discretionary?.items || [];
-  if (essentialItems.length >= 3) {
-    const essentialMonthly = essentialItems.map((i: any) => i.monthly || 0);
-    const eMean = essentialMonthly.reduce((s: number, v: number) => s + v, 0) / essentialMonthly.length;
-    if (eMean > 0) {
-      const eVar = essentialMonthly.reduce((s: number, v: number) => s + (v - eMean) ** 2, 0) / essentialMonthly.length;
-      essentialCV = Math.max(0.02, Math.sqrt(eVar) / eMean); // floor 2%
-    }
-  }
-  if (discretionaryItems.length >= 3) {
-    const discMonthly = discretionaryItems.map((i: any) => i.monthly || 0);
-    const dMean = discMonthly.reduce((s: number, v: number) => s + v, 0) / discMonthly.length;
-    if (dMean > 0) {
-      const dVar = discMonthly.reduce((s: number, v: number) => s + (v - dMean) ** 2, 0) / discMonthly.length;
-      discretionaryCV = Math.max(0.05, Math.sqrt(dVar) / dMean); // floor 5%
-    }
-  }
+  // Spending CVs: heuristic estimates by category type.
+  // Note: budget reality items are per-category averages, not month-to-month data,
+  // so computing temporal variance from them would be meaningless (cross-category ≠ temporal).
+  // Real month-to-month CV requires transaction-level grouping which happens in the
+  // enrichment engine's _dataDrivenCutPct() instead.
+  const essentialCV = 0.08; // low variance (rent/mortgage are fixed, utilities predictable)
+  const discretionaryCV = 0.22; // higher variance (varies by month, mood, events)
 
   // Emergency events: ~1 per year (car repair, appliance, medical)
   let emergencyRate = 0.083; // 1/12

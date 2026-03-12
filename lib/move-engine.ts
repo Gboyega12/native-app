@@ -171,12 +171,14 @@ export function rankMoves(
       const annualIncome = Math.max(1, (profile.monthly?.income || 0) * 12);
       let ukpfBoost = 1.0;
       if (ukpf.priority === 'debt' && moveCategory === 'debt') {
-        // Cost of not paying debt: highest APR × balance / income
+        // Cost of not paying debt: monthly interest cost as fraction of monthly income
         const highestAPR = (debtAccounts || []).reduce((max: number, d: any) => Math.max(max, d.interest_rate || 0), 0.079);
-        const monthlyBalance = (debtAccounts || []).reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
-        ukpfBoost = 1 + (highestAPR * monthlyBalance / annualIncome);
+        const totalDebtBalance = (debtAccounts || []).reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+        const monthlyInterestCost = totalDebtBalance * highestAPR / 12;
+        const monthlyIncome = Math.max(1, profile.monthly?.income || 0);
+        ukpfBoost = 1 + (monthlyInterestCost / monthlyIncome);
       } else if (ukpf.priority === 'buffer' && moveCategory === 'buffer') {
-        // Cost of no buffer: expected emergency cost × probability / income
+        // Cost of no buffer: expected annual emergency cost as fraction of annual income
         const emergencyProb = vol?.emergencyRate || 0.083;
         const emergencyCost = vol?.emergencyCost || (profile.monthly?.spending || 500) * 0.6;
         ukpfBoost = 1 + (emergencyProb * 12 * emergencyCost / annualIncome);
