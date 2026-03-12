@@ -324,13 +324,13 @@ export default function Home() {
     if (showReviewModal) {
       setReviewModalVisible(true);
       Animated.parallel([
-        Animated.timing(reviewModalFade, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.timing(reviewModalSlide, { toValue: 0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(reviewModalFade, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+        Animated.timing(reviewModalSlide, { toValue: 0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
       ]).start();
     } else {
       Animated.parallel([
-        Animated.timing(reviewModalFade, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.timing(reviewModalSlide, { toValue: 40, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(reviewModalFade, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+        Animated.timing(reviewModalSlide, { toValue: 40, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
       ]).start(() => setReviewModalVisible(false));
     }
   }, [showReviewModal]);
