@@ -213,6 +213,46 @@ The move engine uses heuristics and magic numbers where it should use real maths
 
 ---
 
+## UX Improvements
+
+### 13. Categorisation → Budget Sync Feedback
+**Problem:** After saving category reviews, there's no confirmation the re-sync completed. Optimistic updates remove transactions from "Other" but don't add them to the target category.
+
+**Fix:**
+- [ ] Show a brief toast "Budget updated" once the re-sync completes after saving category reviews
+- [ ] Update optimistic update logic to add transactions to target categories, not just remove from Other
+
+**Files:** `app/(main)/(tabs)/index.tsx` (or wherever category review save lives)
+
+### 14. Banner Persistence — Eliminate Flash
+**Problem:** Async fingerprint check on every render cycle causes a flash as the banner briefly appears then hides. Current dismissal model (fingerprint-based) is non-obvious to users.
+
+**Fix:**
+- [ ] Replace async fingerprint check with a synchronous in-memory cache, hydrated once at mount
+- [ ] Consider snackbar-style dismissal ("Dismissed for 24h") instead of fingerprint approach — simpler mental model
+
+**Files:** `app/(main)/(tabs)/index.tsx`
+
+### 15. Connect Page Guard — Skip to TrueLayer
+**Problem:** Banner navigates to the connect page, but the user already knows they need to reconnect. Extra step adds friction.
+
+**Fix:**
+- [ ] Consider making the banner navigate directly to the TrueLayer reconnect flow for the specific expired bank, skipping the connect page entirely
+- [ ] Reduce reconnection to fewest possible taps
+
+**Files:** `app/(main)/(tabs)/index.tsx`, `app/(main)/connect.tsx`
+
+### 16. Banner Timing — Debounce State Changes
+**Problem:** Banner shows/hides during sync transitions, causing flicker.
+
+**Fix:**
+- [ ] Debounce banner state changes with ~500ms delay before showing any banner
+- [ ] Prevents flicker during sync transitions
+
+**Files:** `app/(main)/(tabs)/index.tsx`
+
+---
+
 ## Verification
 
 - [ ] All TypeScript compiles cleanly
@@ -230,3 +270,7 @@ The move engine uses heuristics and magic numbers where it should use real maths
 - [ ] Banner updates to show only remaining expired banks after one is reconnected
 - [ ] Toast shows "[Bank] reconnected. X bank(s) still need attention" when others remain
 - [ ] Toast shows "All banks reconnected" and banner hides when none remain
+- [ ] "Budget updated" toast appears after saving category reviews
+- [ ] Optimistic update adds transactions to target category (not just removes from Other)
+- [ ] Banner doesn't flash on mount — synchronous cache prevents async flicker
+- [ ] Banner state changes are debounced (~500ms) — no flicker during sync
