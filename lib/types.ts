@@ -175,6 +175,9 @@ export interface Move {
   subGoals?: MoveSubGoal[];
   /** Mathematical proof: human-readable breakdown showing exactly how the numbers were derived */
   proof?: string;
+  /** Per-category spending CV (coefficient of variation) from month-to-month transaction data.
+   *  Attached by the enrichment engine for spending moves; used by Monte Carlo for follow-through. */
+  spendingCV?: number;
 }
 
 /**

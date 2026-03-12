@@ -111,23 +111,10 @@ export function estimateVolatility(
     emergencyCost *= 1.3;
   }
 
-  // Upcoming events increase emergency probability — scaled by proximity
-  const events: any[] = identity?.upcoming_events || [];
-  const getEvtType = (e: any): string => typeof e === 'string' ? e : e?.type || '';
-  const getEvtMonths = (e: any): number | null => typeof e === 'object' && e?.months_away != null ? e.months_away : null;
-  const timelineEvents = events.filter((e) => {
-    const t = getEvtType(e);
-    return t === 'moving' || t === 'baby' || t === 'wedding';
-  });
-  for (const evt of timelineEvents) {
-    const months = getEvtMonths(evt);
-    if (months != null && months > 0) {
-      // Closer events get a larger emergency rate bump: 0.04 × (6 / months_away)
-      emergencyRate += 0.04 * Math.min(3, 6 / months); // cap at 3x base bump
-    } else {
-      emergencyRate += 0.04; // no timeline — default flat bump
-    }
-  }
+  // Note: Baby, moving, wedding are deterministic planned events — NOT stochastic emergencies.
+  // They are modelled as CashflowScenario objects in buildScenarios() and flow into
+  // buffer recommendations via the enrichment engine's timeline-scaled move generation.
+  // Do NOT bump emergencyRate here — that conflates planned spending with random shocks.
 
   // Income shock (job loss) probability
   let incomeShockProb = 0.005; // ~6% annual probability

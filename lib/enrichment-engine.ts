@@ -1059,6 +1059,8 @@ const EnrichmentEngine = {
     const eventTypes = rawEvents.map(getEventType);
     const buyingHome = eventTypes.includes('first_home');
     const havingBaby = eventTypes.includes('baby');
+    const isMoving = eventTypes.includes('moving');
+    const hasWedding = eventTypes.includes('wedding');
     const changingCareer = eventTypes.includes('career_change');
     const babyMonths = getEventMonths(rawEvents.find((e: any) => getEventType(e) === 'baby'));
     const movingMonths = getEventMonths(rawEvents.find((e: any) => getEventType(e) === 'moving'));
@@ -1127,7 +1129,7 @@ const EnrichmentEngine = {
 
     // Food delivery
     if (m.foodDelivery > T.foodDeliveryMin) {
-      const cutPct = this._dataDrivenCutPct(txs, 'Delivery', T.foodDeliveryCutPct);
+      const { cutPct, cv: deliveryCV } = this._dataDrivenCutPct(txs, 'Delivery', T.foodDeliveryCutPct);
       const saving = Math.round(m.foodDelivery * cutPct);
       const deliveryMerchants = this._getMerchantsByCategory(txs, 'Delivery');
       const proof = `\u00a3${Math.round(m.foodDelivery)}/mo on delivery (${ANALYSIS_MONTHS}-month avg). `
@@ -1144,6 +1146,7 @@ const EnrichmentEngine = {
         steps: ['Batch-cook twice a week', 'Delete saved payment cards from delivery apps', 'I\'ll track your delivery spend weekly'],
         effect: `Frees \u00a3${saving}/month.`,
         proof,
+        spendingCV: deliveryCV,
         subGoals: [{
           type: 'spending_reduce',
           target: 'Delivery',
@@ -1155,7 +1158,7 @@ const EnrichmentEngine = {
 
     // Eating out
     if (m.eatingOut > T.eatingOutMin) {
-      const eatingCutPct = this._dataDrivenCutPct(txs, 'Eating Out', T.eatingOutCutPct);
+      const { cutPct: eatingCutPct, cv: eatingCV } = this._dataDrivenCutPct(txs, 'Eating Out', T.eatingOutCutPct);
       const saving = Math.round(m.eatingOut * eatingCutPct);
       const eatingMerchants = this._getMerchantsByCategory(txs, 'Eating Out');
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
@@ -1173,6 +1176,7 @@ const EnrichmentEngine = {
         steps: ['Replace one meal out per week with home-cooked', 'Bring coffee from home 2x per week'],
         effect: `Saves \u00a3${saving}/month.`,
         proof,
+        spendingCV: eatingCV,
         subGoals: [{
           type: 'spending_reduce',
           target: 'Eating Out',
@@ -1184,7 +1188,7 @@ const EnrichmentEngine = {
 
     // Shopping
     if (m.shopping > T.shoppingMin) {
-      const shoppingCutPct = this._dataDrivenCutPct(txs, 'Shopping', T.shoppingCutPct);
+      const { cutPct: shoppingCutPct, cv: shoppingCV } = this._dataDrivenCutPct(txs, 'Shopping', T.shoppingCutPct);
       const saving = Math.round(m.shopping * shoppingCutPct);
       const shopMerchants = this._getMerchantsByCategory(txs, 'Shopping');
       const proof = `\u00a3${Math.round(m.shopping)}/mo on shopping (${ANALYSIS_MONTHS}-month avg). `
@@ -1201,6 +1205,7 @@ const EnrichmentEngine = {
         steps: ['Apply 24-hour rule on purchases over \u00a330', 'Remove saved cards from shopping apps', 'Unsubscribe from marketing emails'],
         effect: `Saves \u00a3${saving}/month.`,
         proof,
+        spendingCV: shoppingCV,
         subGoals: [{
           type: 'spending_reduce',
           target: 'Shopping',
@@ -1445,7 +1450,7 @@ const EnrichmentEngine = {
       const optimisableTransport = Math.max(0, Math.round(m.transport) - commuteMonthly - oneTimeTravelMonthly);
       const isOfficeWorker = !isHybrid; // full-time office if not hybrid and not remote
 
-      const baseCutPct = this._dataDrivenCutPct(txs, 'Transport', T.transportCutPct);
+      const { cutPct: baseCutPct, cv: transportCV } = this._dataDrivenCutPct(txs, 'Transport', T.transportCutPct);
       const cutPct = isHybrid ? baseCutPct * 0.5 : baseCutPct;
 
       if (optimisableTransport > 20) {
@@ -1471,6 +1476,7 @@ const EnrichmentEngine = {
           steps,
           effect: `Saves \u00a3${saving}/month from discretionary transport only.`,
           proof,
+          spendingCV: transportCV,
           subGoals: [{
             type: 'spending_reduce',
             target: 'Transport',
@@ -1946,7 +1952,7 @@ const EnrichmentEngine = {
 
     // Coffee
     if (m.coffeeAndCafes > T.coffeeMin) {
-      const coffeeCutPct = this._dataDrivenCutPct(txs, 'Coffee & Cafes', T.coffeeCutPct);
+      const { cutPct: coffeeCutPct, cv: coffeeCV } = this._dataDrivenCutPct(txs, 'Coffee & Cafes', T.coffeeCutPct);
       const saving = Math.round(m.coffeeAndCafes * coffeeCutPct);
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       const coffeeProof = `\u00a3${Math.round(m.coffeeAndCafes)}/mo on caf\u00e9s (${ANALYSIS_MONTHS}-month avg). `
@@ -1963,6 +1969,7 @@ const EnrichmentEngine = {
         steps: ['Make coffee at home 3 mornings per week', 'Keep one treat coffee day', 'I\'ll track your weekly café spend'],
         effect: `Saves \u00a3${saving}/month.`,
         proof: coffeeProof,
+        spendingCV: coffeeCV,
         subGoals: [{
           type: 'spending_reduce',
           target: 'Coffee & Cafes',
@@ -2024,6 +2031,72 @@ const EnrichmentEngine = {
           target: 'Parental leave runway',
           startValue: 0,
           targetValue: parentalRunway,
+        }],
+      });
+    }
+
+    if (isMoving && p.surplus > 0) {
+      // Timeline-scaled moving fund
+      // Typical moving costs: deposit (1-2 months rent) + agency fees + removal costs
+      let depositMultiplier: number;
+      let effort: 'low' | 'medium' | 'high';
+      let urgencyNote: string;
+      if (movingMonths != null && movingMonths <= 3) {
+        depositMultiplier = 1.5; effort = 'low'; urgencyNote = `You have ~${Math.round(movingMonths)} months — focus on deposit + immediate moving costs.`;
+      } else if (movingMonths != null && movingMonths <= 6) {
+        depositMultiplier = 2; effort = 'medium'; urgencyNote = `~${Math.round(movingMonths)} months to go — good time to build a full moving fund.`;
+      } else {
+        depositMultiplier = 3; effort = 'medium'; urgencyNote = 'With time on your side, aim for a comfortable moving fund including furnishing.';
+      }
+      const movingTarget = Math.round(p.spending * depositMultiplier);
+      moves.push({
+        action: `Build a \u00a3${movingTarget.toLocaleString()} moving fund`,
+        annualImpact: Math.round(movingTarget),
+        monthlyImpact: Math.round(movingTarget / 12),
+        effort,
+        category: 'buffer',
+        merchants: [],
+        strategy: `${urgencyNote} Covers deposit, agency fees, removals${depositMultiplier >= 3 ? ', and initial furnishing costs' : ''}.`,
+        steps: ['Calculate expected deposit (usually 4-6 weeks rent)', 'Budget for agency fees and removal costs', 'Set aside funds for utility setup and initial furnishing', 'I\'ll track your moving fund progress'],
+        effect: `\u00a3${movingTarget.toLocaleString()} covers ~${depositMultiplier} months of expenses for the move.`,
+        subGoals: [{
+          type: 'buffer_build',
+          target: 'Moving fund',
+          startValue: 0,
+          targetValue: movingTarget,
+        }],
+      });
+    }
+
+    if (hasWedding && p.surplus > 0) {
+      // Timeline-scaled wedding fund
+      // UK average wedding: ~£20k, but scale to user's income level
+      let targetMultiplier: number;
+      let effort: 'low' | 'medium' | 'high';
+      let urgencyNote: string;
+      if (weddingMonths != null && weddingMonths <= 3) {
+        targetMultiplier = 2; effort = 'low'; urgencyNote = `You have ~${Math.round(weddingMonths)} months — focus on covering the remaining deposit payments.`;
+      } else if (weddingMonths != null && weddingMonths <= 6) {
+        targetMultiplier = 4; effort = 'medium'; urgencyNote = `~${Math.round(weddingMonths)} months to go — good time to build towards your wedding budget.`;
+      } else {
+        targetMultiplier = 6; effort = 'medium'; urgencyNote = 'With time on your side, build a comfortable wedding fund to avoid debt.';
+      }
+      const weddingTarget = Math.round(p.spending * targetMultiplier);
+      moves.push({
+        action: `Build a \u00a3${weddingTarget.toLocaleString()} wedding fund`,
+        annualImpact: Math.round(weddingTarget),
+        monthlyImpact: Math.round(weddingTarget / 12),
+        effort,
+        category: 'savings',
+        merchants: [],
+        strategy: `${urgencyNote} Target: \u00a3${weddingTarget.toLocaleString()} to cover wedding costs without going into debt.`,
+        steps: ['Set a realistic total budget and track vendor deposits', 'Prioritise non-negotiable costs (venue, catering) first', 'Set up a dedicated wedding savings account', 'I\'ll track your wedding fund progress'],
+        effect: `\u00a3${weddingTarget.toLocaleString()} covers ~${targetMultiplier} months of expenses for wedding costs.`,
+        subGoals: [{
+          type: 'savings_reach',
+          target: 'Wedding fund',
+          startValue: 0,
+          targetValue: weddingTarget,
         }],
       });
     }
@@ -2367,7 +2440,7 @@ const EnrichmentEngine = {
   /** Compute data-driven cut percentage for a spending category.
    *  Uses month-to-month variance: achievable reduction based on P25 (not min,
    *  to avoid zero-month distortion). Falls back to constant if < 3 months of data. */
-  _dataDrivenCutPct(txs: EnrichedTransaction[], category: string, fallbackPct: number): number {
+  _dataDrivenCutPct(txs: EnrichedTransaction[], category: string, fallbackPct: number): { cutPct: number; cv: number | undefined } {
     // Group spending by YYYY-MM
     const byMonth: Record<string, number> = {};
     for (const t of txs) {
@@ -2377,15 +2450,19 @@ const EnrichmentEngine = {
       }
     }
     const sorted = Object.values(byMonth).sort((a, b) => a - b);
-    if (sorted.length < 3) return fallbackPct; // insufficient data
+    if (sorted.length < 3) return { cutPct: fallbackPct, cv: undefined }; // insufficient data
     const avg = sorted.reduce((s, v) => s + v, 0) / sorted.length;
-    if (avg <= 0) return fallbackPct;
+    if (avg <= 0) return { cutPct: fallbackPct, cv: undefined };
+    // Compute per-category CV (coefficient of variation) for Monte Carlo follow-through
+    const variance = sorted.reduce((s, v) => s + (v - avg) ** 2, 0) / sorted.length;
+    const cv = Math.sqrt(variance) / avg;
     // Use P25 (25th percentile) as achievable floor instead of min
     // This avoids zero-month anomalies and single-spike distortion
     const p25Idx = Math.floor(sorted.length * 0.25);
     const p25 = sorted[p25Idx];
     const achievable = 1 - (p25 / avg);
-    return Math.min(0.5, Math.max(0.05, achievable)); // floor 5%, cap 50%
+    const cutPct = Math.min(0.5, Math.max(0.05, achievable)); // floor 5%, cap 50%
+    return { cutPct, cv };
   },
 
   _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {

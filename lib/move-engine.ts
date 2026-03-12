@@ -215,9 +215,9 @@ export function rankMoves(
     let riskAdjustedImpact: number | undefined;
     let consistencyScore: number | undefined;
     if (vol) {
-      // Derive spending CV from volatility profile for spending moves
-      const discretionary = profile.budgetReality?.discretionary?.total || 1;
-      const spendingCV = discretionary > 0 ? vol.discretionarySD / discretionary : undefined;
+      // Use per-category CV from the move (computed by enrichment engine from actual transaction data)
+      // instead of aggregate discretionary CV which is always ~0.22
+      const spendingCV = move.spendingCV;
       const mc = calcMoveConsistency(move, vol, 456 + idx, moveCategory === 'spending' ? spendingCV : undefined);
       riskAdjustedImpact = mc.expectedMonthly;
       consistencyScore = mc.consistencyScore;
