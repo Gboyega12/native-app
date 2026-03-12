@@ -204,6 +204,13 @@ export function rankMoves(
       score *= goalBoost;
     }
 
+    // Cap the multiplicative stack to prevent extreme distortion (max 8x from base)
+    const baseScore = move.annualImpact / 100;
+    if (baseScore > 0) {
+      const maxMultiplier = 8;
+      score = Math.min(score, baseScore * maxMultiplier);
+    }
+
     // Monte Carlo consistency — reward reliable moves
     let riskAdjustedImpact: number | undefined;
     let consistencyScore: number | undefined;
@@ -214,8 +221,9 @@ export function rankMoves(
       const mc = calcMoveConsistency(move, vol, 456 + idx, moveCategory === 'spending' ? spendingCV : undefined);
       riskAdjustedImpact = mc.expectedMonthly;
       consistencyScore = mc.consistencyScore;
-      // Blend: 70% marginal-utility score + 30% consistency-adjusted score
-      score = score * 0.7 + (mc.expectedMonthly / 100) * mc.consistencyScore * 0.3 * 100;
+      // Blend: 70% utility-adjusted score + 30% consistency-adjusted score (normalised)
+      const consistencyNormalized = (mc.expectedMonthly / Math.max(1, move.monthlyImpact)) * mc.consistencyScore;
+      score = score * 0.7 + score * consistencyNormalized * 0.3;
     }
 
     // Calculate trajectory for this move (with Monte Carlo if profile available)
