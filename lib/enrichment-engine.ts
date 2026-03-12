@@ -20,7 +20,6 @@ import type {
   BudgetCategory,
   EssentialGap,
   VerifiedBill,
-  AmbiguousTransfer,
   TransactionDetail,
 } from './types.js';
 
@@ -88,7 +87,6 @@ const EnrichmentEngine = {
     this._reclassifyCreditCardPayoffs(enriched, debtAccounts);
 
     const recurring = this.detectRecurring(enriched);
-    const ambiguousTransfers = this.detectAmbiguousTransfers(enriched, overrides, identity);
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
     const patterns = this.detectBehavioralPatterns(profile);
@@ -122,7 +120,6 @@ const EnrichmentEngine = {
       enrichmentMetrics,
       essentialGaps,
       verifiedBills: verifiedBills.length > 0 ? verifiedBills : undefined,
-      ambiguousTransfers: ambiguousTransfers.length > 0 ? ambiguousTransfers : undefined,
     };
   },
 
@@ -466,110 +463,6 @@ const EnrichmentEngine = {
       }
     }
     return recurring;
-  },
-
-  detectAmbiguousTransfers(
-    transactions: EnrichedTransaction[],
-    overrides?: TransactionOverride[],
-    identity?: any,
-  ): AmbiguousTransfer[] {
-    // Group transactions flagged as person transfers by counterparty name
-    const groups: Record<string, EnrichedTransaction[]> = {};
-    for (const tx of transactions) {
-      if (!tx.isTransfer && !tx.isIncome) continue;
-      // Only consider person-name-like descriptions
-      if (!isPersonTransfer(tx.description)) continue;
-      // Normalise counterparty: strip prefixes, lowercase
-      const key = tx.description.toLowerCase()
-        .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
-        .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b|\bfaster payment\b|\bbank transfer\b|\btransfer to\b|\btransfer from\b|\bstanding order\b/g, '')
-        .trim()
-        .replace(/\s+/g, ' ');
-      if (!key || key.length < 3) continue;
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(tx);
-    }
-
-    // Filter out counterparties that already have overrides
-    const overridePatterns = (overrides || []).map((o) => o.match_description.toLowerCase());
-
-    const results: AmbiguousTransfer[] = [];
-    for (const [counterparty, txs] of Object.entries(groups)) {
-      if (txs.length < 2) continue;
-
-      // Skip if already overridden
-      if (overridePatterns.some((p) => counterparty.includes(p) || p.includes(counterparty))) continue;
-
-      // Check direction consistency (all inbound or all outbound)
-      const credits = txs.filter((t) => t.amount > 0);
-      const debits = txs.filter((t) => t.amount <= 0);
-      const direction: 'inbound' | 'outbound' = credits.length >= debits.length ? 'inbound' : 'outbound';
-      const dirTxs = direction === 'inbound' ? credits : debits;
-      if (dirTxs.length < 2) continue;
-
-      // Amount consistency — CV must be low
-      const amounts = dirTxs.map((t) => Math.abs(t.amount));
-      const avgAmount = amounts.reduce((a, b) => a + b, 0) / amounts.length;
-      const stdDev = Math.sqrt(amounts.reduce((s, a) => s + (a - avgAmount) ** 2, 0) / amounts.length);
-      const cv = avgAmount > 0 ? stdDev / avgAmount : 1;
-      if (cv > 0.15) continue;
-
-      // Frequency detection
-      const sorted = dirTxs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      const intervals: number[] = [];
-      for (let i = 1; i < sorted.length; i++) {
-        intervals.push((new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()) / (1000 * 60 * 60 * 24));
-      }
-      const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-      let frequency: 'weekly' | 'fortnightly' | 'monthly' | null = null;
-      if (avgInterval >= 5 && avgInterval <= 10) frequency = 'weekly';
-      else if (avgInterval >= 12 && avgInterval <= 17) frequency = 'fortnightly';
-      else if (avgInterval >= 25 && avgInterval <= 35) frequency = 'monthly';
-      if (!frequency) continue;
-
-      // Suggest type based on identity context
-      const id = identity || {};
-      let suggestedType: AmbiguousTransfer['suggestedType'] = null;
-
-      if (direction === 'outbound') {
-        // Monthly equivalent for rent-range check
-        const monthlyEquiv = frequency === 'weekly' ? avgAmount * 52 / 12
-          : frequency === 'fortnightly' ? avgAmount * 26 / 12
-          : avgAmount;
-        const isRenting = id.housing === 'renting' || id.housing === 'shared_house';
-        if (isRenting && monthlyEquiv >= 300 && monthlyEquiv <= 2000) {
-          suggestedType = 'rent';
-        }
-        // Self-transfer: fuzzy match user name against counterparty
-        if (id.full_name) {
-          const userName = id.full_name.toLowerCase().replace(/\s+/g, ' ').trim();
-          const nameParts = userName.split(' ');
-          const counterParts = counterparty.split(' ');
-          const overlap = nameParts.filter((n: string) => counterParts.some((c: string) => c === n || (n.length > 2 && c.startsWith(n))));
-          if (overlap.length >= 2 || (overlap.length === 1 && nameParts.length <= 2)) {
-            suggestedType = 'self_transfer';
-          }
-        }
-      } else {
-        // Inbound: if user has a partner, suggest household contribution
-        const hasPartner = id.household === 'couple_shared' || id.household === 'couple_separate' || id.household === 'family';
-        if (hasPartner) {
-          suggestedType = 'household_contribution';
-        }
-      }
-
-      results.push({
-        counterparty,
-        direction,
-        frequency,
-        averageAmount: Math.round(avgAmount),
-        count: dirTxs.length,
-        sampleDescriptions: dirTxs.slice(0, 3).map((t) => t.description),
-        suggestedType,
-      });
-    }
-
-    return results;
   },
 
   buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): FinancialProfile {

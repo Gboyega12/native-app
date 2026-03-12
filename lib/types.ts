@@ -302,8 +302,6 @@ export interface Analysis {
   essential_gaps?: EssentialGap[];
   /** Bills verified from actual transaction data with exact amounts */
   verified_bills?: VerifiedBill[];
-  /** Recurring person transfers needing user clarification */
-  ambiguous_transfers?: AmbiguousTransfer[];
   /** Person-to-person transfers (excluded from income/spending but visible in UI) */
   person_transfers?: { date: string; merchant: string; description: string; amount: number; category: string }[];
 }
@@ -366,17 +364,6 @@ export interface EssentialGap {
   confidence: 'high' | 'medium' | 'low';
 }
 
-/** A recurring person transfer that needs user clarification */
-export interface AmbiguousTransfer {
-  counterparty: string;
-  direction: 'inbound' | 'outbound';
-  frequency: 'weekly' | 'fortnightly' | 'monthly';
-  averageAmount: number;
-  count: number;
-  sampleDescriptions: string[];
-  suggestedType: 'rent' | 'household_contribution' | 'debt_repayment' | 'self_transfer' | null;
-}
-
 /** A bill verified from actual transaction data — exact amounts from recognized merchants */
 export interface VerifiedBill {
   /** Category (e.g. "Energy", "Water", "Council Tax") */
@@ -410,8 +397,6 @@ export interface EnrichmentResult {
   essentialGaps?: EssentialGap[];
   /** Bills verified from actual transaction data with exact amounts */
   verifiedBills?: VerifiedBill[];
-  /** Recurring person transfers needing user clarification */
-  ambiguousTransfers?: AmbiguousTransfer[];
 }
 
 // ── Chat ──
@@ -471,7 +456,6 @@ export interface ChatContext {
   subscriptions?: { merchant: string; amount: number }[];
   income_sources?: { source: string; frequency: string; avgAmount: number; monthly: number; isSalary: boolean }[];
   essential_gaps?: EssentialGap[];
-  ambiguous_transfers?: AmbiguousTransfer[];
   verified_bills?: { category: string; merchant: string; monthlyAmount: number; frequency: string; lastPayment: number; lastPaymentDate: string }[];
   spending_by_category?: { category: string; monthly: number }[];
   recent_transfers?: { description: string; amount: number; date: string }[];

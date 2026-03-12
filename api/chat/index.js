@@ -862,20 +862,6 @@ Tools:
     prompt += `\n- Once a gap is filled via save_budget_item, it won't appear in future conversations.`;
   }
 
-  // ── Ambiguous recurring transfers ──
-  if (ctx.ambiguous_transfers?.length) {
-    prompt += `\n\n⚠ AMBIGUOUS RECURRING TRANSFERS — These recurring person-to-person transfers need clarification:`;
-    for (const t of ctx.ambiguous_transfers) {
-      const dir = t.direction === 'inbound' ? 'received from' : 'sent to';
-      prompt += `\n- £${t.averageAmount}/${t.frequency} ${dir} "${t.counterparty}" (${t.count} occurrences)`;
-      if (t.suggestedType) prompt += ` — likely: ${t.suggestedType.replace(/_/g, ' ')}`;
-    }
-    prompt += `\n\nThese may be rent payments to/from a partner, household contributions, debt repayments, or transfers to the user's own accounts.`;
-    prompt += `\n- If the user asks about income accuracy or missing rent, mention these transfers and suggest they tap "Review" on the dashboard banner.`;
-    prompt += `\n- Inbound recurring person transfers may be inflating the income figure if they are household contributions, not real income.`;
-    prompt += `\n- Outbound recurring person transfers may be rent or debt repayments being counted as generic transfers.`;
-  }
-
   // ── All moves (action plan) ──
   if (ctx.all_moves?.length) {
     prompt += `\n\nInsights from analysis (ranked by mathematical impact):`;

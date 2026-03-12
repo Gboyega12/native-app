@@ -18,7 +18,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals } from '@/lib/types';
-import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, AmbiguousTransfer } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
@@ -314,7 +314,6 @@ export default function Home() {
   // Unified review modal state
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean; aiSuggested?: boolean }>>({});
-  const [transferAssignments, setTransferAssignments] = useState<Record<string, string>>({});
   const [savingReview, setSavingReview] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [aiSuggesting, setAiSuggesting] = useState(false);
@@ -335,11 +334,6 @@ export default function Home() {
       ]).start(() => setReviewModalVisible(false));
     }
   }, [showReviewModal]);
-
-  const ambiguousTransfers: AmbiguousTransfer[] = useMemo(
-    () => (analysis as any)?.ambiguous_transfers ?? [],
-    [analysis],
-  );
 
   const ESSENTIAL_CATS = new Set(['Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Childcare', 'Health', 'Education', 'Debt Payments', 'Savings']);
 
@@ -593,25 +587,23 @@ export default function Home() {
   }, [showReviewModal, unresolvedGroups.length]);
 
   const dismissReviewModal = useCallback(() => {
-    const hasUnsaved = Object.keys(catAssignments).length > 0 || Object.keys(transferAssignments).length > 0;
+    const hasUnsaved = Object.keys(catAssignments).length > 0;
     if (hasUnsaved) {
       hapticWarning();
-      Alert.alert('Discard changes?', `You have ${Object.keys(catAssignments).length + Object.keys(transferAssignments).length} unsaved categorisations.`, [
+      Alert.alert('Discard changes?', `You have ${Object.keys(catAssignments).length} unsaved categorisations.`, [
         { text: 'Keep editing', style: 'cancel' },
-        { text: 'Discard', style: 'destructive', onPress: () => { setShowReviewModal(false); setCatAssignments({}); setTransferAssignments({}); } },
+        { text: 'Discard', style: 'destructive', onPress: () => { setShowReviewModal(false); setCatAssignments({}); } },
       ]);
     } else {
       setShowReviewModal(false);
     }
-  }, [catAssignments, transferAssignments]);
+  }, [catAssignments]);
 
   const saveReview = async () => {
     const catKeys = Object.keys(catAssignments);
-    const transferKeys = Object.keys(transferAssignments);
-    const totalReviewed = catKeys.length + transferKeys.length;
-    if (totalReviewed === 0) { setShowReviewModal(false); return; }
+    if (catKeys.length === 0) { setShowReviewModal(false); return; }
 
-    trackEvent('Unified Review Saved', { categories: catKeys.length, transfers: transferKeys.length });
+    trackEvent('Unified Review Saved', { categories: catKeys.length });
     setSavingReview(true);
 
     try {
@@ -637,36 +629,6 @@ export default function Home() {
           });
           if (insertErr) throw new Error(`Failed to save ${name}: ${insertErr.message}`);
         }
-      }
-
-      // ── Save transfer overrides ──
-      const TRANSFER_TYPE_MAP: Record<string, { category: string; is_essential: boolean; direction?: 'credit' | 'debit' }> = {
-        rent: { category: 'Rent', is_essential: true, direction: 'debit' },
-        household_contribution: { category: 'Household Contribution', is_essential: false, direction: 'credit' },
-        debt_repayment: { category: 'Debt Payments', is_essential: true, direction: 'debit' },
-        self_transfer: { category: 'Internal Transfer', is_essential: false, direction: 'debit' },
-        income: { category: 'Income', is_essential: false, direction: 'credit' },
-        transfer: { category: 'Transfers', is_essential: false },
-      };
-
-      for (const counterparty of transferKeys) {
-        const assignedType = transferAssignments[counterparty];
-        const mapping = TRANSFER_TYPE_MAP[assignedType];
-        if (!mapping) continue;
-
-        await supabase.from('transaction_overrides')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('match_description', counterparty);
-
-        const { error: insertErr } = await supabase.from('transaction_overrides').insert({
-          user_id: user.id,
-          match_description: counterparty,
-          category: mapping.category,
-          is_essential: mapping.is_essential,
-          ...(mapping.direction ? { direction: mapping.direction } : {}),
-        });
-        if (insertErr) throw new Error(`Failed to save ${counterparty}: ${insertErr.message}`);
       }
 
       // ── Optimistic UI: remove categorised transactions from "Other" ──
@@ -709,11 +671,6 @@ export default function Home() {
           );
         }
 
-        // Remove resolved ambiguous transfers
-        (updated as any).ambiguous_transfers = ambiguousTransfers.filter(
-          (t) => t && !transferAssignments[t.counterparty]
-        );
-
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
       }
@@ -735,7 +692,6 @@ export default function Home() {
 
       setShowReviewModal(false);
       setCatAssignments({});
-      setTransferAssignments({});
       setSaveSuccess(false);
     } catch (err: any) {
       setSaveSuccess(false);
@@ -1311,7 +1267,6 @@ export default function Home() {
               const other = items.find((i: any) => i?.category === 'Other');
               if (other) c += other.txs || 0;
             }
-            c += ((a as any)?.ambiguous_transfers?.length || 0);
             return c;
           };
           if (countUnresolved(fresh) >= countUnresolved(prev)) return prev;
@@ -1328,7 +1283,6 @@ export default function Home() {
             if (other) count += other.txs || 0;
           }
           count += ((a as any)?.person_transfers?.length || 0);
-          count += ((a as any)?.ambiguous_transfers?.length || 0);
           return count;
         };
         if (
@@ -1922,21 +1876,20 @@ export default function Home() {
       ) : (
         <>
           {/* ── Unified review nudge ── */}
-          {(unresolvedGroups.length + ambiguousTransfers.length) > 0 && (
+          {unresolvedGroups.length > 0 && (
             <TouchableOpacity
               style={s.reviewBanner}
               onPress={() => {
                 setCatAssignments({});
-                setTransferAssignments({});
                 setShowReviewModal(true);
-                trackEvent('Review Modal Opened', { categories: unresolvedGroups.length, transfers: ambiguousTransfers.length });
+                trackEvent('Review Modal Opened', { categories: unresolvedGroups.length });
               }}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel={`${unresolvedGroups.length + ambiguousTransfers.length} items need your input. Tap to review.`}
+              accessibilityLabel={`${unresolvedGroups.length} items need your input. Tap to review.`}
             >
               <Text style={s.reviewBannerText}>
-                {unresolvedGroups.length + ambiguousTransfers.length} item{(unresolvedGroups.length + ambiguousTransfers.length) !== 1 ? 's' : ''} need{(unresolvedGroups.length + ambiguousTransfers.length) === 1 ? 's' : ''} your input.{' '}
+                {unresolvedGroups.length} item{unresolvedGroups.length !== 1 ? 's' : ''} need{unresolvedGroups.length === 1 ? 's' : ''} your input.{' '}
                 <Text style={s.reviewBannerLink}>Tap to review</Text>
               </Text>
             </TouchableOpacity>
@@ -3226,8 +3179,8 @@ export default function Home() {
 
                 {/* Progress indicator */}
                 {(() => {
-                  const totalItems = unresolvedGroups.length + ambiguousTransfers.length;
-                  const reviewedItems = Object.keys(catAssignments).length + Object.keys(transferAssignments).length;
+                  const totalItems = unresolvedGroups.length;
+                  const reviewedItems = Object.keys(catAssignments).length;
                   const progress = totalItems > 0 ? reviewedItems / totalItems : 0;
                   return totalItems > 0 ? (
                     <View style={s.reviewProgressBar}>
@@ -3312,88 +3265,11 @@ export default function Home() {
                     </>
                   )}
 
-                  {/* ── RECURRING TRANSFERS section ── */}
-                  {ambiguousTransfers.length > 0 && (
-                    <>
-                      <Text style={[s.reviewSectionHeader, unresolvedGroups.length > 0 && { marginTop: spacing.lg }]}>
-                        RECURRING TRANSFERS ({ambiguousTransfers.length})
-                      </Text>
-                      {ambiguousTransfers.map((t) => {
-                        const assigned = transferAssignments[t.counterparty];
-                        const isOutbound = t.direction === 'outbound';
-                        const displayName = t.counterparty
-                          .split(' ')
-                          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-                          .join(' ');
-                        const freqLabel = t.frequency === 'weekly' ? 'wk' : t.frequency === 'fortnightly' ? '2wk' : 'mo';
-                        const options = isOutbound
-                          ? [
-                              { key: 'rent', label: 'Rent' },
-                              { key: 'debt_repayment', label: 'Debt repayment' },
-                              { key: 'self_transfer', label: 'My own account' },
-                              { key: 'transfer', label: 'Just a transfer' },
-                            ]
-                          : [
-                              { key: 'household_contribution', label: 'Household' },
-                              { key: 'income', label: 'Income' },
-                              { key: 'transfer', label: 'Just a transfer' },
-                            ];
-                        return (
-                          <View
-                            key={t.counterparty}
-                            style={[s.catReviewRow, assigned && s.catReviewRowDone]}
-                            accessibilityLabel={`${displayName}, ${isOutbound ? 'outbound' : 'inbound'}, £${t.averageAmount} per ${freqLabel}, ${assigned ? `classified as ${assigned}` : 'not yet classified'}`}
-                          >
-                            <View style={s.catReviewRowHeader}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={s.catReviewMerchant} numberOfLines={1}>
-                                  {assigned ? '\u2713 ' : ''}{displayName}
-                                </Text>
-                                <Text style={s.transferDirectionLabel}>
-                                  {isOutbound ? 'Sending to' : 'Received from'}
-                                </Text>
-                              </View>
-                              <Text style={s.catReviewAmount}>
-                                {'\u00a3'}{t.averageAmount}/{freqLabel}
-                              </Text>
-                            </View>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                              {options.map((opt) => (
-                                <TouchableOpacity
-                                  key={opt.key}
-                                  style={[
-                                    s.categoryChip,
-                                    assigned === opt.key && s.categoryChipActive,
-                                    t.suggestedType === opt.key && !assigned && s.categoryChipSuggested,
-                                  ]}
-                                  onPress={() => {
-                                    hapticLight();
-                                    setTransferAssignments((prev) => ({
-                                      ...prev,
-                                      [t.counterparty]: opt.key,
-                                    }));
-                                  }}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={`${opt.label}${assigned === opt.key ? ', selected' : ''}`}
-                                  accessibilityState={{ selected: assigned === opt.key }}
-                                >
-                                  <Text style={[
-                                    s.categoryChipText,
-                                    assigned === opt.key && s.categoryChipTextActive,
-                                  ]}>{opt.label}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </ScrollView>
-                          </View>
-                        );
-                      })}
-                    </>
-                  )}
                 </ScrollView>
 
                 {/* Done button */}
                 {(() => {
-                  const totalReviewed = Object.keys(catAssignments).length + Object.keys(transferAssignments).length;
+                  const totalReviewed = Object.keys(catAssignments).length;
                   return (
                     <TouchableOpacity
                       style={[s.catReviewDone]}
@@ -5173,10 +5049,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     backgroundColor: c.accent,
     borderColor: c.accent,
   },
-  categoryChipSuggested: {
-    borderColor: c.accentDim,
-    backgroundColor: c.mintDim,
-  },
   categoryChipText: {
     fontFamily: fonts.mono,
     fontSize: 11,
@@ -5421,14 +5293,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontFamily: fonts.mono,
     fontSize: 9,
     color: c.green,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase' as const,
-    marginTop: 2,
-  },
-  transferDirectionLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: c.dim,
     letterSpacing: 0.5,
     textTransform: 'uppercase' as const,
     marginTop: 2,

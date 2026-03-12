@@ -1213,7 +1213,6 @@ export default function Chat() {
         isSalary: s.isSalary,
       })),
       essential_gaps: a?.essential_gaps,
-      ambiguous_transfers: a?.ambiguous_transfers,
       verified_bills: a?.verified_bills?.map((b: any) => ({
         category: b.category,
         merchant: b.merchant,

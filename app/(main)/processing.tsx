@@ -471,7 +471,6 @@ function ProcessingInner() {
         all_moves: allMoves,
         behavioral_patterns: result.behavioralPatterns,
         goal_context: goalTrajectory,
-        ambiguous_transfers: result.ambiguousTransfers,
       };
 
       if (user?.id) {

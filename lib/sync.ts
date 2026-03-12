@@ -495,7 +495,6 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     income_cv: result.profile.monthly.incomeCV,
     essential_gaps: result.essentialGaps,
     verified_bills: result.verifiedBills,
-    ambiguous_transfers: result.ambiguousTransfers,
     person_transfers: result.profile.transfers,
   };
 
@@ -517,7 +516,6 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     is_variable_income: rawAnalysis.is_variable_income,
     income_cv: rawAnalysis.income_cv,
     person_transfers: rawAnalysis.person_transfers,
-    ambiguous_transfers: rawAnalysis.ambiguous_transfers,
     essential_gaps: rawAnalysis.essential_gaps,
     verified_bills: rawAnalysis.verified_bills,
   };
