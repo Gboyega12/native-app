@@ -675,24 +675,23 @@ export default function Home() {
         setAnalysis(updated);
       }
 
-      // Guard: prevent any in-flight stale sync from clobbering optimistic state
-      reviewSavedRef.current = true;
-
       // ── Completion celebration ──
       hapticSuccess();
       setSaveSuccess(true);
       await new Promise((resolve) => setTimeout(resolve, 600));
 
-      // ── Prevent stale sync from overwriting optimistic state ──
-      // Overrides are saved to DB. Invalidate cache so the next sync
-      // (on next app focus or pull-to-refresh) will pick them up.
-      // We don't re-sync here to avoid a race where an in-flight sync
-      // (from loadData) overwrites our optimistic update with stale data.
-      invalidateSyncCache();
-
       setShowReviewModal(false);
       setCatAssignments({});
       setSaveSuccess(false);
+
+      // Re-sync so the enrichment engine re-runs with the new overrides
+      // and persists the updated analysis to the DB. Without this, the
+      // stale analysis row in Supabase still has the old "Other" bucket
+      // and loadData() would restore the banner on next focus.
+      reviewSavedRef.current = true;
+      invalidateSyncCache();
+      const uid = userIdRef.current;
+      if (uid) syncInBackground(uid, true);
     } catch (err: any) {
       setSaveSuccess(false);
       Alert.alert('Couldn\u2019t save', err.message || 'Check your connection and try again.');
