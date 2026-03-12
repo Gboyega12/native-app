@@ -192,6 +192,27 @@ The move engine uses heuristics and magic numbers where it should use real maths
 
 ---
 
+## Must Fix — Bank Reconnection Flow
+
+### 12. Loop-Back-to-Banner Multi-Bank Reconnection
+**Problem:** When multiple banks expire (e.g. Barclays + Monzo), the banner shows both but tapping "Fix" navigates to `/connect` with no bank-specific context. After reconnecting one bank, the user is redirected back to profile/home and never prompted for the second. Each visit to connect handles exactly one connection — there's no queuing or multi-bank flow.
+
+**Approach:** Lighter-weight "loop back to banner" — after reconnecting one bank, redirect home where the banner naturally updates to show only remaining expired banks. Avoids turning the connect page into a multi-step wizard.
+
+**Fix:**
+- [ ] Fix the guard at `connect.tsx:97` so existing users coming from the banner aren't bounced home — pass `from: 'banner'` as a distinct mode alongside `'profile'`
+- [ ] Update banner tap handler in `index.tsx` (lines 1810-1812) to navigate with `from: 'banner'` param: `router.push({ pathname: '/(main)/connect', params: { from: 'banner' } })`
+- [ ] In `connect.tsx`, handle `from: 'banner'` — skip the onboarding guard, allow the TrueLayer flow, and after successful reconnection redirect back to home (not profile)
+- [ ] After reconnection redirect lands on home, trigger a re-sync so the banner updates to reflect remaining expired banks
+- [ ] Add a brief toast/alert on home after successful banner reconnection: _"[Bank] reconnected. X bank(s) still need attention."_ (only if there are remaining expired banks)
+- [ ] If all expired banks are now reconnected, show success toast: _"All banks reconnected"_ and hide the banner
+
+**Files:** `app/(main)/connect.tsx`, `app/(main)/(tabs)/index.tsx`, `lib/sync.ts`
+
+**Why not the wizard approach:** The connect page's single-connection flow stays untouched. No new state machine, no partial-completion edge cases, no wizard back-button behavior. The banner already tracks which banks are expired — it's a free queue. Can revisit if data shows users dropping off mid-reconnection with 3+ banks.
+
+---
+
 ## Verification
 
 - [ ] All TypeScript compiles cleanly
@@ -204,3 +225,8 @@ The move engine uses heuristics and magic numbers where it should use real maths
 - [ ] Move ranking uses follow-through from spending history, not flat effort multipliers
 - [ ] UKPF/goal boosts scale with actual financial impact
 - [ ] Monte Carlo uses real income CV when ≥ 3 months data available
+- [ ] Banner tap navigates to connect with `from: 'banner'` — existing user guard doesn't bounce
+- [ ] After reconnecting one expired bank via banner, user lands back on home (not profile)
+- [ ] Banner updates to show only remaining expired banks after one is reconnected
+- [ ] Toast shows "[Bank] reconnected. X bank(s) still need attention" when others remain
+- [ ] Toast shows "All banks reconnected" and banner hides when none remain
