@@ -5,7 +5,6 @@ import {
   estimateVolatility,
   simulateGoalTimeline,
   simulateBufferNeed,
-  calcMoveConsistency,
   type VolatilityProfile,
 } from './monte-carlo.js';
 import { calcMoveMarginalUtility } from './liquidity-engine.js';
@@ -95,10 +94,6 @@ export interface RankedMove extends Move {
   rank: number;
   trajectory: GoalTrajectory | null;
   ukpfScore: number;
-  /** Monte Carlo: risk-adjusted monthly impact (accounts for follow-through) */
-  riskAdjustedImpact?: number;
-  /** Monte Carlo: 0-1 consistency score (1 = highly reliable) */
-  consistencyScore?: number;
   /** Marginal utility multiplier — shows how much value the next pound delivers in this move's context */
   marginalMultiplier?: number;
   /** Liquidity tier: how quickly the savings from this move can be accessed */
@@ -125,8 +120,6 @@ export function rankMoves(
 ): RankedMove[] {
   if (!decisionStack || decisionStack.length === 0) return [];
 
-  const ukpf = determineFlowchartPosition(profile, goals, debtAccounts, identity);
-
   // Compute volatility once for all moves
   let vol: VolatilityProfile | null = null;
   if (profile.budgetReality) {
@@ -140,16 +133,10 @@ export function rankMoves(
     bufferRec = { months: rec.months, amount: rec.amount };
   }
 
-  const scored: RankedMove[] = decisionStack.map((move, idx) => {
-    // Base score: annual impact normalised
-    let score = move.annualImpact / 100;
-
-    // Effort multiplier — easy wins score higher
-    if (move.effort === 'low') score *= 1.3;
-    else if (move.effort === 'high') score *= 0.8;
-
-    // Liquidity-adjusted marginal utility — CRRA diminishing returns
-    // with liquidity tier discounts and variance-adjusted reference points
+  const scored: RankedMove[] = decisionStack.map((move) => {
+    // Score = annual impact × liquidity-adjusted marginal utility
+    // The marginal utility already encodes urgency (CRRA gamma per category),
+    // liquidity accessibility, tax efficiency, and debt-closing bonuses.
     const { multiplier: marginal, liquidityTier } = calcMoveMarginalUtility(
       move,
       profile as FinancialProfile,
@@ -158,33 +145,8 @@ export function rankMoves(
       debtAccounts,
       bufferRec,
     );
-    score *= marginal;
+    const score = (move.annualImpact / 100) * marginal;
 
-    // UKPF tiebreaker — small boost for matching the user's flowchart priority
-    const moveCategory = move.category || 'spending';
-    if (moveCategory === ukpf.priority) {
-      score *= 1.15;
-    }
-
-    // Goal alignment boost
-    if (goals?.one_year_goal === 'clear_debt' && moveCategory === 'debt') score *= 1.3;
-    if (goals?.one_year_goal === 'emergency_fund' && moveCategory === 'buffer') score *= 1.3;
-    if (goals?.one_year_goal === 'reduce_spending' && moveCategory === 'spending') score *= 1.3;
-    if (goals?.one_year_goal === 'save_target' && moveCategory === 'savings') score *= 1.3;
-    if (goals?.one_year_goal === 'invest' && moveCategory === 'invest') score *= 1.3;
-
-    // Monte Carlo consistency — reward reliable moves
-    let riskAdjustedImpact: number | undefined;
-    let consistencyScore: number | undefined;
-    if (vol) {
-      const mc = calcMoveConsistency(move, vol, 456 + idx);
-      riskAdjustedImpact = mc.expectedMonthly;
-      consistencyScore = mc.consistencyScore;
-      // Blend: 70% marginal-utility score + 30% consistency-adjusted score
-      score = score * 0.7 + (mc.expectedMonthly / 100) * mc.consistencyScore * 0.3 * 100;
-    }
-
-    // Calculate trajectory for this move (with Monte Carlo if profile available)
     const trajectory = calcGoalTrajectory(profile, goals, move, identity);
 
     return {
@@ -192,30 +154,13 @@ export function rankMoves(
       rank: 0,
       trajectory,
       ukpfScore: score,
-      riskAdjustedImpact,
-      consistencyScore,
       marginalMultiplier: marginal,
       liquidityTier,
     };
   });
 
-  // Sort by UKPF-weighted score (now includes consistency)
+  // Sort by liquidity-adjusted impact — biggest real impact wins
   scored.sort((a, b) => b.ukpfScore - a.ukpfScore);
-
-  // ── Category diversity enforcement ──
-  // Ensure top 5 moves span at least 2 categories. If the top 5 are all
-  // one category, promote the highest-scoring move from a different category.
-  if (scored.length >= 5) {
-    const top5Categories = new Set(scored.slice(0, 5).map(m => m.category || 'spending'));
-    if (top5Categories.size < 2) {
-      const dominantCat = scored[0].category || 'spending';
-      const altIdx = scored.findIndex((m, i) => i >= 5 && (m.category || 'spending') !== dominantCat);
-      if (altIdx > 0) {
-        const [alt] = scored.splice(altIdx, 1);
-        scored.splice(4, 0, alt); // Insert at position 5
-      }
-    }
-  }
 
   // Assign ranks
   scored.forEach((m, i) => { m.rank = i + 1; });
