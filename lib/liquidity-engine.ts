@@ -438,6 +438,43 @@ function calcTaxEfficiencyMultiplier(
   return 1.0;
 }
 
+// ── Opportunity Cost Multiplier ──
+// Compares effective return of a move to the risk-free rate.
+// Paying 39.9% debt = 39.9% guaranteed return → much higher than 4.5% savings.
+
+export function calcOpportunityCostMultiplier(
+  move: Move,
+  profile: FinancialProfile,
+  debtAccounts?: any[],
+): number {
+  const cat = move.category || 'spending';
+  const boeRate = 0.045; // risk-free baseline (BOE base rate)
+
+  if (cat === 'debt') {
+    // Effective return = APR of the debt being targeted
+    const debts = debtAccounts || [];
+    const highestAPR = debts.reduce((max: number, d: any) => {
+      const apr = d.interest_rate || 0;
+      return apr > max ? apr : max;
+    }, 0.079); // floor at personal loan rate
+    return Math.min(3.0, highestAPR / boeRate); // cap at 3x to avoid extreme distortion
+  }
+
+  if (cat === 'savings' || cat === 'buffer') {
+    // Effective return = best savings rate available
+    return 1.0; // savings rate ≈ base rate → 1x multiplier
+  }
+
+  if (cat === 'invest') {
+    // Expected equity return minus risk discount
+    const expectedReturn = 0.07; // long-run UK equity ~7%
+    const riskDiscount = 0.02;   // volatility penalty
+    return Math.max(1.0, (expectedReturn - riskDiscount) / boeRate);
+  }
+
+  return 1.0; // spending moves: no rate comparison
+}
+
 // ── Spending-Category Utility (for the budget solver) ──
 
 /**

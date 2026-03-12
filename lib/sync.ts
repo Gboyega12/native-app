@@ -8,6 +8,7 @@ import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
 import { runReactiveEngine, type ReactiveResult } from '@/lib/reactive-engine';
 import type { Analysis, Goals, EnrichedTransaction, FinancialProfile } from '@/lib/types';
+import { DEFAULT_APR, defaultMinimumPayment } from '@/lib/constants';
 
 export interface IncomeEvent {
   source: string;
@@ -347,12 +348,18 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         if (!Array.isArray(row.card_balances)) continue;
         for (const card of row.card_balances) {
           const cardName = card.name || row.provider_name || 'Card';
+          const acctType = card.type || 'credit_card';
+          const defaultApr = DEFAULT_APR[acctType] ?? DEFAULT_APR.credit_card;
+          const defaultMin = defaultMinimumPayment(acctType, card.balance || 0);
           const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
             user_id: userId,
             account_name: cardName,
-            account_type: card.type || 'credit_card',
+            account_type: acctType,
             outstanding_balance: card.balance,
             credit_limit: card.limit,
+            interest_rate: defaultApr,
+            minimum_payment: defaultMin,
+            is_default_apr: true,
             source: 'truelayer',
             last_updated: new Date().toISOString(),
           }, { onConflict: 'user_id,account_name' });
@@ -377,7 +384,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     const [debtRes, idRes] = await Promise.all([
       supabase
         .from('debt_accounts')
-        .select('account_name, account_type, outstanding_balance, credit_limit')
+        .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, is_default_apr')
         .eq('user_id', userId),
       supabase
         .from('user_identity')

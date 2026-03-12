@@ -8,7 +8,7 @@ import {
   calcMoveConsistency,
   type VolatilityProfile,
 } from './monte-carlo.js';
-import { calcMoveMarginalUtility } from './liquidity-engine.js';
+import { calcMoveMarginalUtility, calcOpportunityCostMultiplier } from './liquidity-engine.js';
 
 const GOAL_LABELS: Record<string, string> = {
   clear_debt: 'Clear all debt',
@@ -144,9 +144,10 @@ export function rankMoves(
     // Base score: annual impact normalised
     let score = move.annualImpact / 100;
 
-    // Effort multiplier — easy wins score higher
-    if (move.effort === 'low') score *= 1.3;
-    else if (move.effort === 'high') score *= 0.8;
+    // Effort multiplier — decoupled from scoring when spending CV is available.
+    // Keep a mild preference for easy wins, but don't distort rankings.
+    if (move.effort === 'low') score *= 1.1;
+    else if (move.effort === 'high') score *= 0.95;
 
     // Liquidity-adjusted marginal utility — CRRA diminishing returns
     // with liquidity tier discounts and variance-adjusted reference points
@@ -160,24 +161,55 @@ export function rankMoves(
     );
     score *= marginal;
 
-    // UKPF tiebreaker — small boost for matching the user's flowchart priority
+    // Opportunity cost: rate-of-return comparison (debt APR vs savings rate vs equity)
+    const opportunityCost = calcOpportunityCostMultiplier(move, profile as FinancialProfile, debtAccounts);
+    score *= opportunityCost;
+
+    // UKPF priority — cost-of-inaction boost (replaces flat ×1.15)
     const moveCategory = move.category || 'spending';
     if (moveCategory === ukpf.priority) {
-      score *= 1.15;
+      const annualIncome = Math.max(1, (profile.monthly?.income || 0) * 12);
+      let ukpfBoost = 1.0;
+      if (ukpf.priority === 'debt' && moveCategory === 'debt') {
+        // Cost of not paying debt: highest APR × balance / income
+        const highestAPR = (debtAccounts || []).reduce((max: number, d: any) => Math.max(max, d.interest_rate || 0), 0.079);
+        const monthlyBalance = (debtAccounts || []).reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+        ukpfBoost = 1 + (highestAPR * monthlyBalance / annualIncome);
+      } else if (ukpf.priority === 'buffer' && moveCategory === 'buffer') {
+        // Cost of no buffer: expected emergency cost × probability / income
+        const emergencyProb = vol?.emergencyRate || 0.083;
+        const emergencyCost = vol?.emergencyCost || (profile.monthly?.spending || 500) * 0.6;
+        ukpfBoost = 1 + (emergencyProb * 12 * emergencyCost / annualIncome);
+      } else {
+        ukpfBoost = 1.15; // default for non-debt/buffer priorities
+      }
+      score *= Math.min(1.5, Math.max(1.0, ukpfBoost));
     }
 
-    // Goal alignment boost
-    if (goals?.one_year_goal === 'clear_debt' && moveCategory === 'debt') score *= 1.3;
-    if (goals?.one_year_goal === 'emergency_fund' && moveCategory === 'buffer') score *= 1.3;
-    if (goals?.one_year_goal === 'reduce_spending' && moveCategory === 'spending') score *= 1.3;
-    if (goals?.one_year_goal === 'save_target' && moveCategory === 'savings') score *= 1.3;
-    if (goals?.one_year_goal === 'invest' && moveCategory === 'invest') score *= 1.3;
+    // Goal alignment — months-shaved ratio (replaces flat ×1.3)
+    const goalCategory = goals?.one_year_goal === 'clear_debt' ? 'debt'
+      : goals?.one_year_goal === 'emergency_fund' ? 'buffer'
+      : goals?.one_year_goal === 'reduce_spending' ? 'spending'
+      : goals?.one_year_goal === 'save_target' ? 'savings'
+      : goals?.one_year_goal === 'invest' ? 'invest'
+      : null;
+    if (goalCategory && moveCategory === goalCategory) {
+      // Estimate months saved: annualImpact / (monthlyImpact * 12) gives acceleration ratio
+      const goalTarget = GOAL_DEFAULTS[goals!.one_year_goal] || 5000;
+      const currentMonths = profile.monthly?.surplus > 0 ? goalTarget / profile.monthly.surplus : 24;
+      const monthsSaved = move.monthlyImpact > 0 ? goalTarget / move.monthlyImpact : 0;
+      const goalBoost = currentMonths > 0 ? 1 + Math.min(0.5, monthsSaved / currentMonths) : 1.0;
+      score *= goalBoost;
+    }
 
     // Monte Carlo consistency — reward reliable moves
     let riskAdjustedImpact: number | undefined;
     let consistencyScore: number | undefined;
     if (vol) {
-      const mc = calcMoveConsistency(move, vol, 456 + idx);
+      // Derive spending CV from volatility profile for spending moves
+      const discretionary = profile.budgetReality?.discretionary?.total || 1;
+      const spendingCV = discretionary > 0 ? vol.discretionarySD / discretionary : undefined;
+      const mc = calcMoveConsistency(move, vol, 456 + idx, moveCategory === 'spending' ? spendingCV : undefined);
       riskAdjustedImpact = mc.expectedMonthly;
       consistencyScore = mc.consistencyScore;
       // Blend: 70% marginal-utility score + 30% consistency-adjusted score

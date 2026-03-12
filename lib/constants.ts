@@ -43,6 +43,42 @@ export const MOVE_THRESHOLDS = {
   isaAnnualLimit: 20000,             // Total ISA allowance per tax year
 } as const;
 
+// ── Default APR by debt type ──
+// Used when TrueLayer doesn't provide interest rates. Based on UK market averages.
+export const DEFAULT_APR: Record<string, number> = {
+  credit_card: 0.399,      // 39.9% typical UK credit card
+  store_card: 0.399,       // 39.9% store cards
+  overdraft: 0.399,        // 39.9% EAR arranged overdraft
+  personal_loan: 0.079,    // 7.9% representative APR
+  car_finance: 0.089,      // 8.9% PCP/HP typical
+  student_loan: 0.077,     // Plan 2: RPI + 3% (variable, ~7.7% 2024)
+  bnpl: 0,                 // Buy Now Pay Later — 0% if paid on time
+};
+
+// ── Default minimum payment rules by debt type ──
+// Returns monthly minimum payment given a balance.
+export function defaultMinimumPayment(accountType: string, balance: number): number {
+  if (balance <= 0) return 0;
+  switch (accountType) {
+    case 'credit_card':
+    case 'store_card':
+      return Math.max(25, Math.round(balance * 0.025)); // max(£25, 2.5%)
+    case 'overdraft':
+      // Interest-only: monthly interest on the balance
+      return Math.round(balance * (DEFAULT_APR.overdraft / 12));
+    case 'personal_loan':
+    case 'car_finance':
+    case 'student_loan':
+      // Fixed-term: assume 36-month term
+      return Math.round(balance / 36);
+    case 'bnpl':
+      // Fixed instalments: assume 3-month split
+      return Math.round(balance / 3);
+    default:
+      return Math.max(25, Math.round(balance * 0.025));
+  }
+}
+
 // ── Platform fee schedule ──
 // Published annual platform/custody fees for known UK investment providers.
 // Source: provider fee pages (public). Expressed as annual % of holdings.

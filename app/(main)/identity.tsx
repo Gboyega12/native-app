@@ -11,7 +11,7 @@ import { AnimGlyph } from '@/components/Card';
 import { hapticLight } from '@/lib/haptics';
 import type {
   WorkSetup, HouseholdType, HousingStatus, FinancialExperience,
-  RiskAppetite, Priority, UpcomingEvent, Dependent,
+  RiskAppetite, Priority, UpcomingEvent, UpcomingEventType, Dependent,
 } from '@/lib/types';
 
 const CARD_GAP = 10;
@@ -156,6 +156,7 @@ export default function Identity() {
   const [experience, setExperience] = useState<string>('');
   const [priorities, setPriorities] = useState<string[]>([]);
   const [events, setEvents] = useState<string[]>([]);
+  const [eventTimelines, setEventTimelines] = useState<Record<string, number | null>>({});
   const [risk, setRisk] = useState<string>('');
   const [dependents, setDependents] = useState<string[]>([]);
 
@@ -254,7 +255,10 @@ export default function Identity() {
           financial_experience: experience,
           risk_appetite: risk,
           priorities,
-          upcoming_events: events.filter((e) => e !== 'none'),
+          upcoming_events: events.filter((e) => e !== 'none').map((e) => {
+            const months = eventTimelines[e];
+            return months != null ? { type: e, months_away: months } : e;
+          }),
           dependents: dependents.filter((d) => d !== 'none'),
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
@@ -428,6 +432,58 @@ export default function Identity() {
               );
             })}
           </View>
+
+          {/* Timeline picker: show for events that benefit from a timeline */}
+          {step === 5 && (() => {
+            const TIMELINE_EVENTS = ['baby', 'moving', 'wedding'];
+            const TIMELINE_OPTIONS = [
+              { label: '1\u20132 months', value: 1.5 },
+              { label: '3\u20135 months', value: 4 },
+              { label: '6\u20139 months', value: 7.5 },
+              { label: 'Not sure', value: null },
+            ];
+            const selectedTimeline = events.filter((e) => e !== 'none' && TIMELINE_EVENTS.includes(e));
+            if (selectedTimeline.length === 0) return null;
+            return (
+              <View style={{ marginTop: 16 }}>
+                {selectedTimeline.map((eventKey) => (
+                  <View key={eventKey} style={{ marginBottom: 12 }}>
+                    <Text style={[styles.hint, { marginBottom: 6, fontFamily: fonts.medium }]}>
+                      {eventKey === 'baby' ? 'Baby' : eventKey === 'moving' ? 'Moving' : 'Wedding'} — roughly when?
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                      {TIMELINE_OPTIONS.map((opt) => {
+                        const current = eventTimelines[eventKey];
+                        const isSel = current === opt.value;
+                        return (
+                          <TouchableOpacity
+                            key={opt.label}
+                            onPress={() => {
+                              hapticLight();
+                              setEventTimelines((prev) => ({ ...prev, [eventKey]: opt.value }));
+                            }}
+                            style={{
+                              paddingHorizontal: 12, paddingVertical: 6,
+                              borderRadius: radius.sm,
+                              backgroundColor: isSel ? colors.accent : colors.card,
+                              borderWidth: 1,
+                              borderColor: isSel ? colors.accent : colors.border,
+                            }}
+                          >
+                            <Text style={{
+                              fontFamily: fonts.medium, fontSize: 13,
+                              color: isSel ? colors.bg : colors.muted,
+                            }}>{opt.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
+
         </Animated.View>
       </ScrollView>
 

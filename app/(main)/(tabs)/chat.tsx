@@ -2612,7 +2612,10 @@ function buildHouseholdCashflow(
   if (!a || !identity || !a.monthly_income) return null;
   // Only add household cashflow for non-single households or users with upcoming events
   const household = identity.household || 'single';
-  const hasEvents = identity.upcoming_events?.some((e: string) => e !== 'none');
+  const hasEvents = identity.upcoming_events?.some((e: any) => {
+    const evtType = typeof e === 'string' ? e : e?.type || '';
+    return evtType !== 'none';
+  });
   const hasDeps = identity.dependents?.some((d: string) => d !== 'none');
   if (household === 'single' && !hasEvents && !hasDeps) return null;
 

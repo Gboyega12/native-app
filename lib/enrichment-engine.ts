@@ -5,7 +5,8 @@ import {
 import { classifyTransaction } from './classifier.js';
 import { normaliseDescription } from './normalise.js';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes.js';
-import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS, PLATFORM_FEES } from './constants.js';
+import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS, PLATFORM_FEES, DEFAULT_APR, defaultMinimumPayment } from './constants.js';
+import { calcInterestSaved, calcPayoffMonths, calcTotalInterest } from './amortisation.js';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -1051,9 +1052,17 @@ const EnrichmentEngine = {
     const wantsGrowth = (id.priorities || []).includes('growth');
     const wantsFreedom = (id.priorities || []).includes('freedom');
     const wantsExperiences = (id.priorities || []).includes('experiences');
-    const buyingHome = (id.upcoming_events || []).includes('first_home');
-    const havingBaby = (id.upcoming_events || []).includes('baby');
-    const changingCareer = (id.upcoming_events || []).includes('career_change');
+    // Parse events: support both string ('baby') and structured ({ type: 'baby', months_away: 4 })
+    const rawEvents: any[] = id.upcoming_events || [];
+    const getEventType = (e: any): string => typeof e === 'string' ? e : e?.type || '';
+    const getEventMonths = (e: any): number | null => typeof e === 'object' && e?.months_away != null ? e.months_away : null;
+    const eventTypes = rawEvents.map(getEventType);
+    const buyingHome = eventTypes.includes('first_home');
+    const havingBaby = eventTypes.includes('baby');
+    const changingCareer = eventTypes.includes('career_change');
+    const babyMonths = getEventMonths(rawEvents.find((e: any) => getEventType(e) === 'baby'));
+    const movingMonths = getEventMonths(rawEvents.find((e: any) => getEventType(e) === 'moving'));
+    const weddingMonths = getEventMonths(rawEvents.find((e: any) => getEventType(e) === 'wedding'));
     const isAdvanced = id.financial_experience === 'confident' || id.financial_experience === 'advanced';
 
     // Subscriptions — exclude essential bills + require recurrence proof
@@ -1118,10 +1127,11 @@ const EnrichmentEngine = {
 
     // Food delivery
     if (m.foodDelivery > T.foodDeliveryMin) {
-      const saving = Math.round(m.foodDelivery * T.foodDeliveryCutPct);
+      const cutPct = this._dataDrivenCutPct(txs, 'Delivery', T.foodDeliveryCutPct);
+      const saving = Math.round(m.foodDelivery * cutPct);
       const deliveryMerchants = this._getMerchantsByCategory(txs, 'Delivery');
       const proof = `\u00a3${Math.round(m.foodDelivery)}/mo on delivery (${ANALYSIS_MONTHS}-month avg). `
-        + `${Math.round(T.foodDeliveryCutPct * 100)}% reduction = \u00a3${saving}/mo. `
+        + `${Math.round(cutPct * 100)}% reduction (data-driven) = \u00a3${saving}/mo. `
         + `Target: \u00a3${Math.round(m.foodDelivery - saving)}/mo.`;
       moves.push({
         action: `Cut delivery spend from \u00a3${Math.round(m.foodDelivery)} to \u00a3${Math.round(m.foodDelivery - saving)}/month`,
@@ -1145,11 +1155,12 @@ const EnrichmentEngine = {
 
     // Eating out
     if (m.eatingOut > T.eatingOutMin) {
-      const saving = Math.round(m.eatingOut * T.eatingOutCutPct);
+      const eatingCutPct = this._dataDrivenCutPct(txs, 'Eating Out', T.eatingOutCutPct);
+      const saving = Math.round(m.eatingOut * eatingCutPct);
       const eatingMerchants = this._getMerchantsByCategory(txs, 'Eating Out');
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       const proof = `\u00a3${Math.round(m.eatingOut)}/mo on dining + caf\u00e9s (${ANALYSIS_MONTHS}-month avg). `
-        + `${Math.round(T.eatingOutCutPct * 100)}% reduction = \u00a3${saving}/mo. `
+        + `${Math.round(eatingCutPct * 100)}% reduction (data-driven) = \u00a3${saving}/mo. `
         + `Target: \u00a3${Math.round(m.eatingOut - saving)}/mo.`;
       moves.push({
         action: `Reduce dining out from \u00a3${Math.round(m.eatingOut)} to \u00a3${Math.round(m.eatingOut - saving)}/month`,
@@ -1173,10 +1184,11 @@ const EnrichmentEngine = {
 
     // Shopping
     if (m.shopping > T.shoppingMin) {
-      const saving = Math.round(m.shopping * T.shoppingCutPct);
+      const shoppingCutPct = this._dataDrivenCutPct(txs, 'Shopping', T.shoppingCutPct);
+      const saving = Math.round(m.shopping * shoppingCutPct);
       const shopMerchants = this._getMerchantsByCategory(txs, 'Shopping');
       const proof = `\u00a3${Math.round(m.shopping)}/mo on shopping (${ANALYSIS_MONTHS}-month avg). `
-        + `${Math.round(T.shoppingCutPct * 100)}% cap = \u00a3${saving}/mo freed. `
+        + `${Math.round(shoppingCutPct * 100)}% reduction (data-driven) = \u00a3${saving}/mo freed. `
         + `Target: \u00a3${Math.round(m.shopping - saving)}/mo.`;
       moves.push({
         action: `Cap non-essential shopping at \u00a3${Math.round(m.shopping - saving)}/month`,
@@ -1210,13 +1222,19 @@ const EnrichmentEngine = {
     const isMediumUtil = overallUtil > 30 && overallUtil <= 75;
     const isHighUtil = overallUtil > 75;
 
-    // Estimate minimum payment when TrueLayer doesn't provide it (~2.5% of balance, min £25)
+    // Get minimum payment: use stored value, else compute from debt type defaults
     const estimateMinimum = (d: any): number => {
       if (!d) return 0;
       if (d.minimum_payment && d.minimum_payment > 0) return d.minimum_payment;
       const bal = d.outstanding_balance || 0;
       if (bal <= 0) return 0;
-      return Math.max(25, Math.round(bal * 0.025));
+      return defaultMinimumPayment(d.account_type || 'credit_card', bal);
+    };
+
+    // Get APR: use stored value, else fall back to type-based default
+    const getAPR = (d: any): number => {
+      if (d?.interest_rate != null && d.interest_rate > 0) return d.interest_rate;
+      return DEFAULT_APR[d?.account_type || 'credit_card'] ?? DEFAULT_APR.credit_card;
     };
 
     // Use the higher of transaction-detected debt count or actual debt accounts
@@ -1240,26 +1258,32 @@ const EnrichmentEngine = {
           effect: `Earn more from spending you're already doing.`,
         });
       } else {
-        // Real surplus-based snowball payment calculation
-        // Sort debts smallest balance first (snowball order), excluding £0 balances
-        const sortedDebts = [...activeDebts].sort((a, b) => (a.outstanding_balance || 0) - (b.outstanding_balance || 0));
-        const smallestDebt = sortedDebts[0];
-        const smallestName = debtDisplayName(smallestDebt || {});
-        const smallestBalance = Math.round(smallestDebt?.outstanding_balance || 0);
-        const smallestMin = Math.round(estimateMinimum(smallestDebt));
+        // Avalanche method: sort highest interest rate first to minimise total interest
+        // Fall back to smallest balance (snowball tiebreaker) when rates are equal
+        const sortedDebts = [...activeDebts].sort((a, b) => {
+          const rateA = getAPR(a);
+          const rateB = getAPR(b);
+          if (rateB !== rateA) return rateB - rateA; // highest rate first
+          return (a.outstanding_balance || 0) - (b.outstanding_balance || 0); // tiebreak: smallest balance
+        });
+        const targetDebt = sortedDebts[0];
+        const targetName = debtDisplayName(targetDebt || {});
+        const targetBalance = Math.round(targetDebt?.outstanding_balance || 0);
+        const targetMin = Math.round(estimateMinimum(targetDebt));
+        const targetAPR = getAPR(targetDebt);
         // Minimums on all other debts
         const otherMinimums = sortedDebts.slice(1).reduce((s, d) => s + Math.round(estimateMinimum(d)), 0);
-        // Direct all available surplus to the smallest debt on top of its minimum
+        // Direct all available surplus to the highest-rate debt on top of its minimum
         const surplusForDebt = Math.max(0, p.surplus);
         const realPayment = Math.min(
-          Math.round(smallestMin + surplusForDebt),
-          smallestBalance, // Never exceed the remaining balance
+          Math.round(targetMin + surplusForDebt),
+          targetBalance, // Never exceed the remaining balance
         );
         // If surplus is 0, at least recommend the minimum payment
-        const recommendedPayment = Math.max(realPayment, smallestMin);
-        const monthsToClear = recommendedPayment > 0 ? Math.ceil(smallestBalance / recommendedPayment) : 0;
-        // Interest savings estimate (kept for annualImpact — the actual financial benefit)
-        const interestSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
+        const recommendedPayment = Math.max(realPayment, targetMin);
+        const monthsToClear = calcPayoffMonths(targetBalance, targetAPR, recommendedPayment);
+        // Real interest savings from overpaying: compare minimum-only vs recommended payment
+        const interestSaving = Math.round(calcInterestSaved(targetBalance, targetAPR, targetMin, recommendedPayment) / 12);
         const debtSubGoals: MoveSubGoal[] = sortedDebts.map((d) => ({
           type: 'debt_clear' as const,
           target: debtDisplayName(d),
@@ -1269,21 +1293,21 @@ const EnrichmentEngine = {
 
         const proof = `Surplus: \u00a3${Math.round(surplusForDebt)}/mo. `
           + `Minimums on ${sortedDebts.length - 1} other debt${sortedDebts.length > 2 ? 's' : ''}: \u00a3${otherMinimums}/mo. `
-          + `${smallestName} minimum: \u00a3${smallestMin}/mo. `
-          + `Recommended payment: \u00a3${smallestMin} min + \u00a3${Math.round(surplusForDebt)} surplus = \u00a3${recommendedPayment}/mo`
-          + (recommendedPayment >= smallestBalance ? ` (capped at \u00a3${smallestBalance} balance)` : '')
-          + `. Clears \u00a3${smallestBalance} in ${monthsToClear} month${monthsToClear !== 1 ? 's' : ''}.`;
+          + `${targetName} (${Math.round(targetAPR * 100)}% APR) minimum: \u00a3${targetMin}/mo. `
+          + `Recommended payment: \u00a3${targetMin} min + \u00a3${Math.round(surplusForDebt)} surplus = \u00a3${recommendedPayment}/mo`
+          + (recommendedPayment >= targetBalance ? ` (capped at \u00a3${targetBalance} balance)` : '')
+          + `. Clears \u00a3${targetBalance} in ${monthsToClear} month${monthsToClear !== 1 ? 's' : ''}.`;
 
         moves.push({
-          action: `Pay \u00a3${recommendedPayment} to ${smallestName} and clear \u00a3${smallestBalance} in ${monthsToClear} months`,
+          action: `Pay \u00a3${recommendedPayment} to ${targetName} and clear \u00a3${targetBalance} in ${monthsToClear} months`,
           annualImpact: interestSaving * 12,
           monthlyImpact: recommendedPayment,
           effort: 'high',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `${actualDebtCount} debt accounts. Smallest: ${smallestName} (\u00a3${smallestBalance}).${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% which is hurting your credit score.` : ''} Snowball method: clear smallest first, then roll payments into next debt.`,
-          steps: ['Pay minimums on all debts except the smallest', `Direct \u00a3${recommendedPayment}/month at ${smallestName}`, `When it's cleared in ~${monthsToClear} months, roll that \u00a3${recommendedPayment} into the next debt`, 'I\'ll track your progress and adjust automatically'],
-          effect: `Clears ${smallestName} in ${monthsToClear} months. Saves \u00a3${interestSaving * 12}/year in interest across all debts.`,
+          strategy: `${actualDebtCount} debt accounts. Highest rate: ${targetName} at ${Math.round(targetAPR * 100)}% APR (\u00a3${targetBalance}).${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% which is hurting your credit score.` : ''} Avalanche method: clear highest-rate debt first to minimise total interest.`,
+          steps: ['Pay minimums on all debts except the highest-rate one', `Direct \u00a3${recommendedPayment}/month at ${targetName}`, `When it's cleared in ~${monthsToClear} months, roll that \u00a3${recommendedPayment} into the next highest-rate debt`, 'I\'ll track your progress and adjust automatically'],
+          effect: `Clears ${targetName} in ${monthsToClear} months. Saves \u00a3${interestSaving * 12}/year in interest across all debts.`,
           subGoals: debtSubGoals.length > 0 ? debtSubGoals : undefined,
           proof,
         });
@@ -1310,13 +1334,14 @@ const EnrichmentEngine = {
         const singleName = debtDisplayName(singleDebt || {});
         const singleBalance = Math.round(singleDebt?.outstanding_balance || 0);
         const singleMin = Math.round(estimateMinimum(singleDebt));
+        const singleAPR = getAPR(singleDebt);
         // Compute real overpayment from surplus, capped sensibly
         const surplusAlloc = Math.round(Math.min(Math.max(0, p.surplus) * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
         const totalPayment = Math.min(singleMin + surplusAlloc, singleBalance);
         const recommendedPayment = Math.max(totalPayment, singleMin);
-        const monthsToClear = recommendedPayment > 0 ? Math.ceil(singleBalance / recommendedPayment) : 0;
-        // Interest savings estimate for annualImpact
-        const interestSaving = Math.round(p.debtPayments * T.singleDebtOverpayPct);
+        const monthsToClear = calcPayoffMonths(singleBalance, singleAPR, recommendedPayment);
+        // Real interest saving from overpaying vs minimum-only
+        const interestSaving = Math.round(calcInterestSaved(singleBalance, singleAPR, singleMin, recommendedPayment) / 12);
 
         const proof = `${singleName} balance: \u00a3${singleBalance}. Minimum: \u00a3${singleMin}/mo. `
           + `Surplus allocation: \u00a3${surplusAlloc}/mo (${Math.round(T.singleDebtOverpayMaxSurplusPct * 100)}% of \u00a3${Math.round(Math.max(0, p.surplus))} surplus, capped at \u00a3${T.singleDebtOverpayCap}). `
@@ -1330,7 +1355,7 @@ const EnrichmentEngine = {
           effort: 'medium',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `${singleName}: \u00a3${singleBalance} balance.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}%, priority to reduce this.` : ''} Overpaying clears it ${monthsToClear > 0 ? `in ${monthsToClear} months` : 'faster'}.`,
+          strategy: `${singleName}: \u00a3${singleBalance} at ${Math.round(singleAPR * 100)}% APR.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}%, priority to reduce this.` : ''} Overpaying clears it ${monthsToClear > 0 ? `in ${monthsToClear} months` : 'faster'}.`,
           steps: ['Check if overpayments are allowed without penalty', `Set up \u00a3${recommendedPayment}/month standing order`, 'I\'ll redirect savings from other moves into this automatically'],
           effect: `Clears \u00a3${singleBalance} in ${monthsToClear} months. Saves \u00a3${interestSaving * 12}/year in interest.`,
           proof,
@@ -1353,8 +1378,9 @@ const EnrichmentEngine = {
       const estimatedBalance = Math.round(p.debtPayments * 12);
       const surplusAlloc = Math.round(Math.min(Math.max(0, p.surplus) * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
       const recommendedPayment = Math.max(Math.round(p.debtPayments + surplusAlloc), Math.round(p.debtPayments));
-      const monthsToClear = recommendedPayment > 0 ? Math.ceil(estimatedBalance / recommendedPayment) : 0;
-      const interestSaving = Math.round(p.debtPayments * 0.19); // assume ~19% APR for unsecured debt
+      const fallbackAPR = DEFAULT_APR.credit_card; // use credit card default when no account data
+      const monthsToClear = calcPayoffMonths(estimatedBalance, fallbackAPR, recommendedPayment);
+      const interestSaving = Math.round(calcInterestSaved(estimatedBalance, fallbackAPR, Math.round(p.debtPayments), recommendedPayment) / 12);
 
       const proof = `£${Math.round(p.debtPayments)}/mo detected in debt payments across ${m.debtAccountCount} account${m.debtAccountCount !== 1 ? 's' : ''}. `
         + `No balance data available — connect your credit card for a precise payoff plan. `
@@ -1413,7 +1439,8 @@ const EnrichmentEngine = {
       const optimisableTransport = Math.max(0, Math.round(m.transport) - commuteMonthly - oneTimeTravelMonthly);
       const isOfficeWorker = !isHybrid; // full-time office if not hybrid and not remote
 
-      const cutPct = isHybrid ? T.transportCutPct * 0.5 : T.transportCutPct;
+      const baseCutPct = this._dataDrivenCutPct(txs, 'Transport', T.transportCutPct);
+      const cutPct = isHybrid ? baseCutPct * 0.5 : baseCutPct;
 
       if (optimisableTransport > 20) {
         // There's meaningful discretionary transport to cut (Uber, taxis, etc.)
@@ -1913,10 +1940,11 @@ const EnrichmentEngine = {
 
     // Coffee
     if (m.coffeeAndCafes > T.coffeeMin) {
-      const saving = Math.round(m.coffeeAndCafes * T.coffeeCutPct);
+      const coffeeCutPct = this._dataDrivenCutPct(txs, 'Coffee & Cafes', T.coffeeCutPct);
+      const saving = Math.round(m.coffeeAndCafes * coffeeCutPct);
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       const coffeeProof = `\u00a3${Math.round(m.coffeeAndCafes)}/mo on caf\u00e9s (${ANALYSIS_MONTHS}-month avg). `
-        + `${Math.round(T.coffeeCutPct * 100)}% reduction = \u00a3${saving}/mo. `
+        + `${Math.round(coffeeCutPct * 100)}% reduction (data-driven) = \u00a3${saving}/mo. `
         + `Target: \u00a3${Math.round(m.coffeeAndCafes - saving)}/mo.`;
       moves.push({
         action: `Halve caf\u00e9 spending from \u00a3${Math.round(m.coffeeAndCafes)} to \u00a3${Math.round(m.coffeeAndCafes - saving)}/month`,
@@ -1963,17 +1991,28 @@ const EnrichmentEngine = {
     }
 
     if (havingBaby && p.surplus > 0) {
-      const parentalRunway = Math.round(p.spending * 3);
+      // Timeline-scaled parental runway
+      let runwayMonths: number;
+      let effort: 'low' | 'medium' | 'high';
+      let urgencyNote: string;
+      if (babyMonths != null && babyMonths <= 3) {
+        runwayMonths = 1; effort = 'low'; urgencyNote = `You have ~${Math.round(babyMonths)} months — focus on building a minimum runway.`;
+      } else if (babyMonths != null && babyMonths <= 6) {
+        runwayMonths = 2; effort = 'medium'; urgencyNote = `~${Math.round(babyMonths)} months to go — good time to build a solid buffer.`;
+      } else {
+        runwayMonths = 3; effort = 'medium'; urgencyNote = 'With time on your side, aim for a full 3-month runway.';
+      }
+      const parentalRunway = Math.round(p.spending * runwayMonths);
       moves.push({
         action: `Build a \u00a3${parentalRunway.toLocaleString()} parental leave runway`,
         annualImpact: Math.round(parentalRunway),
         monthlyImpact: Math.round(parentalRunway / 12),
-        effort: 'medium',
+        effort,
         category: 'buffer',
         merchants: [],
-        strategy: 'With a baby on the way, you\'ll want 3 months of expenses saved to cover reduced income during parental leave.',
+        strategy: `${urgencyNote} Target: ${runwayMonths} month${runwayMonths > 1 ? 's' : ''} of expenses saved to cover reduced income during parental leave.`,
         steps: ['Calculate your expected statutory/employer maternity/paternity pay', 'Work out the monthly shortfall vs current spending', 'Set aside the difference now while you can', 'I\'ll model the income change for you'],
-        effect: `\u00a3${parentalRunway.toLocaleString()} runway covers 3 months of expenses.`,
+        effect: `\u00a3${parentalRunway.toLocaleString()} runway covers ${runwayMonths} month${runwayMonths > 1 ? 's' : ''} of expenses.`,
         subGoals: [{
           type: 'buffer_build',
           target: 'Parental leave runway',
@@ -2317,6 +2356,27 @@ const EnrichmentEngine = {
       /\bremittance\b/,
     ];
     return patterns.some((rx) => rx.test(lower));
+  },
+
+  /** Compute data-driven cut percentage for a spending category.
+   *  Uses month-to-month variance: achievable reduction = 1 - (min/avg), capped at 0.5.
+   *  Falls back to the constant if < 3 months of data. */
+  _dataDrivenCutPct(txs: EnrichedTransaction[], category: string, fallbackPct: number): number {
+    // Group spending by YYYY-MM
+    const byMonth: Record<string, number> = {};
+    for (const t of txs) {
+      if (t.category === category && !t.isIncome && !t.isTransfer && !t.isRefund && t.amount < 0) {
+        const month = t.date.slice(0, 7); // 'YYYY-MM'
+        byMonth[month] = (byMonth[month] || 0) + Math.abs(t.amount);
+      }
+    }
+    const months = Object.values(byMonth);
+    if (months.length < 3) return fallbackPct; // insufficient data
+    const avg = months.reduce((s, v) => s + v, 0) / months.length;
+    if (avg <= 0) return fallbackPct;
+    const min = Math.min(...months);
+    const achievable = 1 - (min / avg);
+    return Math.min(0.5, Math.max(0.05, achievable)); // floor 5%, cap 50%
   },
 
   _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {

@@ -92,11 +92,30 @@ export function estimateVolatility(
     if (hasIrregular) incomeCV = Math.max(incomeCV, 0.15);
   }
 
-  // Essential spending: low variance (rent/mortgage are fixed, utilities predictable)
-  const essentialCV = 0.08;
+  // Spending CVs: use real data if available (from budget reality items),
+  // fall back to heuristic estimates.
+  let essentialCV = 0.08; // default: low variance (rent/mortgage are fixed)
+  let discretionaryCV = 0.22; // default: higher variance (varies by month)
 
-  // Discretionary spending: higher variance (varies by month, mood, events)
-  const discretionaryCV = 0.22;
+  // If we have per-category item data, compute actual CV from monthly totals
+  const essentialItems = profile.budgetReality?.nonDiscretionary?.items || [];
+  const discretionaryItems = profile.budgetReality?.discretionary?.items || [];
+  if (essentialItems.length >= 3) {
+    const essentialMonthly = essentialItems.map((i: any) => i.monthly || 0);
+    const eMean = essentialMonthly.reduce((s: number, v: number) => s + v, 0) / essentialMonthly.length;
+    if (eMean > 0) {
+      const eVar = essentialMonthly.reduce((s: number, v: number) => s + (v - eMean) ** 2, 0) / essentialMonthly.length;
+      essentialCV = Math.max(0.02, Math.sqrt(eVar) / eMean); // floor 2%
+    }
+  }
+  if (discretionaryItems.length >= 3) {
+    const discMonthly = discretionaryItems.map((i: any) => i.monthly || 0);
+    const dMean = discMonthly.reduce((s: number, v: number) => s + v, 0) / discMonthly.length;
+    if (dMean > 0) {
+      const dVar = discMonthly.reduce((s: number, v: number) => s + (v - dMean) ** 2, 0) / discMonthly.length;
+      discretionaryCV = Math.max(0.05, Math.sqrt(dVar) / dMean); // floor 5%
+    }
+  }
 
   // Emergency events: ~1 per year (car repair, appliance, medical)
   let emergencyRate = 0.083; // 1/12
@@ -109,10 +128,22 @@ export function estimateVolatility(
     emergencyCost *= 1.3;
   }
 
-  // Upcoming events increase emergency probability
-  const events = identity?.upcoming_events || [];
-  if (events.some((e) => e === 'moving' || e === 'baby' || e === 'wedding')) {
-    emergencyRate += 0.04;
+  // Upcoming events increase emergency probability — scaled by proximity
+  const events: any[] = identity?.upcoming_events || [];
+  const getEvtType = (e: any): string => typeof e === 'string' ? e : e?.type || '';
+  const getEvtMonths = (e: any): number | null => typeof e === 'object' && e?.months_away != null ? e.months_away : null;
+  const timelineEvents = events.filter((e) => {
+    const t = getEvtType(e);
+    return t === 'moving' || t === 'baby' || t === 'wedding';
+  });
+  for (const evt of timelineEvents) {
+    const months = getEvtMonths(evt);
+    if (months != null && months > 0) {
+      // Closer events get a larger emergency rate bump: 0.04 × (6 / months_away)
+      emergencyRate += 0.04 * Math.min(3, 6 / months); // cap at 3x base bump
+    } else {
+      emergencyRate += 0.04; // no timeline — default flat bump
+    }
   }
 
   // Income shock (job loss) probability
@@ -309,16 +340,26 @@ export function calcMoveConsistency(
   move: Move,
   volatility: VolatilityProfile,
   seed: number = 456,
+  categoryCV?: number,
 ): MoveConsistency {
   const rng = createRng(seed);
 
-  // Base follow-through rate by effort level
-  const baseRate: Record<string, number> = {
-    low: 0.88,    // Cancel a subscription — almost certain
-    medium: 0.65, // Reduce grocery spend — some months you slip
-    high: 0.42,   // Major lifestyle change — hard to sustain
-  };
-  const rate = baseRate[move.effort] || 0.65;
+  // Follow-through rate: prefer data-derived from category spending variance.
+  // High CV = spending already fluctuates = easier to change = higher follow-through.
+  // Low CV = steady spend = harder to change = lower follow-through.
+  let rate: number;
+  if (categoryCV != null && categoryCV > 0 && move.category === 'spending') {
+    // Formula: 0.5 base + 0.4 scaled by CV (capped at CV=1.0)
+    rate = Math.min(0.9, 0.5 + 0.4 * Math.min(1.0, categoryCV));
+  } else {
+    // Fallback: effort-based base rates
+    const baseRate: Record<string, number> = {
+      low: 0.88,    // Cancel a subscription — almost certain
+      medium: 0.65, // Reduce grocery spend — some months you slip
+      high: 0.42,   // Major lifestyle change — hard to sustain
+    };
+    rate = baseRate[move.effort] || 0.65;
+  }
 
   // Simulate 12 months of follow-through
   const monthlySavings: number[] = [];
@@ -486,7 +527,9 @@ function buildScenarios(
   vol: VolatilityProfile,
 ): CashflowScenario[] {
   const scenarios: CashflowScenario[] = [];
-  const events = identity?.upcoming_events || [];
+  const rawEvts: any[] = identity?.upcoming_events || [];
+  const evtTypes = rawEvts.map((e: any) => typeof e === 'string' ? e : e?.type || '');
+  const events = evtTypes; // backwards-compatible: array of event type strings
   const deps = identity?.dependents || [];
   const household = identity?.household || 'single';
 

@@ -196,10 +196,41 @@ export function solveBudgetAllocation(
   }
 
   // Split unallocated surplus into buffer, savings, invest
+  // Responsive starting point based on current financial state
   if (surplus > 0) {
-    const bufferShare = surplus * 0.40;
-    const savingsShare = surplus * 0.35;
-    const investShare = surplus * 0.25;
+    const savingsRate = profile.metrics?.savingsRate ?? 0;
+    const hasDebt = profile.monthly.debtPayments > 0;
+    const riskAppetite = identity?.risk_appetite;
+
+    // Determine split based on buffer adequacy (savings rate as proxy)
+    let bufferPct: number;
+    let savingsPct: number;
+    let investPct: number;
+
+    if (savingsRate < 5) {
+      // Near-zero buffer: prioritise buffer heavily
+      bufferPct = 0.70; savingsPct = 0.20; investPct = 0.10;
+    } else if (savingsRate < 15) {
+      // Thin buffer: moderate buffer priority
+      bufferPct = 0.50; savingsPct = 0.30; investPct = 0.20;
+    } else if (hasDebt) {
+      // Adequate buffer but has debt: redirect investment share to debt
+      bufferPct = 0.20; savingsPct = 0.30; investPct = 0.50;
+    } else {
+      // Adequate buffer, no debt: balanced growth
+      bufferPct = 0.20; savingsPct = 0.40; investPct = 0.40;
+    }
+
+    // Risk appetite adjustment
+    if (riskAppetite === 'conservative') {
+      bufferPct += 0.10; investPct -= 0.10;
+    } else if (riskAppetite === 'growth') {
+      investPct += 0.10; bufferPct -= 0.10;
+    }
+
+    const bufferShare = surplus * bufferPct;
+    const savingsShare = surplus * savingsPct;
+    const investShare = surplus * investPct;
 
     slices.push({
       category: 'Buffer',

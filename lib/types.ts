@@ -540,7 +540,20 @@ export type HousingStatus = 'renting' | 'mortgage' | 'with_family' | 'shared_hou
 export type FinancialExperience = 'beginner' | 'basics' | 'confident' | 'advanced';
 export type RiskAppetite = 'conservative' | 'balanced' | 'growth';
 export type Priority = 'security' | 'freedom' | 'growth' | 'experiences' | 'family';
-export type UpcomingEvent = 'moving' | 'baby' | 'wedding' | 'career_change' | 'first_home' | 'business' | 'retirement' | 'none';
+export type UpcomingEventType = 'moving' | 'baby' | 'wedding' | 'career_change' | 'first_home' | 'business' | 'retirement' | 'none';
+
+/** Backwards-compatible: a string event name OR a structured event with timeline */
+export type UpcomingEvent = UpcomingEventType | { type: UpcomingEventType; months_away?: number | null };
+
+/** Helper: extract event type from either string or structured event */
+export function getEventType(e: UpcomingEvent): UpcomingEventType {
+  return typeof e === 'string' ? e : e.type;
+}
+
+/** Helper: extract months_away from structured event (null if string or unset) */
+export function getEventMonths(e: UpcomingEvent): number | null {
+  return typeof e === 'object' && e.months_away != null ? e.months_away : null;
+}
 export type Dependent = 'none' | 'young_children' | 'teenagers' | 'elderly_parents' | 'pets';
 
 export interface UserIdentity {
