@@ -332,8 +332,9 @@ const EnrichmentEngine = {
         confidence = 'high';
         classifiedBy = 'keyword';
       } else if (isPerson) {
-        category = 'Transfers';
-        classifiedBy = 'keyword';
+        // Inbound person transfer — uncategorised, let user decide
+        category = 'Other';
+        isPerson = false;
       } else if (this._isInternationalTransfer(tx.description)) {
         // Inbound international transfer — NOT income
         category = 'Transfers';
@@ -368,8 +369,9 @@ const EnrichmentEngine = {
         isPerson = false;
         classifiedBy = 'keyword';
       } else if (isPerson) {
-        category = 'Transfers';
-        classifiedBy = 'keyword';
+        // Outbound person transfer — uncategorised, let user decide
+        category = 'Other';
+        isPerson = false;
       } else {
         category = classification.category;
         isEssential = classification.isEssential;
