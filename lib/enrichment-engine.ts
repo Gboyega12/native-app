@@ -450,6 +450,12 @@ const EnrichmentEngine = {
         intervals.push((new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()) / (1000 * 60 * 60 * 24));
       }
       const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      // Frequency buckets with tolerances for weekends/bank holidays:
+      //   weekly: 5-10 days (not strict 7 — some skip bank holiday weeks)
+      //   monthly: 25-35 days (direct debits shift by weekends)
+      //   quarterly: 80-100 days (UK utilities often bill quarterly)
+      //   semi-annual: 170-200 days (insurance renewals)
+      //   annual: 340-400 days (annual subscriptions, TV licence)
       let frequency: RecurringItem['frequency'] = 'irregular';
       if (avgInterval >= 5 && avgInterval <= 10) frequency = 'weekly';
       else if (avgInterval >= 25 && avgInterval <= 35) frequency = 'monthly';
@@ -459,8 +465,8 @@ const EnrichmentEngine = {
 
       if (frequency !== 'irregular') {
         const avgAmount = Math.abs(txs.reduce((s, t) => s + t.amount, 0) / txs.length);
-        // Only mark as subscription if already flagged by merchant DB, OR
-        // recurring monthly/quarterly AND not a category that is clearly not a subscription.
+        // Subscription detection heuristic: a recurring payment is only a "subscription"
+        // if it's discretionary. Rent, groceries, and debt payments recur but aren't subs.
         const NON_SUB_CATEGORIES = new Set([
           'Debt Payments', 'Groceries', 'Savings', 'Transfers', 'Transport',
           'Rent', 'Mortgage', 'Bills', 'Insurance', 'Income', 'Refunds',

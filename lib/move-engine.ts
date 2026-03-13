@@ -219,7 +219,10 @@ export function rankMoves(
       score *= goalBoost;
     }
 
-    // Cap the multiplicative stack to prevent extreme distortion (max 8x from base)
+    // Cap the multiplicative stack to prevent extreme distortion.
+    // Without this, a low-effort debt move aligned with goal + UKPF priority
+    // could stack 1.1 × 1.5 × 1.5 × CRRA × consistency = 20x+.
+    // 8x keeps the ranking meaningful without letting one move dominate.
     const baseScore = move.annualImpact / 100;
     if (baseScore > 0) {
       const maxMultiplier = 8;
@@ -230,13 +233,15 @@ export function rankMoves(
     let riskAdjustedImpact: number | undefined;
     let consistencyScore: number | undefined;
     if (vol) {
-      // Use per-category CV from the move (computed by enrichment engine from actual transaction data)
-      // instead of aggregate discretionary CV which is always ~0.22
+      // Per-category coefficient of variation (CV) from actual transaction data.
+      // Spending categories with high variance (e.g. dining out) get lower consistency
+      // scores than stable ones (e.g. subscriptions), penalising unreliable savings.
       const spendingCV = move.spendingCV;
       const mc = calcMoveConsistency(move, vol, 456 + idx, moveCategory === 'spending' ? spendingCV : undefined);
       riskAdjustedImpact = mc.expectedMonthly;
       consistencyScore = mc.consistencyScore;
-      // Blend: 70% utility-adjusted score + 30% consistency-adjusted score (normalised)
+      // 70/30 blend: mostly trust the utility-adjusted score, but let Monte Carlo
+      // consistency pull down moves the user historically struggles to sustain.
       const consistencyNormalized = (mc.expectedMonthly / Math.max(1, move.monthlyImpact)) * mc.consistencyScore;
       score = score * 0.7 + score * consistencyNormalized * 0.3;
     }
