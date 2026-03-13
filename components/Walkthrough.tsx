@@ -17,6 +17,10 @@ import { BocyFace } from '@/components/Bocy';
 
 const WALKTHROUGH_KEY = '@bocy_walkthrough_seen';
 
+// In-memory guard to prevent race-condition restarts when navigating
+// between tabs triggers a remount before AsyncStorage write completes.
+let walkthroughDoneInMemory = false;
+
 type WalkthroughStep = {
   title: string;
   body: string;
@@ -30,32 +34,18 @@ type WalkthroughStep = {
 
 const STEPS: WalkthroughStep[] = [
   {
-    title: 'Safe to Spend',
-    body: 'How much you can freely spend this week without touching your goals. Updates every time you sync.',
+    title: 'Your Dashboard',
+    body: 'Swipe between your #1 Move and your weekly spending. Everything updates when you sync.',
     scrollTo: 'hero',
     tooltipPosition: 'below',
-    tag: 'WEEKLY',
+    tag: 'HOME',
   },
   {
-    title: 'Your Moves',
-    body: 'Personalised actions ranked by impact. Start a move, tick off steps, and watch your progress grow.',
-    scrollTo: 'moves',
-    tooltipPosition: 'below',
-    tag: 'ACTION',
-  },
-  {
-    title: 'Your Budget',
-    body: 'Where every pound goes \u2014 essentials, lifestyle, and what\u2019s left. Tap any category for the full breakdown.',
+    title: 'Spending Details',
+    body: 'Where every pound goes \u2014 budget breakdown and transactions in one place. Tap to expand, hold a transaction to re-categorise.',
     scrollTo: 'budget',
-    tooltipPosition: 'below',
-    tag: 'SPENDING',
-  },
-  {
-    title: 'Transactions',
-    body: 'Every transaction, categorised automatically. Hold any one to re-categorise it yourself.',
-    scrollTo: 'transactions',
     tooltipPosition: 'above',
-    tag: 'DETAIL',
+    tag: 'SPENDING',
   },
   {
     title: 'Chat with Bocy',
@@ -147,14 +137,26 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
     }
   };
 
+  const handleBack = () => {
+    if (step > 0) {
+      const prev = step - 1;
+      setStep(prev);
+      navigateToStep(prev);
+      animateIn();
+    }
+  };
+
   const handleDone = async () => {
+    // Set in-memory flag FIRST to prevent race-condition restarts
+    walkthroughDoneInMemory = true;
+    // Persist to AsyncStorage before navigating so remounts don't re-trigger
+    try { await AsyncStorage.setItem(WALKTHROUGH_KEY, 'true'); } catch {}
     if (router) {
       router.navigate('/(main)/(tabs)');
     }
     if (scrollRef?.current) {
       scrollRef.current.scrollTo({ y: 0, animated: true });
     }
-    try { await AsyncStorage.setItem(WALKTHROUGH_KEY, 'true'); } catch {}
     onDismiss();
   };
 
@@ -162,6 +164,7 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
 
   const current = STEPS[step];
   const isLast = step === STEPS.length - 1;
+  const isFirst = step === 0;
 
   const tooltip = (
     <Animated.View
@@ -210,11 +213,19 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
 
       {/* Actions */}
       <View style={styles.actions}>
-        <Pressable onPress={handleDone} hitSlop={10}>
-          <Text style={[styles.skipText, { color: colors.muted }]}>
-            Skip
-          </Text>
-        </Pressable>
+        {isFirst ? (
+          <Pressable onPress={handleDone} hitSlop={10}>
+            <Text style={[styles.skipText, { color: colors.muted }]}>
+              Skip
+            </Text>
+          </Pressable>
+        ) : (
+          <Pressable onPress={handleBack} hitSlop={10}>
+            <Text style={[styles.backText, { color: colors.text2 }]}>
+              Back
+            </Text>
+          </Pressable>
+        )}
 
         <View style={styles.actionsRight}>
           <Text style={[styles.stepCounter, { color: colors.dim }]}>
@@ -234,7 +245,8 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
   );
 
   return (
-    <Pressable style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.4)' }]} onPress={handleNext}>
+    <View style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.4)' }]} pointerEvents="box-none">
+      <Pressable style={StyleSheet.absoluteFillObject} onPress={() => {}} />
       <View style={[
         styles.tooltipContainer,
         current.tooltipPosition === 'below' && styles.tooltipLower,
@@ -252,7 +264,7 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
           <View style={[styles.arrowDown, { borderTopColor: colors.surface }]} />
         )}
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -261,11 +273,16 @@ export function useWalkthrough() {
   const [showWalkthrough, setShowWalkthrough] = useState(false);
 
   useEffect(() => {
+    // Check in-memory flag first (instant, no race condition)
+    if (walkthroughDoneInMemory) return;
+
     AsyncStorage.getItem(WALKTHROUGH_KEY).then((val) => {
-      if (val !== 'true') {
-        // Small delay so the dashboard has time to render first
-        setTimeout(() => setShowWalkthrough(true), 800);
+      if (val === 'true') {
+        walkthroughDoneInMemory = true;
+        return;
       }
+      // Small delay so the dashboard has time to render first
+      setTimeout(() => setShowWalkthrough(true), 800);
     }).catch(() => {});
   }, []);
 
@@ -361,6 +378,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   skipText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+  },
+  backText: {
     fontFamily: fonts.regular,
     fontSize: 14,
   },
