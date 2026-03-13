@@ -172,26 +172,32 @@ export function rankMoves(
     const opportunityCost = calcOpportunityCostMultiplier(move, profile as FinancialProfile, debtAccounts);
     score *= opportunityCost;
 
-    // UKPF priority — cost-of-inaction boost (replaces flat ×1.15)
+    // UKPF priority — cost-of-inaction boost.
+    // Instead of a flat multiplier, we compute the *cost of doing nothing* in the
+    // user's priority area and use that as the boost. This makes debt moves rank
+    // higher when APR is 25% vs 5%, rather than treating all debt equally.
     const moveCategory = move.category || 'spending';
     if (moveCategory === ukpf.priority) {
       const annualIncome = Math.max(1, (profile.monthly?.income || 0) * 12);
       let ukpfBoost = 1.0;
       if (ukpf.priority === 'debt' && moveCategory === 'debt') {
-        // Cost of not paying debt: monthly interest cost as fraction of monthly income
+        // Boost = 1 + (monthly interest burn / monthly income).
+        // E.g. £3k debt at 22% APR on £2k income → boost = 1 + (55/2000) ≈ 1.03
         const highestAPR = (debtAccounts || []).reduce((max: number, d: any) => Math.max(max, d.interest_rate || 0), 0.079);
         const totalDebtBalance = (debtAccounts || []).reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
         const monthlyInterestCost = totalDebtBalance * highestAPR / 12;
         const monthlyIncome = Math.max(1, profile.monthly?.income || 0);
         ukpfBoost = 1 + (monthlyInterestCost / monthlyIncome);
       } else if (ukpf.priority === 'buffer' && moveCategory === 'buffer') {
-        // Cost of no buffer: expected annual emergency cost as fraction of annual income
+        // Boost based on expected value of emergency events.
+        // 0.083 ≈ 1/12, i.e. ~1 emergency per year as default assumption.
         const emergencyProb = vol?.emergencyRate || 0.083;
         const emergencyCost = vol?.emergencyCost || (profile.monthly?.spending || 500) * 0.6;
         ukpfBoost = 1 + (emergencyProb * 12 * emergencyCost / annualIncome);
       } else {
-        ukpfBoost = 1.15; // default for non-debt/buffer priorities
+        ukpfBoost = 1.15;
       }
+      // Clamp to [1.0, 1.5] — prevent any single factor from dominating the ranking
       score *= Math.min(1.5, Math.max(1.0, ukpfBoost));
     }
 
@@ -203,7 +209,9 @@ export function rankMoves(
       : goals?.one_year_goal === 'invest' ? 'invest'
       : null;
     if (goalCategory && moveCategory === goalCategory) {
-      // Estimate months saved: annualImpact / (monthlyImpact * 12) gives acceleration ratio
+      // Goal alignment boost = how much faster this move gets you to the goal,
+      // expressed as a ratio of months-saved to current-timeline.
+      // Capped at +50% to prevent small-surplus users from getting extreme boosts.
       const goalTarget = GOAL_DEFAULTS[goals!.one_year_goal] || 5000;
       const currentMonths = profile.monthly?.surplus > 0 ? goalTarget / profile.monthly.surplus : 24;
       const monthsSaved = move.monthlyImpact > 0 ? goalTarget / move.monthlyImpact : 0;

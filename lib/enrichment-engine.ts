@@ -199,6 +199,18 @@ const EnrichmentEngine = {
     return transactions;
   },
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Transaction Classification Pipeline
+  // Classifies each raw transaction through a priority cascade:
+  //   1. User overrides (highest confidence — user explicitly set category)
+  //   2. Exact merchant DB match (curated merchant → category mapping)
+  //   3. Fuzzy merchant match (Levenshtein distance for typos/variations)
+  //   4. Keyword classifier (regex patterns for common spending categories)
+  //   5. Person-transfer heuristic (1-3 word names → likely P2P transfer)
+  //   6. Default fallback ("Other", low confidence)
+  // Each tier sets confidence level so downstream logic can prioritise
+  // high-confidence data and flag low-confidence for AI re-classification.
+  // ═══════════════════════════════════════════════════════════════════
   enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[]): EnrichedTransaction {
     // Check user overrides first — try both raw and normalised descriptions
     if (overrides?.length) {
@@ -246,6 +258,8 @@ const EnrichmentEngine = {
     let isPerson = isPersonTransfer(tx.description);
     const isCredit = tx.amount > 0;
     const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
+    // Savings/investment detection: outbound-only (debits) to avoid classifying
+    // interest credits or dividend income as savings transfers
     const isSavings = !!(tx.amount < 0 && tx.description.toLowerCase().match(/\bsaving|isa\b|premium bond|ns&i/i));
     const isInvestment = !!(tx.amount < 0 && !isSavings && tx.description.toLowerCase().match(/\binvest|pension|sipp|stocks?\s*(?:&|and)\s*shares?/i));
 
@@ -260,10 +274,10 @@ const EnrichmentEngine = {
     if (merchantMatch) {
       const isIncome = merchantMatch.isIncome || (isCredit && !isPerson && !isRefund && isLikelyIncomeCredit(tx.description));
 
-      // Use the classifier for category + essentiality
+      // Use the classifier for category + essentiality (e.g. Tesco → Groceries → essential)
       const classification = classifyTransaction(tx.description, merchantMatch);
 
-      // Savings & Investments are both excluded from spending
+      // Credits to a non-income merchant (e.g. refund from Amazon) → "Refunds"
       const catFromDb = isIncome ? merchantMatch.category : (isCredit && !merchantMatch.isIncome ? 'Refunds' : classification.category);
       const isSavingsOrInvest = isSavings || isInvestment || catFromDb === 'Savings' || catFromDb === 'Investments';
 
@@ -398,6 +412,13 @@ const EnrichmentEngine = {
     };
   },
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Recurring Payment Detection
+  // Groups transactions by merchant, computes inter-payment intervals,
+  // and classifies frequency by matching average interval to known
+  // billing cycles. Tolerances are wide (e.g. 25-35 days for "monthly")
+  // because UK direct debits can shift by weekends/bank holidays.
+  // ═══════════════════════════════════════════════════════════════════
   detectRecurring(transactions: EnrichedTransaction[]): RecurringItem[] {
     const groups: Record<string, EnrichedTransaction[]> = {};
     for (const tx of transactions) {
