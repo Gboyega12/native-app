@@ -148,6 +148,7 @@ export default function Identity() {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const scrollRef = useRef<ScrollView>(null);
 
   // State for each screen's selection
   const [workSetup, setWorkSetup] = useState<string>('');
@@ -181,11 +182,16 @@ export default function Identity() {
   })();
 
   const handleSelect = (key: string) => {
+    // Animate layout when toggling timeline-eligible events
+    if (step === 5 && ['baby', 'moving', 'wedding'].includes(key)) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    }
     if (isMulti) {
       const arr = currentValue as string[];
       const setter = setters[step] as React.Dispatch<React.SetStateAction<string[]>>;
       if (key === 'none') {
         // "None" clears other selections
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setter(['none']);
         return;
       }
@@ -380,7 +386,7 @@ export default function Identity() {
   // ── Card selection screen ──
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Progress */}
         <View style={styles.progressRow}>
           {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
@@ -445,10 +451,17 @@ export default function Identity() {
             const selectedTimeline = events.filter((e) => e !== 'none' && TIMELINE_EVENTS.includes(e));
             if (selectedTimeline.length === 0) return null;
             return (
-              <View style={{ marginTop: 16 }}>
+              <View
+                style={styles.timelineSection}
+                onLayout={() => {
+                  // Auto-scroll so the follow-up question is visible
+                  setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
+                }}
+              >
+                <View style={styles.timelineDivider} />
                 {selectedTimeline.map((eventKey) => (
                   <View key={eventKey} style={{ marginBottom: 12 }}>
-                    <Text style={[styles.hint, { marginBottom: 6, fontFamily: fonts.medium }]}>
+                    <Text style={styles.timelineLabel}>
                       {eventKey === 'baby' ? 'Baby' : eventKey === 'moving' ? 'Moving' : 'Wedding'} — roughly when?
                     </Text>
                     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
@@ -463,7 +476,7 @@ export default function Identity() {
                               setEventTimelines((prev) => ({ ...prev, [eventKey]: opt.value }));
                             }}
                             style={{
-                              paddingHorizontal: 12, paddingVertical: 6,
+                              paddingHorizontal: 14, paddingVertical: 8,
                               borderRadius: radius.sm,
                               backgroundColor: isSel ? colors.accent : colors.card,
                               borderWidth: 1,
@@ -653,6 +666,23 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 11,
     color: colors.bg,
+  },
+
+  // ── Timeline follow-up ──
+  timelineSection: {
+    marginTop: spacing.xl,
+    paddingTop: spacing.md,
+  },
+  timelineDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginBottom: spacing.lg,
+  },
+  timelineLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.text,
+    marginBottom: 10,
   },
 
   // ── Summary ──
