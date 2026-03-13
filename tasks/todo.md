@@ -1,14 +1,143 @@
-# Add Refund & Internal Transfer to Manual Categorisation
+# Full App Audit - Senior Engineer Review
 
-## Problem
-When the enrichment engine misses a refund or internal transfer (unusual description),
-the transaction falls into "Other" with low confidence. Users currently can only pick
-spending categories — no way to mark it as a refund or internal transfer.
+**Date:** 2026-03-13
+**Scope:** Security, Architecture, Bugs, Operability
+**App:** Bocy - Fintech PWA (Expo + Vercel + Supabase)
 
-## Changes
-- [x] Add `Refund` and `Internal Transfer` to `BUDGET_CATEGORIES`
-- [x] Add mapping in `mapClaudeCategory` for Claude AI suggestions
-- [x] Fix enrichment engine: set `isRefund: true` when override category is `Refund`
-- [x] Update `saveReview()`: exclude Refund/Internal Transfer from budget totals (remove from Other, don't add to spending)
-- [x] Update `saveRecategorize()`: same exclusion logic
-- [x] Verify, commit, push
+---
+
+## CRITICAL FINDINGS (Fix Immediately)
+
+### 1. Missing JWT Authentication on 3 API Endpoints
+- [ ] `api/goals/update.ts` - Accepts `user_id` from body without JWT verification. Any user can modify any other user's goals.
+- [ ] `api/plans/index.ts` - Accepts `user_id` from body without JWT verification. Cross-user plan manipulation possible.
+- [ ] `api/notifications/subscribe.ts` - POST/DELETE accept `user_id` without JWT. Can subscribe/unsubscribe other users.
+
+### 2. Open Redirect in OAuth Callback
+- [ ] `api/truelayer/callback.ts:62` - `webOrigin` from state parameter is not validated. Attacker can redirect to phishing sites.
+
+---
+
+## HIGH SEVERITY
+
+### 3. HTML Injection in Email Notifications
+- [ ] `api/notifications/send.ts:71` - User-controlled `html` passed directly to Resend API without sanitization.
+
+### 4. Distributed State / Triple-Fetch Problem
+- [ ] Home, Plan, and Chat screens all independently fetch `analysis`, `debtAccounts`, `weeklyContext` from Supabase. No shared data layer.
+- **Impact:** Redundant network calls, inconsistent UI state across tabs.
+
+### 5. enrichment-engine.ts is 2649 Lines
+- [ ] Mix of parsing, classification, profiling, archetype detection, scoring, and recommendation logic in one file.
+- **Impact:** Hard to test, review, and maintain.
+
+### 6. 40+ `any` Types in Business Logic
+- [ ] `lib/sync.ts`, `lib/reactive-engine.ts`, `lib/enrichment-engine.ts`, `lib/monte-carlo.ts` all use `any` extensively.
+- [ ] 8+ `catch (e: any)` blocks should be `catch (e: unknown)` with type guards.
+
+### 7. No Structured Logging or Error Tracking
+- [ ] All logging is ad-hoc `console.error()`/`console.warn()` with no aggregation.
+- [ ] No Sentry, Datadog, or equivalent. Production bugs are invisible.
+
+### 8. No UI Component Tests
+- [ ] 7 test files (4260 lines) cover API + engines well, but zero React component tests.
+- [ ] No integration tests, no visual regression tests, no coverage reporter.
+
+### 9. Dependency Vulnerabilities
+- [ ] `npm audit` reports 8 vulnerabilities (2 moderate, 6 high) via `@vercel/node` transitive deps.
+- [ ] Includes `undici` HTTP smuggling, `minimatch` ReDoS, `path-to-regexp` backtracking.
+
+---
+
+## MEDIUM SEVERITY
+
+### 10. Missing CSRF Protection
+- [ ] OAuth state parameter not cryptographically validated in `api/truelayer/callback.ts`.
+- [ ] POST endpoints accept `user_id` in body instead of deriving from JWT.
+
+### 11. Module-Level Mutable State
+- [ ] `app/_layout.tsx:20-39` uses `_pendingOAuth` and `_emailConfirmed` as global mutable variables.
+- [ ] `app/(main)/(tabs)/index.tsx:66-67` uses `dismissCache` as module-level state invisible to React.
+- **Impact:** Hard to debug, race conditions possible.
+
+### 12. CSV Deduplication Code Duplicated
+- [ ] `api/enrich.ts:17-29` (Set-based) and `lib/sync.ts:65-109` (count-based) implement the same logic differently.
+
+### 13. Date Formatting Duplicated 5 Times
+- [ ] `formatTimeAgo()`, `formatTxDateAge()`, `formatRelativeDate()` and 2 more variants scattered across files.
+
+### 14. Inconsistent API Response Structure
+- [ ] Some endpoints return `{ success: true, csv_data }`, others return `{ reason: 'token_expired', expired_connections }`.
+- [ ] No standardized response envelope.
+
+### 15. No Request/Response Validation
+- [ ] API endpoints accept any request shape. No Zod or joi validation.
+- [ ] Financial data not validated (income >= 0, sources sum correctly).
+
+### 16. Performance - ScrollView for Large Lists
+- [ ] Home tab renders transactions/categories in ScrollView without FlatList virtualization.
+- [ ] Analytics `trackScreen()` fires on every state change in useEffect.
+
+### 17. Sensitive Data in Logs
+- [ ] `api/truelayer/callback.ts:299` logs bank account balances: `console.log('[callback] Balances:', JSON.stringify(updatePayload))`.
+
+### 18. No Offline Detection
+- [ ] No `navigator.onLine` checks. No AppState listener for background/foreground.
+- [ ] Sync doesn't pause when app is backgrounded.
+
+---
+
+## LOW SEVERITY
+
+### 19. Accessibility Gaps
+- [ ] Minimal `testID` attributes. No screen reader testing. No reduced-motion support.
+
+### 20. No i18n Support
+- [ ] All text hardcoded in English. Acceptable if UK-only.
+
+### 21. No Bundle Size Monitoring
+- [ ] No `expo-bundle-analyzer` in scripts or CI.
+
+### 22. Service Worker Cache Strategy
+- [ ] Basic precache list. SW updates show banner but don't force reload.
+
+---
+
+## STRENGTHS
+
+- Clean layered architecture - Frontend, API, business logic, data layers properly separated
+- No circular dependencies - Acyclic dependency graph
+- Excellent API key management - No secrets in source, proper `.env.example`
+- Row Level Security - All Supabase tables have RLS policies
+- No SQL injection - Parameterized queries throughout
+- TypeScript strict mode enabled project-wide
+- Good test coverage on engines (4260 lines across 7 test files)
+- Sync resilience - Token recovery, timeout protection, graceful degradation
+- Theme system with WCAG AA contrast, dark/light modes
+- Skeleton loading states with staggered animations
+- Full web push notification implementation
+- ESLint + Prettier enforced
+
+---
+
+## RECOMMENDED FIX ORDER
+
+| Priority | Item | Effort | Impact |
+|----------|------|--------|--------|
+| P0 | Add JWT auth to goals/plans/notifications endpoints | 2h | Blocks IDOR attacks |
+| P0 | Validate OAuth redirect URL whitelist | 1h | Blocks phishing |
+| P1 | Add Sentry error tracking | 4h | Production visibility |
+| P1 | Sanitize email HTML | 1h | Blocks injection |
+| P1 | Replace `any` types with proper types | 4h | Type safety |
+| P1 | Add request validation (Zod) to API endpoints | 4h | Input safety |
+| P2 | Consolidate data fetching (shared hook) | 4h | Performance, consistency |
+| P2 | Split enrichment-engine.ts | 8h | Maintainability |
+| P2 | Add FlatList virtualization | 2h | Performance |
+| P2 | Add component tests | 8h | Regression safety |
+| P2 | Standardize API response envelope | 4h | DX, debugging |
+| P3 | Deduplicate CSV/date utilities | 2h | Maintenance |
+| P3 | Remove module-level mutable state | 2h | Correctness |
+| P3 | Add offline detection | 4h | UX |
+| P3 | Update @vercel/node deps | 1h | Security |
+| P4 | Accessibility audit | 8h | Compliance |
+| P4 | Bundle size monitoring | 2h | Performance |
