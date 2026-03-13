@@ -3,6 +3,7 @@ import { View, Text, Animated, StyleSheet, Easing, TouchableOpacity } from 'reac
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
+import { normaliseDescription } from '@/lib/normalise';
 import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import type { RankedMove } from '@/lib/move-engine';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -263,6 +264,41 @@ function ProcessingInner() {
             }
 
             await delay(200);
+          }
+
+          // Persist Claude reclassifications as transaction_overrides so they
+          // survive background syncs (which don't re-run Claude verification).
+          try {
+            const { data: { user: overrideUser } } = await supabase.auth.getUser();
+            if (overrideUser) {
+              // Collect unique normalised descriptions that Claude reclassified
+              const seen = new Set<string>();
+              const overridesToSave: { user_id: string; match_description: string; category: string; is_essential: boolean }[] = [];
+              for (const { originalIndex } of unclassified) {
+                const tx = updated[originalIndex];
+                if (tx.classifiedBy !== 'claude_ai') continue;
+                const norm = normaliseDescription(tx.description);
+                if (!norm || seen.has(norm)) continue;
+                seen.add(norm);
+                overridesToSave.push({
+                  user_id: overrideUser.id,
+                  match_description: norm,
+                  category: tx.category,
+                  is_essential: tx.isEssential,
+                });
+              }
+              if (overridesToSave.length > 0) {
+                // Delete any existing overrides for these descriptions, then insert
+                const descriptions = overridesToSave.map((o) => o.match_description);
+                await supabase.from('transaction_overrides')
+                  .delete()
+                  .eq('user_id', overrideUser.id)
+                  .in('match_description', descriptions);
+                await supabase.from('transaction_overrides').insert(overridesToSave);
+              }
+            }
+          } catch (overrideErr: any) {
+            console.warn('[processing] Failed to persist Claude overrides:', overrideErr?.message);
           }
 
           // Rebuild profile with all improved data

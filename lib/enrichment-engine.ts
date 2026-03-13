@@ -160,7 +160,8 @@ const EnrichmentEngine = {
       const normDesc = normaliseDescription(tx.description);
       const override = overrides.find((o) => {
         const pattern = o.match_description.toLowerCase();
-        return descLower.includes(pattern) || normDesc.includes(pattern);
+        const normPattern = normaliseDescription(o.match_description);
+        return descLower.includes(pattern) || (normPattern.length >= 3 && normDesc.includes(normPattern));
       });
       if (override) {
         return {
