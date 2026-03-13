@@ -11,15 +11,32 @@
 // Skips users who have disabled weekly_digest in notification_preferences.
 
 import { createClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const appUrl = process.env.APP_URL || 'https://app.bocy.io';
 
-export default async function handler(req, res) {
+interface DigestData {
+  name: string;
+  monthlyIncome: number;
+  monthlySpending: number;
+  surplus: number;
+  surplusChange: number;
+  topCategory: string;
+  topCategoryAmount: number;
+  movesCompleted: number;
+  totalMoves: number;
+  topMove: string | null;
+  topMoveImpact: number;
+  newAchievements: Array<{ name: string; description: string; icon: string }>;
+  streakDays: number;
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Verify cron secret
   const cronSecret = process.env.CRON_SECRET;
-  const authHeader = req.headers.authorization || '';
+  const authHeader = (req.headers.authorization as string) || '';
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -28,8 +45,8 @@ export default async function handler(req, res) {
     return res.json({ success: false, error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
   }
 
-  const admin = createClient(supabaseUrl, serviceKey);
-  const results = { sent: 0, skipped: 0, failed: 0, errors: [] };
+  const admin = createClient(supabaseUrl!, serviceKey);
+  const results = { sent: 0, skipped: 0, failed: 0, errors: [] as Array<{ user_id: string; error: string }> };
 
   try {
     // Get all users with notification preferences enabled
@@ -69,10 +86,10 @@ export default async function handler(req, res) {
 
         // Get user info (name + email fallback for Google OAuth users)
         const { data: { user } } = await admin.auth.admin.getUserById(pref.user_id);
-        const name = user?.user_metadata?.full_name || '';
+        const name: string = user?.user_metadata?.full_name || '';
         // Google OAuth users may not have email in notification_preferences;
         // fall back to auth.users email or identity data email.
-        const recipientEmail = pref.email
+        const recipientEmail: string | undefined = pref.email
           || user?.email
           || user?.user_metadata?.email
           || user?.identities?.[0]?.identity_data?.email;
@@ -87,7 +104,7 @@ export default async function handler(req, res) {
           .select('completed_steps')
           .eq('user_id', pref.user_id);
 
-        const movesCompleted = (progress || []).filter((p) =>
+        const movesCompleted = (progress || []).filter((p: { completed_steps: string[] | null }) =>
           p.completed_steps && p.completed_steps.length > 0
         ).length;
 
@@ -108,18 +125,18 @@ export default async function handler(req, res) {
           .single();
 
         // Find top spending category
-        const disc = analysis.discretionary;
+        const disc = analysis.discretionary as { items?: Array<{ category: string; monthly: number }> } | null;
         const items = disc?.items || [];
         const topCat = items.length > 0
           ? items.reduce((a, b) => (a.monthly > b.monthly ? a : b))
           : null;
 
         // Build and send email
-        const allMoves = analysis.all_moves || [];
+        const allMoves: Array<{ action: string; monthlyImpact: number }> = analysis.all_moves || [];
         const topMove = allMoves[0] || null;
 
-        // Achievement definitions (inline to avoid import in JS)
-        const ACHIEVEMENT_MAP = {
+        // Achievement definitions (inline to avoid import issues)
+        const ACHIEVEMENT_MAP: Record<string, { name: string; description: string; icon: string }> = {
           first_analysis: { name: 'First Look', description: 'Completed your first financial analysis', icon: 'B' },
           goals_set: { name: 'Goal Setter', description: 'Set your financial goals', icon: 'G' },
           first_override: { name: 'Sharp Eye', description: 'Corrected a transaction category', icon: 'E' },
@@ -137,7 +154,7 @@ export default async function handler(req, res) {
         };
 
         const newAchievementDefs = (recentAchievements || [])
-          .map((a) => ACHIEVEMENT_MAP[a.achievement_key])
+          .map((a: { achievement_key: string }) => ACHIEVEMENT_MAP[a.achievement_key])
           .filter(Boolean);
 
         const surplusChange = prevSnapshot ? analysis.surplus - prevSnapshot.surplus : 0;
@@ -192,21 +209,23 @@ export default async function handler(req, res) {
           results.failed++;
           results.errors.push({ user_id: pref.user_id, error: sendData.error });
         }
-      } catch (userErr) {
+      } catch (userErr: unknown) {
+        const message = userErr instanceof Error ? userErr.message : String(userErr);
         results.failed++;
-        results.errors.push({ user_id: pref.user_id, error: userErr?.message });
+        results.errors.push({ user_id: pref.user_id, error: message });
       }
     }
 
     return res.json({ success: true, ...results });
-  } catch (err) {
-    console.error('[weekly-digest] Cron failed:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[weekly-digest] Cron failed:', message);
+    return res.status(500).json({ success: false, error: message });
   }
 }
 
 // ── Inline HTML builder (avoids TS import issues in JS cron) ──
-function buildDigestHtml(data) {
+function buildDigestHtml(data: DigestData): string {
   const BRAND = '#00d4aa';
   const BG = '#0A0A0A';
   const SURFACE = '#141414';

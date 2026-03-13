@@ -12,6 +12,7 @@
 //    only Wednesday. You have £20 left for the rest of the week."
 
 import { createClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -19,9 +20,9 @@ const appUrl = process.env.APP_URL || 'https://app.bocy.io';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cronSecret = process.env.CRON_SECRET;
-  const authHeader = req.headers.authorization || '';
+  const authHeader = (req.headers.authorization as string) || '';
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -30,8 +31,8 @@ export default async function handler(req, res) {
     return res.json({ success: false, error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
   }
 
-  const admin = createClient(supabaseUrl, serviceKey);
-  const results = { sent: 0, skipped: 0, failed: 0, errors: [] };
+  const admin = createClient(supabaseUrl!, serviceKey);
+  const results = { sent: 0, skipped: 0, failed: 0, errors: [] as Array<{ user_id: string; error: string }> };
 
   try {
     // Get users with check-in prompts enabled (spending updates use the same preference)
@@ -95,8 +96,8 @@ export default async function handler(req, res) {
         const income = analysis.is_variable_income && analysis.income_floor
           ? analysis.income_floor
           : rawIncome;
-        const nonDiscTotal = analysis.non_discretionary?.total || 0;
-        const discTotal = analysis.discretionary?.total || 0;
+        const nonDiscTotal = (analysis.non_discretionary as { total?: number })?.total || 0;
+        const discTotal = (analysis.discretionary as { total?: number })?.total || 0;
         const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
         const weeklyBudget = Math.round(leftToDecide / 4.33);
 
@@ -123,7 +124,7 @@ export default async function handler(req, res) {
         let spentThisWeek = 0;
         for (const row of bankRows) {
           if (!row.csv_data) continue;
-          const lines = row.csv_data.split('\n');
+          const lines = (row.csv_data as string).split('\n');
           for (let i = 1; i < lines.length; i++) {
             const line = lines[i].trim();
             if (!line) continue;
@@ -150,27 +151,22 @@ export default async function handler(req, res) {
         const usedPct = weeklyBudget > 0 ? Math.round((spentThisWeek / weeklyBudget) * 100) : 0;
 
         // Build contextual message
-        let message;
-        let emoji = '';
+        let message: string;
 
         if (usedPct <= 50 && daysIntoWeek >= 3) {
           // Under budget, well into the week — positive reinforcement
-          emoji = 'on-track';
-          message = `You've spent \u00a3${spentThisWeek} of your \u00a3${weeklyBudget} weekly budget so far. That's only ${usedPct}% with ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left — you're doing great this week.`;
+          message = `You've spent \u00a3${spentThisWeek} of your \u00a3${weeklyBudget} weekly budget so far. That's only ${usedPct}% with ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''} left \u2014 you're doing great this week.`;
         } else if (usedPct <= 75) {
           // Normal pace
-          emoji = 'steady';
           const dailyRemaining = daysRemaining > 0 ? Math.round(remaining / daysRemaining) : remaining;
-          message = `It's ${dayName} and you've spent \u00a3${spentThisWeek} of your \u00a3${weeklyBudget} weekly budget. You have \u00a3${remaining} left — about \u00a3${dailyRemaining}/day for the rest of the week.`;
+          message = `It's ${dayName} and you've spent \u00a3${spentThisWeek} of your \u00a3${weeklyBudget} weekly budget. You have \u00a3${remaining} left \u2014 about \u00a3${dailyRemaining}/day for the rest of the week.`;
         } else if (usedPct <= 100) {
           // Getting close to budget
-          emoji = 'caution';
-          message = `Heads up — you've used ${usedPct}% of your \u00a3${weeklyBudget} weekly budget (\u00a3${spentThisWeek} spent). You have \u00a3${remaining} left${daysRemaining > 0 ? ` for ${daysRemaining} more day${daysRemaining !== 1 ? 's' : ''}` : ' for the rest of today'}. Want to chat about where to save this week?`;
+          message = `Heads up \u2014 you've used ${usedPct}% of your \u00a3${weeklyBudget} weekly budget (\u00a3${spentThisWeek} spent). You have \u00a3${remaining} left${daysRemaining > 0 ? ` for ${daysRemaining} more day${daysRemaining !== 1 ? 's' : ''}` : ' for the rest of today'}. Want to chat about where to save this week?`;
         } else {
           // Over budget
           const overBy = spentThisWeek - weeklyBudget;
-          emoji = 'over';
-          message = `You've gone \u00a3${overBy} over your \u00a3${weeklyBudget} weekly budget this week (\u00a3${spentThisWeek} total). It happens — let's look at what drove the extra spending and find a way to balance it out next week.`;
+          message = `You've gone \u00a3${overBy} over your \u00a3${weeklyBudget} weekly budget this week (\u00a3${spentThisWeek} total). It happens \u2014 let's look at what drove the extra spending and find a way to balance it out next week.`;
         }
 
         // Add today's spend if meaningful
@@ -180,8 +176,8 @@ export default async function handler(req, res) {
 
         // Get user info (name + email fallback for Google OAuth users)
         const { data: { user } } = await admin.auth.admin.getUserById(pref.user_id);
-        const name = user?.user_metadata?.full_name?.split(' ')[0] || '';
-        const recipientEmail = pref.email
+        const name: string = user?.user_metadata?.full_name?.split(' ')[0] || '';
+        const recipientEmail: string | undefined = pref.email
           || user?.email
           || user?.user_metadata?.email
           || user?.identities?.[0]?.identity_data?.email;
@@ -232,10 +228,10 @@ export default async function handler(req, res) {
           body: JSON.stringify({
             to: recipientEmail,
             subject: usedPct <= 75
-              ? `\u00a3${remaining} left this week — you're on track`
+              ? `\u00a3${remaining} left this week \u2014 you're on track`
               : usedPct <= 100
               ? `\u00a3${remaining} left of your \u00a3${weeklyBudget} weekly budget`
-              : `Over budget this week — let's rebalance`,
+              : `Over budget this week \u2014 let's rebalance`,
             html,
             push_body: message,
             user_id: pref.user_id,
@@ -252,16 +248,18 @@ export default async function handler(req, res) {
           results.failed++;
           results.errors.push({ user_id: pref.user_id, error: sendData.error });
         }
-      } catch (userErr) {
-        console.warn(`[daily-spending] Failed for user ${pref.user_id}:`, userErr?.message);
+      } catch (userErr: unknown) {
+        const message = userErr instanceof Error ? userErr.message : String(userErr);
+        console.warn(`[daily-spending] Failed for user ${pref.user_id}:`, message);
         results.failed++;
-        results.errors.push({ user_id: pref.user_id, error: userErr?.message });
+        results.errors.push({ user_id: pref.user_id, error: message });
       }
     }
 
     return res.json({ success: true, ...results });
-  } catch (err) {
-    console.error('[daily-spending] Cron failed:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[daily-spending] Cron failed:', message);
+    return res.status(500).json({ success: false, error: message });
   }
 }

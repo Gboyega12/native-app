@@ -71,6 +71,12 @@ function debtDisplayName(d: { account_name?: string; institution?: string; accou
 }
 
 const EnrichmentEngine = {
+  // ═══════════════════════════════════════════════════════════════════
+  // Main Entry Point
+  // Orchestrates the full enrichment pipeline: parse → classify →
+  // detect recurring → build profile → archetype → score → recommendations.
+  // Each stage feeds into the next; the final result powers the UI dashboard.
+  // ═══════════════════════════════════════════════════════════════════
   enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[], identity?: any): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
     const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
@@ -726,6 +732,9 @@ const EnrichmentEngine = {
     };
   },
 
+  // Archetypes are evaluated in priority order: debt/risk archetypes first
+  // (more actionable), lifestyle archetypes in the middle, positive archetypes
+  // last. First match wins — "balanced_realist" is the catch-all fallback.
   determineArchetype(profile: FinancialProfile): Archetype {
     const m = profile.metrics;
     const ordered = [
@@ -779,6 +788,7 @@ const EnrichmentEngine = {
         detail: `${Math.round(m.savingsRate)}% vs UK average ${UK_BENCHMARKS.savingsRate}%.`,
       });
     }
+    // £100/month threshold: ONS data shows UK average dining out spend is ~£80/month
     if (m.eatingOut > 100) {
       patterns.push({
         pattern: 'Frequent dining out',
@@ -845,12 +855,13 @@ const EnrichmentEngine = {
 
         // Monthly equivalent: use average payment amount ÷ interval in months
         const avgPayment = txs.reduce((s, t) => s + Math.abs(t.amount), 0) / txs.length;
-        const intervalMonths = avgInterval / 30.44;
+        const intervalMonths = avgInterval / 30.44; // 30.44 = average days per month (365.25/12)
         monthlyAmount = Math.round(avgPayment / Math.max(intervalMonths, 1));
       } else {
         // Single payment — estimate monthly from amount and likely frequency
         const amount = Math.abs(lastTx.amount);
-        // Heuristic: large single bills are likely quarterly/annual
+        // Single-payment frequency heuristic: UK quarterly energy/water bills
+        // are typically £150-400; monthly bills are typically £30-150.
         if (amount > 300) {
           frequency = 'quarterly';
           monthlyAmount = Math.round(amount / 3);
@@ -902,7 +913,8 @@ const EnrichmentEngine = {
     if (!identity) return [];
     const gaps: EssentialGap[] = [];
 
-    // Build a set of categories that have meaningful spend (>£5/mo)
+    // £5/mo threshold filters out noise (one-off small charges that don't
+    // represent a genuine ongoing expense in that category)
     const nonDisc = profile.budgetReality?.nonDiscretionary?.items || [];
     const disc = profile.budgetReality?.discretionary?.items || [];
     const allItems = [...nonDisc, ...disc];
@@ -1296,9 +1308,12 @@ const EnrichmentEngine = {
     }
 
     // ── Debt analysis with good/bad debt differentiation ──
-    // Include both synced and manual debt accounts for holistic view
+    // Credit utilisation ratio determines the strategy:
+    //   0-30%: "good debt" — user pays off regularly, optimise for rewards
+    //   31-75%: medium utilisation — avalanche payoff recommended
+    //   76%+: high utilisation — urgent payoff, credit score impact warning
+    //   -1: no credit limit data available (manual debts without TrueLayer)
     const connectedDebts = debtAccounts || [];
-    // Filter out £0-balance debts — fully paid cards shouldn't generate payoff moves
     const activeDebts = connectedDebts.filter((d: any) => (d.outstanding_balance || 0) > 0);
     const totalLimit = connectedDebts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
     const totalBalance = activeDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
@@ -1343,8 +1358,9 @@ const EnrichmentEngine = {
           effect: `Earn more from spending you're already doing.`,
         });
       } else {
-        // Avalanche method: sort highest interest rate first to minimise total interest
-        // Fall back to smallest balance (snowball tiebreaker) when rates are equal
+        // Avalanche method: mathematically optimal — sort by highest APR first.
+        // Snowball tiebreaker (smallest balance) when rates are equal provides
+        // the psychological win of clearing a debt sooner.
         const sortedDebts = [...activeDebts].sort((a, b) => {
           const rateA = getAPR(a);
           const rateB = getAPR(b);
@@ -1463,7 +1479,8 @@ const EnrichmentEngine = {
     // from the transaction data alone so debt is never invisible.
     if (m.debtAccountCount > 0 && activeDebts.length === 0 && p.debtPayments > 0) {
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
-      // Estimate balance from observed payment pattern (conservative: 12x monthly payment)
+      // Estimate balance as 12x monthly payment — conservative heuristic based on
+      // typical UK credit card minimum payment being ~2-5% of balance
       const estimatedBalance = Math.round(p.debtPayments * 12);
       const surplusAlloc = Math.round(Math.min(Math.max(0, p.surplus) * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
       const recommendedPayment = Math.max(Math.round(p.debtPayments + surplusAlloc), Math.round(p.debtPayments));
@@ -1492,7 +1509,9 @@ const EnrichmentEngine = {
       });
     }
 
-    // Transport — surgical: separate essential commute from optimisable transport
+    // Transport — separates essential commute (TfL, rail operators) from
+    // discretionary transport (Uber, taxis). Only discretionary portion is
+    // targeted for reduction; commute gets optimisation advice instead.
     if (m.transport > T.transportMin && !isRemote) {
       const transportTxs = txs.filter((t) => t.category === 'Transport' && t.amount < 0);
       const transportMerchants = this._getMerchantsByCategory(txs, 'Transport');
@@ -1531,6 +1550,7 @@ const EnrichmentEngine = {
       const isOfficeWorker = !isHybrid; // full-time office if not hybrid and not remote
 
       const { cutPct: baseCutPct, cv: transportCV } = this._dataDrivenCutPct(txs, 'Transport', T.transportCutPct);
+      // Hybrid workers get halved cut target — they need transport some days
       const cutPct = isHybrid ? baseCutPct * 0.5 : baseCutPct;
 
       if (optimisableTransport > 20) {
@@ -1566,8 +1586,9 @@ const EnrichmentEngine = {
         });
       } else if (commuteMonthly > 50 && isOfficeWorker) {
         // No discretionary transport to cut, but commute can be optimised (method, not amount)
-        // Estimate: railcard saves ~34%, annual vs monthly saves ~15%
-        const railcardSaving = Math.round(commuteMonthly * 0.15); // Conservative estimate
+        // 15% is conservative: a 16-25/26-30 Railcard saves 1/3 on off-peak,
+        // and annual season tickets save ~15% vs buying monthly.
+        const railcardSaving = Math.round(commuteMonthly * 0.15);
         if (railcardSaving >= 10) {
           const proof = `\u00a3${commuteMonthly}/mo commute cost. No discretionary transport to cut. `
             + `Commute optimisation (railcard/annual ticket): est. 15% = \u00a3${railcardSaving}/mo.`;
@@ -1593,7 +1614,9 @@ const EnrichmentEngine = {
       }
     }
 
-    // Emergency buffer — adjusted for life situation
+    // Emergency buffer — months of expenses to hold in reserve, scaled by
+    // income stability: self-employed need 6 months (irregular income),
+    // parents need 3 months (higher unexpected costs), others need 1 month minimum.
     if (m.savingsRate < T.bufferSavingsRateThreshold && p.surplus > 0) {
       const autoSave = Math.round(p.surplus * T.bufferAutoSavePct);
       const bufferMonths = isSelfEmployed ? 6 : (isSingleParent || hasChildren) ? 3 : 1;
@@ -1821,6 +1844,8 @@ const EnrichmentEngine = {
         const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
         const trend = secondAvg - firstAvg;
         const trendPct = firstAvg !== 0 ? Math.round((trend / Math.abs(firstAvg)) * 100) : 0;
+        // CV > 0.5 means standard deviation exceeds half the mean — highly unpredictable
+        // Deceleration > 15% means savings trajectory is meaningfully worsening
         const isErratic = cv > 0.5;
         const isDecelerating = trendPct < -15;
         const monthlyValues = monthKeys.map((k, i) => `${k}: £${Math.round(monthlySurpluses[i])}`).join(', ');
@@ -1950,8 +1975,8 @@ const EnrichmentEngine = {
           }],
         });
       } else if (lisaTxs.length === 0 && (buyingHome || (p.surplus > 200 && p.income > 0 && p.income <= 4167))) {
-        // No LISA detected but user is buying a home or is below £50k income threshold
-        // LISA eligibility: 18-39 years old, first-time buyer or retirement
+        // £4,167/month ≈ £50k/year — LISA property bonus only usable on homes ≤£450k,
+        // so it's most relevant for incomes where that price range is realistic.
         const maxBonus = Math.round(lisaLimit * T.lisaBonusRate);
         const monthlyNeeded = Math.round(lisaLimit / 12);
         moves.push({
@@ -2084,7 +2109,9 @@ const EnrichmentEngine = {
     }
 
     if (havingBaby && p.surplus > 0) {
-      // Timeline-scaled parental runway
+      // Timeline-scaled parental runway: urgency increases as due date approaches.
+      // UK statutory maternity pay is ~£172/week — most families face a significant
+      // income drop, so the runway target scales with available lead time.
       let runwayMonths: number;
       let effort: 'low' | 'medium' | 'high';
       let urgencyNote: string;
@@ -2203,6 +2230,8 @@ const EnrichmentEngine = {
     }
 
     if (isSelfEmployed && p.surplus > 0) {
+      // 25% tax reserve: covers basic rate income tax (20%) + Class 4 NI (~6%)
+      // minus personal allowance effect. Conservative enough to avoid underpayment.
       const taxSetAside = Math.round(p.income * 0.25);
       moves.push({
         action: `Set aside \u00a3${taxSetAside}/month for tax (25% of income)`,
@@ -2219,9 +2248,10 @@ const EnrichmentEngine = {
 
     // ── Mathematical insights for financially healthy users ──
     // These surface tax and return facts — not product recommendations.
-    // The user sees the numbers; the ranking reflects the tax math.
+    // Only shown to users with 20%+ savings rate and minimal/no debt,
+    // because spending cuts and debt payoff are higher-priority for others.
     if (m.savingsRate >= 20 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
-      // ISA allowance utilisation
+      // UK ISA allowance: £20,000/year tax-free wrapper (2024-25 tax year)
       const isaLimit = 20000;
       const annualSurplus = Math.round(p.surplus * 12);
       if (annualSurplus > 3000) {
@@ -2240,7 +2270,9 @@ const EnrichmentEngine = {
         });
       }
 
-      // Pension tax relief arithmetic
+      // Pension tax relief arithmetic — shows the net cost after relief.
+      // UK higher rate threshold is ~£50,270/year (£4,189/month). Higher rate
+      // taxpayers get 40% relief vs 20% for basic rate.
       if (p.income > 2500) {
         const pensionExtra = Math.round(p.surplus * 0.15);
         const isHigherRate = p.income > 4167; // ~£50k/year
@@ -2260,7 +2292,9 @@ const EnrichmentEngine = {
         });
       }
 
-      // Tax-free savings threshold
+      // Personal Savings Allowance (PSA): basic rate taxpayers get £1,000/year
+      // of interest tax-free; higher rate get £500. Above this, interest is
+      // taxed at the marginal rate. ISA interest doesn't count against PSA.
       if (p.surplus > 200) {
         const annualSavingsInterest = Math.round(p.surplus * 12 * 0.04);
         const isHigherRate = p.income > 4167;
@@ -2301,7 +2335,8 @@ const EnrichmentEngine = {
         });
       }
 
-      // Spending efficiency
+      // Spending efficiency: 1.5% is a conservative UK cashback/rewards estimate
+      // (Amex Platinum Cashback gives 1.25-5%, but most cards offer 0.5-1%)
       const cashbackEstimate = Math.round(p.spending * 12 * 0.015);
       moves.push({
         action: `1-2% back on \u00a3${Math.round(p.spending * 12).toLocaleString()}/year spending = \u00a3${cashbackEstimate}/year`,
@@ -2430,7 +2465,9 @@ const EnrichmentEngine = {
         if (acct.account_type !== 'credit_card' && acct.account_type !== 'credit') continue;
         const balance = acct.outstanding_balance ?? 0;
         const limit = acct.credit_limit ?? 0;
-        // If we have a credit limit and utilization is under 15%, this is a full-payer card
+        // 15% utilisation threshold: a card paid off in full would typically show
+        // 0-15% utilisation at any snapshot (some pending charges may exist).
+        // Users carrying real debt almost always exceed 30%.
         if (limit > 0 && (balance / limit) < 0.15) {
           fullPayerIssuers.add((acct.account_name || '').toLowerCase());
         }
@@ -2466,9 +2503,10 @@ const EnrichmentEngine = {
 
     const totalCCPayments = Object.values(ccPayments).reduce((s, v) => s + v, 0);
 
-    // Heuristic: if total CC payments are within 30% of total other spending,
-    // this strongly suggests the user routes most spending through cards and
-    // pays them off. The payments are duplicates of the card spending.
+    // Payment-to-spend ratio: a full-payer's CC payments should roughly equal
+    // their total card spending (ratio ≈ 1.0). Range of 0.5-1.5 accounts for
+    // timing mismatches (payments crossing month boundaries) and partial card use.
+    // Below 0.5 → not paying enough (carrying debt). Above 1.5 → paying down old debt.
     const paymentToSpendRatio = totalSpending > 0 ? totalCCPayments / totalSpending : 0;
     const isLikelyFullPayer = paymentToSpendRatio >= 0.5 && paymentToSpendRatio <= 1.5;
 
@@ -2517,11 +2555,17 @@ const EnrichmentEngine = {
     return patterns.some((rx) => rx.test(lower));
   },
 
-  /** Compute data-driven cut percentage for a spending category.
-   *  Uses month-to-month variance: achievable reduction based on P25 (not min,
-   *  to avoid zero-month distortion). Falls back to constant if < 3 months of data. */
+  /** Compute a realistic spending reduction target for a category using the
+   *  user's own spending history, not arbitrary percentages.
+   *
+   *  Approach: bucket spending by calendar month, find the 25th percentile
+   *  month (P25), and use the gap between P25 and the mean as the achievable
+   *  cut. P25 is used instead of the minimum to avoid zero-month anomalies
+   *  (e.g. user was on holiday and didn't order delivery that month).
+   *
+   *  Also returns the coefficient of variation (CV) for downstream Monte Carlo
+   *  confidence intervals on the recommendation. */
   _dataDrivenCutPct(txs: EnrichedTransaction[], category: string, fallbackPct: number): { cutPct: number; cv: number | undefined } {
-    // Group spending by YYYY-MM
     const byMonth: Record<string, number> = {};
     for (const t of txs) {
       if (t.category === category && !t.isIncome && !t.isTransfer && !t.isRefund && t.amount < 0) {
@@ -2541,7 +2585,8 @@ const EnrichmentEngine = {
     const p25Idx = Math.floor(sorted.length * 0.25);
     const p25 = sorted[p25Idx];
     const achievable = 1 - (p25 / avg);
-    const cutPct = Math.min(0.5, Math.max(0.05, achievable)); // floor 5%, cap 50%
+    // Floor 5% (always suggest something), cap 50% (never suggest halving — unrealistic)
+    const cutPct = Math.min(0.5, Math.max(0.05, achievable));
     return { cutPct, cv };
   },
 

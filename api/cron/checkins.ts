@@ -13,14 +13,15 @@
 //   5. Fallback: General daily financial summary (always fires)
 
 import { createClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const appUrl = process.env.APP_URL || 'https://app.bocy.io';
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cronSecret = process.env.CRON_SECRET;
-  const authHeader = req.headers.authorization || '';
+  const authHeader = (req.headers.authorization as string) || '';
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -29,8 +30,8 @@ export default async function handler(req, res) {
     return res.json({ success: false, error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
   }
 
-  const admin = createClient(supabaseUrl, serviceKey);
-  const results = { sent: 0, skipped: 0, failed: 0, errors: [] };
+  const admin = createClient(supabaseUrl!, serviceKey);
+  const results = { sent: 0, skipped: 0, failed: 0, errors: [] as Array<{ user_id: string; error: string }> };
 
   try {
     // Get users with check-in prompts enabled
@@ -101,8 +102,8 @@ export default async function handler(req, res) {
 
         // Get user info (name + email fallback for Google OAuth users)
         const { data: { user } } = await admin.auth.admin.getUserById(pref.user_id);
-        const name = user?.user_metadata?.full_name?.split(' ')[0] || '';
-        const recipientEmail = pref.email
+        const name: string = user?.user_metadata?.full_name?.split(' ')[0] || '';
+        const recipientEmail: string | undefined = pref.email
           || user?.email
           || user?.user_metadata?.email
           || user?.identities?.[0]?.identity_data?.email;
@@ -124,12 +125,12 @@ export default async function handler(req, res) {
           : 999;
 
         // ── Determine check-in message ──
-        let message = null;
+        let message: string | null = null;
 
         // 1. Surplus drop
         if (previous && previous.surplus > 0 && current.surplus < previous.surplus * 0.7) {
           const drop = Math.round(previous.surplus - current.surplus);
-          message = `Your surplus dropped by £${drop} recently. This usually happens when spending increases or income changes. Want to look at what shifted and find a quick fix?`;
+          message = `Your surplus dropped by \u00a3${drop} recently. This usually happens when spending increases or income changes. Want to look at what shifted and find a quick fix?`;
         }
 
         // 2. Spending spike
@@ -137,7 +138,7 @@ export default async function handler(req, res) {
           const spike = (current.monthly_spending - previous.monthly_spending) / previous.monthly_spending;
           if (spike >= 0.3) {
             const increase = Math.round(spike * 100);
-            message = `Your spending jumped ${increase}% compared to last period. Let's take a look at what's driving the increase — there might be an easy win hiding in there.`;
+            message = `Your spending jumped ${increase}% compared to last period. Let's take a look at what's driving the increase \u2014 there might be an easy win hiding in there.`;
           }
         }
 
@@ -151,7 +152,7 @@ export default async function handler(req, res) {
             .limit(1)
             .single();
 
-          const moves = analysis?.all_moves || [];
+          const moves: unknown[] = analysis?.all_moves || [];
           const { data: progress } = await admin
             .from('plan_progress')
             .select('move_key')
@@ -170,7 +171,7 @@ export default async function handler(req, res) {
 
         // 4. Approaching savings milestone
         else if (current.savings_rate >= 8 && current.savings_rate < 10) {
-          message = `You're at a ${Math.round(current.savings_rate)}% savings rate — just a small push from hitting 10%. That's a major milestone. Let's see what can get you there.`;
+          message = `You're at a ${Math.round(current.savings_rate)}% savings rate \u2014 just a small push from hitting 10%. That's a major milestone. Let's see what can get you there.`;
         }
 
         // Fallback: if no specific condition triggered, send a general daily
@@ -178,11 +179,11 @@ export default async function handler(req, res) {
         if (!message) {
           const surplus = current.surplus;
           if (surplus >= 300) {
-            message = `You've got £${Math.round(surplus)} surplus this month — your finances are in a strong position. Want to see if there's a new move worth trying?`;
+            message = `You've got \u00a3${Math.round(surplus)} surplus this month \u2014 your finances are in a strong position. Want to see if there's a new move worth trying?`;
           } else if (surplus >= 0) {
-            message = `You've got £${Math.round(surplus)} surplus this month. There's room to grow — want to take a quick look at what could stretch that further?`;
+            message = `You've got \u00a3${Math.round(surplus)} surplus this month. There's room to grow \u2014 want to take a quick look at what could stretch that further?`;
           } else {
-            message = `You're running a £${Math.round(Math.abs(surplus))} deficit this month. A few targeted moves could start turning things around. Want to take a look?`;
+            message = `You're running a \u00a3${Math.round(Math.abs(surplus))} deficit this month. A few targeted moves could start turning things around. Want to take a look?`;
           }
         }
 
@@ -233,16 +234,18 @@ export default async function handler(req, res) {
           results.failed++;
           results.errors.push({ user_id: pref.user_id, error: sendData.error });
         }
-      } catch (userErr) {
-        console.warn(`[checkins] Failed for user ${pref.user_id}:`, userErr?.message);
+      } catch (userErr: unknown) {
+        const message = userErr instanceof Error ? userErr.message : String(userErr);
+        console.warn(`[checkins] Failed for user ${pref.user_id}:`, message);
         results.failed++;
-        results.errors.push({ user_id: pref.user_id, error: userErr?.message });
+        results.errors.push({ user_id: pref.user_id, error: message });
       }
     }
 
     return res.json({ success: true, ...results });
-  } catch (err) {
-    console.error('[checkins] Cron failed:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[checkins] Cron failed:', message);
+    return res.status(500).json({ success: false, error: message });
   }
 }
