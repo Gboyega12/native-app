@@ -1090,6 +1090,24 @@ const EnrichmentEngine = {
     return { score, verdict, breakdown };
   },
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Decision Stack Generator
+  // Produces a ranked list of actionable financial recommendations ("moves").
+  // Each move includes: action, annual/monthly impact, effort level, proof
+  // (showing the math), and trackable sub-goals.
+  //
+  // Move categories (evaluated in this order):
+  //   1. Spending cuts: subscriptions, delivery, dining, shopping, transport
+  //   2. Debt strategy: avalanche (highest APR first) or rewards optimisation
+  //   3. Buffer/emergency fund: scaled by life situation (self-employed → 6mo)
+  //   4. Savings optimisation: idle cash, duplicate subs, rate acceleration
+  //   5. Investment awareness: platform fees, LISA bonus, ISA/pension tax math
+  //   6. Life events: home purchase, baby, wedding, career change
+  //   7. Break-even: deficit recovery for users spending more than income
+  //
+  // Moves are sorted by annualImpact descending so the highest-value
+  // recommendation appears first.
+  // ═══════════════════════════════════════════════════════════════════
   genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[], debtAccounts?: any[], identity?: any): Move[] {
     const moves: Move[] = [];
     const m = profile.metrics;
