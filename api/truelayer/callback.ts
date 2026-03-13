@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Allow up to 60s for the callback to process (Hobby plan max).
 // The default 10s is too tight for token exchange + multiple TrueLayer API calls.
@@ -9,21 +10,44 @@ const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 't
 const TL_AUTH_HOST = IS_SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
 const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://api.truelayer.com';
 
-export default async function handler(req, res) {
-  // Accept both GET (server redirect from TrueLayer) and POST (client-initiated)
-  let code, connectionId, webOrigin;
+interface TLAccount {
+  account_id: string;
+  display_name?: string;
+  account_type?: string;
+  provider?: { display_name?: string };
+}
 
-  let postUserId;
+interface TLCard {
+  account_id: string;
+  display_name?: string;
+  card_network?: string;
+  provider?: { display_name?: string };
+}
+
+interface TLTransaction {
+  timestamp?: string;
+  merchant_name?: string;
+  description?: string;
+  transaction_type?: string;
+  amount: number;
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Accept both GET (server redirect from TrueLayer) and POST (client-initiated)
+  let code: string | undefined;
+  let connectionId: string;
+  let webOrigin: string | null = null;
+  let postUserId: string | null = null;
 
   if (req.method === 'POST') {
     code = req.body?.code;
     postUserId = req.body?.user_id || null;
-    const state = req.body?.state || '';
+    const state: string = req.body?.state || '';
     const pipeIdx = state.indexOf('|');
     connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
   } else if (req.method === 'GET') {
-    code = req.query.code;
-    const state = req.query.state || '';
+    code = req.query.code as string | undefined;
+    const state: string = (req.query.state as string) || '';
     const pipeIdx = state.indexOf('|');
     connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
     webOrigin = pipeIdx === -1 ? null : state.slice(pipeIdx + 1);
@@ -32,8 +56,7 @@ export default async function handler(req, res) {
   }
 
   // Helper: for GET requests, redirect errors back to the app instead of returning JSON.
-  // Without this, the popup/browser shows raw JSON and the user sees a blank screen.
-  const fail = (status, error, details) => {
+  const fail = (status: number, error: string, details?: string) => {
     if (req.method === 'GET' && webOrigin) {
       const errMsg = encodeURIComponent(details ? `${error}: ${details}` : error);
       return res.redirect(302, `${webOrigin}/connect?status=error&error=${errMsg}`);
@@ -89,7 +112,6 @@ export default async function handler(req, res) {
       fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
     ]);
 
-    // Log HTTP status for debugging — silently swallowing errors here was masking issues
     if (!accountsRes.ok || !cardsRes.ok) {
       console.error('[callback] TrueLayer accounts/cards HTTP error:', {
         accounts: { status: accountsRes.status, statusText: accountsRes.statusText },
@@ -100,10 +122,9 @@ export default async function handler(req, res) {
     const accountsData = await accountsRes.json();
     const cardsData = await cardsRes.json();
 
-    const accounts = accountsData.results || [];
-    const cards = cardsData.results || [];
+    const accounts: TLAccount[] = accountsData.results || [];
+    const cards: TLCard[] = cardsData.results || [];
 
-    // Log if we got error responses from TrueLayer
     if (!accountsData.results && accountsData.error) {
       console.error('[callback] TrueLayer accounts error:', JSON.stringify(accountsData));
     }
@@ -114,7 +135,6 @@ export default async function handler(req, res) {
     console.log(`[callback] Found ${accounts.length} accounts, ${cards.length} cards`);
 
     // Date range: last 12 months. Use today as upper bound.
-    // TrueLayer rejects future dates with invalid_date_range.
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
     fromDate.setFullYear(fromDate.getFullYear() - 1);
@@ -144,17 +164,16 @@ export default async function handler(req, res) {
       ),
     ];
 
-    // Fetch card balances + account balances for debt/overdraft tracking
     const cardBalancePromises = cards.map((c) =>
       fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/balance`, { headers })
         .then((r) => r.json())
-        .then((data) => ({ card: c, balance: (data.results || [])[0] || null }))
+        .then((data: { results?: Array<{ current?: number; credit_limit?: number; available?: number }> }) => ({ card: c, balance: (data.results || [])[0] || null }))
         .catch(() => ({ card: c, balance: null }))
     );
     const accountBalancePromises = accounts.map((a) =>
       fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/balance`, { headers })
         .then((r) => r.json())
-        .then((data) => ({ account: a, balance: (data.results || [])[0] || null }))
+        .then((data: { results?: Array<{ current?: number; overdraft?: number; available?: number }> }) => ({ account: a, balance: (data.results || [])[0] || null }))
         .catch(() => ({ account: a, balance: null }))
     );
 
@@ -163,7 +182,7 @@ export default async function handler(req, res) {
       Promise.all(cardBalancePromises),
       Promise.all(accountBalancePromises),
     ]);
-    const allTx = txResults.flatMap((r) => r.results || []);
+    const allTx: TLTransaction[] = txResults.flatMap((r: { results?: TLTransaction[] }) => r.results || []);
 
     console.log(`[callback] Fetched ${allTx.length} transactions (date range: ${from} to ${to})`);
 
@@ -195,7 +214,7 @@ export default async function handler(req, res) {
       : accounts.length > 0 ? 'bank' : null;
 
     // Insert bank data row with all available fields
-    const insertRow = {
+    const insertRow: Record<string, unknown> = {
       connection_id: connectionId,
       csv_data: csv,
       source: 'truelayer',
@@ -213,16 +232,8 @@ export default async function handler(req, res) {
     }
 
     // Clean up old connections for the same provider and user.
-    // Without this, reconnecting a bank creates a duplicate row while the
-    // old expired row persists — causing the reconnect banner to reappear
-    // even though the user just reconnected successfully.
     if (postUserId) {
       try {
-        // Build the cleanup query with all required filters in a single chain.
-        // Supabase query builder is immutable — .eq() returns a NEW object,
-        // so conditional chaining via variable reassignment doesn't work.
-        // Only clean up when we can positively identify the provider.
-        // Falling back to account_type alone risks deleting unrelated connections.
         if (providerName) {
           await admin
             .from('bank_data')
@@ -232,57 +243,55 @@ export default async function handler(req, res) {
             .eq('provider_name', providerName)
             .neq('connection_id', connectionId);
         }
-      } catch (cleanupErr) {
-        console.warn('[callback] Non-critical: old connection cleanup failed:', cleanupErr.message);
+      } catch (cleanupErr: unknown) {
+        const msg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+        console.warn('[callback] Non-critical: old connection cleanup failed:', msg);
       }
     }
 
 
     // Store card + account balances on bank_data row (best-effort, non-blocking)
-    // Processing step will read these and upsert into debt_accounts with user_id
     try {
       const cardBalances = cardBalanceResults
         .filter((r) => r.balance)
         .map((r) => ({
           name: r.card.provider?.display_name || r.card.card_network || r.card.display_name || 'Card',
           type: 'credit_card',
-          balance: r.balance.current != null ? Math.abs(r.balance.current) : null,
-          limit: r.balance.credit_limit || null,
-          available: r.balance.available || null,
+          balance: r.balance!.current != null ? Math.abs(r.balance!.current!) : null,
+          limit: r.balance!.credit_limit || null,
+          available: r.balance!.available || null,
         }));
 
-      // Debt-exposed accounts (overdraft/overdrawn) → stored alongside card balances
       const accountBalances = accountBalanceResults
         .filter((r) => r.balance)
         .map((r) => {
-          const bal = r.balance;
+          const bal = r.balance!;
           const hasOverdraft = bal.overdraft != null && bal.overdraft > 0;
           const isOverdrawn = bal.current != null && bal.current < 0;
           if (!hasOverdraft && !isOverdrawn) return null;
           return {
             name: r.account.display_name || r.account.provider?.display_name || 'Account',
             type: isOverdrawn ? 'overdraft' : 'overdraft_facility',
-            balance: isOverdrawn ? Math.abs(bal.current) : 0,
+            balance: isOverdrawn ? Math.abs(bal.current!) : 0,
             limit: bal.overdraft || null,
             available: bal.available || null,
           };
         })
         .filter(Boolean);
 
-      // All account balances (current + savings) — for surplus/idle cash analysis
       const allAccountBalances = accountBalanceResults
         .filter((r) => r.balance && r.balance.current != null)
         .map((r) => ({
           name: r.account.provider?.display_name || r.account.display_name || 'Account',
           type: r.account.account_type || 'current',
-          balance: r.balance.current,
-          available: r.balance.available || null,
-          overdraft: r.balance.overdraft || null,
+          balance: r.balance!.current,
+          available: r.balance!.available || null,
+          overdraft: r.balance!.overdraft || null,
         }));
 
       const allBalances = [...cardBalances, ...accountBalances];
 
-      const updatePayload = {};
+      const updatePayload: Record<string, unknown> = {};
       if (allBalances.length > 0) updatePayload.card_balances = allBalances;
       if (allAccountBalances.length > 0) updatePayload.account_balances = allAccountBalances;
 
@@ -292,8 +301,9 @@ export default async function handler(req, res) {
           .update(updatePayload)
           .eq('connection_id', connectionId);
       }
-    } catch (debtErr) {
-      console.warn('[callback] Non-critical: balance save failed:', debtErr.message);
+    } catch (debtErr: unknown) {
+      const msg = debtErr instanceof Error ? debtErr.message : String(debtErr);
+      console.warn('[callback] Non-critical: balance save failed:', msg);
     }
 
     // POST → return JSON to the client
@@ -312,8 +322,9 @@ export default async function handler(req, res) {
       return res.redirect(302, `${webOrigin}/connect?connection_id=${encodeURIComponent(connectionId)}&status=success`);
     }
     return res.redirect(302, `bocy://callback?connection_id=${connectionId}&status=success`);
-  } catch (err) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('Callback error:', err);
-    return fail(500, 'Unexpected error', err.message);
+    return fail(500, 'Unexpected error', message);
   }
 }

@@ -7,15 +7,16 @@
 import { createClient } from '@supabase/supabase-js';
 import EnrichmentEngine from '../lib/enrichment-engine.js';
 import { rankMoves, determineFlowchartPosition } from '../lib/move-engine.js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export const config = { maxDuration: 30 };
 
 /**
  * Deduplicate CSV lines across multiple bank_data rows.
  */
-function deduplicateCSVLines(csvLines) {
-  const seen = new Set();
-  const unique = [];
+function deduplicateCSVLines(csvLines: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
   for (const line of csvLines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -27,13 +28,13 @@ function deduplicateCSVLines(csvLines) {
   return unique;
 }
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   // Authenticate: accept either cron secret or Supabase JWT
-  const authHeader = req.headers.authorization || '';
+  const authHeader = (req.headers.authorization as string) || '';
   const cronSecret = process.env.CRON_SECRET;
   const isCronAuth = cronSecret && authHeader === `Bearer ${cronSecret}`;
 
@@ -59,7 +60,7 @@ export default async function handler(req, res) {
     req.body = { ...req.body, user_id: user.id };
   }
 
-  const userId = req.body?.user_id;
+  const userId: string | undefined = req.body?.user_id;
   if (!userId) {
     return res.status(400).json({ error: 'Missing user_id' });
   }
@@ -76,11 +77,11 @@ export default async function handler(req, res) {
       return res.json({ success: false, reason: 'no_data' });
     }
 
-    const rawLines = [];
+    const rawLines: string[] = [];
     for (const row of bankRows) {
       if (!row.csv_data) continue;
-      const lines = row.csv_data.split('\n');
-      rawLines.push(...lines.slice(1).filter((l) => l.trim()));
+      const lines = (row.csv_data as string).split('\n');
+      rawLines.push(...lines.slice(1).filter((l: string) => l.trim()));
     }
     const uniqueLines = deduplicateCSVLines(rawLines);
     if (uniqueLines.length === 0) {
@@ -133,7 +134,7 @@ export default async function handler(req, res) {
         .eq('user_id', userId)
         .like('move_key', 'dismissed-%');
       if (progressRows && progressRows.length > 0) {
-        const dismissedActions = new Set(progressRows.map((r) => r.move_action));
+        const dismissedActions = new Set(progressRows.map((r: { move_action: string }) => r.move_action));
         for (let i = allMoves.length - 1; i >= 0; i--) {
           if (dismissedActions.has(allMoves[i].action)) allMoves.splice(i, 1);
         }
@@ -211,7 +212,7 @@ export default async function handler(req, res) {
     });
 
     // ── 8. Latest transaction date ──
-    let latestTransactionDate = null;
+    let latestTransactionDate: string | null = null;
     for (const tx of result.enrichedTransactions) {
       if (tx.date && (!latestTransactionDate || tx.date > latestTransactionDate)) {
         latestTransactionDate = tx.date;
@@ -226,8 +227,9 @@ export default async function handler(req, res) {
       latest_transaction_date: latestTransactionDate,
       decision_score: rawAnalysis.decision_score,
     });
-  } catch (err) {
-    console.error('[enrich] Failed:', err?.message || err);
-    return res.status(500).json({ error: 'Enrichment failed', details: err?.message });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[enrich] Failed:', message);
+    return res.status(500).json({ error: 'Enrichment failed', details: message });
   }
 }

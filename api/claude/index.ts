@@ -4,19 +4,37 @@
 // classify: batches unclassified transaction descriptions → Claude → structured JSON
 // enrich: takes ranked moves and rewrites them into BOCY-style output
 
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_CACHE_SIZE = 2000;
 
-// ── In-memory classification cache ──
-const classificationCache = new Map();
+interface Classification {
+  merchant: string;
+  category: string;
+  isEssential: boolean;
+  isSubscription: boolean;
+  isDebt: boolean;
+  isBNPL: boolean;
+  isIncome: boolean;
+  confidence: string;
+}
 
-function getCacheKey(description) {
+interface CacheEntry {
+  classification: Classification;
+  timestamp: number;
+}
+
+// ── In-memory classification cache ──
+const classificationCache = new Map<string, CacheEntry>();
+
+function getCacheKey(description: string): string {
   return (description || '').toLowerCase().trim();
 }
 
-function getCached(description) {
+function getCached(description: string): Classification | null {
   const key = getCacheKey(description);
   const entry = classificationCache.get(key);
   if (!entry) return null;
@@ -27,10 +45,10 @@ function getCached(description) {
   return entry.classification;
 }
 
-function setCache(description, classification) {
+function setCache(description: string, classification: Classification): void {
   if (classificationCache.size >= MAX_CACHE_SIZE) {
     const firstKey = classificationCache.keys().next().value;
-    classificationCache.delete(firstKey);
+    if (firstKey) classificationCache.delete(firstKey);
   }
   classificationCache.set(getCacheKey(description), {
     classification,
@@ -38,11 +56,11 @@ function setCache(description, classification) {
   });
 }
 
-function sleep(ms) {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function sanitize(str, maxLen = 200) {
+function sanitize(str: unknown, maxLen = 200): string {
   if (typeof str !== 'string') return '';
   // eslint-disable-next-line no-control-regex
   return str.replace(/[\x00-\x1f\x7f]/g, '').slice(0, maxLen);
@@ -59,24 +77,21 @@ const VALID_CATEGORIES = [
 ];
 
 // Sensitive categories require keyword evidence in the transaction description.
-// If the AI suggests one of these but the description has no matching keyword,
-// we fall back to the safer alternative to avoid offensive mis-categorisations.
-const SENSITIVE_CATEGORIES = {
+const SENSITIVE_CATEGORIES: Record<string, { keywords: RegExp; fallback: string }> = {
   Gambling: {
     keywords: /\bbet365\b|\bpaddy\s*power\b|\bladbrokes\b|\bwilliam\s*hill\b|\bbetfred\b|\bcoral\b|\bsky\s*bet\b|\bbetting\b|\bcasino\b|\blottery\b|\blotto\b|\bgambl|\btombola\b|\bbetfair\b|\bpokerstars\b|\b888\b|\bfoxybingo\b/i,
     fallback: 'Entertainment',
   },
 };
 
-// Gate sensitive categories: only accept if transaction description has keyword evidence
-function gateSensitiveCategory(category, description) {
+function gateSensitiveCategory(category: string, description: string): string {
   const rule = SENSITIVE_CATEGORIES[category];
-  if (!rule) return category; // not sensitive, pass through
+  if (!rule) return category;
   const desc = (description || '').toLowerCase();
   return rule.keywords.test(desc) ? category : rule.fallback;
 }
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -94,15 +109,15 @@ export default async function handler(req, res) {
 
 // ─── CLASSIFY ───────────────────────────────────────────────
 
-async function handleClassify(req, res) {
+async function handleClassify(req: VercelRequest, res: VercelResponse) {
   const { transactions } = req.body;
   if (!transactions || !Array.isArray(transactions) || transactions.length === 0) {
     return res.json({ success: true, classifications: [] });
   }
 
-  const batch = transactions.slice(0, 50);
-  const results = new Array(batch.length).fill(null);
-  const uncached = [];
+  const batch = transactions.slice(0, 50) as Array<{ description: string; amount: number }>;
+  const results: Array<(Classification & { index: number }) | null> = new Array(batch.length).fill(null);
+  const uncached: Array<{ tx: { description: string; amount: number }; originalIndex: number }> = [];
 
   for (let i = 0; i < batch.length; i++) {
     const cached = getCached(batch[i].description);
@@ -125,14 +140,14 @@ async function handleClassify(req, res) {
   const model = process.env.CLAUDE_CLASSIFY_MODEL || process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
   const prompt = buildClassifyPrompt(uncached.map((u) => u.tx));
 
-  let lastError = null;
+  let lastError: Error | null = null;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': process.env.CLAUDE_API_KEY,
+          'x-api-key': process.env.CLAUDE_API_KEY!,
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
@@ -143,7 +158,7 @@ async function handleClassify(req, res) {
       });
 
       const data = await response.json();
-      let text = data.content?.[0]?.text || '';
+      let text: string = data.content?.[0]?.text || '';
       text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
       try {
@@ -152,12 +167,12 @@ async function handleClassify(req, res) {
           return res.json({ success: false, classifications: [], error: 'not_array' });
         }
 
-        parsed.forEach((item, i) => {
+        parsed.forEach((item: Record<string, unknown>, i: number) => {
           const entry = uncached[i];
           if (!entry) return;
 
-          const rawCategory = VALID_CATEGORIES.includes(item.category) ? item.category : 'Other';
-          const classification = {
+          const rawCategory = VALID_CATEGORIES.includes(item.category as string) ? (item.category as string) : 'Other';
+          const classification: Classification = {
             merchant: sanitize(item.merchant || entry.tx.description || 'Unknown', 100),
             category: gateSensitiveCategory(rawCategory, entry.tx.description),
             isEssential: Boolean(item.isEssential),
@@ -191,7 +206,7 @@ async function handleClassify(req, res) {
         return res.json({ success: false, classifications: [], error: 'parse_failed' });
       }
     } catch (err) {
-      lastError = err;
+      lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < MAX_RETRIES) {
         await sleep(RETRY_DELAY_MS * (attempt + 1));
       }
@@ -201,7 +216,7 @@ async function handleClassify(req, res) {
   return res.json({ success: false, classifications: [], error: lastError?.message || 'request_failed' });
 }
 
-function buildClassifyPrompt(transactions) {
+function buildClassifyPrompt(transactions: Array<{ description: string; amount: number }>): string {
   let prompt = `You are a UK bank transaction classifier. For each transaction description, determine:
 1. The clean merchant name (human-readable, e.g. "American Express" not "AMEX EPAYMENT")
 2. The spending category
@@ -230,7 +245,7 @@ TRANSACTIONS TO CLASSIFY:
 `;
 
   transactions.forEach((tx, i) => {
-    prompt += `\n${i}. "${sanitize(tx.description, 150)}" (amount: ${tx.amount > 0 ? '+' : ''}£${Math.abs(tx.amount).toFixed(2)})`;
+    prompt += `\n${i}. "${sanitize(tx.description, 150)}" (amount: ${tx.amount > 0 ? '+' : ''}\u00a3${Math.abs(tx.amount).toFixed(2)})`;
   });
 
   prompt += `
@@ -255,8 +270,30 @@ Return exactly ${transactions.length} objects in index order.`;
 
 // ─── ENRICH ─────────────────────────────────────────────────
 
-async function handleEnrich(req, res) {
-  const { moves, context } = req.body;
+interface Move {
+  action: string;
+  category?: string;
+  monthlyImpact: number;
+  annualImpact: number;
+  effort: string;
+  merchants?: string[];
+  strategy: string;
+  steps?: string[];
+  effect: string;
+  trajectory?: { insight: string; newMonths: number; goalLabel: string };
+}
+
+interface EnrichContext {
+  monthly_income?: number;
+  monthly_spending?: number;
+  surplus?: number;
+  goals?: { one_year_goal?: string; target_amount?: number };
+  ukpf_priority?: string;
+  ukpf_label?: string;
+}
+
+async function handleEnrich(req: VercelRequest, res: VercelResponse) {
+  const { moves, context } = req.body as { moves: Move[]; context: EnrichContext };
   if (!moves || !Array.isArray(moves) || moves.length === 0) {
     return res.status(400).json({ error: 'moves array required' });
   }
@@ -264,14 +301,14 @@ async function handleEnrich(req, res) {
   const model = process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
   const prompt = buildEnrichPrompt(moves, context);
 
-  let lastError = null;
+  let lastError: Error | null = null;
   for (let attempt = 0; attempt <= 2; attempt++) {
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': process.env.CLAUDE_API_KEY,
+          'x-api-key': process.env.CLAUDE_API_KEY!,
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
@@ -282,7 +319,7 @@ async function handleEnrich(req, res) {
       });
 
       const data = await response.json();
-      let text = data.content?.[0]?.text || '';
+      let text: string = data.content?.[0]?.text || '';
       text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
       try {
@@ -292,7 +329,7 @@ async function handleEnrich(req, res) {
         return res.json({ success: false, moves: moves, error: 'parse_failed' });
       }
     } catch (err) {
-      lastError = err;
+      lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < 2) {
         await sleep(RETRY_DELAY_MS * (attempt + 1));
       }
@@ -302,20 +339,20 @@ async function handleEnrich(req, res) {
   return res.json({ success: false, moves: moves, error: lastError?.message || 'request_failed' });
 }
 
-function buildEnrichPrompt(moves, context) {
+function buildEnrichPrompt(moves: Move[], context: EnrichContext | undefined): string {
   const { monthly_income, monthly_spending, surplus, goals, ukpf_priority, ukpf_label } = context || {};
 
   let prompt = `You are Bocy, an AI financial assistant. Rewrite these financial recommendations into specific, outcome-focused action plans.
 
 RULES:
 - Name ACTUAL merchants from the merchants list (e.g. "Cancel Netflix, Spotify, Adobe" not "cancel some subscriptions")
-- Include SPECIFIC £ amounts (already provided in the data)
-- Tie every action to the user's goal with a timeline (e.g. "→ reach 1-month buffer in 4 months")
+- Include SPECIFIC \u00a3 amounts (already provided in the data)
+- Tie every action to the user's goal with a timeline (e.g. "\u2192 reach 1-month buffer in 4 months")
 - Keep the action field under 80 characters. It's a headline.
 - Rewrite the strategy as 1-2 definite sentences. No hedging, no "you might want to".
 - Rewrite the effect as a measurable outcome with timeline
 - Keep the steps array as 3-4 concrete, executable actions
-- Use British English and £ symbol
+- Use British English and \u00a3 symbol
 - NEVER use markdown formatting. No **bold**, no *italic*, no backticks. Output plain text only.
 - NEVER use em-dashes (\u2014) or en-dashes (\u2013). Use commas, full stops, or natural connectors like "and", "to", "so" instead.
 - Write like a human. Short sentences. No robotic phrasing. No dashes as separators.
@@ -324,7 +361,7 @@ RULES:
 
 MERCHANT CLEANUP RULES:
 - The "merchants" array may contain raw bank descriptions. Clean them into proper brand names.
-- Examples: "DELIVEROO.COM ORDER" → "Deliveroo", "AMZNMKTPLACE" → "Amazon", "TESCO STORES" → "Tesco", "UBER *EATS" → "Uber Eats"
+- Examples: "DELIVEROO.COM ORDER" \u2192 "Deliveroo", "AMZNMKTPLACE" \u2192 "Amazon", "TESCO STORES" \u2192 "Tesco", "UBER *EATS" \u2192 "Uber Eats"
 - Remove payment prefixes (SQ*, IZ*, PP*, etc.), terminal IDs, reference numbers, country codes (GB, GBR)
 - Use proper capitalisation: "Deliveroo" not "deliveroo" or "DELIVEROO"
 - Deduplicate: if the same merchant appears with slight variations, keep only the clean version
@@ -333,11 +370,11 @@ MERCHANT CLEANUP RULES:
 USER CONTEXT:
 - UKPF priority: ${sanitize(ukpf_label || 'unknown')} (${sanitize(ukpf_priority || 'unknown')})`;
 
-  if (monthly_income) prompt += `\n- Monthly income: £${Math.round(monthly_income)}`;
-  if (monthly_spending) prompt += `\n- Monthly spending: £${Math.round(monthly_spending)}`;
-  if (surplus != null) prompt += `\n- Monthly surplus: £${Math.round(surplus)}`;
+  if (monthly_income) prompt += `\n- Monthly income: \u00a3${Math.round(monthly_income)}`;
+  if (monthly_spending) prompt += `\n- Monthly spending: \u00a3${Math.round(monthly_spending)}`;
+  if (surplus != null) prompt += `\n- Monthly surplus: \u00a3${Math.round(surplus)}`;
   if (goals?.one_year_goal) prompt += `\n- 1-year goal: ${sanitize(goals.one_year_goal)}`;
-  if (goals?.target_amount) prompt += `\n- Target amount: £${goals.target_amount}`;
+  if (goals?.target_amount) prompt += `\n- Target amount: \u00a3${goals.target_amount}`;
 
   prompt += `\n\nMOVES TO REFINE (${moves.length} moves):`;
 
@@ -346,8 +383,8 @@ USER CONTEXT:
     prompt += `\n\n--- Move ${i + 1} ---`;
     prompt += `\nAction: ${sanitize(m.action, 120)}`;
     prompt += `\nCategory: ${sanitize(m.category || 'spending', 30)}`;
-    prompt += `\nMonthly impact: £${m.monthlyImpact}`;
-    prompt += `\nAnnual impact: £${m.annualImpact}`;
+    prompt += `\nMonthly impact: \u00a3${m.monthlyImpact}`;
+    prompt += `\nAnnual impact: \u00a3${m.annualImpact}`;
     prompt += `\nEffort: ${sanitize(m.effort, 10)}`;
     prompt += `\nMerchants (raw, clean these up): ${(m.merchants || []).map((s) => sanitize(s, 50)).join(', ') || 'none detected'}`;
     prompt += `\nStrategy: ${sanitize(m.strategy, 300)}`;

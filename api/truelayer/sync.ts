@@ -1,4 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Allow up to 60s for sync (Hobby plan max).
 // Default 10s is too tight for token exchange + multiple TrueLayer API calls.
@@ -8,14 +9,31 @@ const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 't
 const TL_AUTH_HOST = IS_SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
 const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://api.truelayer.com';
 
+interface BankRow {
+  id: string;
+  connection_id: string;
+  refresh_token: string;
+  updated_at: string;
+  provider_name: string | null;
+  created_at: string;
+  csv_data: string | null;
+}
+
+interface SyncResult {
+  csvLines: string[];
+  balances: Array<{ name: string; type: string; balance: number; limit: number | null; available: number | null }>;
+  accountBalances?: Array<{ name: string; type: string; balance: number | null; available: number | null; overdraft: number | null }>;
+  newRefreshToken: string | null;
+  txCount: number;
+  providerName: string | null;
+  tokenOnlyRecovery?: boolean;
+}
+
 /**
  * Sync a single TrueLayer connection: refresh token → fetch transactions + balances.
- * Returns { csv, balances, newRefreshToken } or null on failure.
- * On token exchange success but data fetch failure, returns { newRefreshToken }
- * so the caller can persist the rotated token even if data fetching fails.
  */
-async function syncConnection(bankRow, clientId, clientSecret, admin) {
-  let newRefreshToken = null;
+async function syncConnection(bankRow: BankRow, clientId: string, clientSecret: string, admin: SupabaseClient): Promise<SyncResult | null> {
+  let newRefreshToken: string | null = null;
   try {
     const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
       method: 'POST',
@@ -34,11 +52,6 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
       return null;
     }
 
-    // Persist the new refresh token IMMEDIATELY — before any data fetches.
-    // TrueLayer tokens are single-use (rotating). The old token is consumed
-    // the moment we exchange it. If we wait until after data fetches and
-    // the function times out or crashes, the new token is lost forever and
-    // the user must re-authenticate.
     newRefreshToken = tokenData.refresh_token || null;
     if (newRefreshToken && admin) {
       await admin.from('bank_data').update({ refresh_token: newRefreshToken }).eq('id', bankRow.id);
@@ -46,49 +59,39 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
 
     const headers = { Authorization: `Bearer ${tokenData.access_token}` };
 
-    // Fetch accounts and cards with a single retry — some banks need a
-    // moment after token refresh before data endpoints respond.
-    let accountsRes, cardsRes, accountsJson, cardsJson;
+    let accountsRes: Response, cardsRes: Response, accountsJson: Record<string, unknown>, cardsJson: Record<string, unknown>;
     for (let attempt = 0; attempt < 2; attempt++) {
-      [accountsRes, cardsRes] = await Promise.all([
+      [accountsRes!, cardsRes!] = await Promise.all([
         fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
         fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
       ]);
 
-      accountsJson = await accountsRes.json();
-      cardsJson = await cardsRes.json();
+      accountsJson! = await accountsRes!.json();
+      cardsJson! = await cardsRes!.json();
 
-      if (accountsRes.ok && cardsRes.ok) break;
+      if (accountsRes!.ok && cardsRes!.ok) break;
 
       if (attempt === 0) {
-        console.warn(`[sync] TrueLayer data endpoints failed (attempt 1) — accounts: ${accountsRes.status}, cards: ${cardsRes.status}. Retrying in 2s...`);
+        console.warn(`[sync] TrueLayer data endpoints failed (attempt 1) — accounts: ${accountsRes!.status}, cards: ${cardsRes!.status}. Retrying in 2s...`);
         await new Promise((r) => setTimeout(r, 2000));
       }
     }
 
-    // Guard: if TrueLayer still returned errors after retry, bail out.
-    // IMPORTANT: preserve the new refresh token so the caller can persist it —
-    // returning null here would lose the rotated token permanently.
-    if (!accountsRes.ok || !cardsRes.ok) {
-      console.warn(`[sync] TrueLayer data endpoints returned errors after retry — accounts: ${accountsRes.status}, cards: ${cardsRes.status}`, {
-        accountsError: accountsJson.error || null,
-        cardsError: cardsJson.error || null,
+    if (!accountsRes!.ok || !cardsRes!.ok) {
+      console.warn(`[sync] TrueLayer data endpoints returned errors after retry — accounts: ${accountsRes!.status}, cards: ${cardsRes!.status}`, {
+        accountsError: (accountsJson! as Record<string, unknown>).error || null,
+        cardsError: (cardsJson! as Record<string, unknown>).error || null,
       });
-      return { csvLines: [], balances: [], newRefreshToken, txCount: 0, tokenOnlyRecovery: true };
+      return { csvLines: [], balances: [], newRefreshToken, txCount: 0, providerName: null, tokenOnlyRecovery: true };
     }
 
-    const accounts = accountsJson.results || [];
-    const cards = cardsJson.results || [];
+    const accounts: Array<{ account_id: string; display_name?: string; account_type?: string; provider?: { display_name?: string } }> = (accountsJson! as { results?: unknown[] }).results as Array<{ account_id: string; display_name?: string; account_type?: string; provider?: { display_name?: string } }> || [];
+    const cards: Array<{ account_id: string; display_name?: string; card_network?: string; provider?: { display_name?: string } }> = (cardsJson! as { results?: unknown[] }).results as Array<{ account_id: string; display_name?: string; card_network?: string; provider?: { display_name?: string } }> || [];
 
-    // Extract provider name from TrueLayer account/card data
     const providerName = accounts[0]?.provider?.display_name || cards[0]?.provider?.display_name || null;
 
-    // Use today as the upper bound.
-    // TrueLayer rejects future dates with invalid_date_range.
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
-    // Re-syncs only need 30 days of data (incremental update).
-    // The initial 12-month pull happens in callback.js at connection time.
     fromDate.setDate(fromDate.getDate() - 30);
     const from = fromDate.toISOString().split('T')[0];
 
@@ -102,7 +105,7 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
             }
             return body;
           })
-          .catch((err) => { console.warn(`[sync] Transaction fetch failed for account ${a.account_id}:`, err.message); return { results: [] }; })
+          .catch((err: Error) => { console.warn(`[sync] Transaction fetch failed for account ${a.account_id}:`, err.message); return { results: [] }; })
       ),
       ...cards.map((c) =>
         fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers })
@@ -113,20 +116,20 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
             }
             return body;
           })
-          .catch((err) => { console.warn(`[sync] Transaction fetch failed for card ${c.account_id}:`, err.message); return { results: [] }; })
+          .catch((err: Error) => { console.warn(`[sync] Transaction fetch failed for card ${c.account_id}:`, err.message); return { results: [] }; })
       ),
     ];
 
     const cardBalancePromises = cards.map((c) =>
       fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/balance`, { headers })
         .then((r) => r.json())
-        .then((data) => ({ card: c, balance: (data.results || [])[0] || null }))
+        .then((data: { results?: Array<{ current?: number; credit_limit?: number; available?: number }> }) => ({ card: c, balance: (data.results || [])[0] || null }))
         .catch(() => ({ card: c, balance: null }))
     );
     const accountBalancePromises = accounts.map((a) =>
       fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/balance`, { headers })
         .then((r) => r.json())
-        .then((data) => ({ account: a, balance: (data.results || [])[0] || null }))
+        .then((data: { results?: Array<{ current?: number; overdraft?: number; available?: number }> }) => ({ account: a, balance: (data.results || [])[0] || null }))
         .catch(() => ({ account: a, balance: null }))
     );
 
@@ -135,10 +138,9 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
       Promise.all(cardBalancePromises),
       Promise.all(accountBalancePromises),
     ]);
-    const allTx = txResults.flatMap((r) => r.results || []);
+    const allTx: Array<{ timestamp?: string; merchant_name?: string; description?: string; transaction_type?: string; amount: number }> = txResults.flatMap((r: { results?: unknown[] }) => r.results || []) as Array<{ timestamp?: string; merchant_name?: string; description?: string; transaction_type?: string; amount: number }>;
 
-    // Convert to CSV lines (without header)
-    const csvLines = [];
+    const csvLines: string[] = [];
     for (const tx of allTx) {
       const date = tx.timestamp ? tx.timestamp.split('T')[0] : '';
       const desc = (tx.merchant_name || tx.description || '').replace(/,/g, ' ').replace(/[\r\n]+/g, ' ');
@@ -150,38 +152,37 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
       .filter((r) => r.balance)
       .map((r) => ({
         name: r.card.provider?.display_name || r.card.card_network || r.card.display_name || 'Card',
-        type: 'credit_card',
-        balance: r.balance.current != null ? Math.abs(r.balance.current) : null,
-        limit: r.balance.credit_limit || null,
-        available: r.balance.available || null,
+        type: 'credit_card' as const,
+        balance: r.balance!.current != null ? Math.abs(r.balance!.current!) : 0,
+        limit: r.balance!.credit_limit || null,
+        available: r.balance!.available || null,
       }));
 
     const accountBalances = accountBalanceResults
       .filter((r) => r.balance)
       .map((r) => {
-        const bal = r.balance;
+        const bal = r.balance!;
         const hasOverdraft = bal.overdraft != null && bal.overdraft > 0;
         const isOverdrawn = bal.current != null && bal.current < 0;
         if (!hasOverdraft && !isOverdrawn) return null;
         return {
           name: r.account.display_name || r.account.provider?.display_name || 'Account',
-          type: isOverdrawn ? 'overdraft' : 'overdraft_facility',
-          balance: isOverdrawn ? Math.abs(bal.current) : 0,
+          type: isOverdrawn ? 'overdraft' as const : 'overdraft_facility' as const,
+          balance: isOverdrawn ? Math.abs(bal.current!) : 0,
           limit: bal.overdraft || null,
           available: bal.available || null,
         };
       })
-      .filter(Boolean);
+      .filter(Boolean) as Array<{ name: string; type: string; balance: number; limit: number | null; available: number | null }>;
 
-    // All account balances (current + savings) for surplus analysis
     const allAccountBalances = accountBalanceResults
       .filter((r) => r.balance && r.balance.current != null)
       .map((r) => ({
         name: r.account.provider?.display_name || r.account.display_name || 'Account',
         type: r.account.account_type || 'current',
-        balance: r.balance.current,
-        available: r.balance.available || null,
-        overdraft: r.balance.overdraft || null,
+        balance: r.balance!.current!,
+        available: r.balance!.available || null,
+        overdraft: r.balance!.overdraft || null,
       }));
 
     return {
@@ -192,12 +193,11 @@ async function syncConnection(bankRow, clientId, clientSecret, admin) {
       txCount: allTx.length,
       providerName,
     };
-  } catch (err) {
-    console.warn(`[sync] Connection ${bankRow.connection_id} failed:`, err.message);
-    // If token exchange succeeded but data fetch failed, return the new
-    // refresh token so it can still be persisted (old token is consumed).
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[sync] Connection ${bankRow.connection_id} failed:`, message);
     if (newRefreshToken) {
-      return { csvLines: [], balances: [], newRefreshToken, txCount: 0, tokenOnlyRecovery: true };
+      return { csvLines: [], balances: [], newRefreshToken, txCount: 0, providerName: null, tokenOnlyRecovery: true };
     }
     return null;
   }
@@ -213,13 +213,13 @@ const WARN_DAYS = 14;
  * Syncs ALL connected bank accounts for a user, merges transactions and
  * balances, and returns the combined CSV.
  */
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   // Authenticate the caller via Supabase JWT to prevent unauthenticated access
-  const authHeader = req.headers.authorization || '';
+  const authHeader = (req.headers.authorization as string) || '';
   const authToken = authHeader.replace('Bearer ', '');
   if (!authToken) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -228,20 +228,18 @@ export default async function handler(req, res) {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
   if (supabaseAnonKey) {
-    const anonClient = createClient(supabaseUrl, supabaseAnonKey);
+    const anonClient = createClient(supabaseUrl!, supabaseAnonKey);
     const { data: { user }, error: authError } = await anonClient.auth.getUser(authToken);
     if (authError || !user) {
       return res.status(401).json({ error: 'Invalid token' });
     }
-    // Ensure the user can only sync their own data
     if (req.body?.user_id && req.body.user_id !== user.id) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    // Use the authenticated user's ID
     req.body = { ...req.body, user_id: user.id };
   }
 
-  const userId = req.body?.user_id;
+  const userId: string | undefined = req.body?.user_id;
   if (!userId) {
     return res.status(400).json({ error: 'Missing user_id' });
   }
@@ -276,31 +274,21 @@ export default async function handler(req, res) {
 
     // Sync all connections in parallel
     const results = await Promise.all(
-      bankRows.map((row) => syncConnection(row, clientId, clientSecret, admin).then((r) => ({ row, result: r })))
+      (bankRows as BankRow[]).map((row) => syncConnection(row, clientId, clientSecret, admin).then((r) => ({ row, result: r })))
     );
 
-    let mergedCsvLines = [];
-    let mergedBalances = [];
+    let mergedBalances: Array<{ name: string; type: string; balance: number; limit: number | null; available: number | null }> = [];
     let totalTx = 0;
     let syncedCount = 0;
-    let expiredConnections = [];
+    const expiredConnections: Array<{ connection_id: string; provider_name: string | null }> = [];
 
     for (const { row, result } of results) {
-      // Refresh token is now persisted inside syncConnection() immediately
-      // after token exchange, before data fetches — no need to do it here.
-
       if (!result || result.tokenOnlyRecovery) {
-        // Only flag as expired if the 90-day consent window has actually lapsed.
-        // Transient failures (network errors, TrueLayer outages) within the
-        // consent window should NOT trigger the reconnect banner.
-        // IMPORTANT: Use created_at (when consent was granted), NOT updated_at
-        // (which advances on every sync and would shift the 90-day window).
         const created = new Date(row.created_at);
         if (!created || isNaN(created.getTime())) continue;
         const expiry = new Date(created);
         expiry.setDate(expiry.getDate() + CONSENT_DAYS);
         if (Date.now() >= expiry.getTime()) {
-          // Use provider_name from DB, or from the sync result (backfill), or fallback
           const name = row.provider_name || result?.providerName || null;
           expiredConnections.push({ connection_id: row.connection_id, provider_name: name });
         }
@@ -308,30 +296,22 @@ export default async function handler(req, res) {
       }
 
       syncedCount++;
-      mergedCsvLines.push(...result.csvLines);
       mergedBalances.push(...result.balances);
       totalTx += result.txCount;
 
-      // Update each bank_data row individually with its own data.
-      // Guard: never overwrite stored CSV with empty data — only write if
-      // we actually got transactions back from TrueLayer.
-      const updateFields = {
+      const updateFields: Record<string, unknown> = {
         updated_at: new Date().toISOString(),
       };
       if (result.csvLines.length > 0) {
-        // Merge new transactions with existing stored CSV (incremental sync).
-        // The new 30-day window overlaps with stored data, so deduplicate.
-        // Use count-based dedup: keep max(existing, new) per key so legitimate
-        // duplicate transactions (e.g. two coffees same day/amount) aren't lost.
-        const existingLines = [];
+        const existingLines: string[] = [];
         if (row.csv_data) {
           const lines = row.csv_data.split('\n');
-          existingLines.push(...lines.slice(1).filter((l) => l.trim()));
+          existingLines.push(...lines.slice(1).filter((l: string) => l.trim()));
         }
-        const normalise = (line) => line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
-        const countByKey = (lines) => {
-          const counts = new Map();
-          const lineByKey = new Map();
+        const normalise = (line: string) => line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
+        const countByKey = (lines: string[]) => {
+          const counts = new Map<string, number>();
+          const lineByKey = new Map<string, string>();
           for (const line of lines) {
             const key = normalise(line);
             counts.set(key, (counts.get(key) || 0) + 1);
@@ -342,10 +322,10 @@ export default async function handler(req, res) {
         const existing = countByKey(existingLines);
         const fresh = countByKey(result.csvLines);
         const allKeys = new Set([...existing.counts.keys(), ...fresh.counts.keys()]);
-        const unique = [];
+        const unique: string[] = [];
         for (const key of allKeys) {
           const maxCount = Math.max(existing.counts.get(key) || 0, fresh.counts.get(key) || 0);
-          const line = fresh.lineByKey.get(key) || existing.lineByKey.get(key);
+          const line = fresh.lineByKey.get(key) || existing.lineByKey.get(key)!;
           for (let i = 0; i < maxCount; i++) {
             unique.push(line);
           }
@@ -358,17 +338,13 @@ export default async function handler(req, res) {
       if (result.accountBalances && result.accountBalances.length > 0) {
         updateFields.account_balances = result.accountBalances;
       }
-      // Backfill provider_name if missing (older rows created before the column existed)
       if (!row.provider_name && result.providerName) {
         updateFields.provider_name = result.providerName;
       }
-      // refresh_token is already persisted above (before data fetch guards)
       await admin.from('bank_data').update(updateFields).eq('id', row.id);
     }
 
     if (syncedCount === 0) {
-      // If no connections are genuinely expired (past 90 days), this is a
-      // transient failure — don't tell the client to show "Reconnect".
       const reason = expiredConnections.length > 0 ? 'token_expired' : 'sync_failed';
       return res.json({
         success: false,
@@ -378,25 +354,22 @@ export default async function handler(req, res) {
     }
 
     // Deduplicate transactions across connections.
-    // Use per-connection counts so legitimate duplicates within one account
-    // (e.g. two coffees same day/amount) are preserved, while the same
-    // transaction appearing in two accounts is still merged.
-    const normKey = (l) => l.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
+    const normKey = (l: string) => l.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
     const connCountMaps = results
       .filter(({ result: r }) => r && !r.tokenOnlyRecovery && r.csvLines.length > 0)
       .map(({ result: r }) => {
-        const m = new Map();
-        const ref = new Map();
-        for (const line of r.csvLines) {
+        const m = new Map<string, number>();
+        const ref = new Map<string, string>();
+        for (const line of r!.csvLines) {
           const k = normKey(line);
           m.set(k, (m.get(k) || 0) + 1);
           if (!ref.has(k)) ref.set(k, line);
         }
         return { m, ref };
       });
-    const allTxKeys = new Set();
+    const allTxKeys = new Set<string>();
     for (const { m } of connCountMaps) for (const k of m.keys()) allTxKeys.add(k);
-    const uniqueLines = [];
+    const uniqueLines: string[] = [];
     for (const k of allTxKeys) {
       let best = 0;
       let line = '';
@@ -407,13 +380,11 @@ export default async function handler(req, res) {
       for (let i = 0; i < best; i++) uniqueLines.push(line);
     }
 
-    // Return merged CSV across all connections
     const mergedCsv = ['Date,Description,Amount', ...uniqueLines].join('\n');
 
-    // Check for connections approaching 90-day consent expiry (warn at 14 days)
-    // Use created_at (when consent was granted), not updated_at (which shifts with syncs).
-    const expiringConnections = [];
-    for (const row of bankRows) {
+    // Check for connections approaching 90-day consent expiry
+    const expiringConnections: Array<{ provider_name: string | null; days_left: number }> = [];
+    for (const row of bankRows as BankRow[]) {
       const created = new Date(row.created_at);
       if (!created || isNaN(created.getTime())) continue;
       const expiry = new Date(created);
@@ -430,34 +401,30 @@ export default async function handler(req, res) {
     console.log(`[sync] Synced ${syncedCount}/${bankRows.length} connections, ${totalTx} transactions, ${mergedBalances.length} balance(s)`);
 
     // Clean up duplicate connections for the same provider.
-    // When a user reconnects a bank, a new row is created — the old expired row
-    // should be removed so the reconnect banner doesn't keep reappearing.
     try {
-      // Build a map of row.id → providerName, using syncConnection response
-      // to fill in missing provider_name (backfill for old rows)
-      const rowProviders = {};
+      const rowProviders: Record<string, string | null> = {};
       for (const { row, result } of results) {
         rowProviders[row.id] = row.provider_name || result?.providerName || null;
       }
 
-      const providerGroups = {};
-      for (const row of bankRows) {
+      const providerGroups: Record<string, BankRow[]> = {};
+      for (const row of bankRows as BankRow[]) {
         const key = rowProviders[row.id] || row.connection_id;
         if (!providerGroups[key]) providerGroups[key] = [];
         providerGroups[key].push(row);
       }
-      for (const [provKey, rows] of Object.entries(providerGroups)) {
+      for (const [, rows] of Object.entries(providerGroups)) {
         if (rows.length <= 1) continue;
-        // Keep the newest, delete the rest
         rows.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
         const staleIds = rows.slice(1).map((r) => r.id);
         if (staleIds.length > 0) {
           await admin.from('bank_data').delete().in('id', staleIds);
-          console.log(`[sync] Cleaned up ${staleIds.length} stale connection(s) for provider ${provKey}`);
+          console.log(`[sync] Cleaned up ${staleIds.length} stale connection(s)`);
         }
       }
-    } catch (cleanupErr) {
-      console.warn('[sync] Non-critical: duplicate cleanup failed:', cleanupErr.message);
+    } catch (cleanupErr: unknown) {
+      const msg = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+      console.warn('[sync] Non-critical: duplicate cleanup failed:', msg);
     }
 
     return res.json({
@@ -471,8 +438,9 @@ export default async function handler(req, res) {
       expiring_connections: expiringConnections.length > 0 ? expiringConnections : undefined,
       updated_at: new Date().toISOString(),
     });
-  } catch (err) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('[sync] Error:', err);
-    return res.status(500).json({ error: 'Sync failed', details: err.message });
+    return res.status(500).json({ error: 'Sync failed', details: message });
   }
 }

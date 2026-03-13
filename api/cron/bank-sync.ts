@@ -8,7 +8,8 @@
 // because the token refresh only happened on app open. By running
 // server-side, tokens stay warm and data stays fresh.
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Allow up to 60s for the cron job (Hobby plan max).
 // Processing multiple users' bank connections easily exceeds the default 10s.
@@ -21,12 +22,32 @@ const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+interface BankRow {
+  id: string;
+  connection_id: string;
+  refresh_token: string;
+  user_id: string;
+  provider_name: string | null;
+  created_at: string;
+  updated_at: string;
+  csv_data: string | null;
+}
+
+interface RefreshResult {
+  success: boolean;
+  expired?: boolean;
+  csvLines?: string[];
+  cardBalances?: Array<{ name: string; type: string; balance: number | null; limit: number | null; available: number | null }>;
+  newRefreshToken?: string | null;
+  txCount?: number;
+}
+
 /**
  * Refresh a single TrueLayer connection: refresh token → fetch transactions + balances.
  * Returns updated data or null on failure.
  */
-async function refreshConnection(bankRow, clientId, clientSecret, admin) {
-  let newRefreshToken = null;
+async function refreshConnection(bankRow: BankRow, clientId: string, clientSecret: string, admin: SupabaseClient): Promise<RefreshResult> {
+  let newRefreshToken: string | null = null;
   try {
     const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
       method: 'POST',
@@ -67,15 +88,13 @@ async function refreshConnection(bankRow, clientId, clientSecret, admin) {
     // Refresh token is already persisted above.
     if (!accountsRes.ok || !cardsRes.ok) {
       console.warn(`[bank-sync] TrueLayer data endpoints returned errors — accounts: ${accountsRes.status}, cards: ${cardsRes.status}`);
-      return { success: false, expired: false, newRefreshToken };
+      return { success: false, expired: false, newRefreshToken: newRefreshToken ?? undefined };
     }
 
-    const accounts = accountsJson.results || [];
-    const cards = cardsJson.results || [];
+    const accounts: Array<{ account_id: string; display_name?: string; provider?: { display_name?: string } }> = accountsJson.results || [];
+    const cards: Array<{ account_id: string; display_name?: string; provider?: { display_name?: string } }> = cardsJson.results || [];
 
     // Use tomorrow as the upper bound so TrueLayer includes all of today's transactions.
-    // Date-only strings (e.g. "2026-03-09") are interpreted as start-of-day UTC,
-    // which can exclude same-day transactions depending on the bank's timezone.
     const toDate = new Date();
     toDate.setDate(toDate.getDate() + 1);
     const to = toDate.toISOString().split('T')[0];
@@ -88,25 +107,25 @@ async function refreshConnection(bankRow, clientId, clientSecret, admin) {
       ...accounts.map((a) =>
         fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers })
           .then((r) => r.json())
-          .catch((err) => { console.warn(`[bank-sync] Transaction fetch failed for account ${a.account_id}:`, err.message); return { results: [] }; })
+          .catch((err: Error) => { console.warn(`[bank-sync] Transaction fetch failed for account ${a.account_id}:`, err.message); return { results: [] }; })
       ),
       ...cards.map((c) =>
         fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers })
           .then((r) => r.json())
-          .catch((err) => { console.warn(`[bank-sync] Transaction fetch failed for card ${c.account_id}:`, err.message); return { results: [] }; })
+          .catch((err: Error) => { console.warn(`[bank-sync] Transaction fetch failed for card ${c.account_id}:`, err.message); return { results: [] }; })
       ),
     ];
 
     const cardBalancePromises = cards.map((c) =>
       fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/balance`, { headers })
         .then((r) => r.json())
-        .then((data) => ({ card: c, balance: (data.results || [])[0] || null }))
+        .then((data: { results?: Array<{ current?: number; credit_limit?: number; available?: number }> }) => ({ card: c, balance: (data.results || [])[0] || null }))
         .catch(() => ({ card: c, balance: null }))
     );
     const accountBalancePromises = accounts.map((a) =>
       fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/balance`, { headers })
         .then((r) => r.json())
-        .then((data) => ({ account: a, balance: (data.results || [])[0] || null }))
+        .then((data: { results?: Array<{ current?: number; overdraft?: number; available?: number }> }) => ({ account: a, balance: (data.results || [])[0] || null }))
         .catch(() => ({ account: a, balance: null }))
     );
 
@@ -115,9 +134,9 @@ async function refreshConnection(bankRow, clientId, clientSecret, admin) {
       Promise.all(cardBalancePromises),
       Promise.all(accountBalancePromises),
     ]);
-    const allTx = txResults.flatMap((r) => r.results || []);
+    const allTx: Array<{ timestamp?: string; merchant_name?: string; description?: string; transaction_type?: string; amount: number }> = txResults.flatMap((r: { results?: unknown[] }) => r.results || []) as Array<{ timestamp?: string; merchant_name?: string; description?: string; transaction_type?: string; amount: number }>;
 
-    const csvLines = [];
+    const csvLines: string[] = [];
     for (const tx of allTx) {
       const date = tx.timestamp ? tx.timestamp.split('T')[0] : '';
       const desc = (tx.merchant_name || tx.description || '').replace(/,/g, ' ');
@@ -129,28 +148,28 @@ async function refreshConnection(bankRow, clientId, clientSecret, admin) {
       .filter((r) => r.balance)
       .map((r) => ({
         name: r.card.display_name || r.card.provider?.display_name || 'Card',
-        type: 'credit_card',
-        balance: r.balance.current != null ? Math.abs(r.balance.current) : null,
-        limit: r.balance.credit_limit || null,
-        available: r.balance.available || null,
+        type: 'credit_card' as const,
+        balance: r.balance!.current != null ? Math.abs(r.balance!.current!) : null,
+        limit: r.balance!.credit_limit || null,
+        available: r.balance!.available || null,
       }));
 
     const accountBalances = accountBalanceResults
       .filter((r) => r.balance)
       .map((r) => {
-        const bal = r.balance;
+        const bal = r.balance!;
         const hasOverdraft = bal.overdraft != null && bal.overdraft > 0;
         const isOverdrawn = bal.current != null && bal.current < 0;
         if (!hasOverdraft && !isOverdrawn) return null;
         return {
           name: r.account.display_name || r.account.provider?.display_name || 'Account',
-          type: isOverdrawn ? 'overdraft' : 'overdraft_facility',
-          balance: isOverdrawn ? Math.abs(bal.current) : 0,
+          type: isOverdrawn ? 'overdraft' as const : 'overdraft_facility' as const,
+          balance: isOverdrawn ? Math.abs(bal.current!) : 0,
           limit: bal.overdraft || null,
           available: bal.available || null,
         };
       })
-      .filter(Boolean);
+      .filter(Boolean) as Array<{ name: string; type: string; balance: number; limit: number | null; available: number | null }>;
 
     return {
       success: true,
@@ -159,17 +178,18 @@ async function refreshConnection(bankRow, clientId, clientSecret, admin) {
       newRefreshToken,
       txCount: allTx.length,
     };
-  } catch (err) {
-    console.warn(`[bank-sync] Connection ${bankRow.connection_id} failed:`, err.message);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[bank-sync] Connection ${bankRow.connection_id} failed:`, message);
     // Return the new refresh token even on failure so it can be persisted
-    return { success: false, expired: false, newRefreshToken };
+    return { success: false, expired: false, newRefreshToken: newRefreshToken ?? undefined };
   }
 }
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Verify cron secret
   const cronSecret = process.env.CRON_SECRET;
-  const authHeader = req.headers.authorization || '';
+  const authHeader = (req.headers.authorization as string) || '';
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -184,9 +204,9 @@ export default async function handler(req, res) {
     return res.json({ success: false, error: 'TrueLayer credentials not configured' });
   }
 
-  const admin = createClient(supabaseUrl, serviceKey);
+  const admin = createClient(supabaseUrl!, serviceKey);
   const results = { refreshed: 0, failed: 0, expired: 0, total: 0 };
-  const refreshedUserIds = new Set();
+  const refreshedUserIds = new Set<string>();
 
   try {
     // Get all TrueLayer connections with valid refresh tokens
@@ -206,7 +226,7 @@ export default async function handler(req, res) {
     // Process connections in batches of 5 to avoid overwhelming TrueLayer
     const BATCH_SIZE = 5;
     for (let i = 0; i < bankRows.length; i += BATCH_SIZE) {
-      const batch = bankRows.slice(i, i + BATCH_SIZE);
+      const batch = bankRows.slice(i, i + BATCH_SIZE) as BankRow[];
 
       const batchResults = await Promise.all(
         batch.map(async (row) => {
@@ -215,7 +235,7 @@ export default async function handler(req, res) {
           const expiry = new Date(created);
           expiry.setDate(expiry.getDate() + 90);
           if (Date.now() >= expiry.getTime()) {
-            return { row, result: { success: false, expired: true } };
+            return { row, result: { success: false, expired: true } as RefreshResult };
           }
 
           const result = await refreshConnection(row, clientId, clientSecret, admin);
@@ -224,9 +244,6 @@ export default async function handler(req, res) {
       );
 
       for (const { row, result } of batchResults) {
-        // Refresh token is now persisted inside refreshConnection() immediately
-        // after token exchange — no need to do it here.
-
         if (!result.success) {
           if (result.expired) {
             results.expired++;
@@ -241,19 +258,19 @@ export default async function handler(req, res) {
 
         // Update the bank_data row with fresh data.
         // Guard: never overwrite stored CSV with empty data.
-        const updateFields = {
+        const updateFields: Record<string, unknown> = {
           updated_at: new Date().toISOString(),
         };
-        if (result.csvLines.length > 0) {
+        if (result.csvLines && result.csvLines.length > 0) {
           // Merge new transactions with existing stored CSV (incremental sync).
-          const existingLines = [];
+          const existingLines: string[] = [];
           if (row.csv_data) {
             const lines = row.csv_data.split('\n');
-            existingLines.push(...lines.slice(1).filter((l) => l.trim()));
+            existingLines.push(...lines.slice(1).filter((l: string) => l.trim()));
           }
           const allLines = [...existingLines, ...result.csvLines];
-          const seen = new Set();
-          const unique = [];
+          const seen = new Set<string>();
+          const unique: string[] = [];
           for (const line of allLines) {
             const key = line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
             if (!seen.has(key)) {
@@ -266,12 +283,10 @@ export default async function handler(req, res) {
         if (result.cardBalances && result.cardBalances.length > 0) {
           updateFields.card_balances = result.cardBalances;
         }
-        // refresh_token is already persisted above (before data fetch guards)
 
         await admin.from('bank_data').update(updateFields).eq('id', row.id);
 
         // ── Income arrival detection & notification ──
-        // Check if any large credits arrived this week that look like salary/income
         try {
           const now = new Date();
           const dayOfWeek = now.getDay();
@@ -287,38 +302,32 @@ export default async function handler(req, res) {
           const TRANSFER_PATTERNS = /\b(faster payment|bank transfer|transfer from|transfer to)\b/i;
           const PERSON_TITLE = /^(mr|mrs|miss|ms|dr)\s/i;
 
-          // Person name pattern: 2-3 purely alphabetic words (e.g. "JOHN SMITH")
-          // Strip banking prefixes before checking.
-          function looksLikePersonName(text) {
+          function looksLikePersonName(text: string): boolean {
             const cleaned = text.toLowerCase().trim()
               .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
               .replace(/\b(fp|bgt|bacs|chq)\b/g, '')
               .trim();
             const words = cleaned.split(/\s+/).filter(Boolean);
             if (words.length < 2 || words.length > 3) return false;
-            // All words must be alphabetic, at least one must be a full name (2+ chars).
-            // Allows single-letter initials like "Maria G", "J Smith".
             const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w));
             const hasFullName = words.some((w) => w.length >= 2);
             return allAlpha && hasFullName;
           }
 
           // Find income-like transactions from this week
-          const incomeCredits = result.csvLines.filter((line) => {
+          const incomeCredits = (result.csvLines || []).filter((line: string) => {
             const parts = line.split(',');
             if (parts.length < 3) return false;
             const date = parts[0];
             const desc = parts.slice(1, -1).join(',');
             const amount = parseFloat(parts[parts.length - 1]);
-            if (!date || date < weekStartStr || amount < 100) return false; // Min £100 credit
+            if (!date || date < weekStartStr || amount < 100) return false;
             if (TRANSFER_PATTERNS.test(desc) || PERSON_TITLE.test(desc.trim())) return false;
-            // Exclude person-to-person transfers (e.g. "JOHN SMITH", "FP SARAH JONES")
             if (looksLikePersonName(desc)) return false;
             return SALARY_PATTERNS.test(desc) || EMPLOYER_PATTERNS.test(desc);
           });
 
           if (incomeCredits.length > 0) {
-            // Check we haven't already notified for this week
             const { data: recentLog } = await admin
               .from('notification_log')
               .select('id')
@@ -328,7 +337,6 @@ export default async function handler(req, res) {
               .limit(1);
 
             if (!recentLog || recentLog.length === 0) {
-              // Get user preferences & profile
               const [{ data: prefs }, { data: profile }] = await Promise.all([
                 admin.from('notification_preferences').select('email, checkin_prompts').eq('user_id', row.user_id).single(),
                 admin.from('profiles').select('full_name').eq('id', row.user_id).single(),
@@ -340,8 +348,8 @@ export default async function handler(req, res) {
                 const incomeSource = topIncome.slice(1, -1).join(',').trim();
                 const userName = (profile?.full_name || '').split(' ')[0] || 'there';
 
-                const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bocy.io';
-                const notifyEndpoint = `${appUrl.replace(/\/$/, '')}/api/notifications/send`;
+                const notifyAppUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bocy.io';
+                const notifyEndpoint = `${notifyAppUrl.replace(/\/$/, '')}/api/notifications/send`;
 
                 await fetch(notifyEndpoint, {
                   method: 'POST',
@@ -351,31 +359,30 @@ export default async function handler(req, res) {
                   },
                   body: JSON.stringify({
                     to: prefs.email,
-                    subject: `£${Math.round(incomeAmount).toLocaleString()} received from ${incomeSource}`,
-                    html: `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><style>body{margin:0;padding:0;background:#0A0A0A;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;}</style></head><body><div style="max-width:520px;margin:0 auto;padding:32px 24px;"><div style="text-align:center;margin-bottom:24px;"><span style="font-size:24px;font-weight:800;">B</span> <span style="color:#999;font-size:14px;">Bocy</span></div><div style="background:#141414;border:1px solid #1F1F1F;border-radius:14px;padding:24px;"><p style="font-size:10px;color:#00d4aa;letter-spacing:2px;text-transform:uppercase;margin:0 0 16px;">PAYDAY</p><h2 style="font-size:18px;margin:0 0 12px;">£${Math.round(incomeAmount).toLocaleString()} received</h2><p style="font-size:14px;line-height:22px;margin:0 0 12px;">Hey ${userName}, income from <strong>${incomeSource}</strong> just landed.</p><hr style="border:none;border-top:1px solid #1F1F1F;margin:20px 0;"><p style="font-size:14px;color:#999;">Open Bocy to see where it should go.</p><div style="text-align:center;margin-top:20px;"><a href="${appUrl}" style="display:inline-block;background:#00d4aa;color:#0A0A0A;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px;">See your plan</a></div></div><div style="text-align:center;margin-top:32px;padding-top:24px;border-top:1px solid #1F1F1F;"><p style="color:#999;font-size:12px;">You're receiving this because you have a Bocy account.<br>To manage or turn off email notifications, visit your <a href="${appUrl}/profile?section=notifications" style="color:#999;">notification settings</a> in the app.</p></div></div></body></html>`,
+                    subject: `\u00a3${Math.round(incomeAmount).toLocaleString()} received from ${incomeSource}`,
+                    html: `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><style>body{margin:0;padding:0;background:#0A0A0A;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;}</style></head><body><div style="max-width:520px;margin:0 auto;padding:32px 24px;"><div style="text-align:center;margin-bottom:24px;"><span style="font-size:24px;font-weight:800;">B</span> <span style="color:#999;font-size:14px;">Bocy</span></div><div style="background:#141414;border:1px solid #1F1F1F;border-radius:14px;padding:24px;"><p style="font-size:10px;color:#00d4aa;letter-spacing:2px;text-transform:uppercase;margin:0 0 16px;">PAYDAY</p><h2 style="font-size:18px;margin:0 0 12px;">\u00a3${Math.round(incomeAmount).toLocaleString()} received</h2><p style="font-size:14px;line-height:22px;margin:0 0 12px;">Hey ${userName}, income from <strong>${incomeSource}</strong> just landed.</p><hr style="border:none;border-top:1px solid #1F1F1F;margin:20px 0;"><p style="font-size:14px;color:#999;">Open Bocy to see where it should go.</p><div style="text-align:center;margin-top:20px;"><a href="${notifyAppUrl}" style="display:inline-block;background:#00d4aa;color:#0A0A0A;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px;">See your plan</a></div></div><div style="text-align:center;margin-top:32px;padding-top:24px;border-top:1px solid #1F1F1F;"><p style="color:#999;font-size:12px;">You're receiving this because you have a Bocy account.<br>To manage or turn off email notifications, visit your <a href="${notifyAppUrl}/profile?section=notifications" style="color:#999;">notification settings</a> in the app.</p></div></div></body></html>`,
                     user_id: row.user_id,
                     notification_type: 'income_arrival',
-                    push_body: `£${Math.round(incomeAmount).toLocaleString()} from ${incomeSource} just landed. Open Bocy to see where it should go.`,
+                    push_body: `\u00a3${Math.round(incomeAmount).toLocaleString()} from ${incomeSource} just landed. Open Bocy to see where it should go.`,
                   }),
-                }).catch((e) => console.warn('[bank-sync] Income notification failed:', e?.message));
+                }).catch((e: Error) => console.warn('[bank-sync] Income notification failed:', e?.message));
               }
             }
           }
-        } catch (notifErr) {
-          // Non-critical — don't fail the sync
-          console.warn('[bank-sync] Income notification check failed:', notifErr?.message);
+        } catch (notifErr: unknown) {
+          const msg = notifErr instanceof Error ? notifErr.message : String(notifErr);
+          console.warn('[bank-sync] Income notification check failed:', msg);
         }
       }
     }
 
     // ── Re-enrich analyses for users whose data was refreshed ──
-    // Without this, the analyses row stays stale until the user opens the app.
     const usersToEnrich = [...refreshedUserIds];
 
     let enriched = 0;
     if (usersToEnrich.length > 0) {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bocy.io';
-      const enrichEndpoint = `${appUrl.replace(/\/$/, '')}/api/enrich`;
+      const enrichAppUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bocy.io';
+      const enrichEndpoint = `${enrichAppUrl.replace(/\/$/, '')}/api/enrich`;
 
       for (const uid of usersToEnrich) {
         try {
@@ -390,16 +397,18 @@ export default async function handler(req, res) {
           const enrichData = await enrichRes.json();
           if (enrichData.success) enriched++;
           else console.warn(`[bank-sync] Enrich failed for ${uid}:`, enrichData.reason || enrichData.error);
-        } catch (e) {
-          console.warn(`[bank-sync] Enrich request failed for ${uid}:`, e?.message);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn(`[bank-sync] Enrich request failed for ${uid}:`, msg);
         }
       }
     }
 
     console.log(`[bank-sync] Refreshed ${results.refreshed}/${results.total} connections (${results.expired} expired, ${results.failed} failed), enriched ${enriched}/${usersToEnrich.length} users`);
     return res.json({ success: true, ...results, enriched });
-  } catch (err) {
-    console.error('[bank-sync] Cron failed:', err?.message);
-    return res.status(500).json({ success: false, error: err?.message });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[bank-sync] Cron failed:', message);
+    return res.status(500).json({ success: false, error: message });
   }
 }

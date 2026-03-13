@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 /**
  * GET /api/bank-data?connection_id=xxx
@@ -7,13 +8,13 @@ import { createClient } from '@supabase/supabase-js';
  * This bypasses RLS, which blocks the client-side anon key from reading
  * rows inserted by the callback handler (which has no user_id context).
  */
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const connectionId = req.query.connection_id;
-  const userId = req.query.user_id;
+  const connectionId = req.query.connection_id as string | undefined;
+  const userId = req.query.user_id as string | undefined;
   if (!connectionId) {
     return res.status(400).json({ error: 'Missing connection_id' });
   }
@@ -55,17 +56,14 @@ export default async function handler(req, res) {
           .single();
 
         if (row && !row.account_type) {
-          const derived = (row.card_balances && row.card_balances.length > 0) ? 'credit' : 'bank';
+          const cardBalances = row.card_balances as unknown[] | null;
+          const derived = (cardBalances && cardBalances.length > 0) ? 'credit' : 'bank';
           await admin.from('bank_data')
             .update({ account_type: derived })
             .eq('connection_id', connectionId);
         }
 
         // Clean up old connections for the same provider.
-        // This handles the web flow where callback didn't have user_id
-        // and couldn't run cleanup at insert time.
-        // Only clean up when we can positively identify the provider to avoid
-        // deleting unrelated connections.
         if (row?.provider_name) {
           await admin
             .from('bank_data')
@@ -75,13 +73,15 @@ export default async function handler(req, res) {
             .eq('provider_name', row.provider_name)
             .neq('connection_id', connectionId);
         }
-      } catch (derivErr) {
-        console.warn('[bank-data] Non-critical: account_type derivation or cleanup failed:', derivErr.message || derivErr);
+      } catch (derivErr: unknown) {
+        const message = derivErr instanceof Error ? derivErr.message : String(derivErr);
+        console.warn('[bank-data] Non-critical: account_type derivation or cleanup failed:', message);
       }
     }
 
     return res.json({ success: true, csv_data: data.csv_data });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: message });
   }
 }
