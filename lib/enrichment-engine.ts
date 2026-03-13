@@ -223,6 +223,7 @@ const EnrichmentEngine = {
         const isHouseholdContribution = override.category === 'Household Contribution';
         const isInternalTransfer = override.category === 'Internal Transfer';
         const isTransferCat = override.category === 'Transfers';
+        const isRefundCat = override.category === 'Refund';
         // Transfers between people/own accounts are NOT income and NOT spending.
         // They still appear in the transaction list (the UI handles visibility).
         const isTransfer = isHouseholdContribution || isInternalTransfer || isTransferCat;
@@ -236,9 +237,9 @@ const EnrichmentEngine = {
           isSubscription: false,
           isBNPL: override.category === 'BNPL',
           isDebt: override.category === 'Debt Payments',
-          isIncome: tx.amount > 0 && !isTransfer,
+          isIncome: tx.amount > 0 && !isTransfer && !isRefundCat,
           isTransfer,
-          isRefund: false,
+          isRefund: isRefundCat,
           isSavings: override.category === 'Savings' || override.category === 'Investments',
           confidence: 'high' as const,
           classifiedBy: 'user_override' as const,

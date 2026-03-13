@@ -357,7 +357,8 @@ export default function Home() {
   const BUDGET_CATEGORIES = [
     'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Travel',
     'Eating Out', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
-    'Childcare', 'Education', 'Charity', 'Transfers', 'Savings', 'Investments', 'Other',
+    'Childcare', 'Education', 'Charity', 'Transfers', 'Savings', 'Investments',
+    'Refund', 'Internal Transfer', 'Other',
   ];
 
   // Map Claude's broader categories to our BUDGET_CATEGORIES
@@ -370,6 +371,9 @@ export default function Home() {
       'TV Licence': 'Bills', 'Personal Care': 'Shopping',
       'Gambling': 'Entertainment', 'Pets': 'Shopping',
       'Debt Payments': 'Bills',
+      'Refund': 'Refund', 'Refunds': 'Refund',
+      'Internal Transfer': 'Internal Transfer', 'Internal Transfers': 'Internal Transfer',
+      'Bank Transfer': 'Internal Transfer', 'Account Transfer': 'Internal Transfer',
     };
     const mapped = map[cat] || cat;
     return BUDGET_CATEGORIES.includes(mapped) ? mapped : 'Other';
@@ -717,8 +721,14 @@ export default function Home() {
           }
         }
 
+        // Non-spending categories: Refund and Internal Transfer are excluded from budget totals.
+        // They are removed from "Other" but not added to any spending section.
+        const NON_SPENDING_CATS = new Set(['Refund', 'Internal Transfer']);
+
         // Add removed transactions to their target categories in the correct section
         for (const { tx, target } of removedTxs) {
+          // Skip adding to budget sections for non-spending categories
+          if (NON_SPENDING_CATS.has(target.category)) continue;
           const destSection = target.isEssential ? nonDisc : disc;
           const destIdx = destSection.items.findIndex((i: BudgetCategory) => i.category === target.category);
           const txAmt = Math.abs(tx.amount);
@@ -820,17 +830,20 @@ export default function Home() {
           else fromSection.items[srcCatIdx] = srcCat;
         }
 
-        // Add tx to target category
-        const destCatIdx = toSection.items.findIndex((i: BudgetCategory) => i.category === recatTarget);
-        const txAmt = Math.abs(recatTx.tx.amount);
-        if (destCatIdx >= 0) {
-          const destCat = { ...toSection.items[destCatIdx] };
-          destCat.transactions = [...(destCat.transactions || []), recatTx.tx];
-          destCat.monthly += txAmt;
-          destCat.txs += 1;
-          toSection.items[destCatIdx] = destCat;
-        } else {
-          toSection.items.push({ category: recatTarget, monthly: txAmt, txs: 1, transactions: [recatTx.tx] });
+        // Add tx to target category (skip for non-spending categories like Refund/Internal Transfer)
+        const NON_SPENDING_CATS = new Set(['Refund', 'Internal Transfer']);
+        if (!NON_SPENDING_CATS.has(recatTarget)) {
+          const destCatIdx = toSection.items.findIndex((i: BudgetCategory) => i.category === recatTarget);
+          const txAmt = Math.abs(recatTx.tx.amount);
+          if (destCatIdx >= 0) {
+            const destCat = { ...toSection.items[destCatIdx] };
+            destCat.transactions = [...(destCat.transactions || []), recatTx.tx];
+            destCat.monthly += txAmt;
+            destCat.txs += 1;
+            toSection.items[destCatIdx] = destCat;
+          } else {
+            toSection.items.push({ category: recatTarget, monthly: txAmt, txs: 1, transactions: [recatTx.tx] });
+          }
         }
 
         fromSection.total = fromSection.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);

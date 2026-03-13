@@ -1,16 +1,14 @@
-# Fix: Modal Categorisation Bug
+# Add Refund & Internal Transfer to Manual Categorisation
 
 ## Problem
-Manual categorisation modal removes data from budget instead of adding to it.
-On refresh, all sorted transactions disappear.
+When the enrichment engine misses a refund or internal transfer (unusual description),
+the transaction falls into "Other" with low confidence. Users currently can only pick
+spending categories — no way to mark it as a refund or internal transfer.
 
-## Root Causes
-1. `saveReview()` removes transactions from "Other" but never adds them to the target category
-2. `saveRecategorize()` has a broken monthly amount formula
-3. Optimistic state isn't persisted to Supabase, and `reviewSavedRef` guard doesn't survive page refresh
-
-## Fixes
-- [x] Fix 1: `saveReview()` — add transactions to target categories with cross-section handling
-- [x] Fix 2: `saveRecategorize()` — fix monthly math to simple subtraction
-- [x] Fix 3: Persist optimistic analysis to `analyses` table immediately after save
-- [x] Fix 4: Make `reviewSavedRef` guard survive page refreshes via AsyncStorage
+## Changes
+- [x] Add `Refund` and `Internal Transfer` to `BUDGET_CATEGORIES`
+- [x] Add mapping in `mapClaudeCategory` for Claude AI suggestions
+- [x] Fix enrichment engine: set `isRefund: true` when override category is `Refund`
+- [x] Update `saveReview()`: exclude Refund/Internal Transfer from budget totals (remove from Other, don't add to spending)
+- [x] Update `saveRecategorize()`: same exclusion logic
+- [x] Verify, commit, push
