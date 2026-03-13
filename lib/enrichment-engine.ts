@@ -490,6 +490,15 @@ const EnrichmentEngine = {
     return recurring;
   },
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Financial Profile Construction
+  // Aggregates enriched transactions into a monthly budget picture:
+  //   - Income sources with frequency detection and salary identification
+  //   - Essential vs discretionary spending split (majority-rule per category)
+  //   - Income volatility analysis with conservative floor for variable earners
+  //   - Subscription and recurring charge summary
+  // All monetary values are normalised to monthly equivalents.
+  // ═══════════════════════════════════════════════════════════════════
   buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): FinancialProfile {
     // Use only the most recent N months for income & spending calculations
     // so figures reflect the user's current financial picture (especially
@@ -542,9 +551,10 @@ const EnrichmentEngine = {
       const sortedTxs = d.transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       const item: BudgetCategory = { category: cat, monthly: d.total / months, txs: d.count, transactions: sortedTxs };
 
-      // Determine essentiality from the transactions in this category.
-      // If the majority of spend in this category is from essential transactions,
-      // the whole category goes into non-discretionary.
+      // Majority-rule essentiality: if >50% of spend in a category comes from
+      // transactions individually flagged as essential, the whole category is
+      // treated as non-discretionary. This handles mixed categories like "Shopping"
+      // where some merchants are essential (pharmacy) and others aren't (clothing).
       const catSpending = spending.filter((t) => (t.category || 'Other') === cat);
       const essentialSpend = catSpending.filter((t) => t.isEssential).reduce((s, t) => s + Math.abs(t.amount), 0);
       const totalCatSpend = catSpending.reduce((s, t) => s + Math.abs(t.amount), 0);

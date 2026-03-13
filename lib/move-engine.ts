@@ -313,6 +313,9 @@ export function calcGoalTrajectory(
   const moveSaving = move?.monthlyImpact || 0;
 
   // ── Deterministic baseline (backward-compatible) ──
+  // Simple linear projection: target ÷ monthly surplus = months to goal.
+  // -1 signals "unreachable at current pace" (surplus ≤ 0).
+  // Capped at MAX_TRAJECTORY_MONTHS to avoid showing "247 months" for distant goals.
   const rawCurrentMonths = surplus > 0 ? Math.ceil(targetAmount / surplus) : Infinity;
   const rawNewMonths = (surplus + moveSaving) > 0 ? Math.ceil(targetAmount / (surplus + moveSaving)) : Infinity;
 
