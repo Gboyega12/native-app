@@ -106,7 +106,6 @@ export function useWebPush(userId?: string): WebPushState {
           ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
         },
         body: JSON.stringify({
-          user_id: userId,
           subscription: subscription.toJSON(),
         }),
       });
@@ -142,7 +141,7 @@ export function useWebPush(userId?: string): WebPushState {
             'Content-Type': 'application/json',
             ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
           },
-          body: JSON.stringify({ user_id: userId }),
+          body: JSON.stringify({}),
         });
       }
 

@@ -10,6 +10,13 @@ const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 't
 const TL_AUTH_HOST = IS_SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
 const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://api.truelayer.com';
 
+// Allowed redirect origins — prevents open redirect via state parameter
+const ALLOWED_ORIGINS = new Set([
+  'https://app.bocy.io',
+  ...(process.env.APP_URL ? [process.env.APP_URL] : []),
+  ...(IS_SANDBOX ? ['http://localhost:8081', 'http://localhost:19006'] : []),
+]);
+
 interface TLAccount {
   account_id: string;
   display_name?: string;
@@ -50,7 +57,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const state: string = (req.query.state as string) || '';
     const pipeIdx = state.indexOf('|');
     connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
-    webOrigin = pipeIdx === -1 ? null : state.slice(pipeIdx + 1);
+    const rawOrigin = pipeIdx === -1 ? null : state.slice(pipeIdx + 1);
+    webOrigin = rawOrigin && ALLOWED_ORIGINS.has(rawOrigin) ? rawOrigin : null;
   } else {
     return res.status(405).json({ error: 'Method not allowed' });
   }

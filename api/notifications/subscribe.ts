@@ -10,21 +10,34 @@ import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!serviceKey) {
+  if (!supabaseUrl || !anonKey || !serviceKey) {
     return res.status(500).json({ error: 'Server not configured' });
   }
 
-  const admin = createClient(supabaseUrl!, serviceKey);
+  // Verify JWT
+  const authHeader = req.headers.authorization as string | undefined;
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing authorization token' });
+  }
+  const token = authHeader.replace('Bearer ', '');
+  const supabase = createClient(supabaseUrl, anonKey);
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey);
 
   // ── POST: Save subscription ──
   if (req.method === 'POST') {
-    const { user_id, subscription } = req.body;
+    const { subscription } = req.body;
 
-    if (!user_id || !subscription?.endpoint || !subscription?.keys) {
-      return res.status(400).json({ error: 'Missing user_id or subscription' });
+    if (!subscription?.endpoint || !subscription?.keys) {
+      return res.status(400).json({ error: 'Missing subscription' });
     }
 
     try {
@@ -33,7 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('web_push_subscriptions')
         .upsert(
           {
-            user_id,
+            user_id: user.id,
             endpoint: subscription.endpoint,
             p256dh: subscription.keys.p256dh,
             auth: subscription.keys.auth,
@@ -57,17 +70,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ── DELETE: Remove subscription ──
   if (req.method === 'DELETE') {
-    const { user_id } = req.body;
-
-    if (!user_id) {
-      return res.status(400).json({ error: 'Missing user_id' });
-    }
-
     try {
       await admin
         .from('web_push_subscriptions')
         .delete()
-        .eq('user_id', user_id);
+        .eq('user_id', user.id);
 
       return res.json({ success: true });
     } catch (err: unknown) {

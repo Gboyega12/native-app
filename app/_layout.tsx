@@ -9,8 +9,12 @@ import { supabase } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { registerServiceWorker } from '@/lib/register-sw';
 import { initMixpanel, resetMixpanel } from '@/lib/mixpanel';
+import { initSentryClient, setSentryUser, clearSentryUser } from '@/lib/sentry';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
+
+// Initialise Sentry as early as possible
+initSentryClient();
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -48,7 +52,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     let subscription: { unsubscribe: () => void } | null = null;
     try {
       const { data } = supabase.auth.onAuthStateChange((_event, sess) => {
-        if (!sess && session) resetMixpanel(); // Reset on sign-out
+        if (!sess && session) {
+          resetMixpanel();
+          clearSentryUser();
+        }
+        if (sess?.user) setSentryUser(sess.user.id, sess.user.email);
         setSession(sess);
         setReady(true);
       });

@@ -1517,10 +1517,11 @@ export default function Home() {
 
     try {
       // Use the API endpoint (service-role key) so RLS doesn't block the delete
+      const { data: { session: sess } } = await supabase.auth.getSession();
       const res = await fetch('/api/plans', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'delete', plan_id: planId, user_id: uid }),
+        headers: { 'Content-Type': 'application/json', ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}) },
+        body: JSON.stringify({ action: 'delete', plan_id: planId }),
       });
       if (!res.ok) throw new Error('API delete failed');
     } catch {

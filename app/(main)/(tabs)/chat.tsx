@@ -1609,10 +1609,11 @@ export default function Chat() {
 
       if (planId) {
         // Server already created the plan as 'proposed' — approve it
+        const { data: { session: sess } } = await supabase.auth.getSession();
         const res = await fetch('/api/plans', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'approve', plan_id: planId, user_id: uid }),
+          headers: { 'Content-Type': 'application/json', ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}) },
+          body: JSON.stringify({ action: 'approve', plan_id: planId }),
         });
         const data = await res.json();
 
@@ -1688,10 +1689,11 @@ export default function Chat() {
     // Dismiss server-side if we have a plan ID
     if (planId && uid) {
       try {
+        const { data: { session: dismissSess } } = await supabase.auth.getSession();
         await fetch('/api/plans', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'dismiss', plan_id: planId, user_id: uid }),
+          headers: { 'Content-Type': 'application/json', ...(dismissSess?.access_token ? { Authorization: `Bearer ${dismissSess.access_token}` } : {}) },
+          body: JSON.stringify({ action: 'dismiss', plan_id: planId }),
         });
       } catch {
         // Non-critical — still update UI
@@ -1728,10 +1730,11 @@ export default function Chat() {
 
       if (planId && uid) {
         try {
+          const { data: { session: delSess } } = await supabase.auth.getSession();
           const res = await fetch('/api/plans', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'delete', plan_id: planId, user_id: uid }),
+            headers: { 'Content-Type': 'application/json', ...(delSess?.access_token ? { Authorization: `Bearer ${delSess.access_token}` } : {}) },
+            body: JSON.stringify({ action: 'delete', plan_id: planId }),
           });
           if (!res.ok) throw new Error('API delete failed');
         } catch {
@@ -1778,10 +1781,11 @@ export default function Chat() {
 
       if (itemId && uid) {
         try {
+          const { data: { session: budgetSess } } = await supabase.auth.getSession();
           await fetch('/api/plans', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'delete_budget_item', budget_item_id: itemId, user_id: uid }),
+            headers: { 'Content-Type': 'application/json', ...(budgetSess?.access_token ? { Authorization: `Bearer ${budgetSess.access_token}` } : {}) },
+            body: JSON.stringify({ action: 'delete_budget_item', budget_item_id: itemId }),
           });
         } catch {
           // Non-critical — still update UI
@@ -1834,11 +1838,11 @@ export default function Chat() {
     setSavingPlan(key);
 
     try {
+      const { data: { session: goalSess } } = await supabase.auth.getSession();
       const res = await fetch('/api/goals/update', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(goalSess?.access_token ? { Authorization: `Bearer ${goalSess.access_token}` } : {}) },
         body: JSON.stringify({
-          user_id: uid,
           current_situation: action.data.new_situation,
           one_year_goal: action.data.new_one_year_goal,
           two_year_goal: action.data.new_two_year_goal,

@@ -9,12 +9,12 @@
 ## CRITICAL FINDINGS (Fix Immediately)
 
 ### 1. Missing JWT Authentication on 3 API Endpoints
-- [ ] `api/goals/update.ts` - Accepts `user_id` from body without JWT verification. Any user can modify any other user's goals.
-- [ ] `api/plans/index.ts` - Accepts `user_id` from body without JWT verification. Cross-user plan manipulation possible.
-- [ ] `api/notifications/subscribe.ts` - POST/DELETE accept `user_id` without JWT. Can subscribe/unsubscribe other users.
+- [x] `api/goals/update.ts` - JWT auth added. User ID derived from verified token, not request body.
+- [x] `api/plans/index.ts` - JWT auth added. User ID derived from verified token, not request body.
+- [x] `api/notifications/subscribe.ts` - JWT auth added. User ID derived from verified token, not request body.
 
 ### 2. Open Redirect in OAuth Callback
-- [ ] `api/truelayer/callback.ts:62` - `webOrigin` from state parameter is not validated. Attacker can redirect to phishing sites.
+- [x] `api/truelayer/callback.ts` - `webOrigin` validated against `ALLOWED_ORIGINS` whitelist. Invalid origins silently dropped.
 
 ---
 
@@ -36,8 +36,8 @@
 - [ ] 8+ `catch (e: any)` blocks should be `catch (e: unknown)` with type guards.
 
 ### 7. No Structured Logging or Error Tracking
-- [ ] All logging is ad-hoc `console.error()`/`console.warn()` with no aggregation.
-- [ ] No Sentry, Datadog, or equivalent. Production bugs are invisible.
+- [x] Sentry integrated: client-side (`@sentry/react`) in `_layout.tsx` + `ErrorBoundary.tsx`, server-side (`@sentry/node`) via `lib/sentry-server.ts`.
+- [x] User context attached on auth state change. `EXPO_PUBLIC_SENTRY_DSN` / `SENTRY_DSN` env vars added to `.env.example`.
 
 ### 8. No UI Component Tests
 - [ ] 7 test files (4260 lines) cover API + engines well, but zero React component tests.
@@ -124,9 +124,9 @@
 
 | Priority | Item | Effort | Impact |
 |----------|------|--------|--------|
-| P0 | Add JWT auth to goals/plans/notifications endpoints | 2h | Blocks IDOR attacks |
-| P0 | Validate OAuth redirect URL whitelist | 1h | Blocks phishing |
-| P1 | Add Sentry error tracking | 4h | Production visibility |
+| ~~P0~~ | ~~Add JWT auth to goals/plans/notifications endpoints~~ | ~~2h~~ | ~~Blocks IDOR attacks~~ DONE |
+| ~~P0~~ | ~~Validate OAuth redirect URL whitelist~~ | ~~1h~~ | ~~Blocks phishing~~ DONE |
+| ~~P1~~ | ~~Add Sentry error tracking~~ | ~~4h~~ | ~~Production visibility~~ DONE |
 | P1 | Sanitize email HTML | 1h | Blocks injection |
 | P1 | Replace `any` types with proper types | 4h | Type safety |
 | P1 | Add request validation (Zod) to API endpoints | 4h | Input safety |
