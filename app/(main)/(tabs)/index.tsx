@@ -772,6 +772,13 @@ export default function Home() {
 
       setRecatTx(null);
       setRecatTarget('');
+
+      // Trigger a delayed background sync so the analyses row in Supabase
+      // gets updated with the correct category split from the enrichment pipeline.
+      // Delayed by 2s to ensure the transaction_overrides insert has committed.
+      if (user) {
+        setTimeout(() => syncInBackground(user.id, true), 2000);
+      }
     } catch (err: any) {
       console.warn('[home] Recategorize failed:', err?.message);
     }
@@ -1040,7 +1047,10 @@ export default function Home() {
       }
 
       const lastResult = getLastResult();
-      if (data) {
+      // Don't overwrite optimistic state from a recent recategorization —
+      // the Supabase analyses row hasn't been updated yet by the delayed sync.
+      const recentRecat = reviewSavedRef.current && Date.now() - reviewSavedRef.current < 60_000;
+      if (data && !recentRecat) {
         setAnalysis(mergeAdjustments(data, adjustments));
       } else if (lastResult) {
         // Fallback: use in-memory result only if Supabase has nothing yet
