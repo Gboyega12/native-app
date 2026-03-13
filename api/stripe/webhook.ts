@@ -4,21 +4,23 @@
 // Must receive raw body for signature verification.
 
 import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { IncomingMessage } from 'http';
 
 // Vercel: disable body parsing so we can verify the Stripe signature
 export const config = { api: { bodyParser: false } };
 
-function getRawBody(req) {
+function getRawBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -32,32 +34,34 @@ export default async function handler(req, res) {
 
   const stripe = new Stripe(stripeKey);
   const rawBody = await getRawBody(req);
-  const sig = req.headers['stripe-signature'];
+  const sig = req.headers['stripe-signature'] as string;
 
-  let event;
+  let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-  } catch (err) {
-    console.error('[stripe/webhook] Signature verification failed:', err.message);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[stripe/webhook] Signature verification failed:', message);
     return res.status(400).json({ error: 'Invalid signature' });
   }
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const admin = createClient(supabaseUrl, serviceKey);
+  const admin = createClient(supabaseUrl!, serviceKey!);
 
   try {
     switch (event.type) {
       case 'checkout.session.completed': {
-        const session = event.data.object;
-        const customerId = session.customer;
-        const subscriptionId = session.subscription;
-        const userId = session.subscription_data?.metadata?.supabase_user_id
-          || session.metadata?.supabase_user_id;
+        const session = event.data.object as Stripe.Checkout.Session;
+        const customerId = session.customer as string;
+        const subscriptionId = session.subscription as string;
+        const userId = (session as Record<string, unknown>).subscription_data
+          ? ((session as Record<string, unknown>).subscription_data as Record<string, unknown>)?.metadata?.supabase_user_id as string | undefined
+          : session.metadata?.supabase_user_id;
 
         if (!userId) {
           // Look up by customer metadata
-          const customer = await stripe.customers.retrieve(customerId);
+          const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
           const fallbackUserId = customer.metadata?.supabase_user_id;
           if (fallbackUserId) {
             await upsertSubscription(admin, stripe, fallbackUserId, subscriptionId, customerId);
@@ -70,8 +74,8 @@ export default async function handler(req, res) {
 
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
-        const subscription = event.data.object;
-        const customerId = subscription.customer;
+        const subscription = event.data.object as Stripe.Subscription;
+        const customerId = subscription.customer as string;
         const subscriptionId = subscription.id;
 
         // Find user by stripe_customer_id
@@ -88,9 +92,9 @@ export default async function handler(req, res) {
       }
 
       case 'invoice.payment_failed': {
-        const invoice = event.data.object;
-        const customerId = invoice.customer;
-        const subscriptionId = invoice.subscription;
+        const invoice = event.data.object as Stripe.Invoice;
+        const customerId = invoice.customer as string;
+        const subscriptionId = invoice.subscription as string;
 
         if (subscriptionId) {
           const { data: sub } = await admin
@@ -110,15 +114,16 @@ export default async function handler(req, res) {
         // Unhandled event type — that's fine
         break;
     }
-  } catch (err) {
-    console.error(`[stripe/webhook] Error handling ${event.type}:`, err.message);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[stripe/webhook] Error handling ${event.type}:`, message);
     return res.status(500).json({ error: 'Webhook handler failed' });
   }
 
   return res.json({ received: true });
 }
 
-async function upsertSubscription(admin, stripe, userId, subscriptionId, customerId) {
+async function upsertSubscription(admin: SupabaseClient, stripe: Stripe, userId: string, subscriptionId: string, customerId: string) {
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
   const status = mapStripeStatus(subscription.status);
@@ -151,7 +156,7 @@ async function upsertSubscription(admin, stripe, userId, subscriptionId, custome
   }
 }
 
-function mapStripeStatus(stripeStatus) {
+function mapStripeStatus(stripeStatus: string): string {
   switch (stripeStatus) {
     case 'active':
     case 'trialing':

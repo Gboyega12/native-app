@@ -44,7 +44,8 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null, de
   const debtPayments = profile.monthly.debtPayments;
   const situation = goals?.current_situation || '';
 
-  // Check if debt is "good debt" (low utilization, rewards-focused)
+  // "Good debt" = credit utilization ≤30%. Users who carry cards for rewards/credit-building
+  // but pay them off shouldn't be funnelled into debt-priority levels.
   const debts = debtAccounts || [];
   const totalLimit = debts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
   const totalBalance = debts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
@@ -62,22 +63,26 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null, de
   }
 
   // Level 2: No buffer — build a 1-month emergency fund
+  // <5% savings rate signals no meaningful buffer exists
   if (savingsRate < 5) {
     return { level: 2, label: 'Build a buffer', priority: 'buffer' };
   }
 
   // Level 4: High-interest debt (credit cards, BNPL) — pay it off
-  // Skip this level if user has good debt (low utilization, paying on time for rewards)
+  // Skip this level if user has good debt (low utilization, paying on time for rewards).
+  // £50/month threshold filters out trivial minimum payments on small balances.
   if (debtCount >= 1 && !isGoodDebt && (situation === 'in_debt' || debtPayments > 50)) {
     return { level: 4, label: 'Clear high-interest debt', priority: 'debt' };
   }
 
   // Level 5: Buffer exists but not a full emergency fund (3 months)
+  // 15% savings rate ≈ building toward 3-month buffer within a year
   if (savingsRate < 15) {
     return { level: 5, label: 'Full emergency fund', priority: 'buffer' };
   }
 
   // Level 7: Short-term goals — save for specific targets
+  // 25% savings rate is the transition point to long-term wealth building
   if (savingsRate < 25) {
     return { level: 7, label: 'Short-term goals', priority: 'savings' };
   }
@@ -141,11 +146,13 @@ export function rankMoves(
   }
 
   const scored: RankedMove[] = decisionStack.map((move, idx) => {
-    // Base score: annual impact normalised
+    // Base score: annual impact normalised to ~1.0 scale for a £100/yr move.
+    // All subsequent multipliers are relative to this baseline.
     let score = move.annualImpact / 100;
 
-    // Effort multiplier — decoupled from scoring when spending CV is available.
-    // Keep a mild preference for easy wins, but don't distort rankings.
+    // Effort multiplier — mild nudge toward easy wins (±5-10%), not a hard filter.
+    // Kept small because Monte Carlo consistency scoring already penalises
+    // moves the user is unlikely to follow through on.
     if (move.effort === 'low') score *= 1.1;
     else if (move.effort === 'high') score *= 0.95;
 

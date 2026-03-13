@@ -5,13 +5,14 @@
 
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const authHeader = req.headers.authorization;
+  const authHeader = req.headers.authorization as string | undefined;
   if (!authHeader?.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Missing authorization token' });
   }
@@ -28,14 +29,14 @@ export default async function handler(req, res) {
 
   // Verify user
   const token = authHeader.replace('Bearer ', '');
-  const supabase = createClient(supabaseUrl, anonKey);
+  const supabase = createClient(supabaseUrl!, anonKey!);
   const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
   if (authErr || !user) {
     return res.status(401).json({ error: 'Invalid token' });
   }
 
   // Get Stripe customer ID from subscription record
-  const admin = createClient(supabaseUrl, serviceKey);
+  const admin = createClient(supabaseUrl!, serviceKey!);
   const { data: sub } = await admin
     .from('user_subscriptions')
     .select('stripe_customer_id')
@@ -54,8 +55,9 @@ export default async function handler(req, res) {
     });
 
     return res.json({ url: session.url });
-  } catch (err) {
-    console.error('[stripe/portal] Error:', err.message);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[stripe/portal] Error:', message);
     return res.status(500).json({ error: 'Failed to create portal session' });
   }
 }
