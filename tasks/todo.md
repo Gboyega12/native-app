@@ -213,72 +213,71 @@ The move engine uses heuristics and magic numbers where it should use real maths
 
 ---
 
-## UX Improvements
+## UX Bug Fixes (March 2025)
 
-### 13. Categorisation → Budget Sync Feedback
-**Problem:** After saving category reviews, there's no confirmation the re-sync completed. Optimistic update (lines 634-676) removes transactions from "Other" but doesn't add them to the target category — the budget looks like money vanished until the background re-sync completes and `loadData()` refreshes.
+### 13. Categorisation doesn't update budget
 
-**Already done:** `saveReview()` triggers `syncInBackground()` after saving (commit `474fc81`). Haptic + checkmark animation fires at line 679. `saveSuccess` state shows "Saved!" in the button but clears at line 685 — before the sync finishes.
+**Problem:** `saveRecategorize()` (index.tsx:702-783) saves the override to Supabase, does an optimistic UI update, then immediately calls `syncInBackground(user.id, true)` at line 777. The sync races the override write — if the sync's enrichment pipeline starts before the Supabase insert commits, it rebuilds the budget from stale data and overwrites the optimistic state.
 
-**Recommended fix:**
-- [ ] In the optimistic update block (lines 634-676), after removing transactions from "Other", extract the matched transactions and add them to the target category. `catAssignments` has `.category` and `.isEssential` per merchant — use `isEssential` to pick the section (`non_discretionary` / `discretionary`), then find-or-create the category entry and push the transactions in. Recalculate `monthly`, `txs`, and `section.total`.
-- [ ] For the "Budget updated" toast: `syncInBackground` is async and CAN be awaited (it's only called fire-and-forget at line 694). Change line 694 to `syncInBackground(uid, true).then(() => setBudgetSynced(true))`. Add a `budgetSynced` state that renders a brief inline message below the budget section (e.g. "Budget updated with your changes") and auto-clears after 3s via `setTimeout`. No toast library needed — no toast library exists in the app.
+The `reviewSavedRef` guard (line 1256) only protects against this if the fresh analysis has *fewer* "Other" transactions. Moving "Shopping" → "Groceries" (neither is "Other") bypasses the guard entirely.
 
-**Files:** `app/(main)/(tabs)/index.tsx` (lines 634-700)
+**Fix:**
+- [ ] **Remove the immediate sync** (line 775-778): Delete `syncInBackground(user.id, true)` after recategorization. The override is already persisted; the next organic sync (pull-to-refresh, focus, 30s interval) will apply it correctly.
+- [ ] **Strengthen the guard** (line 768, 1256): Replace the boolean `reviewSavedRef` with a timestamp. In the sync handler, skip overwriting analysis if recategorization happened within the last 60s:
+  ```ts
+  // line 768: reviewSavedRef.current = Date.now();
+  // line 1256: if (reviewSavedRef.current && Date.now() - reviewSavedRef.current < 60_000) {
+  ```
 
-### 14. Banner Persistence — Eliminate Flash
-**Problem:** The flash is narrower than originally described. `connectionWarning` starts `null`, so the banner doesn't render on first mount. The actual flash: sync completes → `setConnectionWarning({...})` → banner renders for 1 frame with `connectionDismissed = false` (initial value) → then the async `AsyncStorage.getItem` at line 120 resolves and sets `connectionDismissed = true`. Only affects **previously-dismissed** banners re-appearing for a frame.
-
-**Recommended fix:**
-- [ ] Initialise `connectionDismissed` state to `true` (hidden by default) instead of `false`. This is the single most impactful change — banner starts hidden, only appears after we've confirmed it shouldn't be dismissed.
-- [ ] Add a module-level `let dismissCache: Record<string, string> = {}` outside the component. On mount (`useEffect([], [])`), hydrate once: `dismissCache[CONN_DISMISS_KEY] = await AsyncStorage.getItem(CONN_DISMISS_KEY)`.
-- [ ] Replace the async check at line 118 with a synchronous read from `dismissCache`. No `.then()`, no frame gap.
-- [ ] Update `dismissConnection()` (line 157) to write both to `dismissCache` and AsyncStorage simultaneously.
-- [ ] Same pattern for `INCOME_DISMISS_KEY` at line 150.
-- [ ] Note: module-level cache resets on Expo Fast Refresh in dev — not a production concern, but worth a code comment.
-
-**Files:** `app/(main)/(tabs)/index.tsx` (lines 85, 112-163)
-
-### 15. Connect Page Guard — Fix Banner→Connect Flow (merged with Step 12)
-**Problem:** Banner tap at line 1805 navigates to `/(main)/connect` with no params. The guard at line 97 checks `!isFromProfile && !isRedirecting` — since `from` isn't passed, an existing user with an analysis gets bounced home at line 106.
-
-**Recommended fix:**
-- [ ] Pass `from: 'banner'` in the banner's `onPress` at line 1805: `router.push({ pathname: '/(main)/connect', params: { from: 'banner' } })`
-- [ ] In `connect.tsx` line 68, expand check: `const isFromProfile = params.from === 'profile' || params.from === 'banner';` — this skips the guard at line 97 and ensures the redirect-back at line 214 fires.
-- [ ] At line 218, branch on `params.from`: if `'banner'`, redirect to `/(main)/(tabs)` (home) instead of `/(main)/profile`. Also `invalidateSyncCache()` so the re-sync on home picks up the new connection.
-- [ ] Note: `isFromProfile` is checked at 5 locations (lines 97, 214, 293, 342, 387). The expanded check works correctly at all of them — CSV/PDF upload paths (293, 342) should also redirect home for banner users, and the UI text at line 387 is fine showing "Add a connection".
-
-**~~Phase 2 — skip the page entirely~~ DROPPED:** `handleTrueLayer()` calls `saveConnectState()` at line 247 before the TrueLayer redirect. If we skip the connect page, this state isn't saved. After TrueLayer redirects back, `restoreConnectState()` at line 77 finds nothing → CSV data lost. Deep link routing (via `_layout.tsx` lines 23-39) always routes back to `/connect` anyway, so skipping the page saves one tap but breaks state management. Not worth it.
-
-**Files:** `app/(main)/(tabs)/index.tsx` (line 1805), `app/(main)/connect.tsx` (lines 68, 97, 214-218, 293, 342)
-
-### ~~16. Banner Timing — Debounce State Changes~~ DROPPED
-**Original claim:** `connectionWarning` flips `null → {...} → null` during sync, causing flicker.
-
-**Research finding:** This doesn't happen. `setConnectionWarning` is called exactly once per sync at line 1165, only after `requestSync()` fully completes. The warning state does NOT change during the 2-3s sync runs — there's no intermediate clearing or re-setting. The `null → {...} → null` sequence the plan described doesn't exist in the code.
-
-**Why dropped:** A 500ms debounce would delay legitimate warnings on every app open / tab switch with no actual benefit. The flicker (if any) is better addressed by Step 14's synchronous dismiss cache, which eliminates the only real flash scenario (previously-dismissed banner re-appearing for 1 frame).
+**Files:** `app/(main)/(tabs)/index.tsx` (lines 768, 775-778, 1256)
 
 ---
 
+### 14. Banner reappears after every re-sync
+
+**Problem:** The dismiss flow has a timing bug:
+1. User dismisses → fingerprint saved to AsyncStorage, `connectionDismissed = true`
+2. Sync completes → `setConnectionWarning(nextWarning)` (line 1165)
+3. If warning cycles through `null` (healthy sync before unhealthy), the effect on line 133-137 resets `connectionDismissed = false`
+4. Warning is reconstructed → banner re-renders visible for 1+ frames
+5. AsyncStorage fingerprint check (line 120) is **async** — banner flashes before it resolves
+
+**Fix:**
+- [ ] **Default to hidden**: Change `useState(false)` to `useState(true)` on line 85 for `connectionDismissed`. Banner starts hidden, only shows after confirming it shouldn't be dismissed.
+- [ ] **Synchronous cache**: Add module-level `let dismissCache: Record<string, string> = {}`. Hydrate on mount from AsyncStorage. Replace the async `.then()` check (line 120) with a synchronous read from cache.
+- [ ] **Remove the null-reset effect** (lines 133-137): The `if (connectionWarning === null) setConnectionDismissed(false)` is the root cause. Remove it entirely. The fingerprint comparison already handles showing the banner when the bank set changes.
+- [ ] **Update dismissConnection()** (line 157): Write to both `dismissCache` and AsyncStorage so future renders are synchronous.
+
+**Files:** `app/(main)/(tabs)/index.tsx` (lines 85, 111-137, 157-163)
+
+---
+
+### 15. "Fix" button bounces back to home immediately
+
+**Problem:** Banner navigates to `/(main)/connect` with no params (line 1805). In `connect.tsx`, the guard at line 97 checks `!isFromProfile && !isRedirecting` — since no `from` param is passed, an existing user with an analysis is immediately bounced back via `router.replace('/(main)/(tabs)')`.
+
+**Fix:**
+- [ ] **Pass context from banner** (index.tsx line 1805): `router.push({ pathname: '/(main)/connect', params: { from: 'banner' } })`
+- [ ] **Expand guard skip** (connect.tsx line 68): `const isReconnect = params.from === 'profile' || params.from === 'banner';` and use it at line 97: `if (!isReconnect && !isRedirecting)`
+- [ ] **Handle post-reconnection redirect** (connect.tsx line 214-220): When `from === 'banner'`, redirect to `/(main)/(tabs)` (not profile) and call `invalidateSyncCache()` so the home screen picks up the new connection.
+
+**Files:** `app/(main)/(tabs)/index.tsx` (line 1805), `app/(main)/connect.tsx` (lines 49-54, 68, 97, 214-220)
+
+---
+
+## Implementation Order
+
+1. **Bug 15 first** — smallest change, highest user frustration (broken button), zero regression risk
+2. **Bug 14 second** — banner logic refactor, self-contained in one file
+3. **Bug 13 last** — touches sync pipeline, needs careful testing of timing
+
 ## Verification
 
-- [ ] All TypeScript compiles cleanly
-- [ ] Debt moves show real amortisation numbers, not heuristic estimates
-- [ ] Avalanche ordering: highest-rate debt is targeted first
-- [ ] User with 39.9% debt and 4.5% savings sees "pay debt" ranked above "save"
-- [ ] Budget solver allocates 70%+ to buffer when buffer = £0
-- [ ] Baby in 1 month vs 9 months generates different move targets and urgency
-- [ ] Spending cut amounts reflect user's actual variance, not flat percentages
-- [ ] Move ranking uses follow-through from spending history, not flat effort multipliers
-- [ ] UKPF/goal boosts scale with actual financial impact
-- [ ] Monte Carlo uses real income CV when ≥ 3 months data available
-- [ ] Banner tap navigates to connect with `from: 'banner'` — existing user guard doesn't bounce
-- [ ] After reconnecting one expired bank via banner, user lands back on home (not profile)
-- [ ] Banner updates to show only remaining expired banks after one is reconnected
-- [ ] Toast shows "[Bank] reconnected. X bank(s) still need attention" when others remain
-- [ ] Toast shows "All banks reconnected" and banner hides when none remain
-- [ ] "Budget updated" toast appears after saving category reviews
-- [ ] Optimistic update adds transactions to target category (not just removes from Other)
-- [ ] Banner doesn't flash on mount — synchronous cache prevents async flicker
-- [ ] ~~Banner state changes are debounced (~500ms) — no flicker during sync~~ DROPPED (problem doesn't exist)
+- [ ] Tap "Fix" on connection banner → lands on connect page and stays there
+- [ ] Complete reconnection from banner → returns to home with fresh data (not profile)
+- [ ] Dismiss connection banner → pull-to-refresh → banner stays dismissed
+- [ ] Dismiss banner → wait for organic re-sync → no flash/flicker
+- [ ] Recategorize a transaction → confirm it stays in new category after 60s
+- [ ] Recategorize a transaction → pull-to-refresh → category persists
+- [ ] New user onboarding → connect page still redirects to dashboard if analysis exists
+- [ ] Banner tap navigates to connect with `from: 'banner'` param visible in logs
