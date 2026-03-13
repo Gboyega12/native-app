@@ -187,6 +187,7 @@ export function rankMoves(
       if (ukpf.priority === 'debt' && moveCategory === 'debt') {
         // Boost = 1 + (monthly interest burn / monthly income).
         // E.g. £3k debt at 22% APR on £2k income → boost = 1 + (55/2000) ≈ 1.03
+        // 0.079 (7.9%) fallback = typical UK personal loan rate when no APR data available
         const highestAPR = (debtAccounts || []).reduce((max: number, d: any) => Math.max(max, d.interest_rate || 0), 0.079);
         const totalDebtBalance = (debtAccounts || []).reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
         const monthlyInterestCost = totalDebtBalance * highestAPR / 12;
@@ -269,8 +270,9 @@ export function rankMoves(
   scored.sort((a, b) => b.ukpfScore - a.ukpfScore);
 
   // ── Category diversity enforcement ──
-  // Ensure top 5 moves span at least 2 categories. If the top 5 are all
-  // one category, promote the highest-scoring move from a different category.
+  // Prevent "cancel 5 subscriptions" dominating the top 5.
+  // Users need to see a mix of move types to feel the recommendations are balanced.
+  // Promotes the best move from a different category into position 5.
   if (scored.length >= 5) {
     const top5Categories = new Set(scored.slice(0, 5).map(m => m.category || 'spending'));
     if (top5Categories.size < 2) {
