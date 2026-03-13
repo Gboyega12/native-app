@@ -312,6 +312,22 @@ export default function Home() {
     }).catch(() => {});
   }, []);
 
+  // Hydrate reviewSavedRef from AsyncStorage so the guard survives page refreshes
+  useEffect(() => {
+    AsyncStorage.getItem('review_saved_at').then((val) => {
+      if (val) {
+        const ts = parseInt(val, 10);
+        // Only honour if within the last 60 seconds
+        if (ts && Date.now() - ts < 60_000) {
+          reviewSavedRef.current = ts;
+        } else {
+          // Expired — clean up
+          AsyncStorage.removeItem('review_saved_at').catch(() => {});
+        }
+      }
+    }).catch(() => {});
+  }, []);
+
   // Unified review modal state
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean; aiSuggested?: boolean }>>({});
@@ -600,6 +616,30 @@ export default function Home() {
     }
   }, [catAssignments]);
 
+  // Persist the current optimistic analysis state to Supabase so it survives page refreshes
+  const persistAnalysis = async (updatedAnalysis: Analysis) => {
+    try {
+      const uid = userIdRef.current;
+      if (!uid) return;
+      const { data: latest } = await supabase.from('analyses')
+        .select('id')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latest?.id) {
+        await supabase.from('analyses').update({
+          non_discretionary: updatedAnalysis.non_discretionary,
+          discretionary: updatedAnalysis.discretionary,
+          monthly_spending: updatedAnalysis.monthly_spending,
+          surplus: updatedAnalysis.surplus,
+        }).eq('id', latest.id);
+      }
+    } catch (err: any) {
+      console.warn('[home] persistAnalysis failed:', err?.message);
+    }
+  };
+
   const saveReview = async () => {
     const catKeys = Object.keys(catAssignments);
     if (catKeys.length === 0) { setShowReviewModal(false); return; }
@@ -632,48 +672,84 @@ export default function Home() {
         }
       }
 
-      // ── Optimistic UI: remove categorised transactions from "Other" ──
+      // ── Optimistic UI: move categorised transactions from "Other" to their target categories ──
       if (analysis) {
         const updated = { ...analysis };
-        const assignedMerchants = new Set<string>();
+
+        // Build a map of merchant name → { target category, isEssential, transactions }
+        const merchantToTarget = new Map<string, { category: string; isEssential: boolean }>();
         for (const matchKey of catKeys) {
+          const a = catAssignments[matchKey];
           const group = unresolvedGroups.find(g => g.key === matchKey);
-          (group?.merchants || [matchKey]).forEach(m => assignedMerchants.add(m));
+          for (const m of (group?.merchants || [matchKey])) {
+            merchantToTarget.set(m, { category: a.category, isEssential: a.isEssential });
+          }
         }
 
-        for (const sectionKey of ['discretionary', 'non_discretionary'] as const) {
-          if (!(updated as any)[sectionKey]) continue;
-          const section = { ...(updated as any)[sectionKey] };
-          section.items = [...(section.items || [])];
+        // Deep-clone both sections so mutations are safe
+        const disc = { ...((updated as any).discretionary || { total: 0, items: [] }) };
+        disc.items = [...(disc.items || [])].map((i: BudgetCategory) => ({ ...i, transactions: [...(i.transactions || [])] }));
+        const nonDisc = { ...((updated as any).non_discretionary || { total: 0, items: [] }) };
+        nonDisc.items = [...(nonDisc.items || [])].map((i: BudgetCategory) => ({ ...i, transactions: [...(i.transactions || [])] }));
+
+        // Collect removed transactions from "Other" in both sections
+        const removedTxs: { tx: TransactionDetail; target: { category: string; isEssential: boolean } }[] = [];
+
+        for (const section of [disc, nonDisc]) {
           const otherIdx = section.items.findIndex((i: BudgetCategory) => i.category === 'Other');
-          if (otherIdx >= 0) {
-            const otherCat = { ...section.items[otherIdx] };
-            otherCat.transactions = (otherCat.transactions || []).filter(
-              (tx: TransactionDetail) => !assignedMerchants.has(tx.merchant || tx.description)
-            );
-            otherCat.txs = otherCat.transactions.length;
-            if (otherCat.txs === 0) {
-              section.items.splice(otherIdx, 1);
+          if (otherIdx < 0) continue;
+          const otherCat = section.items[otherIdx];
+          const kept: TransactionDetail[] = [];
+          for (const tx of (otherCat.transactions || [])) {
+            const target = merchantToTarget.get(tx.merchant || tx.description);
+            if (target) {
+              removedTxs.push({ tx, target });
             } else {
-              otherCat.monthly = otherCat.transactions.reduce(
-                (s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0
-              );
-              section.items[otherIdx] = otherCat;
+              kept.push(tx);
             }
-            section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
           }
-          (updated as any)[sectionKey] = section;
+          otherCat.transactions = kept;
+          otherCat.txs = kept.length;
+          if (otherCat.txs === 0) {
+            section.items.splice(otherIdx, 1);
+          } else {
+            otherCat.monthly = kept.reduce((s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0);
+          }
         }
+
+        // Add removed transactions to their target categories in the correct section
+        for (const { tx, target } of removedTxs) {
+          const destSection = target.isEssential ? nonDisc : disc;
+          const destIdx = destSection.items.findIndex((i: BudgetCategory) => i.category === target.category);
+          const txAmt = Math.abs(tx.amount);
+          if (destIdx >= 0) {
+            destSection.items[destIdx].transactions.push(tx);
+            destSection.items[destIdx].monthly += txAmt;
+            destSection.items[destIdx].txs += 1;
+          } else {
+            destSection.items.push({ category: target.category, monthly: txAmt, txs: 1, transactions: [tx] });
+          }
+        }
+
+        // Recalculate section totals
+        disc.total = disc.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+        nonDisc.total = nonDisc.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+        (updated as any).discretionary = disc;
+        (updated as any).non_discretionary = nonDisc;
 
         // Remove classified person transfers
         if (Array.isArray((updated as any).person_transfers)) {
           (updated as any).person_transfers = (updated as any).person_transfers.filter(
-            (t: any) => !assignedMerchants.has(t?.merchant || t?.description)
+            (t: any) => !merchantToTarget.has(t?.merchant || t?.description)
           );
         }
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
+
+        // Persist optimistic state to Supabase immediately so it survives page refreshes.
+        // The background sync will eventually overwrite with the canonical enrichment result.
+        persistAnalysis(updated);
       }
 
       // ── Completion celebration ──
@@ -685,11 +761,10 @@ export default function Home() {
       setCatAssignments({});
       setSaveSuccess(false);
 
-      // Re-sync so the enrichment engine re-runs with the new overrides
-      // and persists the updated analysis to the DB. Without this, the
-      // stale analysis row in Supabase still has the old "Other" bucket
-      // and loadData() would restore the banner on next focus.
+      // Re-sync so the enrichment engine re-runs with the new overrides.
+      // The persisted optimistic state above protects against refresh in the meantime.
       reviewSavedRef.current = Date.now();
+      AsyncStorage.setItem('review_saved_at', String(reviewSavedRef.current)).catch(() => {});
       invalidateSyncCache();
       const uid = userIdRef.current;
       if (uid) syncInBackground(uid, true);
@@ -739,7 +814,7 @@ export default function Home() {
           srcCat.transactions = (srcCat.transactions || []).filter(
             (t: TransactionDetail) => !(t.description === recatTx.tx.description && t.date === recatTx.tx.date && t.amount === recatTx.tx.amount)
           );
-          srcCat.monthly = Math.max(0, srcCat.monthly - txAmt / Math.max(1, (analysis.monthly_spending || 1) / (srcCat.monthly || 1)));
+          srcCat.monthly = Math.max(0, srcCat.monthly - txAmt);
           srcCat.txs = Math.max(0, srcCat.txs - 1);
           if (srcCat.txs === 0) fromSection.items.splice(srcCatIdx, 1);
           else fromSection.items[srcCatIdx] = srcCat;
@@ -767,7 +842,11 @@ export default function Home() {
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
         reviewSavedRef.current = Date.now();
+        AsyncStorage.setItem('review_saved_at', String(reviewSavedRef.current)).catch(() => {});
         invalidateSyncCache();
+
+        // Persist optimistic state immediately so it survives page refreshes
+        persistAnalysis(updated);
       }
 
       setRecatTx(null);
@@ -1265,8 +1344,11 @@ export default function Home() {
         if (reviewSavedRef.current && Date.now() - reviewSavedRef.current < 60_000) {
           return prev;
         }
-        // Clear stale timestamp
-        if (reviewSavedRef.current) reviewSavedRef.current = 0;
+        // Clear stale timestamp (both in-memory and persisted)
+        if (reviewSavedRef.current) {
+          reviewSavedRef.current = 0;
+          AsyncStorage.removeItem('review_saved_at').catch(() => {});
+        }
 
         // Count unresolved items to detect reclassifications/overrides
         const unresolvedCount = (a: Analysis | null) => {
