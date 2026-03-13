@@ -3,8 +3,6 @@ import { View, Text, Animated, StyleSheet, Easing, TouchableOpacity } from 'reac
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
-import EnrichmentEngine from '@/lib/enrichment-engine';
-import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
 import type { RankedMove } from '@/lib/move-engine';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { SpendingRing } from '@/components/Charts';
@@ -106,6 +104,7 @@ function ProcessingInner() {
   const [error, setError] = useState('');
   const [enrichProgress, setEnrichProgress] = useState('');
   const [insight, setInsight] = useState('');
+  const [slowWarning, setSlowWarning] = useState(false);
   const fadeAnims = useRef(STEPS.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(STEPS.map(() => new Animated.Value(20))).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
@@ -113,6 +112,10 @@ function ProcessingInner() {
   useEffect(() => {
     trackScreen('Processing');
     runAnalysis();
+
+    // Show a reassurance message if analysis takes > 45s
+    const slowTimer = setTimeout(() => setSlowWarning(true), 45_000);
+    return () => clearTimeout(slowTimer);
   }, []);
 
   useEffect(() => {
@@ -180,7 +183,11 @@ function ProcessingInner() {
         return;
       }
 
-      // ── Layer 1: Enrichment Engine ──
+      // ── Layer 1: Enrichment Engine (lazy-loaded to reduce initial bundle) ──
+      const [{ default: EnrichmentEngine }, { rankMoves, determineFlowchartPosition, calcGoalTrajectory }] = await Promise.all([
+        import('@/lib/enrichment-engine'),
+        import('@/lib/move-engine'),
+      ]);
       setCurrentStep(0);
       await delay(400);
 
@@ -781,6 +788,12 @@ function ProcessingInner() {
           </Animated.View>
         ))}
       </View>
+
+      {slowWarning && (
+        <Text style={styles.slowWarning}>
+          This is taking longer than usual. Large transaction histories need extra time — hang tight.
+        </Text>
+      )}
     </View>
   );
 }
@@ -897,6 +910,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.green,
     marginTop: 2,
+  },
+  slowWarning: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.muted,
+    textAlign: 'center' as const,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.lg,
   },
   insightHero: {
     alignItems: 'center',

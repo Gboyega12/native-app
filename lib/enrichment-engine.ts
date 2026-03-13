@@ -1,3 +1,4 @@
+import Papa from 'papaparse';
 import {
   matchMerchant, fuzzyMatchMerchant, isPersonTransfer,
   isLikelyIncomeCredit, matchesSalaryKeywords, extractCreditCardBrand,
@@ -25,16 +26,9 @@ import type {
 } from './types.js';
 
 function splitCSVLine(line: string): string[] {
-  const parts: string[] = [];
-  let current = '';
-  let inQuotes = false;
-  for (const ch of line) {
-    if (ch === '"') { inQuotes = !inQuotes; continue; }
-    if (ch === ',' && !inQuotes) { parts.push(current); current = ''; continue; }
-    current += ch;
-  }
-  parts.push(current);
-  return parts.map((p) => p.trim());
+  const result = Papa.parse(line, { header: false, skipEmptyLines: true });
+  const row = result.data[0] as string[] | undefined;
+  return row ? row.map((p) => p.trim()) : [];
 }
 
 function parseDate(str: string): Date | null {

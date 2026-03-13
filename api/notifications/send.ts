@@ -5,6 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import webPush from 'web-push';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -18,7 +19,7 @@ if (VAPID_PUBLIC && VAPID_PRIVATE) {
 }
 
 /** Strip HTML tags and decode common entities to get plain text. */
-function htmlToPlainText(html) {
+function htmlToPlainText(html: string): string {
   return html
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
@@ -33,13 +34,13 @@ function htmlToPlainText(html) {
     .slice(0, 200);
 }
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   // Verify internal call (cron secret or service key)
-  const authHeader = req.headers.authorization || '';
+  const authHeader = (req.headers.authorization as string) || '';
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -74,7 +75,7 @@ export default async function handler(req, res) {
     const data = await response.json();
 
     // Log to notification_log table
-    const admin = (user_id && serviceKey) ? createClient(supabaseUrl, serviceKey) : null;
+    const admin = (user_id && serviceKey) ? createClient(supabaseUrl!, serviceKey) : null;
     if (admin) {
       try {
         await admin.from('notification_log').insert({
@@ -85,8 +86,9 @@ export default async function handler(req, res) {
           status: response.ok ? 'sent' : 'failed',
           error_message: response.ok ? null : JSON.stringify(data),
         });
-      } catch (logErr) {
-        console.warn('[notifications] Failed to log notification:', logErr?.message);
+      } catch (logErr: unknown) {
+        const message = logErr instanceof Error ? logErr.message : String(logErr);
+        console.warn('[notifications] Failed to log notification:', message);
       }
     }
 
@@ -96,7 +98,7 @@ export default async function handler(req, res) {
     }
 
     // Also deliver via web push if user_id is provided
-    let webPushResult = null;
+    let webPushResult: { success: boolean; sent?: number; total?: number; error?: string; count?: number } | null = null;
     if (user_id && admin && VAPID_PUBLIC && VAPID_PRIVATE) {
       try {
         // Fetch all active web push subscriptions for this user
@@ -118,24 +120,25 @@ export default async function handler(req, res) {
           });
 
           const results = await Promise.allSettled(
-            subscriptions.map(async (sub) => {
+            subscriptions.map(async (sub: { endpoint: string; p256dh: string; auth: string }) => {
               try {
                 await webPush.sendNotification(
                   { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
                   payload,
                 );
-                return { endpoint: sub.endpoint, status: 'sent' };
-              } catch (err) {
+                return { endpoint: sub.endpoint, status: 'sent' as const };
+              } catch (err: unknown) {
+                const pushErr = err as { statusCode?: number; message?: string };
                 // 410 Gone or 404 = subscription expired, clean it up
-                if (err.statusCode === 410 || err.statusCode === 404) {
+                if (pushErr.statusCode === 410 || pushErr.statusCode === 404) {
                   await admin.from('web_push_subscriptions').delete().eq('endpoint', sub.endpoint);
                 }
-                return { endpoint: sub.endpoint, status: 'failed', error: err.message };
+                return { endpoint: sub.endpoint, status: 'failed' as const, error: pushErr.message };
               }
             })
           );
 
-          const sent = results.filter((r) => r.status === 'fulfilled' && r.value?.status === 'sent').length;
+          const sent = results.filter((r) => r.status === 'fulfilled' && (r as PromiseFulfilledResult<{ status: string }>).value?.status === 'sent').length;
           webPushResult = { success: sent > 0, sent, total: subscriptions.length };
 
           // Log web push delivery
@@ -152,15 +155,17 @@ export default async function handler(req, res) {
         } else {
           webPushResult = { success: false, error: 'no_subscriptions', count: 0 };
         }
-      } catch (pushErr) {
-        console.warn('[notifications] Web push delivery failed:', pushErr?.message);
-        webPushResult = { success: false, error: pushErr?.message };
+      } catch (pushErr: unknown) {
+        const message = pushErr instanceof Error ? pushErr.message : String(pushErr);
+        console.warn('[notifications] Web push delivery failed:', message);
+        webPushResult = { success: false, error: message };
       }
     }
 
     return res.json({ success: true, id: data.id, web_push: webPushResult });
-  } catch (err) {
-    console.error('[notifications] Send failed:', err?.message);
-    return res.json({ success: false, error: err?.message || 'request_failed' });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[notifications] Send failed:', message);
+    return res.json({ success: false, error: message || 'request_failed' });
   }
 }

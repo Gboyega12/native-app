@@ -1,6 +1,8 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
 const MAX_PDF_SIZE_MB = 10;
 
-export default async function handler(req, res) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -21,7 +23,7 @@ export default async function handler(req, res) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': process.env.CLAUDE_API_KEY,
+        'x-api-key': process.env.CLAUDE_API_KEY!,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
@@ -67,7 +69,7 @@ Rules:
     }
 
     const data = await response.json();
-    let csv = data.content?.[0]?.text || '';
+    let csv: string = data.content?.[0]?.text || '';
 
     // Strip any code fences Claude might add
     csv = csv.replace(/^```(?:\w+)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -77,14 +79,15 @@ Rules:
     }
 
     // Basic validation: must have header + at least 1 transaction
-    const lines = csv.split('\n').filter((l) => l.trim());
+    const lines = csv.split('\n').filter((l: string) => l.trim());
     if (lines.length < 2 || !lines[0].toLowerCase().includes('date')) {
       return res.status(422).json({ error: 'Could not extract transactions from this PDF' });
     }
 
     return res.json({ success: true, csv_data: csv });
-  } catch (err) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('Parse statement error:', err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: message });
   }
 }

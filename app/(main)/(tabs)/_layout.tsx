@@ -58,13 +58,7 @@ export default function TabsLayout() {
             ),
           }}
         />
-        <Tabs.Screen
-          name="plan"
-          options={{
-            href: null, // Hidden — merged into Home
-          }}
-        />
-        <Tabs.Screen
+<Tabs.Screen
           name="chat"
           options={{
             title: 'Chat',
