@@ -65,7 +65,7 @@ export default function Connect() {
   const [accumulatedCSV, setAccumulatedCSV] = useState(params.csvData || '');
   const [connectedCount, setConnectedCount] = useState(params.csvData ? 1 : 0);
 
-  const isFromProfile = params.from === 'profile';
+  const isFromProfile = params.from === 'profile' || params.from === 'banner';
 
   // Track page view on mount
   useEffect(() => { trackScreen('Connect', { from: isFromProfile ? 'profile' : 'onboarding' }); }, []);
@@ -215,7 +215,11 @@ export default function Connect() {
         clearConnectState();
         // Invalidate sync cache so dashboard picks up the new bank data
         invalidateSyncCache();
-        router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
+        if (params.from === 'banner') {
+          router.replace('/(main)/(tabs)');
+        } else {
+          router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
+        }
         return;
       }
 

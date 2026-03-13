@@ -63,6 +63,9 @@ function formatTxDateAge(dateStr: string): string {
   return `${diffDays}d ago`;
 }
 
+// Module-level cache for banner dismiss fingerprints (survives re-renders, avoids async flash)
+let dismissCache: Record<string, string> = {};
+
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -82,14 +85,14 @@ export default function Home() {
   const [syncDataSource, setSyncDataSource] = useState<'truelayer' | 'fallback' | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [connectionWarning, setConnectionWarning] = useState<{ message: string; banks: string[] } | null>(null);
-  const [connectionDismissed, setConnectionDismissed] = useState(false);
+  const [connectionDismissed, setConnectionDismissed] = useState(true); // Default hidden; show only after confirming not dismissed
   const [incomeDismissed, setIncomeDismissed] = useState(false);
   const [hasBankConnection, setHasBankConnection] = useState(false);
   const { showWalkthrough, dismissWalkthrough } = useWalkthrough();
   const dashScrollRef = useRef<ScrollView>(null);
   const cardPositions = useRef<Record<string, number>>({});
   const syncRetryRef = useRef<number>(0);
-  const reviewSavedRef = useRef(false); // Guards against stale sync overwriting optimistic review state
+  const reviewSavedRef = useRef<number>(0); // Timestamp of last recategorization — guards against stale sync overwriting optimistic state
   const [retriesExhausted, setRetriesExhausted] = useState(false);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);
@@ -112,27 +115,23 @@ export default function Home() {
   // Keyed by the sorted bank names. Dismissing stores these bank names.
   // Banner only reappears if the set of expired banks actually changes
   // (i.e. a new bank expires, or the user reconnects and a different one lapses).
-  // Cleared automatically when all connections sync OK (connectionWarning = null).
   const CONN_DISMISS_KEY = 'dismiss:conn:banks';
 
+  // Hydrate dismiss cache on mount (once)
   useEffect(() => {
-    if (!connectionWarning) return; // Don't reset — keep dismissed state until warning arrives
     AsyncStorage.getItem(CONN_DISMISS_KEY).then((stored) => {
-      if (!stored) { setConnectionDismissed(false); return; }
-      // Compare stored bank fingerprint with current warning
-      const currentFingerprint = connectionWarning.banks.sort().join(',');
-      setConnectionDismissed(stored === currentFingerprint);
+      if (stored) dismissCache[CONN_DISMISS_KEY] = stored;
     }).catch(() => {});
-  }, [connectionWarning]);
+  }, []);
 
-  // When connections are healthy, just reset the in-memory dismissed flag.
-  // Don't clear AsyncStorage — the dismiss fingerprint comparison (above)
-  // already handles showing the banner when the set of affected banks changes.
-  // Clearing on every healthy sync caused the banner to reappear after
-  // transient failures even though the user had already dismissed it.
+  // When warning changes, compare synchronously against cache
   useEffect(() => {
-    if (connectionWarning === null) {
-      setConnectionDismissed(false);
+    if (!connectionWarning) return; // warning cleared = leave dismiss state alone
+    const currentFingerprint = connectionWarning.banks.sort().join(',');
+    if (dismissCache[CONN_DISMISS_KEY] === currentFingerprint) {
+      setConnectionDismissed(true); // same banks as dismissed — stay hidden
+    } else {
+      setConnectionDismissed(false); // new bank set — show banner
     }
   }, [connectionWarning]);
 
@@ -158,7 +157,9 @@ export default function Home() {
     trackEvent('Connection Warning Dismissed');
     setConnectionDismissed(true);
     if (connectionWarning) {
-      AsyncStorage.setItem(CONN_DISMISS_KEY, connectionWarning.banks.sort().join(',')).catch(() => {});
+      const fp = connectionWarning.banks.sort().join(',');
+      dismissCache[CONN_DISMISS_KEY] = fp;
+      AsyncStorage.setItem(CONN_DISMISS_KEY, fp).catch(() => {});
     }
   };
   const dismissIncome = () => {
@@ -688,7 +689,7 @@ export default function Home() {
       // and persists the updated analysis to the DB. Without this, the
       // stale analysis row in Supabase still has the old "Other" bucket
       // and loadData() would restore the banner on next focus.
-      reviewSavedRef.current = true;
+      reviewSavedRef.current = Date.now();
       invalidateSyncCache();
       const uid = userIdRef.current;
       if (uid) syncInBackground(uid, true);
@@ -765,17 +766,12 @@ export default function Home() {
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
-        reviewSavedRef.current = true;
+        reviewSavedRef.current = Date.now();
         invalidateSyncCache();
       }
 
       setRecatTx(null);
       setRecatTarget('');
-
-      // Force re-enrich so overrides are applied immediately
-      if (user) {
-        syncInBackground(user.id, true);
-      }
     } catch (err: any) {
       console.warn('[home] Recategorize failed:', err?.message);
     }
@@ -1253,23 +1249,14 @@ export default function Home() {
         // If a review was just saved, the optimistic UI has the correct state.
         // This sync may have started BEFORE overrides were written — don't
         // clobber the optimistic state with stale data.
-        if (reviewSavedRef.current) {
-          reviewSavedRef.current = false;
-          // Only accept the sync result if it has FEWER unresolved items
-          // (meaning it correctly applied the overrides)
-          const countUnresolved = (a: Analysis | null) => {
-            if (!a) return 0;
-            let c = 0;
-            for (const sec of [a.discretionary, a.non_discretionary]) {
-              const items = (sec as any)?.items;
-              if (!Array.isArray(items)) continue;
-              const other = items.find((i: any) => i?.category === 'Other');
-              if (other) c += other.txs || 0;
-            }
-            return c;
-          };
-          if (countUnresolved(fresh) >= countUnresolved(prev)) return prev;
+        // If a recategorization happened recently, keep the optimistic state.
+        // The override is persisted in Supabase — the next sync after the window
+        // will pick it up correctly via the enrichment pipeline.
+        if (reviewSavedRef.current && Date.now() - reviewSavedRef.current < 60_000) {
+          return prev;
         }
+        // Clear stale timestamp
+        if (reviewSavedRef.current) reviewSavedRef.current = 0;
 
         // Count unresolved items to detect reclassifications/overrides
         const unresolvedCount = (a: Analysis | null) => {
@@ -1802,7 +1789,7 @@ export default function Home() {
       {/* ── Connection warning ── */}
       {connectionWarning && !connectionDismissed && (
         <View style={s.connectionBanner}>
-          <TouchableOpacity style={s.connectionBannerBody} onPress={() => router.push('/(main)/connect')} activeOpacity={0.8}>
+          <TouchableOpacity style={s.connectionBannerBody} onPress={() => router.push({ pathname: '/(main)/connect', params: { from: 'banner' } })} activeOpacity={0.8}>
             <View style={{ flex: 1 }}>
               {connectionWarning.message === 'stale_data'
                 ? <Text style={s.connectionBannerText}>Transactions haven't updated in days — try reconnecting</Text>
