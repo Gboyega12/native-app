@@ -156,8 +156,11 @@ export function rankMoves(
     if (move.effort === 'low') score *= 1.1;
     else if (move.effort === 'high') score *= 0.95;
 
-    // Liquidity-adjusted marginal utility — CRRA diminishing returns
-    // with liquidity tier discounts and variance-adjusted reference points
+    // CRRA (Constant Relative Risk Aversion) marginal utility.
+    // Why CRRA: cutting £50/month from a £200 grocery budget is harder than cutting
+    // £50/month from a £800 entertainment budget. CRRA captures this via category-specific
+    // γ (gamma) parameters — higher γ = steeper diminishing returns.
+    // Also discounts illiquid moves (e.g. pension contributions) when buffer is thin.
     const { multiplier: marginal, liquidityTier } = calcMoveMarginalUtility(
       move,
       profile as FinancialProfile,
@@ -168,7 +171,8 @@ export function rankMoves(
     );
     score *= marginal;
 
-    // Opportunity cost: rate-of-return comparison (debt APR vs savings rate vs equity)
+    // Opportunity cost: compares the return on this move against the best alternative.
+    // E.g. paying off 5% debt when you could invest at 7% gets a multiplier <1.
     const opportunityCost = calcOpportunityCostMultiplier(move, profile as FinancialProfile, debtAccounts);
     score *= opportunityCost;
 
@@ -342,7 +346,9 @@ export function calcGoalTrajectory(
   };
 
   // ── Monte Carlo confidence bands (Phase 1) ──
-  // Only run if we have enough profile data for variance estimation.
+  // Runs 1,000 simulations of the user's monthly surplus with real variance
+  // from their transaction history. Produces p10/p50/p90 month estimates and
+  // a 12-month hit rate (% of simulations that reach the goal within 1 year).
   if (targetAmount > 0 && profile.budgetReality) {
     const vol = estimateVolatility(profile as FinancialProfile, identity);
     const confidence = simulateGoalTimeline(
@@ -353,13 +359,15 @@ export function calcGoalTrajectory(
     );
     result.confidence = confidence;
 
-    // Phase 3b: personalized buffer recommendation for emergency_fund goals
+    // For emergency fund goals, use variance-adjusted buffer sizing instead of
+    // the static "3 months expenses" rule. Volatile incomes need larger buffers.
     if (oneYear === 'emergency_fund' || oneYear === 'buffer') {
       result.bufferRecommendation = simulateBufferNeed(profile as FinancialProfile, vol);
     }
 
-    // Enrich insight with probability
+    // Enrich insight with probability language instead of deterministic projections
     if (confidence.p50 > 0 && confidence.p50 < 120) {
+      // Spread > 3 months = meaningful uncertainty worth communicating
       const spread = confidence.p90 - confidence.p10;
       if (spread > 3) {
         insight = `Most likely ${confidence.p50} months (${confidence.p10}\u2013${confidence.p90} range). `;

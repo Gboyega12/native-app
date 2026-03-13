@@ -583,6 +583,10 @@ const EnrichmentEngine = {
         intervals.push((new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()) / (1000 * 60 * 60 * 24));
       }
       const avgInt = intervals.length ? intervals.reduce((a, b) => a + b, 0) / intervals.length : 0;
+      // Income frequency detection — UK pay cycles:
+      //   weekly (5-9 days): common in gig/retail/hospitality
+      //   fortnightly (12-17 days): some NHS/public sector roles
+      //   monthly (25-35 days): standard UK salaried pay
       let frequency = 'irregular';
       if (avgInt >= 25 && avgInt <= 35) frequency = 'monthly';
       else if (avgInt >= 12 && avgInt <= 17) frequency = 'fortnightly';
@@ -627,6 +631,9 @@ const EnrichmentEngine = {
     })
     .sort((a, b) => b.monthly - a.monthly);
 
+    // If no source explicitly matched salary keywords, promote the largest
+    // income source to "salary" — the archetype and decision stack logic
+    // relies on having at least one primary income source identified.
     if (incomeSources.length > 0 && !incomeSources.some((s) => s.isSalary)) {
       incomeSources[0].isSalary = true;
     }
@@ -671,9 +678,13 @@ const EnrichmentEngine = {
         totalWeight += w;
       }
       overallIncomeCV = totalWeight > 0 ? weightedCV / totalWeight : 0;
-      // Variable if CV > 10% (salaried workers typically have < 5% variation)
+      // 10% CV threshold separates stable salary (<5% variation) from variable
+      // income (gig workers, freelancers, commission-based). Salaried workers have
+      // near-zero CV due to fixed monthly pay.
       if (overallIncomeCV > 0.10) {
-        // Conservative floor = mean - 0.67 * SD (≈ 25th percentile assuming normal)
+        // Conservative floor uses z-score of -0.67 (25th percentile of normal
+        // distribution). This means 75% of months the user earns at least this
+        // much — safe to budget against without assuming a good month.
         const incomeSD = overallIncomeCV * monthlyIncome;
         incomeFloor = Math.max(0, monthlyIncome - 0.67 * incomeSD);
         return true;
