@@ -188,40 +188,40 @@ Split the enrichment pipeline into two phases:
 2. **Slow phase (server):** Claude classification + move refinement runs as a background API call. Updates the analysis row when done. Dashboard picks up the improved version.
 
 ### Step 1: Add verification status to analyses table
-- [ ] Add `verification_status` column: `'draft' | 'verifying' | 'verified'`
-- [ ] Default to `'verified'` so existing rows are unaffected
-- [ ] Add `verified_at` timestamp column (nullable)
+- [x] Add `verification_status` column: `'draft' | 'verifying' | 'verified'`
+- [x] Default to `'verified'` so existing rows are unaffected
+- [x] Add `verified_at` timestamp column (nullable)
 
 ### Step 2: New background verification API endpoint
-- [ ] Create `api/verify.ts` that accepts `{ user_id }`
-- [ ] Authenticate via JWT (same pattern as other endpoints)
-- [ ] Read stored CSV from `bank_data`, fetch overrides/identity/debt/goals
-- [ ] Run `EnrichmentEngine.enrich()` to get enriched transactions
-- [ ] Run Claude classify batches on low-confidence transactions (same logic currently in processing.tsx lines 252-319)
-- [ ] Run `EnrichmentEngine.rebuild()` with improved classifications
-- [ ] Re-rank moves with `rankMoves()`, run Claude move refinement
-- [ ] Update the analysis row with improved data + set `verification_status = 'verified'`, `verified_at = now()`
+- [x] Create `api/verify.ts` that accepts `{ user_id }`
+- [x] Authenticate via JWT (same pattern as other endpoints)
+- [x] Read stored CSV from `bank_data`, fetch overrides/identity/debt/goals
+- [x] Run `EnrichmentEngine.enrich()` to get enriched transactions
+- [x] Run Claude classify batches on low-confidence transactions (same logic currently in processing.tsx lines 252-319)
+- [x] Run `EnrichmentEngine.rebuild()` with improved classifications
+- [x] Re-rank moves with `rankMoves()`, run Claude move refinement
+- [x] Update the analysis row with improved data + set `verification_status = 'verified'`, `verified_at = now()`
 
 ### Step 3: Modify processing.tsx to skip Claude calls
-- [ ] Remove the Claude classify loop (current lines 252-319)
-- [ ] Remove the Claude move refinement call (current lines 363-419)
-- [ ] Save the analysis with `verification_status: 'draft'`
-- [ ] After saving, fire and forget `fetch('/api/verify')` with user's JWT
-- [ ] Navigate user to dashboard immediately after save
-- [ ] Processing screen now completes in ~3 seconds
+- [x] Remove the Claude classify loop (current lines 252-319)
+- [x] Remove the Claude move refinement call (current lines 363-419)
+- [x] Save the analysis with `verification_status: 'draft'`
+- [x] After saving, fire and forget `fetch('/api/verify')` with user's JWT
+- [x] Navigate user to dashboard immediately after save
+- [x] Processing screen now completes in ~3 seconds
 
 ### Step 4: Dashboard picks up verified analysis
-- [ ] In dashboard `loadData()`, read `verification_status` from the analysis row
-- [ ] If status is `'draft'` or `'verifying'`, show subtle text: "Refining your analysis..."
-- [ ] Add lightweight poll: if not `'verified'`, re-fetch every 15 seconds (max 4 attempts)
-- [ ] When verified version arrives, update state smoothly (no jarring layout shifts)
-- [ ] On `syncCoordinator.onSyncComplete()`, also check for status change
+- [x] In dashboard `loadData()`, read `verification_status` from the analysis row
+- [x] If status is `'draft'` or `'verifying'`, show subtle text: "Refining your analysis..."
+- [x] Add lightweight poll: if not `'verified'`, re-fetch every 15 seconds (max 4 attempts)
+- [x] When verified version arrives, update state smoothly (no jarring layout shifts)
+- [x] On `syncCoordinator.onSyncComplete()`, also check for status change
 
 ### Step 5: Handle edge cases
-- [ ] If `/api/verify` fails, keep `verification_status = 'draft'` (not stuck on 'verifying')
-- [ ] Next background sync via cron picks up unverified analyses and runs verification
-- [ ] If user triggers manual re-analysis, skip the poll and run fresh
-- [ ] Ensure verify endpoint is idempotent (safe to call twice)
+- [x] If `/api/verify` fails, keep `verification_status = 'draft'` (not stuck on 'verifying')
+- [x] Next background sync via cron picks up unverified analyses and runs verification
+- [x] If user triggers manual re-analysis, skip the poll and run fresh
+- [x] Ensure verify endpoint is idempotent (safe to call twice)
 
 ### Files to modify
 
