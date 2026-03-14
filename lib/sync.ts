@@ -51,6 +51,8 @@ export interface SyncResult {
   expiringConnections: { name: string; daysLeft: number }[];
   /** Reactive engine results: events, next move suggestion, achievements. */
   reactive: ReactiveResult | null;
+  /** Epoch ms when this sync started — used to reject stale results after override saves. */
+  syncStartedAt: number;
 }
 
 /**
@@ -191,6 +193,7 @@ async function reconcileDebtPayments(
  * Returns `null` if there's no CSV data to process.
  */
 export async function syncBankData(userId: string): Promise<SyncResult | null> {
+  const syncStartedAt = Date.now();
   // ── 1. Fetch fresh CSV ──
   let csvData: string | null = null;
   let dataSource: 'truelayer' | 'fallback' = 'truelayer';
@@ -416,6 +419,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       expiredBankNames,
       expiringConnections,
       reactive: null,
+      syncStartedAt,
     };
   }
 
@@ -603,6 +607,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     expiredBankNames,
     expiringConnections,
     reactive,
+    syncStartedAt,
   };
 }
 

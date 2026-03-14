@@ -99,8 +99,8 @@ async function refreshConnection(bankRow: BankRow, clientId: string, clientSecre
     toDate.setDate(toDate.getDate() + 1);
     const to = toDate.toISOString().split('T')[0];
     const fromDate = new Date();
-    // Re-syncs fetch 3 months of data (incremental). Initial 12-month pull is in callback.ts.
-    fromDate.setMonth(fromDate.getMonth() - 3);
+    // Re-syncs fetch 1 month of data (incremental). Initial 12-month pull is in callback.ts.
+    fromDate.setMonth(fromDate.getMonth() - 1);
     const from = fromDate.toISOString().split('T')[0];
 
     const txPromises = [

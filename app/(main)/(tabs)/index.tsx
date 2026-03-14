@@ -18,7 +18,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals } from '@/lib/types';
-import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
@@ -92,7 +92,7 @@ export default function Home() {
   const dashScrollRef = useRef<ScrollView>(null);
   const cardPositions = useRef<Record<string, number>>({});
   const syncRetryRef = useRef<number>(0);
-  const reviewSavedRef = useRef<number>(0); // Timestamp of last recategorization — guards against stale sync overwriting optimistic state
+  const overridesSavedAt = useRef<number>(0); // Timestamp of last override save — syncs started before this are rejected
   const [retriesExhausted, setRetriesExhausted] = useState(false);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);
@@ -312,18 +312,12 @@ export default function Home() {
     }).catch(() => {});
   }, []);
 
-  // Hydrate reviewSavedRef from AsyncStorage so the guard survives page refreshes
+  // Hydrate overridesSavedAt from AsyncStorage so the guard survives page refreshes
   useEffect(() => {
-    AsyncStorage.getItem('review_saved_at').then((val) => {
+    AsyncStorage.getItem('overrides_saved_at').then((val) => {
       if (val) {
         const ts = parseInt(val, 10);
-        // Only honour if within the last 60 seconds
-        if (ts && Date.now() - ts < 60_000) {
-          reviewSavedRef.current = ts;
-        } else {
-          // Expired — clean up
-          AsyncStorage.removeItem('review_saved_at').catch(() => {});
-        }
+        if (ts) overridesSavedAt.current = ts;
       }
     }).catch(() => {});
   }, []);
@@ -774,8 +768,8 @@ export default function Home() {
 
       // Re-sync so the enrichment engine re-runs with the new overrides.
       // The persisted optimistic state above protects against refresh in the meantime.
-      reviewSavedRef.current = Date.now();
-      AsyncStorage.setItem('review_saved_at', String(reviewSavedRef.current)).catch(() => {});
+      overridesSavedAt.current = Date.now();
+      AsyncStorage.setItem('overrides_saved_at', String(overridesSavedAt.current)).catch(() => {});
       invalidateSyncCache();
       const uid = userIdRef.current;
       if (uid) syncInBackground(uid, true);
@@ -855,8 +849,8 @@ export default function Home() {
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
-        reviewSavedRef.current = Date.now();
-        AsyncStorage.setItem('review_saved_at', String(reviewSavedRef.current)).catch(() => {});
+        overridesSavedAt.current = Date.now();
+        AsyncStorage.setItem('overrides_saved_at', String(overridesSavedAt.current)).catch(() => {});
         invalidateSyncCache();
 
         // Persist optimistic state immediately so it survives page refreshes
@@ -1140,10 +1134,12 @@ export default function Home() {
       }
 
       const lastResult = getLastResult();
-      // Don't overwrite optimistic state from a recent recategorization —
-      // the Supabase analyses row hasn't been updated yet by the delayed sync.
-      const recentRecat = reviewSavedRef.current && Date.now() - reviewSavedRef.current < 120_000;
-      if (data && !recentRecat) {
+      // Don't overwrite optimistic state if overrides were saved recently —
+      // the Supabase analyses row may not reflect the latest overrides yet.
+      // We check against a generous 120s window on initial load only; the
+      // deterministic syncStartedAt check handles background sync results.
+      const recentOverride = overridesSavedAt.current && Date.now() - overridesSavedAt.current < 120_000;
+      if (data && !recentOverride) {
         setAnalysis(mergeAdjustments(data, adjustments));
       } else if (lastResult) {
         // Fallback: use in-memory result only if Supabase has nothing yet
@@ -1349,19 +1345,17 @@ export default function Home() {
       setRetriesExhausted(false);
       const fresh = mergeAdjustments(result.analysis, budgetAdjustments);
       setAnalysis((prev) => {
-        // If a review was just saved, the optimistic UI has the correct state.
-        // This sync may have started BEFORE overrides were written — don't
-        // clobber the optimistic state with stale data.
-        // If a recategorization happened recently, keep the optimistic state.
-        // The override is persisted in Supabase — the next sync after the window
-        // will pick it up correctly via the enrichment pipeline.
-        if (reviewSavedRef.current && Date.now() - reviewSavedRef.current < 120_000) {
+        // Deterministic guard: reject sync results from syncs that started
+        // BEFORE the user's last override save. Those syncs fetched stale
+        // overrides and their enrichment result is incorrect.
+        if (overridesSavedAt.current && result.syncStartedAt < overridesSavedAt.current) {
           return prev;
         }
-        // Clear stale timestamp (both in-memory and persisted)
-        if (reviewSavedRef.current) {
-          reviewSavedRef.current = 0;
-          AsyncStorage.removeItem('review_saved_at').catch(() => {});
+        // This sync started after overrides were saved — it has the latest data.
+        // Clear the guard so future syncs aren't blocked.
+        if (overridesSavedAt.current && result.syncStartedAt >= overridesSavedAt.current) {
+          overridesSavedAt.current = 0;
+          AsyncStorage.removeItem('overrides_saved_at').catch(() => {});
         }
 
         // Count unresolved items to detect reclassifications/overrides
@@ -1439,7 +1433,7 @@ export default function Home() {
     if (!uid) return;
     const key = `move-${index}`;
     if (planProgress[key]?.approved) return;
-    const sgs = hydrateSubGoals(move);
+    const sgs = hydrateSubGoals(move, debtAccounts);
     const row = { move_key: key, move_action: move.action, approved: true, completed_steps: [] as number[], sub_goals: sgs, updated_at: new Date().toISOString() };
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setPlanProgress((prev) => ({ ...prev, [key]: row }));
@@ -1462,50 +1456,186 @@ export default function Home() {
     await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', key);
   };
 
-  /** Generate actionable steps for user plans */
-  const getPlanSteps = (plan: any): string[] => {
+  /** Generate data-driven, surgical steps for user plans using real account data */
+  const generatePlanSteps = (plan: any): string[] => {
     const action = (plan.action || '').toLowerCase();
-    if (action.includes('emergency') || action.includes('buffer')) {
-      return [
-        'Set aside your target amount on payday',
-        'Automate it so you don\'t have to think about it',
-        'Bocy will track your buffer progress each month',
-      ];
-    }
+    const activeDebts = debtAccounts.filter((d: any) => (d.outstanding_balance || 0) > 0);
+
+    // ── Debt plans: one step per real debt account with name, balance, APR ──
     if (action.includes('debt') || action.includes('credit') || action.includes('pay off')) {
+      if (activeDebts.length > 0) {
+        // Sort by interest rate descending (avalanche method)
+        const sorted = [...activeDebts].sort((a: any, b: any) => (b.interest_rate || 0) - (a.interest_rate || 0));
+        return sorted.map((d: any, i: number) => {
+          const name = d.account_name || 'Debt';
+          const balance = Math.round(d.outstanding_balance || 0);
+          const apr = d.interest_rate ? `${Math.round(d.interest_rate * 100)}% APR` : '';
+          const min = d.minimum_payment ? Math.round(d.minimum_payment) : 0;
+          const payment = i === 0 && plan.monthly_saving
+            ? `£${Math.round(plan.monthly_saving)}/mo`
+            : min > 0 ? `£${min}/mo minimum` : '';
+          const details = [apr, payment].filter(Boolean).join(' · ');
+          return `${i === 0 ? 'Pay down' : 'Then clear'} ${name} — £${balance.toLocaleString()}${details ? ` (${details})` : ''}`;
+        });
+      }
       return [
-        'List all debts with their interest rates',
-        'Set up minimum payments on all debts',
-        'Direct any extra to the highest-rate debt first',
-        'Bocy will track your debt-free countdown',
+        'Connect your credit cards so Bocy can build a precise payoff plan',
+        'Bocy will track each debt by name, balance, and interest rate',
       ];
     }
-    if (action.includes('save') || action.includes('saving')) {
-      return [
-        'Set up automatic monthly transfer on payday',
-        'Automate it — hands-free saving',
-        'Bocy will update your progress each month',
-      ];
+
+    // ── Buffer/emergency plans: real surplus amount + timeline ──
+    if (action.includes('emergency') || action.includes('buffer')) {
+      const steps: string[] = [];
+      const target = plan.target_amount ? Math.round(plan.target_amount) : 0;
+      const monthly = plan.monthly_saving ? Math.round(plan.monthly_saving) : 0;
+      const surplus = analysis?.surplus ? Math.round(analysis.surplus) : 0;
+      const transferAmt = monthly || surplus;
+      if (transferAmt > 0 && target > 0) {
+        const months = Math.ceil(target / transferAmt);
+        steps.push(`Transfer £${transferAmt}/mo on payday → reaches £${target.toLocaleString()} in ${months} months`);
+      } else if (target > 0) {
+        steps.push(`Target: £${target.toLocaleString()} emergency buffer`);
+      }
+      steps.push('Set up automatic standing order so it happens without thinking');
+      return steps;
     }
+
+    // ── Savings/deposit plans: real amounts ──
+    if (action.includes('save') || action.includes('saving') || action.includes('deposit')) {
+      const steps: string[] = [];
+      const target = plan.target_amount ? Math.round(plan.target_amount) : 0;
+      const monthly = plan.monthly_saving ? Math.round(plan.monthly_saving) : 0;
+      const surplus = analysis?.surplus ? Math.round(analysis.surplus) : 0;
+      const transferAmt = monthly || surplus;
+      if (transferAmt > 0 && target > 0) {
+        const months = Math.ceil(target / transferAmt);
+        steps.push(`Transfer £${transferAmt}/mo → reaches £${target.toLocaleString()} in ${months} months`);
+      } else if (transferAmt > 0) {
+        steps.push(`Transfer £${transferAmt}/mo into savings on payday`);
+      }
+      steps.push('Automate it — set up a standing order so you don\'t have to think');
+      return steps;
+    }
+
+    // ── Subscription plans: real merchants from analysis ──
+    if (action.includes('subscript') || action.includes('cancel')) {
+      const subs = extractSubscriptionsFromAnalysis();
+      if (subs.length > 0) {
+        return subs.slice(0, 5).map((s) =>
+          `Cancel ${s.name} — £${Math.round(s.monthly * 100) / 100}/mo`
+        );
+      }
+      return ['Review active subscriptions this week', 'Cancel the ones you haven\'t used in 30 days'];
+    }
+
+    // ── Spending reduction: real category amounts ──
+    if (action.includes('reduce') || action.includes('cut') || action.includes('spending')) {
+      const categories = extractTopSpendingCategories();
+      if (categories.length > 0) {
+        return categories.slice(0, 3).map((c) => {
+          const target = Math.round(c.monthly * 0.7); // suggest 30% reduction
+          return `Reduce ${c.category} from £${Math.round(c.monthly)} to £${target}/mo`;
+        });
+      }
+    }
+
+    // ── Investment plans ──
     if (action.includes('invest')) {
+      const monthly = plan.monthly_saving ? Math.round(plan.monthly_saving) : 0;
+      if (monthly > 0) {
+        return [
+          `Set up £${monthly}/mo automatic investment`,
+          'Start with a low-cost index fund — don\'t overthink it',
+        ];
+      }
       return [
         'Start with a small monthly amount you won\'t miss',
-        'Set it and forget it — don\'t check daily',
-        'Bocy will flag when to review your approach',
+        'Automate it and don\'t check daily',
       ];
     }
-    if (action.includes('subscript') || action.includes('cancel')) {
-      return [
-        'Review active subscriptions this week',
-        'Cancel the ones you haven\'t used in 30 days',
-        'Bocy will check again next month',
-      ];
-    }
+
+    // ── Fallback: still actionable ──
     return [
       'Break this goal into a weekly action',
       'Start with the smallest step this week',
-      'Bocy will check in on your progress',
     ];
+  };
+
+  /** Extract subscription-like items from analysis for plan steps */
+  const extractSubscriptionsFromAnalysis = (): { name: string; monthly: number }[] => {
+    if (!analysis) return [];
+    const subs: { name: string; monthly: number }[] = [];
+    for (const section of [analysis.discretionary, analysis.non_discretionary]) {
+      const items = (section as any)?.items;
+      if (!Array.isArray(items)) continue;
+      const subCat = items.find((i: any) => i?.category === 'Subscriptions');
+      if (subCat?.transactions) {
+        for (const tx of subCat.transactions) {
+          const name = tx.merchant || tx.description;
+          const existing = subs.find((s) => s.name === name);
+          if (existing) existing.monthly += Math.abs(tx.amount);
+          else subs.push({ name, monthly: Math.abs(tx.amount) });
+        }
+      }
+    }
+    return subs.sort((a, b) => b.monthly - a.monthly);
+  };
+
+  /** Extract top discretionary spending categories from analysis */
+  const extractTopSpendingCategories = (): { category: string; monthly: number }[] => {
+    if (!analysis?.discretionary) return [];
+    const items = (analysis.discretionary as any)?.items;
+    if (!Array.isArray(items)) return [];
+    return items
+      .filter((i: any) => i.category !== 'Other' && i.category !== 'Subscriptions')
+      .sort((a: any, b: any) => b.monthly - a.monthly);
+  };
+
+  /** Generate sub-goals for user plans so debt/savings plans get progress bars */
+  const generatePlanSubGoals = (plan: any): MoveSubGoal[] | undefined => {
+    const action = (plan.action || '').toLowerCase();
+    const activeDebts = debtAccounts.filter((d: any) => (d.outstanding_balance || 0) > 0);
+
+    // Debt plans: one sub-goal per real debt account
+    if ((action.includes('debt') || action.includes('credit') || action.includes('pay off')) && activeDebts.length > 0) {
+      return activeDebts.map((d: any) => ({
+        type: 'debt_clear' as MoveSubGoalType,
+        target: d.account_name || 'Debt',
+        startValue: Math.round(d.outstanding_balance || 0),
+        targetValue: 0,
+        currentValue: Math.round(d.outstanding_balance || 0),
+      }));
+    }
+
+    // Buffer/savings plans: single sub-goal with target amount
+    if ((action.includes('emergency') || action.includes('buffer') || action.includes('save') || action.includes('saving') || action.includes('deposit')) && plan.target_amount) {
+      const target = Math.round(plan.target_amount);
+      return [{
+        type: (action.includes('buffer') || action.includes('emergency')) ? 'buffer_build' as MoveSubGoalType : 'savings_reach' as MoveSubGoalType,
+        target: action.includes('deposit') ? 'House deposit'
+          : action.includes('buffer') || action.includes('emergency') ? 'Emergency buffer'
+          : 'Savings goal',
+        startValue: 0,
+        targetValue: target,
+        currentValue: 0,
+      }];
+    }
+
+    // Subscription plans: one sub-goal per subscription
+    if (action.includes('subscript') || action.includes('cancel')) {
+      const subs = extractSubscriptionsFromAnalysis();
+      if (subs.length > 0) {
+        return subs.slice(0, 5).map((s) => ({
+          type: 'sub_cancel' as MoveSubGoalType,
+          target: s.name,
+          startValue: Math.round(s.monthly * 100) / 100,
+          targetValue: 0,
+        }));
+      }
+    }
+
+    return undefined;
   };
 
   const handleRemovePlan = async (planId: string) => {
@@ -1778,7 +1908,7 @@ export default function Home() {
     const key = `move-${move._sortIdx}`;
     const prog = planProgress[key];
     if (!prog?.approved) return false;
-    const sgs = prog.sub_goals || hydrateSubGoals(move) || [];
+    const sgs = prog.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
     if (sgs.length > 0) return sgs.every((sg) => sg.completedAt);
     const steps = move.steps || [];
     if (steps.length > 0) return (prog.completed_steps || []).length >= steps.length;
@@ -1790,10 +1920,14 @@ export default function Home() {
   const completedPlanMoves = approvedMoves.filter((m) => isMoveCompleted(m));
   const opportunityMoves = sortedMoves.filter((m) => !planProgress[`move-${m._sortIdx}`]?.approved);
 
-  /** Check if a user plan has all steps completed */
+  /** Check if a user plan has all steps/sub-goals completed */
   const isPlanCompleted = (plan: any) => {
     const planKey = `plan-${plan.id}`;
-    const steps = getPlanSteps(plan);
+    const sgs = planProgress[planKey]?.sub_goals || generatePlanSubGoals(plan) || [];
+    if (sgs.length > 0) {
+      return sgs.every((sg: MoveSubGoal) => !!sg.completedAt);
+    }
+    const steps = generatePlanSteps(plan);
     const done = planProgress[planKey]?.completed_steps || [];
     return steps.length > 0 && done.length >= steps.length;
   };
@@ -2037,7 +2171,7 @@ export default function Home() {
                   const heroKey = `move-${heroIdx}`;
                   const heroProgress = planProgress[heroKey];
                   const heroActive = !!heroProgress?.approved;
-                  const heroSgs = heroProgress?.sub_goals || hydrateSubGoals(heroMove) || [];
+                  const heroSgs = heroProgress?.sub_goals || hydrateSubGoals(heroMove, debtAccounts) || [];
                   const heroSteps = heroMove.steps || [];
                   const heroHasSgs = heroSgs.length > 0;
                   const heroDoneCount = heroHasSgs
@@ -2361,9 +2495,16 @@ export default function Home() {
                   {activeUserPlans.map((plan) => {
                     const isPlanExpanded = expandedPlan === plan.id;
                     const planKey = `plan-${plan.id}`;
-                    const planSteps = getPlanSteps(plan);
+                    const planSteps = generatePlanSteps(plan);
+                    const planSgs = planProgress[planKey]?.sub_goals || generatePlanSubGoals(plan) || [];
+                    const hasPlanSgs = planSgs.length > 0;
                     const doneSteps = planProgress[planKey]?.completed_steps || [];
-                    const stepProgress = planSteps.length > 0 ? doneSteps.length / planSteps.length : 0;
+                    const sgDoneCount = hasPlanSgs ? planSgs.filter((sg: MoveSubGoal) => sg.completedAt).length : 0;
+                    const stepProgress = hasPlanSgs
+                      ? (planSgs.length > 0 ? sgDoneCount / planSgs.length : 0)
+                      : (planSteps.length > 0 ? doneSteps.length / planSteps.length : 0);
+                    const progressTotal = hasPlanSgs ? planSgs.length : planSteps.length;
+                    const progressDone = hasPlanSgs ? sgDoneCount : doneSteps.length;
                     const nextStepIdx = planSteps.findIndex((_: string, idx: number) => !doneSteps.includes(idx));
                     return (
                       <Card key={plan.id} variant="active" style={{ marginBottom: spacing.md }}>
@@ -2380,12 +2521,12 @@ export default function Home() {
                                 )}
                                 <Text style={{ fontSize: 10, color: colors.muted }}>{isPlanExpanded ? '\u25B2' : '\u25BC'}</Text>
                               </View>
-                              {!isPlanExpanded && planSteps.length > 0 && (
+                              {!isPlanExpanded && progressTotal > 0 && (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
                                   <View style={{ flex: 1, height: 2, borderRadius: 1, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
                                     <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 1, backgroundColor: colors.accent }} />
                                   </View>
-                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{doneSteps.length}/{planSteps.length}</Text>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{progressDone}/{progressTotal}</Text>
                                 </View>
                               )}
                             </View>
@@ -2401,10 +2542,48 @@ export default function Home() {
                               <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
                                 <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: colors.accent }} />
                               </View>
-                              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{doneSteps.length}/{planSteps.length} done</Text>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{progressDone}/{progressTotal} done</Text>
                             </View>
-                            {/* Step checklist */}
-                            {planSteps.map((step: string, j: number) => {
+                            {/* Sub-goals with progress bars (when available) or step checklist */}
+                            {hasPlanSgs ? planSgs.map((sg: MoveSubGoal, j: number) => {
+                              const isDone = !!sg.completedAt;
+                              const current = sg.currentValue ?? sg.startValue;
+                              const pct = sg.type === 'sub_cancel'
+                                ? (isDone ? 100 : 0)
+                                : sg.type === 'spending_reduce'
+                                  ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / Math.max(1, sg.startValue - sg.targetValue)) * 100)))
+                                  : sg.type === 'debt_clear'
+                                    ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / Math.max(1, sg.startValue)) * 100)))
+                                    : Math.min(100, Math.max(0, Math.round((current / Math.max(1, sg.targetValue)) * 100)));
+                              return (
+                                <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                  <View style={[s.checkbox, isDone && s.checkboxDone]}>
+                                    {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
+                                  </View>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={[s.checklistText, isDone && s.checklistTextDone]}>{sg.target}</Text>
+                                    {!isDone && (
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                        <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                          <View style={{ width: `${pct}%`, height: '100%', borderRadius: 2, backgroundColor: colors.accent }} />
+                                        </View>
+                                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>
+                                          {sg.type === 'sub_cancel'
+                                            ? `\u00a3${sg.startValue}/mo`
+                                            : sg.type === 'debt_clear'
+                                              ? `\u00a3${current} left`
+                                              : sg.type === 'spending_reduce'
+                                                ? `\u00a3${current} \u2192 \u00a3${sg.targetValue}`
+                                                : `\u00a3${current}/\u00a3${sg.targetValue}`
+                                          }
+                                        </Text>
+                                      </View>
+                                    )}
+                                    {isDone && <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green, marginTop: 2 }}>{'\u2713'} Completed</Text>}
+                                  </View>
+                                </View>
+                              );
+                            }) : planSteps.map((step: string, j: number) => {
                               const isDone = doneSteps.includes(j);
                               const isNext = j === nextStepIdx;
                               return (
@@ -2448,7 +2627,7 @@ export default function Home() {
                     const moveKey = `move-${i}`;
                     const steps = move.steps || [];
                     const doneSteps = planProgress[moveKey]?.completed_steps || [];
-                    const moveSgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move) || [];
+                    const moveSgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
                     const hasSgs = moveSgs.length > 0;
                     const sgDoneCount = hasSgs ? moveSgs.filter((sg) => sg.completedAt).length : 0;
                     const stepProgress = hasSgs
@@ -2495,7 +2674,7 @@ export default function Home() {
                             )}
                             {(() => {
                               // Show sub-goal progress bars when available, otherwise legacy steps
-                              const sgs: MoveSubGoal[] = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move) || [];
+                              const sgs: MoveSubGoal[] = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
                               if (sgs.length > 0) {
                                 const doneSgs = sgs.filter((sg) => sg.completedAt);
                                 const sgProgress = sgs.length > 0 ? doneSgs.length / sgs.length : 0;
@@ -2594,7 +2773,7 @@ export default function Home() {
                   </View>
                   {completedUserPlans.map((plan) => {
                     const planKey = `plan-${plan.id}`;
-                    const planSteps = getPlanSteps(plan);
+                    const planSteps = generatePlanSteps(plan);
                     return (
                       <Card key={plan.id} style={{ marginBottom: spacing.md, opacity: 0.75 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
@@ -2622,7 +2801,7 @@ export default function Home() {
                   {completedPlanMoves.map((move) => {
                     const i = move._sortIdx;
                     const moveKey = `move-${i}`;
-                    const sgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move) || [];
+                    const sgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
                     const steps = move.steps || [];
                     const totalItems = sgs.length > 0 ? sgs.length : steps.length;
                     return (

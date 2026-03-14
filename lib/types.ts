@@ -184,14 +184,40 @@ export interface Move {
  * Derive sub-goals from a Move. Returns the move's own subGoals if present,
  * otherwise synthesises them from the action text / merchants for older analyses.
  */
-export function hydrateSubGoals(move: Move): MoveSubGoal[] | undefined {
+/** Minimal debt account shape for hydration (avoids importing full DB type). */
+export interface DebtAccountInfo {
+  account_name: string;
+  account_type?: string;
+  outstanding_balance?: number;
+  interest_rate?: number;
+  minimum_payment?: number;
+}
+
+/**
+ * Derive sub-goals from a Move. Returns the move's own subGoals if present,
+ * otherwise synthesises them from the action text / merchants / debt accounts.
+ *
+ * When `debtAccounts` is provided, debt moves get real account names, balances,
+ * and APRs instead of generic "Debt 1", "Debt 2" labels.
+ */
+export function hydrateSubGoals(move: Move, debtAccounts?: DebtAccountInfo[]): MoveSubGoal[] | undefined {
   if (move.subGoals && move.subGoals.length > 0) return move.subGoals;
 
   const action = (move.action || '').toLowerCase();
   const cat = move.category;
 
-  // Debt moves
+  // Debt moves — use real accounts when available
   if (cat === 'debt') {
+    const activeDebts = (debtAccounts || []).filter((d) => (d.outstanding_balance || 0) > 0);
+    if (activeDebts.length > 0) {
+      return activeDebts.map((d) => ({
+        type: 'debt_clear' as const,
+        target: d.account_name || 'Debt',
+        startValue: Math.round(d.outstanding_balance || 0),
+        targetValue: 0,
+      }));
+    }
+    // Fallback: parse count from action text
     const countMatch = action.match(/(\d+)\s*debt/);
     if (countMatch) {
       const count = parseInt(countMatch[1], 10);
