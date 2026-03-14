@@ -3,7 +3,6 @@ import { View, Text, Animated, StyleSheet, Easing, TouchableOpacity } from 'reac
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
-import type { RankedMove } from '@/lib/move-engine';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { SpendingRing } from '@/components/Charts';
 import { colors, fonts, spacing, radius } from '@/theme';
@@ -14,13 +13,10 @@ const STEPS = [
   'Scanning transactions',
   'Mapping income stability',
   'Enriching transactions',
-  'Verifying transactions',
   'Detecting optimisation opportunities',
   'Ranking highest impact actions',
-  'Refining your action plan',
+  'Saving your analysis',
 ];
-
-const CLASSIFY_BATCH_SIZE = 25; // Send to Claude in batches of 25
 
 // Global holder so dashboard can pick it up without re-fetching
 let _lastResult: Analysis | null = null;
@@ -249,85 +245,11 @@ function ProcessingInner() {
       setEnrichProgress(`${result.enrichedTransactions.length} transactions enriched`);
       await delay(400);
 
-      // ── Layer 2: Claude AI Verification ──
-      // Batch low-confidence transactions to Claude in chunks of CLASSIFY_BATCH_SIZE
-      // so nothing falls off during enrichment.
+      // ── Claude AI classification is now deferred to /api/verify (background) ──
+      // The processing screen saves a "draft" analysis and fires /api/verify
+      // which runs Claude classify + refinement server-side without blocking the user.
+
       setCurrentStep(3);
-      try {
-        const unclassified = result.enrichedTransactions
-          .map((tx, i) => ({ tx, originalIndex: i }))
-          .filter(({ tx }) =>
-            tx.confidence === 'low'
-            && !tx.isIncome
-            && !tx.isTransfer
-            && !tx.isRefund
-            && !tx.isSavings
-          );
-
-        if (unclassified.length > 0) {
-          const updated = [...result.enrichedTransactions];
-          const totalBatches = Math.ceil(unclassified.length / CLASSIFY_BATCH_SIZE);
-
-          for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
-            const batchStart = batchIdx * CLASSIFY_BATCH_SIZE;
-            const batch = unclassified.slice(batchStart, batchStart + CLASSIFY_BATCH_SIZE);
-
-            setEnrichProgress(`Verifying batch ${batchIdx + 1} of ${totalBatches} (${batch.length} transactions)`);
-
-            try {
-              const classifyRes = await fetch('/api/claude', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  action: 'classify',
-                  transactions: batch.map(({ tx }) => ({
-                    description: tx.description,
-                    amount: tx.amount,
-                  })),
-                }),
-              });
-              const classifyData = await classifyRes.json();
-
-              if (classifyData.success && Array.isArray(classifyData.classifications)) {
-                classifyData.classifications.forEach((c: any, i: number) => {
-                  const entry = batch[i];
-                  if (!entry || c.category === 'Other') return;
-
-                  const tx = { ...updated[entry.originalIndex] };
-                  tx.merchant = c.merchant || tx.merchant;
-                  tx.category = c.category;
-                  tx.isEssential = c.isEssential;
-                  tx.isSubscription = c.isSubscription || tx.isSubscription;
-                  tx.isDebt = c.isDebt || tx.isDebt;
-                  tx.isBNPL = c.isBNPL || tx.isBNPL;
-                  tx.isIncome = c.isIncome || tx.isIncome;
-                  tx.confidence = c.confidence || 'medium';
-                  tx.classifiedBy = 'claude_ai';
-                  updated[entry.originalIndex] = tx;
-                });
-              }
-            } catch (batchErr: any) {
-              console.warn(`[processing] Batch ${batchIdx + 1} classify failed:`, batchErr?.message);
-              // Continue with remaining batches
-            }
-
-            await delay(200);
-          }
-
-          // Rebuild profile with all improved data
-          result = EnrichmentEngine.rebuild(updated, debtAccountsData, identityData);
-          setEnrichProgress(`${unclassified.length} transactions verified`);
-        }
-      } catch (classifyErr: any) {
-        console.warn('[processing] Claude classify failed, falling back to rule-based enrichment:', classifyErr?.message || classifyErr);
-        const lowConfCount = result.enrichedTransactions.filter((t) => t.confidence === 'low' && !t.isIncome && !t.isTransfer).length;
-        if (lowConfCount > 0) {
-          console.warn(`[processing] ${lowConfCount} transactions stuck as "Other" — Claude AI fallback unavailable`);
-        }
-      }
-      await delay(400);
-
-      setCurrentStep(4);
       setEnrichProgress('');
       await delay(400);
 
@@ -353,78 +275,16 @@ function ProcessingInner() {
 
       // ── Layer 2: Move Engine ──
       // UKPF flowchart priority + goal-aware ranking + trajectories
-      setCurrentStep(5);
-      const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
+      setCurrentStep(4);
+      determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
       const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
       const topRanked = rankedMoves[0] || null;
       const goalTrajectory = topRanked ? topRanked.trajectory : null;
       await delay(400);
 
-      // ── Layer 3: Claude Refinement ──
-      // Takes top 3 ranked moves + raw data → rewrites into BOCY-style language
-      setCurrentStep(6);
-      const top3 = rankedMoves.slice(0, 3);
-      let refinedMoves = top3 as RankedMove[];
-
-      try {
-        const res = await fetch('/api/claude', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'enrich',
-            moves: top3.map((m) => ({
-              action: m.action,
-              category: m.category,
-              monthlyImpact: m.monthlyImpact,
-              annualImpact: m.annualImpact,
-              effort: m.effort,
-              merchants: m.merchants,
-              strategy: m.strategy,
-              steps: m.steps,
-              effect: m.effect,
-              trajectory: m.trajectory,
-            })),
-            context: {
-              monthly_income: result.profile.monthly.income,
-              monthly_spending: result.profile.monthly.spending,
-              surplus: result.profile.monthly.surplus,
-              goals: goals ? {
-                one_year_goal: goals.one_year_goal,
-                target_amount: goals.target_amount,
-              } : null,
-              ukpf_priority: ukpf.priority,
-              ukpf_label: ukpf.label,
-            },
-          }),
-        });
-        const data = await res.json();
-        if (data.success && Array.isArray(data.moves)) {
-          // Merge Claude's refined text + cleaned merchants with our ranked data
-          refinedMoves = top3.map((original, i) => {
-            const refined = data.moves[i];
-            if (!refined) return original;
-            return {
-              ...original,
-              action: refined.action || original.action,
-              strategy: refined.strategy || original.strategy,
-              steps: refined.steps || original.steps,
-              effect: refined.effect || original.effect,
-              timeline: refined.timeline || original.timeline,
-              merchants: (refined.merchants && refined.merchants.length > 0) ? refined.merchants : original.merchants,
-            };
-          });
-        }
-      } catch {
-        // Graceful fallback — use pre-refined moves from Layer 2
-      }
-
-      // Combine: refined top 3 + remaining unrefined moves
-      const allMoves = [
-        ...refinedMoves,
-        ...rankedMoves.slice(3),
-      ];
-
-      await delay(300);
+      // Claude refinement is now deferred to /api/verify (background).
+      // Use unrefined moves for the draft — they'll be upgraded once verified.
+      const allMoves = [...rankedMoves];
 
       // ── Merge manual budget adjustments ──
       const nonDiscSection = { ...result.profile.budgetReality.nonDiscretionary };
@@ -462,7 +322,8 @@ function ProcessingInner() {
 
       const totalManualSpend = budgetAdjustments.reduce((s: number, a: any) => s + a.monthly_amount, 0);
 
-      // ── Save to Supabase ──
+      // ── Save to Supabase (as draft — background verification will upgrade) ──
+      setCurrentStep(5);
       const topMove = allMoves[0] || null;
       const analysis: Analysis = {
         user_id: user?.id ?? undefined,
@@ -496,9 +357,28 @@ function ProcessingInner() {
             all_moves: analysis.all_moves,
             behavioral_patterns: analysis.behavioral_patterns,
             goal_context: analysis.goal_context,
+            verification_status: 'draft',
           });
           if (insertError) {
             console.warn('[processing] Supabase insert failed:', insertError.message);
+          }
+
+          // ── Fire-and-forget: trigger background verification ──
+          // Claude AI classify + refinement runs server-side without blocking the user.
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) {
+              fetch('/api/verify', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ user_id: user.id }),
+              }).catch((e: any) => console.warn('[processing] Background verify fire failed:', e?.message));
+            }
+          } catch (verifyErr: any) {
+            console.warn('[processing] Background verify trigger failed:', verifyErr?.message);
           }
 
           // ── Save score snapshot for historical tracking ──

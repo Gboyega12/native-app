@@ -404,8 +404,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    console.log(`[bank-sync] Refreshed ${results.refreshed}/${results.total} connections (${results.expired} expired, ${results.failed} failed), enriched ${enriched}/${usersToEnrich.length} users`);
-    return res.json({ success: true, ...results, enriched });
+    // ── Pick up stuck draft analyses and trigger background verification ──
+    let verified = 0;
+    try {
+      const { data: draftRows } = await admin
+        .from('analyses')
+        .select('user_id')
+        .in('verification_status', ['draft', 'verifying'])
+        .order('created_at', { ascending: true })
+        .limit(10);
+
+      if (draftRows && draftRows.length > 0) {
+        const verifyAppUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bocy.io';
+        const verifyEndpoint = `${verifyAppUrl.replace(/\/$/, '')}/api/verify`;
+
+        for (const row of draftRows) {
+          try {
+            const verifyRes = await fetch(verifyEndpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${cronSecret}`,
+              },
+              body: JSON.stringify({ user_id: row.user_id }),
+            });
+            const verifyData = await verifyRes.json();
+            if (verifyData.success) verified++;
+            else console.warn(`[bank-sync] Verify failed for ${row.user_id}:`, verifyData.reason || verifyData.error);
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn(`[bank-sync] Verify request failed for ${row.user_id}:`, msg);
+          }
+        }
+      }
+    } catch (verifyErr: unknown) {
+      const msg = verifyErr instanceof Error ? verifyErr.message : String(verifyErr);
+      console.warn('[bank-sync] Draft verification sweep failed:', msg);
+    }
+
+    console.log(`[bank-sync] Refreshed ${results.refreshed}/${results.total} connections (${results.expired} expired, ${results.failed} failed), enriched ${enriched}/${usersToEnrich.length} users, verified ${verified} drafts`);
+    return res.json({ success: true, ...results, enriched, verified });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[bank-sync] Cron failed:', message);

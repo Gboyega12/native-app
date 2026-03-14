@@ -319,3 +319,14 @@ ALTER TABLE analyses
 -- ============================================================
 ALTER TABLE bank_data
   ADD COLUMN IF NOT EXISTS account_balances JSONB;
+
+
+-- ============================================================
+-- Migration: add verification_status to analyses
+-- Tracks whether Claude AI verification has run on this analysis.
+-- 'draft' = rule-based only, 'verifying' = in progress, 'verified' = complete.
+-- Default 'verified' so existing rows are unaffected.
+-- ============================================================
+ALTER TABLE analyses
+  ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT 'verified',
+  ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;

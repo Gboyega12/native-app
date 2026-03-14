@@ -96,6 +96,8 @@ export default function Home() {
   const [retriesExhausted, setRetriesExhausted] = useState(false);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);
+  const [verificationStatus, setVerificationStatus] = useState<'draft' | 'verifying' | 'verified' | null>(null);
+  const verifyPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Review modal animation
   const reviewModalFade = useRef(new Animated.Value(0)).current;
@@ -1029,6 +1031,45 @@ export default function Home() {
     return updated;
   };
 
+  // ── Background verification polling ──
+  // When an analysis is saved as 'draft', /api/verify runs Claude AI in the background.
+  // Poll every 15s (max 4 attempts) until the analysis is 'verified', then refresh.
+  const startVerifyPolling = (userId: string, adjustments: any[]) => {
+    if (verifyPollRef.current) clearTimeout(verifyPollRef.current);
+    let attempts = 0;
+    const poll = async () => {
+      attempts++;
+      if (attempts > 4) {
+        setVerificationStatus('verified'); // Stop showing indicator after max attempts
+        return;
+      }
+      try {
+        const { data: row } = await supabase
+          .from('analyses')
+          .select('verification_status, archetype, decision_score, monthly_income, monthly_spending, surplus, non_discretionary, discretionary, income_sources, top_move, all_moves, behavioral_patterns, goal_context')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (row?.verification_status === 'verified') {
+          setVerificationStatus('verified');
+          setAnalysis(mergeAdjustments(row, adjustments));
+          return;
+        }
+      } catch {}
+      verifyPollRef.current = setTimeout(poll, 15_000);
+    };
+    verifyPollRef.current = setTimeout(poll, 15_000);
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (verifyPollRef.current) clearTimeout(verifyPollRef.current);
+    };
+  }, []);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -1141,9 +1182,17 @@ export default function Home() {
       const recentOverride = overridesSavedAt.current && Date.now() - overridesSavedAt.current < 120_000;
       if (data && !recentOverride) {
         setAnalysis(mergeAdjustments(data, adjustments));
+        // Track verification status and start polling if not verified yet
+        const status = data.verification_status || 'verified';
+        setVerificationStatus(status);
+        if (status === 'draft' || status === 'verifying') {
+          startVerifyPolling(user.id, adjustments);
+        }
       } else if (lastResult) {
         // Fallback: use in-memory result only if Supabase has nothing yet
         setAnalysis(mergeAdjustments(lastResult, adjustments));
+        setVerificationStatus('draft');
+        startVerifyPolling(user.id, adjustments);
       }
 
       // Check if user has a bank connection even if no analysis exists yet.
@@ -2023,6 +2072,11 @@ export default function Home() {
             {syncing ? 'Syncing...' : syncError ? syncError : syncDataSource === 'fallback' && latestTxDate
               ? `Data from ${formatTxDateAge(latestTxDate)} (cached)`
               : `Synced ${formatTimeAgo(lastSynced)}`}
+          </Text>
+        )}
+        {verificationStatus && verificationStatus !== 'verified' && (
+          <Text style={[s.syncText, { color: colors.accent }]}>
+            Refining your analysis...
           </Text>
         )}
       </View>

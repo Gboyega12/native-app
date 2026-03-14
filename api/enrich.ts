@@ -180,6 +180,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       income_floor: rawAnalysis.income_floor,
       is_variable_income: rawAnalysis.is_variable_income,
       income_cv: rawAnalysis.income_cv,
+      verification_status: 'verified',
+      verified_at: new Date().toISOString(),
     };
 
     const { data: existingRow } = await admin
