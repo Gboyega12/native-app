@@ -3154,9 +3154,9 @@ export default function Home() {
                       <View style={s.verifyActions}>
                         <TouchableOpacity
                           style={s.moveApproveBtn}
-                          onPress={() => { setVerifyMove(null); router.push('/(main)/(tabs)/plan'); }}
+                          onPress={() => setVerifyMove(null)}
                         >
-                          <Text style={s.moveApproveBtnText}>Continue to plan</Text>
+                          <Text style={s.moveApproveBtnText}>Done</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={s.moveVerifyBtn}
