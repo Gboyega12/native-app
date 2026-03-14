@@ -103,7 +103,20 @@
 
 ---
 
-## CURRENT SPRINT: Sync & Categorisation Fixes (2026-03-14)
+## CURRENT SPRINT: Education Carousel Redesign (2026-03-14)
+
+### Design Overhaul — Minimalist, Sophisticated, Elegant
+- [ ] Remove BocyFace from all carousel slides
+- [ ] Restructure layout: Heading (top) → Visual Hero (center, dominant) → One-liner subtitle → Dots → CTA
+- [ ] Scale up mockup visuals (260px → 340px+, bigger internal typography)
+- [ ] Rewrite body copy to punchy one-liners
+- [ ] Remove BocyFace from MockupChat component
+- [ ] Polish spacing, typography hierarchy, and whitespace
+- [ ] Verify all 3 slides
+
+---
+
+## PREVIOUS SPRINT: Sync & Categorisation Fixes (2026-03-14)
 
 ### A. Categorisation modal re-populates after user manually categorises (on refresh/re-sync)
 - [x] **Root cause:** `syncBankData()` re-fetches transactions from TrueLayer, re-enriches, and re-computes analysis. The `unresolvedGroups` memo recomputes from `analysis` state. The `reviewSavedRef` 60s guard protects against overwrite, but after 60s the fresh sync wipes optimistic state. The overrides ARE persisted to `transaction_overrides`, and the enrichment engine DOES apply them — BUT the `persistAnalysis()` only saves `non_discretionary`, `discretionary`, `monthly_spending`, `surplus` and does NOT persist the enriched transaction details that include `confidence`/`classifiedBy` fields. So after sync, enrichment re-runs with overrides applied correctly, but transactions that were "Other" before remain in the `unresolvedGroups` because the override system works at the enrichment level, not at the analysis→modal level.
