@@ -103,16 +103,83 @@
 
 ---
 
-## CURRENT SPRINT: Education Carousel Redesign (2026-03-14)
+## CURRENT SPRINT: Background Verification (2026-03-14)
+
+### Problem
+During onboarding, the processing screen runs Claude AI verification (classifying low-confidence transactions) synchronously on the client. This takes 20-60 seconds depending on transaction volume. If the user leaves the screen, work is orphaned and restarts from scratch on return.
+
+### Solution
+Split the enrichment pipeline into two phases:
+1. **Fast phase (client):** Rule-based enrichment, profile building, move ranking, save draft analysis. User proceeds to dashboard in ~3 seconds.
+2. **Slow phase (server):** Claude classification + move refinement runs as a background API call. Updates the analysis row when done. Dashboard picks up the improved version.
+
+### Step 1: Add verification status to analyses table
+- [ ] Add `verification_status` column: `'draft' | 'verifying' | 'verified'`
+- [ ] Default to `'verified'` so existing rows are unaffected
+- [ ] Add `verified_at` timestamp column (nullable)
+
+### Step 2: New background verification API endpoint
+- [ ] Create `api/verify.ts` that accepts `{ user_id }`
+- [ ] Authenticate via JWT (same pattern as other endpoints)
+- [ ] Read stored CSV from `bank_data`, fetch overrides/identity/debt/goals
+- [ ] Run `EnrichmentEngine.enrich()` to get enriched transactions
+- [ ] Run Claude classify batches on low-confidence transactions (same logic currently in processing.tsx lines 252-319)
+- [ ] Run `EnrichmentEngine.rebuild()` with improved classifications
+- [ ] Re-rank moves with `rankMoves()`, run Claude move refinement
+- [ ] Update the analysis row with improved data + set `verification_status = 'verified'`, `verified_at = now()`
+
+### Step 3: Modify processing.tsx to skip Claude calls
+- [ ] Remove the Claude classify loop (current lines 252-319)
+- [ ] Remove the Claude move refinement call (current lines 363-419)
+- [ ] Save the analysis with `verification_status: 'draft'`
+- [ ] After saving, fire and forget `fetch('/api/verify')` with user's JWT
+- [ ] Navigate user to dashboard immediately after save
+- [ ] Processing screen now completes in ~3 seconds
+
+### Step 4: Dashboard picks up verified analysis
+- [ ] In dashboard `loadData()`, read `verification_status` from the analysis row
+- [ ] If status is `'draft'` or `'verifying'`, show subtle text: "Refining your analysis..."
+- [ ] Add lightweight poll: if not `'verified'`, re-fetch every 15 seconds (max 4 attempts)
+- [ ] When verified version arrives, update state smoothly (no jarring layout shifts)
+- [ ] On `syncCoordinator.onSyncComplete()`, also check for status change
+
+### Step 5: Handle edge cases
+- [ ] If `/api/verify` fails, keep `verification_status = 'draft'` (not stuck on 'verifying')
+- [ ] Next background sync via cron picks up unverified analyses and runs verification
+- [ ] If user triggers manual re-analysis, skip the poll and run fresh
+- [ ] Ensure verify endpoint is idempotent (safe to call twice)
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `app/(main)/processing.tsx` | Remove Claude classify + refine, save draft, fire background verify |
+| `api/verify.ts` | New endpoint: classify + refine + update analysis |
+| `app/(main)/(tabs)/index.tsx` | Read verification_status, subtle indicator, lightweight poll |
+| `lib/sync.ts` | After sync, trigger verify if analysis is still draft |
+| `api/enrich.ts` | Set verification_status on analyses it creates |
+| Supabase migration | Add `verification_status` + `verified_at` columns |
+
+### User experience
+
+**Before:** 30-60 second spinner. Leaving = lost progress.
+
+**After:**
+1. Connect bank, set goals, processing shows 4 quick steps (~3 seconds)
+2. Land on dashboard with accurate surplus, categories, and moves (rule-based, ~95% correct)
+3. Small "Refining your analysis..." text visible
+4. ~20-30 seconds later, text disappears. Categories and moves may shift very slightly
+5. If they never notice the refinement, that's the ideal outcome
+
+---
+
+## PREVIOUS SPRINT: Education Carousel Redesign (2026-03-14)
 
 ### Design Overhaul — Minimalist, Sophisticated, Elegant
-- [ ] Remove BocyFace from all carousel slides
-- [ ] Restructure layout: Heading (top) → Visual Hero (center, dominant) → One-liner subtitle → Dots → CTA
-- [ ] Scale up mockup visuals (260px → 340px+, bigger internal typography)
-- [ ] Rewrite body copy to punchy one-liners
-- [ ] Remove BocyFace from MockupChat component
-- [ ] Polish spacing, typography hierarchy, and whitespace
-- [ ] Verify all 3 slides
+- [x] Upgrade MockupDashboard: surplus + next best move (no spending bars)
+- [x] Upgrade MockupMoves: energy switch, savings placement, debt consolidation
+- [x] Upgrade MockupChat: debt-free timeline + income variability
+- [x] Update slide copy to match new mockups, remove all dashes
 
 ---
 
