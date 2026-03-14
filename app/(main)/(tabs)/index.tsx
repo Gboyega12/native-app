@@ -637,6 +637,7 @@ export default function Home() {
           discretionary: updatedAnalysis.discretionary,
           monthly_spending: updatedAnalysis.monthly_spending,
           surplus: updatedAnalysis.surplus,
+          person_transfers: (updatedAnalysis as any).person_transfers ?? null,
         }).eq('id', latest.id);
       }
     } catch (err: any) {
@@ -1141,7 +1142,7 @@ export default function Home() {
       const lastResult = getLastResult();
       // Don't overwrite optimistic state from a recent recategorization —
       // the Supabase analyses row hasn't been updated yet by the delayed sync.
-      const recentRecat = reviewSavedRef.current && Date.now() - reviewSavedRef.current < 60_000;
+      const recentRecat = reviewSavedRef.current && Date.now() - reviewSavedRef.current < 120_000;
       if (data && !recentRecat) {
         setAnalysis(mergeAdjustments(data, adjustments));
       } else if (lastResult) {
@@ -1354,7 +1355,7 @@ export default function Home() {
         // If a recategorization happened recently, keep the optimistic state.
         // The override is persisted in Supabase — the next sync after the window
         // will pick it up correctly via the enrichment pipeline.
-        if (reviewSavedRef.current && Date.now() - reviewSavedRef.current < 60_000) {
+        if (reviewSavedRef.current && Date.now() - reviewSavedRef.current < 120_000) {
           return prev;
         }
         // Clear stale timestamp (both in-memory and persisted)
@@ -1895,14 +1896,14 @@ export default function Home() {
       {/* ── Connection warning ── */}
       {connectionWarning && !connectionDismissed && (
         <View style={s.connectionBanner}>
-          <TouchableOpacity style={s.connectionBannerBody} onPress={() => router.push({ pathname: '/(main)/connect', params: { from: 'banner' } })} activeOpacity={0.8}>
+          <TouchableOpacity style={s.connectionBannerBody} onPress={() => router.push({ pathname: '/(main)/connect', params: { from: 'banner', banks: connectionWarning.banks.join(',') } })} activeOpacity={0.8}>
             <View style={{ flex: 1 }}>
               {connectionWarning.message === 'stale_data'
                 ? <Text style={s.connectionBannerText}>Transactions haven't updated in days — try reconnecting</Text>
-                : connectionWarning.banks.length > 0
-                ? connectionWarning.banks.map((bank, idx) => (
-                    <Text key={idx} style={s.connectionBannerText}>Reconnect {bank}</Text>
-                  ))
+                : connectionWarning.banks.length > 1
+                ? <Text style={s.connectionBannerText}>Reconnect {connectionWarning.banks.length} bank accounts: {connectionWarning.banks.join(', ')}</Text>
+                : connectionWarning.banks.length === 1
+                ? <Text style={s.connectionBannerText}>Reconnect {connectionWarning.banks[0]}</Text>
                 : <Text style={s.connectionBannerText}>Bank connection needs attention</Text>}
             </View>
             <Text style={s.connectionBannerAction}>Fix</Text>

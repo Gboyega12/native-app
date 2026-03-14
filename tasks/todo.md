@@ -103,6 +103,22 @@
 
 ---
 
+## CURRENT SPRINT: Sync & Categorisation Fixes (2026-03-14)
+
+### A. Categorisation modal re-populates after user manually categorises (on refresh/re-sync)
+- [x] **Root cause:** `syncBankData()` re-fetches transactions from TrueLayer, re-enriches, and re-computes analysis. The `unresolvedGroups` memo recomputes from `analysis` state. The `reviewSavedRef` 60s guard protects against overwrite, but after 60s the fresh sync wipes optimistic state. The overrides ARE persisted to `transaction_overrides`, and the enrichment engine DOES apply them — BUT the `persistAnalysis()` only saves `non_discretionary`, `discretionary`, `monthly_spending`, `surplus` and does NOT persist the enriched transaction details that include `confidence`/`classifiedBy` fields. So after sync, enrichment re-runs with overrides applied correctly, but transactions that were "Other" before remain in the `unresolvedGroups` because the override system works at the enrichment level, not at the analysis→modal level.
+- [x] **Fix:** The real issue is that `persistAnalysis()` in `saveReview` doesn't persist the updated `non_discretionary.items` and `discretionary.items` with the transactions moved out of "Other". The analysis object stored in Supabase retains the old item structure. When the next sync reads from Supabase (before TrueLayer responds), it loads the OLD structure with transactions still in "Other". The enrichment re-run DOES apply overrides correctly — so the fix should ensure the analysis persistence includes the full items structure, not just totals.
+
+### B. Re-sync fetches too much data
+- [x] **Current state:** `api/truelayer/sync.ts` uses 30-day window. `api/cron/bank-sync.ts` uses 30-day window. `api/truelayer/callback.ts` uses 12-month window (initial connect only). This is actually correct — the 12-month pull only happens on initial connection, and re-syncs already use 30 days. BUT the user wants 3-month window on re-sync (not 30 days).
+- [x] **Fix:** Change re-sync window from 30 days to 90 days (3 months) in both `api/truelayer/sync.ts` and `api/cron/bank-sync.ts`. Keep count-based deduplication to avoid duplicates.
+
+### C. Multi-bank reconnection UX
+- [x] **Current state:** When multiple banks expire, the profile page shows individual "Reconnect" buttons per bank. User must tap each one individually, each triggering a full TrueLayer OAuth redirect. No batch flow exists.
+- [x] **Fix:** Add a banner/section on the home screen that shows all expired banks and allows sequential reconnection with a clear progress indicator. After reconnecting one bank, return to the same flow for the next expired bank.
+
+---
+
 ## STRENGTHS
 
 - Clean layered architecture - Frontend, API, business logic, data layers properly separated

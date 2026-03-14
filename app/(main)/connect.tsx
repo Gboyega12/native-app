@@ -51,6 +51,7 @@ export default function Connect() {
     code?: string; state?: string;
     from?: string;
     csvData?: string;
+    banks?: string; // comma-separated list of expired bank names for multi-reconnect flow
   }>();
 
   // Detect if we're returning from a TrueLayer redirect
@@ -67,8 +68,17 @@ export default function Connect() {
 
   const isFromProfile = params.from === 'profile' || params.from === 'banner';
 
+  // Multi-bank reconnection: track which banks need reconnecting
+  const [pendingBanks, setPendingBanks] = useState<string[]>(() => {
+    if (params.banks) return params.banks.split(',').filter(Boolean);
+    return [];
+  });
+  const [reconnectedCount, setReconnectedCount] = useState(0);
+  const totalBanksToReconnect = pendingBanks.length + reconnectedCount;
+  const isMultiReconnect = totalBanksToReconnect > 1;
+
   // Track page view on mount
-  useEffect(() => { trackScreen('Connect', { from: isFromProfile ? 'profile' : 'onboarding' }); }, []);
+  useEffect(() => { trackScreen('Connect', { from: isFromProfile ? 'profile' : 'onboarding', banks: totalBanksToReconnect }); }, []);
 
   // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
@@ -215,6 +225,18 @@ export default function Connect() {
         clearConnectState();
         // Invalidate sync cache so dashboard picks up the new bank data
         invalidateSyncCache();
+
+        // Multi-bank reconnection: if more banks need reconnecting, continue the flow
+        if (params.from === 'banner' && pendingBanks.length > 1) {
+          const remaining = pendingBanks.slice(1);
+          setPendingBanks(remaining);
+          setReconnectedCount((c) => c + 1);
+          setErrorMsg('');
+          setStatusMsg('');
+          // Stay on connect page for the next bank
+          return;
+        }
+
         if (params.from === 'banner') {
           router.replace('/(main)/(tabs)');
         } else {
@@ -389,19 +411,33 @@ export default function Connect() {
 
   // Profile flow — simple add connection UI
   if (isFromProfile) {
+    const currentBank = pendingBanks[0] || null;
+
     return (
       <View style={styles.container}>
         <View style={styles.content}>
           <TouchableOpacity
-            onPress={() => router.canGoBack() ? router.back() : router.replace('/(main)/profile')}
+            onPress={() => router.canGoBack() ? router.back() : router.replace(params.from === 'banner' ? '/(main)/(tabs)' : '/(main)/profile')}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             style={styles.backButton}
           >
             <Text style={styles.backButtonText}>{'\u2190'}</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>Add a connection</Text>
+
+          {/* Multi-bank reconnection progress */}
+          {isMultiReconnect && (
+            <Text style={styles.stepLabel}>
+              RECONNECTING {reconnectedCount + 1} OF {totalBanksToReconnect}
+            </Text>
+          )}
+
+          <Text style={styles.title}>
+            {currentBank ? `Reconnect ${currentBank}` : 'Add a connection'}
+          </Text>
           <Text style={styles.subtitle}>
-            Connect a bank account for transactions or a credit card for balance tracking.
+            {currentBank
+              ? `Your ${currentBank} connection has expired. Tap below to re-authorise access.${pendingBanks.length > 1 ? ` ${pendingBanks.length - 1} more account${pendingBanks.length - 1 > 1 ? 's' : ''} to reconnect after this.` : ''}`
+              : 'Connect a bank account for transactions or a credit card for balance tracking.'}
           </Text>
 
           <TouchableOpacity
@@ -462,6 +498,22 @@ export default function Connect() {
 
           {statusMsg ? <Text style={styles.statusText}>{statusMsg}</Text> : null}
           {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
+
+          {/* Multi-bank: skip remaining banks */}
+          {isMultiReconnect && pendingBanks.length > 0 && !anyLoading && (
+            <TouchableOpacity
+              style={styles.skipButton}
+              onPress={() => {
+                clearConnectState();
+                invalidateSyncCache();
+                router.replace('/(main)/(tabs)');
+              }}
+            >
+              <Text style={styles.skipButtonText}>
+                {reconnectedCount > 0 ? 'Done for now' : 'Skip — I\'ll do this later'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -821,5 +873,16 @@ const styles = StyleSheet.create({
     color: '#ff6b6b',
     textAlign: 'center',
     marginTop: spacing.md,
+  },
+  skipButton: {
+    marginTop: spacing.xl,
+    alignItems: 'center' as const,
+    paddingVertical: 10,
+  },
+  skipButtonText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    textDecorationLine: 'underline' as const,
   },
 });

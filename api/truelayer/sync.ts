@@ -92,7 +92,8 @@ async function syncConnection(bankRow: BankRow, clientId: string, clientSecret: 
 
     const to = new Date().toISOString().split('T')[0];
     const fromDate = new Date();
-    fromDate.setDate(fromDate.getDate() - 30);
+    // Re-syncs fetch 3 months of data (incremental). Initial 12-month pull is in callback.ts.
+    fromDate.setMonth(fromDate.getMonth() - 3);
     const from = fromDate.toISOString().split('T')[0];
 
     const txPromises = [
