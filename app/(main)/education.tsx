@@ -11,32 +11,22 @@ import { BocyFace, MockupDashboard, MockupMoves, MockupChat } from '@/components
 const SLIDES = [
   {
     mockup: 'dashboard' as const,
-    illustration: 'scan' as const,
-    tag: 'PHILOSOPHY',
     title: "This isn't a\nbudgeting app",
-    body: "Bocy looks at your whole financial picture, not just what you spend. It finds the one move that'll make the biggest difference right now.",
+    body: "Bocy looks at your whole financial picture and finds the one move that makes the biggest difference right now.",
     accent: colors.accent,
     mood: 'neutral' as const,
   },
   {
     mockup: 'moves' as const,
-    illustration: 'plan' as const,
-    tag: 'METHOD',
-    title: 'See it. Rank it.\nDo it.',
-    bullets: [
-      { label: 'See', detail: 'your income, spending, and patterns in one place' },
-      { label: 'Rank', detail: 'every opportunity by how much it actually helps' },
-      { label: 'Do', detail: 'the highest impact action first, step by step' },
-    ],
+    title: 'One step at\na time',
+    body: "Bocy spots what's costing you money, then walks you through fixing it — biggest wins first.",
     accent: colors.text2,
     mood: 'thinking' as const,
   },
   {
     mockup: 'chat' as const,
-    illustration: 'personal' as const,
-    tag: 'PERSONALISED',
     title: 'Built around\nyour life',
-    body: "Everyone's situation is different. Whether you're a freelancer, a parent, or just starting out, Bocy adapts to what matters to you.",
+    body: "Freelancer, parent, or just starting out — Bocy adapts to what matters to you.",
     cta: "Let's get to know you",
     accent: colors.green,
     mood: 'happy' as const,
@@ -139,36 +129,11 @@ export default function Education() {
                   {slide.mockup === 'chat' && <MockupChat />}
                 </Animated.View>
 
-                {/* Tag */}
-                <Text style={[styles.tag, { color: slide.accent }]}>{slide.tag}</Text>
-
                 {/* Title */}
                 <Text style={styles.title}>{slide.title}</Text>
 
-                {/* Dot separator */}
-                <View style={styles.dotSeparator}>
-                  {Array.from({ length: 3 }).map((_, i) => (
-                    <View key={i} style={[styles.dot, { backgroundColor: slide.accent + '40' }]} />
-                  ))}
-                </View>
-
-                {/* Body or bullets */}
+                {/* Body */}
                 {slide.body && <Text style={styles.body}>{slide.body}</Text>}
-                {slide.bullets && (
-                  <View style={styles.bullets}>
-                    {slide.bullets.map((b, i) => (
-                      <View key={i} style={styles.bulletRow}>
-                        <View style={[styles.bulletDot, { backgroundColor: slide.accent }]}>
-                          <Text style={styles.bulletNum}>{i + 1}</Text>
-                        </View>
-                        <View style={styles.bulletContent}>
-                          <Text style={[styles.bulletLabel, { color: slide.accent }]}>{b.label}</Text>
-                          <Text style={styles.bulletDetail}>{b.detail}</Text>
-                        </View>
-                      </View>
-                    ))}
-                  </View>
-                )}
               </View>
             </View>
           ))}
@@ -266,13 +231,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.lg,
   },
-  tag: {
-    fontFamily: fonts.mono,
-    fontSize: 10,
-    letterSpacing: 3,
-    textTransform: 'uppercase',
-    marginBottom: spacing.md,
-  },
   title: {
     fontFamily: fonts.heading,
     fontSize: 30,
@@ -280,17 +238,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 38,
     letterSpacing: -0.3,
-  },
-  dotSeparator: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-    marginVertical: spacing.lg,
-  },
-  dot: {
-    width: 3,
-    height: 3,
-    borderRadius: 1.5,
+    marginBottom: spacing.md,
   },
   body: {
     fontFamily: fonts.regular,
@@ -300,44 +248,6 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     maxWidth: 480,
     paddingHorizontal: spacing.sm,
-  },
-  bullets: {
-    width: '100%',
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.xs,
-  },
-  bulletRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: spacing.xl + spacing.xs,
-  },
-  bulletDot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
-    marginTop: 2,
-  },
-  bulletNum: {
-    fontFamily: fonts.semibold,
-    fontSize: 13,
-    color: colors.bg,
-  },
-  bulletContent: {
-    flex: 1,
-  },
-  bulletLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    marginBottom: 4,
-  },
-  bulletDetail: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: colors.text2,
-    lineHeight: 22,
   },
   bottomArea: {
     paddingBottom: spacing.xxl + spacing.sm,
