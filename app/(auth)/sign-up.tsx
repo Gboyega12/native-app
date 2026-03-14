@@ -93,6 +93,9 @@ export default function SignUp() {
             style={styles.secondaryButton}
             onPress={handleResend}
             disabled={resending}
+            testID="sign-up-resend-button"
+            accessibilityRole="button"
+            accessibilityLabel="Resend verification email"
           >
             <Text style={styles.secondaryButtonText}>
               {resending ? 'Sending...' : 'Resend email'}
@@ -110,6 +113,7 @@ export default function SignUp() {
     <KeyboardAvoidingView
       style={styles.container}
       behavior={undefined}
+      testID="sign-up-screen"
     >
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -125,6 +129,9 @@ export default function SignUp() {
             style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
             onPress={handleGoogleSignUp}
             disabled={loading || googleLoading}
+            testID="sign-up-google-button"
+            accessibilityRole="button"
+            accessibilityLabel="Continue with Google"
           >
             {googleLoading ? (
               <ActivityIndicator color={colors.text} />
@@ -151,6 +158,8 @@ export default function SignUp() {
             autoCorrect={false}
             value={email}
             onChangeText={setEmail}
+            testID="sign-up-email-input"
+            accessibilityLabel="Email address"
           />
           <TextInput
             style={styles.input}
@@ -159,6 +168,8 @@ export default function SignUp() {
             secureTextEntry
             value={password}
             onChangeText={setPassword}
+            testID="sign-up-password-input"
+            accessibilityLabel="Password"
           />
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -167,6 +178,9 @@ export default function SignUp() {
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleSignUp}
             disabled={loading || googleLoading}
+            testID="sign-up-submit-button"
+            accessibilityRole="button"
+            accessibilityLabel="Sign up"
           >
             {loading ? (
               <ActivityIndicator color={colors.bg} />
@@ -176,7 +190,7 @@ export default function SignUp() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity onPress={() => router.replace('/(auth)/sign-in')}>
+        <TouchableOpacity onPress={() => router.replace('/(auth)/sign-in')} testID="sign-up-sign-in-link" accessibilityRole="button" accessibilityLabel="Go to sign in">
           <Text style={styles.link}>
             Already have an account? <Text style={styles.linkAccent}>Sign in</Text>
           </Text>

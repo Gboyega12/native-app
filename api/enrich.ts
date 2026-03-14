@@ -4,10 +4,15 @@
 // and upserts the updated analysis. This keeps the analyses row fresh
 // even when the user doesn't open the app.
 
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import EnrichmentEngine from '../lib/enrichment-engine.js';
 import { rankMoves, determineFlowchartPosition } from '../lib/move-engine.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const bodySchema = z.object({
+  user_id: z.string().optional(),
+});
 
 export const config = { maxDuration: 30 };
 
@@ -60,7 +65,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     req.body = { ...req.body, user_id: user.id };
   }
 
-  const userId: string | undefined = req.body?.user_id;
+  const bodyParsed = bodySchema.safeParse(req.body);
+  if (!bodyParsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: bodyParsed.error.flatten().fieldErrors });
+  }
+  const userId: string | undefined = bodyParsed.data.user_id;
   if (!userId) {
     return res.status(400).json({ error: 'Missing user_id' });
   }

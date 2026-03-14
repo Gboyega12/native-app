@@ -9,7 +9,7 @@
 // Gap 4: Wire plan completion counts back to the achievement engine.
 
 import { supabase } from '@/lib/supabase';
-import type { Analysis, Move, MoveSubGoal, EnrichedTransaction, FinancialProfile, Goals } from '@/lib/types';
+import type { Analysis, Move, MoveSubGoal, EnrichedTransaction, FinancialProfile, Goals, UserIdentity, DebtAccount } from '@/lib/types';
 import type { RankedMove } from '@/lib/move-engine';
 import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
 import { checkAchievements, type ScoreSnapshot } from '@/lib/achievements';
@@ -35,7 +35,7 @@ export interface ReactiveEvent {
   /** Unique fingerprint for dismissal tracking */
   fingerprint: string;
   /** Associated data */
-  data?: Record<string, any>;
+  data?: Record<string, unknown>;
 }
 
 export interface NextMoveSuggestion {
@@ -107,7 +107,7 @@ async function verifySubGoalsFromData(
   enrichedTxs: EnrichedTransaction[],
   analysis: Analysis,
   profile: FinancialProfile | null,
-  debtAccounts: any[],
+  debtAccounts: DebtAccount[],
   previousAnalysis: Analysis | null,
 ): Promise<{
   verified: ReactiveEvent[];
@@ -262,10 +262,10 @@ async function verifySubGoalsFromData(
           case 'buffer_build':
           case 'savings_reach': {
             // Sum recent savings transfers as proxy for progress
-            const savingsTxs = recentTxs.filter((tx) => tx.amount < 0 && (tx as any).isSavings);
+            const savingsTxs = recentTxs.filter((tx) => tx.amount < 0 && tx.isSavings);
             const totalSaved = savingsTxs.reduce((s, tx) => s + Math.abs(tx.amount), 0);
             // Use stored progress or accumulate
-            const prevValue = (row as any).sub_goals?.[si]?.currentValue || 0;
+            const prevValue = row.sub_goals?.[si]?.currentValue || 0;
             sg.currentValue = Math.round(Math.max(prevValue, totalSaved));
             if (sg.currentValue >= sg.targetValue && !sg.completedAt) {
               sg.completedAt = now.toISOString();
@@ -338,13 +338,13 @@ async function verifySubGoalsFromData(
       let newStepsCompleted = false;
 
       if (cat === 'debt') {
-        const debtPayments = recentTxs.filter((tx) => tx.amount < 0 && ((tx as any).isDebt || (tx as any).isBNPL));
+        const debtPayments = recentTxs.filter((tx) => tx.amount < 0 && (tx.isDebt || tx.isBNPL));
         if (debtPayments.length > 0 && !completedSteps.includes(0)) {
           completedSteps.push(0);
           newStepsCompleted = true;
         }
       } else if (cat === 'buffer' || cat === 'savings') {
-        const savingsTransfers = recentTxs.filter((tx) => tx.amount < 0 && (tx as any).isSavings);
+        const savingsTransfers = recentTxs.filter((tx) => tx.amount < 0 && tx.isSavings);
         if (savingsTransfers.length > 0 && !completedSteps.includes(0)) {
           completedSteps.push(0);
           newStepsCompleted = true;
@@ -390,8 +390,8 @@ function suggestNextPriorityMove(
   analysis: Analysis,
   profile: FinancialProfile | null,
   goals: Goals | null,
-  identity: any,
-  debtAccounts: any[],
+  identity: UserIdentity | null,
+  debtAccounts: DebtAccount[],
   progress: Record<string, ProgressRow>,
   justCompletedEvents: ReactiveEvent[],
 ): NextMoveSuggestion | null {
@@ -552,7 +552,7 @@ async function detectReactiveAchievements(
     .from('user_achievements')
     .select('achievement_key')
     .eq('user_id', userId);
-  const existing = (existingRows || []).map((r: any) => r.achievement_key);
+  const existing = (existingRows || []).map((r: { achievement_key: string }) => r.achievement_key);
 
   // Fetch previous score snapshot for comparison
   const { data: snapshots } = await supabase
@@ -675,8 +675,8 @@ export async function runReactiveEngine(
   enrichedTxs: EnrichedTransaction[],
   profile: FinancialProfile | null,
   goals: Goals | null,
-  identity: any,
-  debtAccounts: any[],
+  identity: UserIdentity | null,
+  debtAccounts: DebtAccount[],
 ): Promise<ReactiveResult> {
   const allEvents: ReactiveEvent[] = [];
 

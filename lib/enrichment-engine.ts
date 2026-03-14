@@ -23,6 +23,10 @@ import type {
   EssentialGap,
   VerifiedBill,
   TransactionDetail,
+  UserIdentity,
+  DebtAccount,
+  BudgetAdjustment,
+  UpcomingEvent,
 } from './types.js';
 
 function splitCSVLine(line: string): string[] {
@@ -77,7 +81,7 @@ const EnrichmentEngine = {
   // detect recurring → build profile → archetype → score → recommendations.
   // Each stage feeds into the next; the final result powers the UI dashboard.
   // ═══════════════════════════════════════════════════════════════════
-  enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[], identity?: any): EnrichmentResult {
+  enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: DebtAccount[], identity?: UserIdentity | null): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
     const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
 
@@ -111,12 +115,12 @@ const EnrichmentEngine = {
     return {
       profile,
       archetype,
-      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
-      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
-      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
+      traits: traits.map((t) => ({ name: t.name, insight: t.insight })),
+      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })),
+      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })),
       decisionScore: score,
       decisionStack: stack,
-      behavioralPatterns: patterns.map((p: any) => p.pattern || p),
+      behavioralPatterns: patterns.map((p: string | { pattern: string }) => typeof p === 'string' ? p : p.pattern),
       enrichedTransactions: enriched,
       enrichmentMetrics,
       essentialGaps,
@@ -905,9 +909,9 @@ const EnrichmentEngine = {
    */
   detectEssentialGaps(
     profile: FinancialProfile,
-    identity: any,
-    debtAccounts?: any[],
-    budgetAdjustments?: any[],
+    identity: UserIdentity | null,
+    debtAccounts?: DebtAccount[],
+    budgetAdjustments?: BudgetAdjustment[],
     verifiedBills?: VerifiedBill[],
   ): EssentialGap[] {
     if (!identity) return [];
@@ -973,19 +977,20 @@ const EnrichmentEngine = {
 
     // ── Council Tax (everyone except students and some living with family) ──
     const isStudent = identity.work_setup === 'student';
-    if (!isStudent && housing !== 'with_family') {
+    const housingRaw = housing as string;
+    if (!isStudent && housingRaw !== 'with_family') {
       if (!has('council tax') && !has('council')) {
         gaps.push({
           category: 'Council Tax',
           reason: 'Most UK households pay council tax',
           typicalRange: { low: 100, high: 250 },
-          confidence: housing === 'with_family' ? 'low' : 'medium',
+          confidence: housingRaw === 'with_family' ? 'low' : 'medium',
         });
       }
     }
 
     // ── Energy (gas + electric) ──
-    if (housing !== 'with_family') {
+    if (housingRaw !== 'with_family') {
       if (!has('energy') && !has('bills') && !has('utilities') && !has('gas') && !has('electric')) {
         gaps.push({
           category: 'Energy',
@@ -1035,7 +1040,7 @@ const EnrichmentEngine = {
 
     // ── Debt minimums ──
     if (debtAccounts && debtAccounts.length > 0) {
-      const totalDebt = debtAccounts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+      const totalDebt = debtAccounts.reduce((s: number, d: DebtAccount) => s + (d.outstanding_balance || 0), 0);
       if (totalDebt > 0 && !has('debt payments') && !has('debt') && !has('loan')) {
         gaps.push({
           category: 'Debt Payments',
@@ -1120,7 +1125,7 @@ const EnrichmentEngine = {
   // Moves are sorted by annualImpact descending so the highest-value
   // recommendation appears first.
   // ═══════════════════════════════════════════════════════════════════
-  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[], debtAccounts?: any[], identity?: any): Move[] {
+  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[], debtAccounts?: DebtAccount[], identity?: UserIdentity | null): Move[] {
     const moves: Move[] = [];
     const m = profile.metrics;
     const p = profile.monthly;
@@ -1131,7 +1136,7 @@ const EnrichmentEngine = {
     const T = MOVE_THRESHOLDS;
 
     // ── Identity-aware modifiers ──
-    const id = identity || {};
+    const id: Partial<UserIdentity> = identity || {};
     const isRemote = id.work_setup === 'remote';
     const isHybrid = id.work_setup === 'hybrid';
     const isSelfEmployed = id.work_setup === 'self_employed';
@@ -1145,18 +1150,18 @@ const EnrichmentEngine = {
     const wantsFreedom = (id.priorities || []).includes('freedom');
     const wantsExperiences = (id.priorities || []).includes('experiences');
     // Parse events: support both string ('baby') and structured ({ type: 'baby', months_away: 4 })
-    const rawEvents: any[] = id.upcoming_events || [];
-    const getEventType = (e: any): string => typeof e === 'string' ? e : e?.type || '';
-    const getEventMonths = (e: any): number | null => typeof e === 'object' && e?.months_away != null ? e.months_away : null;
+    const rawEvents: UpcomingEvent[] = id.upcoming_events || [];
+    const getEventType = (e: UpcomingEvent): string => typeof e === 'string' ? e : e?.type || '';
+    const getEventMonths = (e: UpcomingEvent | undefined): number | null => typeof e === 'object' && e?.months_away != null ? e.months_away : null;
     const eventTypes = rawEvents.map(getEventType);
     const buyingHome = eventTypes.includes('first_home');
     const havingBaby = eventTypes.includes('baby');
     const isMoving = eventTypes.includes('moving');
     const hasWedding = eventTypes.includes('wedding');
     const changingCareer = eventTypes.includes('career_change');
-    const babyMonths = getEventMonths(rawEvents.find((e: any) => getEventType(e) === 'baby'));
-    const movingMonths = getEventMonths(rawEvents.find((e: any) => getEventType(e) === 'moving'));
-    const weddingMonths = getEventMonths(rawEvents.find((e: any) => getEventType(e) === 'wedding'));
+    const babyMonths = getEventMonths(rawEvents.find((e: UpcomingEvent) => getEventType(e) === 'baby'));
+    const movingMonths = getEventMonths(rawEvents.find((e: UpcomingEvent) => getEventType(e) === 'moving'));
+    const weddingMonths = getEventMonths(rawEvents.find((e: UpcomingEvent) => getEventType(e) === 'wedding'));
     const isAdvanced = id.financial_experience === 'confident' || id.financial_experience === 'advanced';
 
     // Subscriptions — exclude essential bills + require recurrence proof
@@ -1314,16 +1319,16 @@ const EnrichmentEngine = {
     //   76%+: high utilisation — urgent payoff, credit score impact warning
     //   -1: no credit limit data available (manual debts without TrueLayer)
     const connectedDebts = debtAccounts || [];
-    const activeDebts = connectedDebts.filter((d: any) => (d.outstanding_balance || 0) > 0);
-    const totalLimit = connectedDebts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
-    const totalBalance = activeDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+    const activeDebts = connectedDebts.filter((d: DebtAccount) => (d.outstanding_balance || 0) > 0);
+    const totalLimit = connectedDebts.reduce((s: number, d: DebtAccount) => s + (d.credit_limit || 0), 0);
+    const totalBalance = activeDebts.reduce((s: number, d: DebtAccount) => s + (d.outstanding_balance || 0), 0);
     const overallUtil = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : -1;
     const isGoodDebt = overallUtil >= 0 && overallUtil <= 30;
     const isMediumUtil = overallUtil > 30 && overallUtil <= 75;
     const isHighUtil = overallUtil > 75;
 
     // Get minimum payment: use stored value, else compute from debt type defaults
-    const estimateMinimum = (d: any): number => {
+    const estimateMinimum = (d: DebtAccount): number => {
       if (!d) return 0;
       if (d.minimum_payment && d.minimum_payment > 0) return d.minimum_payment;
       const bal = d.outstanding_balance || 0;
@@ -1332,7 +1337,7 @@ const EnrichmentEngine = {
     };
 
     // Get APR: use stored value, else fall back to type-based default
-    const getAPR = (d: any): number => {
+    const getAPR = (d: DebtAccount): number => {
       if (d?.interest_rate != null && d.interest_rate > 0) return d.interest_rate;
       return DEFAULT_APR[d?.account_type || 'credit_card'] ?? DEFAULT_APR.credit_card;
     };
@@ -2379,7 +2384,7 @@ const EnrichmentEngine = {
    * transactions into proper categories — the profile, archetype, score,
    * and moves all recompute with the improved data.
    */
-  rebuild(enriched: EnrichedTransaction[], debtAccounts?: any[], identity?: any): EnrichmentResult {
+  rebuild(enriched: EnrichedTransaction[], debtAccounts?: DebtAccount[], identity?: UserIdentity | null): EnrichmentResult {
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
@@ -2400,12 +2405,12 @@ const EnrichmentEngine = {
     return {
       profile,
       archetype,
-      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
-      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
-      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
+      traits: traits.map((t) => ({ name: t.name, insight: t.insight })),
+      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })),
+      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })),
       decisionScore: score,
       decisionStack: stack,
-      behavioralPatterns: patterns.map((p: any) => p.pattern || p),
+      behavioralPatterns: patterns.map((p: string | { pattern: string }) => typeof p === 'string' ? p : p.pattern),
       enrichedTransactions: enriched,
       enrichmentMetrics,
       essentialGaps,
@@ -2450,7 +2455,7 @@ const EnrichmentEngine = {
    * transfers (isTransfer=true, isDebt=false) so they don't inflate spending
    * or create a false negative surplus.
    */
-  _reclassifyCreditCardPayoffs(enriched: EnrichedTransaction[], debtAccounts?: any[]): void {
+  _reclassifyCreditCardPayoffs(enriched: EnrichedTransaction[], debtAccounts?: DebtAccount[]): void {
     // Known credit card issuer merchants (must match merchant-db entries)
     const CC_ISSUERS = new Set([
       'American Express', 'Barclaycard', 'MBNA', 'Capital One', 'Vanquis',

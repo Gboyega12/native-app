@@ -12,33 +12,37 @@ import { initMixpanel, resetMixpanel } from '@/lib/mixpanel';
 import { initSentryClient, setSentryUser, clearSentryUser } from '@/lib/sentry';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
+import AppDataProvider from '@/providers/AppDataProvider';
 
 // Initialise Sentry as early as possible
 initSentryClient();
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
-// Capture OAuth code+state at module load time — before any component renders.
+// Capture URL-based signals at module load time — before any component renders.
 // This is critical because app/index.tsx's <Redirect> fires during render and
-// clears the URL params before useEffect can read them.
-let _pendingOAuth: { code: string; state: string } | null = null;
-let _pendingBankCallback = false;
-let _emailConfirmed = false;
+// clears the URL params before useEffect can read them. Each flag is consumed
+// (set to null/false) on first read so it fires exactly once.
+const pendingSignals = {
+  oauth: null as { code: string; state: string } | null,
+  bankCallback: false,
+  emailConfirmed: false,
+};
 if (typeof window !== 'undefined') {
   const p = new URLSearchParams(window.location.search);
   const code = p.get('code');
   const state = p.get('state');
   if (code && state) {
-    _pendingOAuth = { code, state };
+    pendingSignals.oauth = { code, state };
   }
   // Detect return from TrueLayer server callback (GET redirect flow)
   if (p.get('connection_id') && p.get('status')) {
-    _pendingBankCallback = true;
+    pendingSignals.bankCallback = true;
   }
   // Detect email confirmation redirect (Supabase appends #...&type=signup)
   const hash = window.location.hash;
   if (hash.includes('type=signup') || hash.includes('type=email')) {
-    _emailConfirmed = true;
+    pendingSignals.emailConfirmed = true;
   }
 }
 
@@ -84,8 +88,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
     // Email confirmation opened in email browser — sign out to prevent
     // onboarding in the wrong browser. Show confirmation on sign-in instead.
-    if (session && _emailConfirmed) {
-      _emailConfirmed = false;
+    if (session && pendingSignals.emailConfirmed) {
+      pendingSignals.emailConfirmed = false;
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('_emailConfirmed', '1');
       }
@@ -95,18 +99,18 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     // Forward captured OAuth code+state to the connect screen
-    if (session && _pendingOAuth) {
-      const { code, state } = _pendingOAuth;
-      _pendingOAuth = null; // consume so it doesn't fire again
+    if (session && pendingSignals.oauth) {
+      const { code, state } = pendingSignals.oauth;
+      pendingSignals.oauth = null; // consume so it doesn't fire again
       router.replace({ pathname: '/(main)/connect', params: { code, state } });
       return;
     }
 
     // If returning from TrueLayer bank callback, let connect screen handle the URL params.
     // Don't reroute — just clear the flag once session arrives.
-    if (_pendingBankCallback) {
+    if (pendingSignals.bankCallback) {
       if (session) {
-        _pendingBankCallback = false; // session restored, connect screen is handling it
+        pendingSignals.bankCallback = false; // session restored, connect screen is handling it
       }
       // Whether session is null (restoring) or present, don't interfere —
       // connect is already mounted with connection_id + status in the URL.
@@ -219,8 +223,10 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <InnerLayout />
-        <UpdateBanner />
+        <AppDataProvider>
+          <InnerLayout />
+          <UpdateBanner />
+        </AppDataProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );

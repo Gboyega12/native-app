@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, ActivityIndicator,
   LayoutAnimation, TextInput, Modal, Pressable, Animated, Easing, PanResponder,
   RefreshControl, Linking, Alert,
 } from 'react-native';
@@ -27,6 +27,9 @@ import { SpendingRing, CategoryBars, WeeklySparkline } from '@/components/Charts
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { useAppData } from '@/hooks/useAppData';
+import { formatTimeAgo, formatTxDateAge } from '@/lib/date-utils';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 
 // Cache the beforeinstallprompt event for the install modal
 if (typeof window !== 'undefined') {
@@ -39,46 +42,33 @@ if (typeof window !== 'undefined') {
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 
-/** Human-friendly "X ago" label from epoch ms */
-function formatTimeAgo(epochMs: number): string {
-  const diffSec = Math.round((Date.now() - epochMs) / 1000);
-  if (diffSec < 10) return 'just now';
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const mins = Math.floor(diffSec / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
 
-/** Format a date-only string (e.g. "2026-03-09") as a human-friendly label.
- *  Date-only strings become midnight UTC when parsed, so computing hours
- *  from midnight gives misleading results like "17h ago" at 5pm. */
-function formatTxDateAge(dateStr: string): string {
-  const today = new Date().toISOString().split('T')[0];
-  if (dateStr === today) return 'today';
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-  if (dateStr === yesterday) return 'yesterday';
-  const diffDays = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
-  return `${diffDays}d ago`;
-}
-
-// Module-level cache for banner dismiss fingerprints (survives re-renders, avoids async flash)
-let dismissCache: Record<string, string> = {};
 
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
   const { maxContentWidth, isTablet, horizontalPadding, width: screenWidth } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState('');
+  const { isOnline, isActive } = useOnlineStatus();
+  // ── Shared data from AppDataProvider (eliminates redundant fetches across tabs) ──
+  const appData = useAppData();
+  // Local overrides — Home screen applies mergeAdjustments and optimistic updates
+  // on top of the shared analysis, so we keep local state that shadows the context.
+  const [analysisLocal, setAnalysisLocal] = useState<Analysis | null>(null);
+  const [loadingLocal, setLoadingLocal] = useState(true);
+  // Derive effective values: prefer local override, fall back to shared context
+  const analysis = analysisLocal ?? appData.analysis;
+  const setAnalysis = setAnalysisLocal;
+  const loading = loadingLocal && appData.loading;
+  const userName = appData.userName;
+  const debtAccounts = appData.debtAccounts;
+  const setDebtAccounts = appData.setDebtAccounts;
+  const weeklyCtx = appData.weeklyCtx;
+  const setWeeklyCtx = appData.setWeeklyCtx;
+
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
   const [txCardExpanded, setTxCardExpanded] = useState(false);
-  const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
-  const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<number>(0);
   const [latestTxDate, setLatestTxDate] = useState<string | null>(null);
@@ -98,6 +88,7 @@ export default function Home() {
   const [heroPage, setHeroPage] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<'draft' | 'verifying' | 'verified' | null>(null);
   const verifyPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dismissCache = useRef<Record<string, string>>({});
 
   // Review modal animation
   const reviewModalFade = useRef(new Animated.Value(0)).current;
@@ -122,7 +113,7 @@ export default function Home() {
   // Hydrate dismiss cache on mount (once)
   useEffect(() => {
     AsyncStorage.getItem(CONN_DISMISS_KEY).then((stored) => {
-      if (stored) dismissCache[CONN_DISMISS_KEY] = stored;
+      if (stored) dismissCache.current[CONN_DISMISS_KEY] = stored;
     }).catch(() => {});
   }, []);
 
@@ -130,7 +121,7 @@ export default function Home() {
   useEffect(() => {
     if (!connectionWarning) return; // warning cleared = leave dismiss state alone
     const currentFingerprint = connectionWarning.banks.sort().join(',');
-    if (dismissCache[CONN_DISMISS_KEY] === currentFingerprint) {
+    if (dismissCache.current[CONN_DISMISS_KEY] === currentFingerprint) {
       setConnectionDismissed(true); // same banks as dismissed — stay hidden
     } else {
       setConnectionDismissed(false); // new bank set — show banner
@@ -160,7 +151,7 @@ export default function Home() {
     setConnectionDismissed(true);
     if (connectionWarning) {
       const fp = connectionWarning.banks.sort().join(',');
-      dismissCache[CONN_DISMISS_KEY] = fp;
+      dismissCache.current[CONN_DISMISS_KEY] = fp;
       AsyncStorage.setItem(CONN_DISMISS_KEY, fp).catch(() => {});
     }
   };
@@ -265,15 +256,18 @@ export default function Home() {
   const [addItemError, setAddItemError] = useState('');
 
   // Previous month snapshot for real income comparison
-  const [prevSnapshot, setPrevSnapshot] = useState<{ monthly_spending: number; monthly_income: number } | null>(null);
+  // Previous month snapshot — from shared context
+  const prevSnapshot = appData.prevSnapshot;
 
   // ── Reactive engine state ──
   const [reactiveEvents, setReactiveEvents] = useState<ReactiveEvent[]>([]);
   const [showReactiveModal, setShowReactiveModal] = useState(false);
   const [reactiveEventIndex, setReactiveEventIndex] = useState(0);
   // ── Plan data (merged from plan page) ──
-  const [userPlans, setUserPlans] = useState<any[]>([]);
-  const [planProgress, setPlanProgress] = useState<Record<string, { move_key: string; move_action: string; approved: boolean; completed_steps: number[]; sub_goals?: MoveSubGoal[]; updated_at?: string }>>({});
+  // ── Plan data — from shared context ──
+  const userPlans = appData.userPlans;
+  const planProgress = appData.planProgress;
+  const setPlanProgress = appData.setPlanProgress;
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
@@ -957,10 +951,10 @@ export default function Home() {
       // Invalidate cached sync so returning from connect screen always fetches fresh data
       invalidateSyncCache();
       loadData();
-      // Subscribe to sync completions from other screens
+      // Subscribe to sync completions for screen-specific reactive events.
+      // Shared data (weeklyCtx, planProgress, analysis) is updated by AppDataProvider.
       const unsub = onSyncComplete((result) => {
         if (!result) return;
-        if (result.weeklyContext) setWeeklyCtx(result.weeklyContext);
         // Surface reactive events from syncs triggered by other screens
         if (result.reactive?.events?.length) {
           setReactiveEvents(result.reactive.events);
@@ -968,18 +962,6 @@ export default function Home() {
           if (!result.weeklyContext?.incomeArrivedThisWeek) {
             setTimeout(() => setShowReactiveModal(true), 800);
           }
-        }
-        // Merge verified steps into local progress state
-        if (result.reactive?.verifiedSteps && Object.keys(result.reactive.verifiedSteps).length > 0) {
-          setPlanProgress((prev) => {
-            const updated = { ...prev };
-            for (const [key, steps] of Object.entries(result.reactive!.verifiedSteps)) {
-              if (updated[key]) {
-                updated[key] = { ...updated[key], completed_steps: steps };
-              }
-            }
-            return updated;
-          });
         }
       });
       return () => unsub();
@@ -1071,13 +1053,10 @@ export default function Home() {
   }, []);
 
   const loadData = async () => {
-    setLoading(true);
+    setLoadingLocal(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setLoading(false); return; }
-
-      const rawName = user.user_metadata?.full_name?.split(' ')[0] || '';
-      setUserName(rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1) : '');
+      if (!user) { setLoadingLocal(false); return; }
       userIdRef.current = user.id;
 
       // ── Record daily streak ──
@@ -1117,73 +1096,23 @@ export default function Home() {
         }
       } catch {}
 
-      // Fetch budget adjustments + debt accounts
-      let adjustments: any[] = [];
-      try {
-        const [adjRes, debtRes] = await Promise.all([
-          supabase
-            .from('budget_adjustments')
-            .select('description, category, monthly_amount, is_essential')
-            .eq('user_id', user.id),
-          supabase
-            .from('debt_accounts')
-            .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source')
-            .eq('user_id', user.id),
-        ]);
-        if (adjRes.data) adjustments = adjRes.data;
-        if (debtRes.data) setDebtAccounts(debtRes.data);
-      } catch {}
+      // Refresh shared context data (analysis, debt, plans, progress, prevSnapshot).
+      // This single call replaces the 6+ independent Supabase queries that were here.
+      // The snapshot gives us immediate access to fresh data (React state may not be updated yet).
+      const snapshot = await appData.refresh();
 
-      // Fetch user plans + progress (merged from plan page)
-      try {
-        const [plansRes, progressRes] = await Promise.all([
-          supabase.from('user_plans').select('*').eq('user_id', user.id)
-            .eq('status', 'active').order('created_at', { ascending: false }),
-          supabase.from('plan_progress').select('*').eq('user_id', user.id),
-        ]);
-        setUserPlans(plansRes.data || []);
-        const progressMap: Record<string, any> = {};
-        for (const row of (progressRes.data || [])) {
-          if (!row.move_key.startsWith('dismissed-')) {
-            progressMap[row.move_key] = {
-              move_key: row.move_key,
-              move_action: row.move_action,
-              approved: row.approved,
-              completed_steps: row.completed_steps || [],
-              sub_goals: row.sub_goals && Array.isArray(row.sub_goals) ? row.sub_goals : undefined,
-              updated_at: row.updated_at,
-            };
-          }
-        }
-        setPlanProgress(progressMap);
-      } catch {}
+      // Use fresh budget adjustments for mergeAdjustments
+      const adjustments = snapshot.budgetAdjustments;
 
-      // Fetch the latest persisted analysis from Supabase.
-      // Only fall back to in-memory result if Supabase has nothing.
-      // This eliminates the visual "flash" of showing stale in-memory data
-      // before Supabase data arrives.
-      const { data, error } = await supabase
-        .from('analyses')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        console.warn('[home] Failed to fetch analysis:', error.message);
-      }
-
+      // Apply mergeAdjustments to create the local analysis override.
+      // The shared context has the raw analysis; the Home screen merges budget adjustments.
+      const rawAnalysis = snapshot.analysis;
       const lastResult = getLastResult();
-      // Don't overwrite optimistic state if overrides were saved recently —
-      // the Supabase analyses row may not reflect the latest overrides yet.
-      // We check against a generous 120s window on initial load only; the
-      // deterministic syncStartedAt check handles background sync results.
       const recentOverride = overridesSavedAt.current && Date.now() - overridesSavedAt.current < 120_000;
-      if (data && !recentOverride) {
-        setAnalysis(mergeAdjustments(data, adjustments));
+      if (rawAnalysis && !recentOverride) {
+        setAnalysis(mergeAdjustments(rawAnalysis, adjustments));
         // Track verification status and start polling if not verified yet
-        const status = data.verification_status || 'verified';
+        const status = (rawAnalysis as any).verification_status || 'verified';
         setVerificationStatus(status);
         if (status === 'draft' || status === 'verifying') {
           startVerifyPolling(user.id, adjustments);
@@ -1196,9 +1125,7 @@ export default function Home() {
       }
 
       // Check if user has a bank connection even if no analysis exists yet.
-      // This distinguishes "never connected" from "connected but transactions
-      // are still settling" so the dashboard can show the right empty state.
-      if (!data && !lastResult) {
+      if (!rawAnalysis && !lastResult) {
         try {
           const { count } = await supabase
             .from('bank_data')
@@ -1210,25 +1137,6 @@ export default function Home() {
         }
       }
 
-      // Fetch previous month's snapshot for real income comparison
-      try {
-        const now = new Date();
-        const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-        const { data: prevData } = await supabase
-          .from('score_history')
-          .select('monthly_spending, monthly_income')
-          .eq('user_id', user.id)
-          .gte('created_at', prevMonth.toISOString())
-          .lte('created_at', prevMonthEnd.toISOString())
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        setPrevSnapshot(prevData ?? null);
-      } catch {
-        setPrevSnapshot(null);
-      }
-
       // Trigger background sync if user has any data or a bank connection.
       // Force-sync when data was previously stale (fallback) to retry TrueLayer.
       const shouldForce = syncDataSource === 'fallback';
@@ -1237,7 +1145,7 @@ export default function Home() {
       console.warn('[home] loadData error:', err?.message);
       setAnalysis(null);
     }
-    setLoading(false);
+    setLoadingLocal(false);
   };
 
   // Pull-to-refresh handler — force a fresh TrueLayer fetch
@@ -1258,6 +1166,8 @@ export default function Home() {
 
   // Background sync: refresh bank data via TrueLayer and re-run analysis
   const syncInBackground = async (userId: string, force: boolean = false) => {
+    // Skip sync when offline or app is backgrounded
+    if (!isOnline || !isActive) return;
     try {
       setSyncing(true);
       setSyncError(null);
@@ -1692,7 +1602,7 @@ export default function Home() {
     const uid = userIdRef.current;
     if (!uid) return;
     LayoutAnimation.configureNext(SMOOTH_ANIM);
-    setUserPlans((prev) => prev.filter((p) => p.id !== planId));
+    // Optimistic update removed — refresh shared context after mutation below
     setExpandedPlan(null);
 
     try {
@@ -1725,6 +1635,9 @@ export default function Home() {
     try {
       await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', `plan-${planId}`);
     } catch {}
+
+    // Refresh shared context so userPlans reflects the deletion
+    appData.refresh().catch(() => {});
   };
 
 
@@ -2028,10 +1941,11 @@ export default function Home() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg }} testID="home-screen">
     <ScrollView
       ref={dashScrollRef}
       style={s.container}
+      testID="dashboard-scroll"
       contentContainerStyle={[
         s.scroll,
         isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding },
@@ -2080,6 +1994,15 @@ export default function Home() {
           </Text>
         )}
       </View>
+
+      {/* ── Offline banner ── */}
+      {!isOnline && (
+        <View style={[s.connectionBanner, { borderColor: colors.muted }]}>
+          <View style={s.connectionBannerBody}>
+            <Text style={[s.connectionBannerText, { color: colors.muted }]}>You're offline — data may be stale</Text>
+          </View>
+        </View>
+      )}
 
       {/* ── Connection warning ── */}
       {connectionWarning && !connectionDismissed && (
@@ -3188,68 +3111,57 @@ export default function Home() {
                   <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
                     TRANSACTIONS
                   </Text>
-                  {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
-                    const key = `nd-${item.category}`;
-                    const isExp = expandedCategories.has(key);
-                    return (
-                      <View key={`nd-${i}`}>
-                        <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
-                          <View style={s.dataRowLeft}>
-                            <Text style={[s.catArrow, { color: colors.text }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
-                            <Text style={s.dataLabel}>{item.category}</Text>
-                          </View>
-                          <Text style={[s.dataValue, { color: colors.text }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
-                        </TouchableOpacity>
-                        {isExp && (
-                          <>
-                            <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
-                              <ExpandDots count={4} size={2} />
+                  <FlatList
+                    data={[
+                      ...periodNonDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'essential' as const, colorKey: 'text' as const })),
+                      ...periodDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'lifestyle' as const, colorKey: 'dim' as const })),
+                    ]}
+                    keyExtractor={(item, i) => `${item.section}-${item.category}-${i}`}
+                    scrollEnabled={false}
+                    initialNumToRender={8}
+                    maxToRenderPerBatch={5}
+                    windowSize={3}
+                    renderItem={({ item }) => {
+                      const key = `${item.section === 'essential' ? 'nd' : 'd'}-${item.category}`;
+                      const isExp = expandedCategories.has(key);
+                      const accentColor = item.colorKey === 'text' ? colors.text : colors.dim;
+                      return (
+                        <View>
+                          <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
+                            <View style={s.dataRowLeft}>
+                              <Text style={[s.catArrow, { color: accentColor }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
+                              <Text style={s.dataLabel}>{item.category}</Text>
                             </View>
-                            {item.txs.map((tx, j) => (
-                              <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'essential' }); setRecatTarget(''); setRecatEssential(true); }} activeOpacity={0.7}>
-                                <View style={s.txLeft}>
-                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
-                                  <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                                </View>
-                                <Text style={[s.txAmount, { color: colors.text2 }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </>
-                        )}
-                      </View>
-                    );
-                  })}
-                  {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
-                    const key = `d-${item.category}`;
-                    const isExp = expandedCategories.has(key);
-                    return (
-                      <View key={`d-${i}`}>
-                        <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
-                          <View style={s.dataRowLeft}>
-                            <Text style={[s.catArrow, { color: colors.dim }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
-                            <Text style={s.dataLabel}>{item.category}</Text>
-                          </View>
-                          <Text style={[s.dataValue, { color: colors.dim }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
-                        </TouchableOpacity>
-                        {isExp && (
-                          <>
-                            <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
-                              <ExpandDots count={4} size={2} />
-                            </View>
-                            {item.txs.map((tx, j) => (
-                              <TouchableOpacity key={j} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: 'lifestyle' }); setRecatTarget(''); setRecatEssential(false); }} activeOpacity={0.7}>
-                                <View style={s.txLeft}>
-                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
-                                  <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                                </View>
-                                <Text style={[s.txAmount, { color: colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
-                              </TouchableOpacity>
-                            ))}
-                          </>
-                        )}
-                      </View>
-                    );
-                  })}
+                            <Text style={[s.dataValue, { color: accentColor }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
+                          </TouchableOpacity>
+                          {isExp && (
+                            <>
+                              <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
+                                <ExpandDots count={4} size={2} />
+                              </View>
+                              <FlatList
+                                data={item.txs}
+                                keyExtractor={(tx, j) => `${key}-tx-${j}`}
+                                scrollEnabled={false}
+                                initialNumToRender={10}
+                                maxToRenderPerBatch={10}
+                                windowSize={3}
+                                renderItem={({ item: tx }) => (
+                                  <TouchableOpacity style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: item.section }); setRecatTarget(''); setRecatEssential(item.section === 'essential'); }} activeOpacity={0.7}>
+                                    <View style={s.txLeft}>
+                                      <Text style={s.txMerchant}>{tx.merchant}</Text>
+                                      <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                                    </View>
+                                    <Text style={[s.txAmount, { color: item.colorKey === 'text' ? colors.text2 : colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                                  </TouchableOpacity>
+                                )}
+                              />
+                            </>
+                          )}
+                        </View>
+                      );
+                    }}
+                  />
                   <Text style={s.cardFooter}>Hold a transaction to re-categorise</Text>
                 </View>
               </Card>

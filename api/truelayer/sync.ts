@@ -1,5 +1,10 @@
+import { z } from 'zod';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const bodySchema = z.object({
+  user_id: z.string().optional(),
+});
 
 // Allow up to 60s for sync (Hobby plan max).
 // Default 10s is too tight for token exchange + multiple TrueLayer API calls.
@@ -240,7 +245,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     req.body = { ...req.body, user_id: user.id };
   }
 
-  const userId: string | undefined = req.body?.user_id;
+  const bodyParsed = bodySchema.safeParse(req.body);
+  if (!bodyParsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: bodyParsed.error.flatten().fieldErrors });
+  }
+  const userId: string | undefined = bodyParsed.data.user_id;
   if (!userId) {
     return res.status(400).json({ error: 'Missing user_id' });
   }

@@ -414,9 +414,9 @@ export interface VerifiedBill {
 export interface EnrichmentResult {
   profile: FinancialProfile;
   archetype: Archetype;
-  traits: string[];
-  strengths: string[];
-  blindSpots: string[];
+  traits: { name: string; insight: string }[];
+  strengths: { label: string; detail: string }[];
+  blindSpots: { label: string; detail: string }[];
   decisionScore: DecisionScore;
   decisionStack: Move[];
   behavioralPatterns: string[];
@@ -597,4 +597,29 @@ export interface UserIdentity {
   dependents: Dependent[];
   created_at?: string;
   updated_at?: string;
+}
+
+// ── Debt Account (synced from TrueLayer or manually added) ──
+
+export interface DebtAccount {
+  account_name?: string;
+  account_type?: string;
+  outstanding_balance?: number;
+  credit_limit?: number;
+  interest_rate?: number;
+  minimum_payment?: number;
+  is_default_apr?: boolean;
+  institution?: string;
+  provider_name?: string;
+  connection_id?: string;
+  account_id?: string;
+}
+
+// ── Budget Adjustment (user-added manual budget items) ──
+
+export interface BudgetAdjustment {
+  description?: string;
+  category?: string;
+  monthly_amount?: number;
+  is_essential?: boolean;
 }

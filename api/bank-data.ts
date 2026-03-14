@@ -1,5 +1,12 @@
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { apiSuccess, apiError, methodNotAllowed } from '../lib/api-response.js';
+
+const querySchema = z.object({
+  connection_id: z.string(),
+  user_id: z.string().optional(),
+});
 
 /**
  * GET /api/bank-data?connection_id=xxx
@@ -9,21 +16,19 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
  * rows inserted by the callback handler (which has no user_id context).
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (methodNotAllowed(res, req.method, 'GET')) return;
 
-  const connectionId = req.query.connection_id as string | undefined;
-  const userId = req.query.user_id as string | undefined;
-  if (!connectionId) {
-    return res.status(400).json({ error: 'Missing connection_id' });
+  const parsed = querySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return apiError(res, 400, 'Invalid request', parsed.error.flatten().fieldErrors);
   }
+  const { connection_id: connectionId, user_id: userId } = parsed.data;
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceKey) {
-    return res.status(500).json({ error: 'Server misconfigured' });
+    return apiError(res, 500, 'Server misconfigured');
   }
 
   try {
@@ -35,10 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .single();
 
     if (error || !data?.csv_data) {
-      return res.status(404).json({
-        error: 'No bank data found',
-        details: error?.message,
-      });
+      return apiError(res, 404, 'No bank data found', error?.message);
     }
 
     // Claim the row for this user so sync can find it later
@@ -79,9 +81,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    return res.json({ success: true, csv_data: data.csv_data });
+    return apiSuccess(res, { csv_data: data.csv_data });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
-    return res.status(500).json({ error: message });
+    return apiError(res, 500, message);
   }
 }

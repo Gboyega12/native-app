@@ -7,10 +7,16 @@
 //
 // Also callable by the cron job to pick up any stuck drafts.
 
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import EnrichmentEngine from '../lib/enrichment-engine.js';
 import { rankMoves, determineFlowchartPosition } from '../lib/move-engine.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { apiSuccess, apiError, methodNotAllowed } from '../lib/api-response.js';
+
+const bodySchema = z.object({
+  user_id: z.string().optional(),
+});
 
 export const config = { maxDuration: 60 };
 
@@ -34,9 +40,7 @@ function deduplicateCSVLines(csvLines: string[]): string[] {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (methodNotAllowed(res, req.method, 'POST')) return;
 
   // ── Auth: accept cron secret or Supabase JWT ──
   const authHeader = (req.headers.authorization as string) || '';
@@ -46,27 +50,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) {
-    return res.status(500).json({ error: 'Server misconfigured' });
+    return apiError(res, 500, 'Server misconfigured');
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
 
   if (!isCronAuth) {
     const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
-    if (!anonKey) return res.status(500).json({ error: 'Server misconfigured' });
+    if (!anonKey) return apiError(res, 500, 'Server misconfigured');
     const token = authHeader.replace('Bearer ', '');
     const anonClient = createClient(supabaseUrl, anonKey);
     const { data: { user }, error: authError } = await anonClient.auth.getUser(token);
-    if (authError || !user) return res.status(401).json({ error: 'Unauthorized' });
+    if (authError || !user) return apiError(res, 401, 'Unauthorized');
     if (req.body?.user_id && req.body.user_id !== user.id) {
-      return res.status(403).json({ error: 'Forbidden' });
+      return apiError(res, 403, 'Forbidden');
     }
     req.body = { ...req.body, user_id: user.id };
   }
 
-  const userId: string | undefined = req.body?.user_id;
+  const bodyParsed = bodySchema.safeParse(req.body);
+  if (!bodyParsed.success) {
+    return apiError(res, 400, 'Invalid request', bodyParsed.error.flatten().fieldErrors);
+  }
+  const userId: string | undefined = bodyParsed.data.user_id;
   if (!userId) {
-    return res.status(400).json({ error: 'Missing user_id' });
+    return apiError(res, 400, 'Missing user_id');
   }
 
   // Respond immediately — the caller doesn't need to wait for verification.
@@ -320,8 +328,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`[verify] Verified analysis ${draftAnalysis.id} for user ${userId} — ${classifiedCount} transactions classified, ${finalMoves.length} moves`);
 
-    return res.json({
-      success: true,
+    return apiSuccess(res, {
       analysis_id: draftAnalysis.id,
       classified_count: classifiedCount,
       move_count: finalMoves.length,
@@ -339,7 +346,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .eq('verification_status', 'verifying');
     } catch {}
 
-    return res.status(500).json({ error: 'Verification failed', details: message });
+    return apiError(res, 500, 'Verification failed', message);
   }
 }
 

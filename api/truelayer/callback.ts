@@ -1,5 +1,17 @@
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const postBodySchema = z.object({
+  code: z.string().optional(),
+  user_id: z.string().optional(),
+  state: z.string().optional(),
+});
+
+const getQuerySchema = z.object({
+  code: z.string().optional(),
+  state: z.string().optional(),
+});
 
 // Allow up to 60s for the callback to process (Hobby plan max).
 // The default 10s is too tight for token exchange + multiple TrueLayer API calls.
@@ -47,14 +59,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let postUserId: string | null = null;
 
   if (req.method === 'POST') {
-    code = req.body?.code;
-    postUserId = req.body?.user_id || null;
-    const state: string = req.body?.state || '';
+    const parsed = postBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
+    }
+    code = parsed.data.code;
+    postUserId = parsed.data.user_id || null;
+    const state: string = parsed.data.state || '';
     const pipeIdx = state.indexOf('|');
     connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
   } else if (req.method === 'GET') {
-    code = req.query.code as string | undefined;
-    const state: string = (req.query.state as string) || '';
+    const parsed = getQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
+    }
+    code = parsed.data.code;
+    const state: string = parsed.data.state || '';
     const pipeIdx = state.indexOf('|');
     connectionId = pipeIdx === -1 ? state : state.slice(0, pipeIdx);
     const rawOrigin = pipeIdx === -1 ? null : state.slice(pipeIdx + 1);

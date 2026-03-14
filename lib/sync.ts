@@ -7,7 +7,8 @@ import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
 import { runReactiveEngine, type ReactiveResult } from '@/lib/reactive-engine';
-import type { Analysis, Goals, EnrichedTransaction, FinancialProfile } from '@/lib/types';
+import type { Analysis, Goals, EnrichedTransaction, FinancialProfile, UserIdentity, DebtAccount, BudgetAdjustment, BudgetSection, Move } from '@/lib/types';
+import type { TransactionOverride } from '@/lib/enrichment-engine';
 import { DEFAULT_APR, defaultMinimumPayment } from '@/lib/constants';
 
 export interface IncomeEvent {
@@ -36,7 +37,7 @@ export interface SyncResult {
   /** The raw analysis (before budget-adjustment merge). Null when bank is connected but enrichment found no usable transactions yet. */
   analysis: Analysis | null;
   /** Debt accounts synced from TrueLayer card balances. */
-  debtAccounts: any[];
+  debtAccounts: DebtAccount[];
   /** Real-time weekly budget context for adaptive spending guidance. */
   weeklyContext: WeeklyContext;
   /** Where the transaction data came from. */
@@ -257,8 +258,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         });
       }
     }
-  } catch (e: any) {
-    console.warn('[sync] TrueLayer sync request failed:', e?.message || e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] TrueLayer sync request failed:', message);
   }
 
   // If connections have issues but we still don't have bank names, query DB as fallback
@@ -274,8 +276,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
           if (row.provider_name) expiredBankNames.push(row.provider_name);
         }
       }
-    } catch (e: any) {
-      console.warn('[sync] Failed to fetch bank names:', e?.message || e);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn('[sync] Failed to fetch bank names:', message);
     }
   }
 
@@ -301,8 +304,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         const uniqueLines = deduplicateCSVLines(rawLines, perRowLines);
         csvData = ['Date,Description,Amount', ...uniqueLines].join('\n');
       }
-    } catch (e: any) {
-      console.warn('[sync] Failed to read fallback CSV:', e?.message || e);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn('[sync] Failed to read fallback CSV:', message);
     }
   }
 
@@ -316,8 +320,8 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   if (!csvData) return null;
 
   // ── 2. Fetch user config ──
-  let overrides: any[] = [];
-  let budgetAdjustments: any[] = [];
+  let overrides: TransactionOverride[] = [];
+  let budgetAdjustments: BudgetAdjustment[] = [];
   try {
     const [overrideRes, adjustmentRes] = await Promise.all([
       supabase
@@ -331,14 +335,15 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     ]);
     if (overrideRes.data) overrides = overrideRes.data;
     if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
-  } catch (e: any) {
-    console.warn('[sync] Failed to fetch user config:', e?.message || e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to fetch user config:', message);
   }
 
   // ── 2b. Sync debt accounts from card balances BEFORE enrichment ──
   // This must happen before we query debt_accounts so the enrichment engine
   // and move ranking have access to connected credit card data on the first sync.
-  const syncedDebt: any[] = [];
+  const syncedDebt: DebtAccount[] = [];
   try {
     const { data: bankRows } = await supabase
       .from('bank_data')
@@ -377,12 +382,13 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         }
       }
     }
-  } catch (e: any) {
-    console.warn('[sync] Failed to sync debt accounts from card balances:', e?.message || e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to sync debt accounts from card balances:', message);
   }
 
-  let debtAccountsData: any[] = [];
-  let identityData: any = null;
+  let debtAccountsData: DebtAccount[] = [];
+  let identityData: UserIdentity | null = null;
   try {
     const [debtRes, idRes] = await Promise.all([
       supabase
@@ -397,8 +403,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     ]);
     if (debtRes.data) debtAccountsData = debtRes.data;
     if (idRes.data) identityData = idRes.data;
-  } catch (e: any) {
-    console.warn('[sync] Failed to fetch debt/identity data:', e?.message || e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to fetch debt/identity data:', message);
   }
 
   // ── 3. Enrich ──
@@ -434,8 +441,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .select('account_name, account_type, outstanding_balance, credit_limit')
       .eq('user_id', userId);
     if (freshDebt) debtAccountsData = freshDebt;
-  } catch (e: any) {
-    console.warn('[sync] Debt reconciliation failed:', e?.message || e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Debt reconciliation failed:', message);
   }
 
   // ── 3c. Compute essential gap deduction for conservative surplus ──
@@ -447,7 +455,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       // Use midpoint of typical range as conservative estimate
       return sum + (gap.typicalRange.low + gap.typicalRange.high) / 2;
     }, 0);
-    (result.profile as any).essentialGapDeduction = Math.round(gapDeduction);
+    (result.profile as FinancialProfile & { essentialGapDeduction?: number }).essentialGapDeduction = Math.round(gapDeduction);
   }
 
   // ── 4. Rank moves ──
@@ -459,8 +467,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .eq('user_id', userId)
       .maybeSingle();
     goals = goalsData;
-  } catch (e: any) {
-    console.warn('[sync] Failed to fetch goals:', e?.message || e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to fetch goals:', message);
   }
 
   const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
@@ -475,13 +484,14 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .eq('user_id', userId)
       .like('move_key', 'dismissed-%');
     if (progressRows && progressRows.length > 0) {
-      const dismissedActions = new Set(progressRows.map((r: any) => r.move_action));
+      const dismissedActions = new Set(progressRows.map((r: { move_action: string }) => r.move_action));
       for (let i = allMoves.length - 1; i >= 0; i--) {
         if (dismissedActions.has(allMoves[i].action)) allMoves.splice(i, 1);
       }
     }
-  } catch (e: any) {
-    console.warn('[sync] Failed to filter dismissed moves:', e?.message || e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to filter dismissed moves:', message);
   }
 
   const topMove = allMoves[0] || null;
@@ -497,7 +507,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     non_discretionary: result.profile.budgetReality.nonDiscretionary,
     discretionary: result.profile.budgetReality.discretionary,
     income_sources: result.profile.incomeSources,
-    top_move: topMove || ({} as any),
+    top_move: topMove || ({} as Move),
     all_moves: allMoves,
     behavioral_patterns: result.behavioralPatterns,
     goal_context: topMove?.trajectory || null,
@@ -545,8 +555,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     } else {
       await supabase.from('analyses').insert({ user_id: userId, ...fields });
     }
-  } catch (e: any) {
-    console.warn('[sync] Failed to upsert analysis:', e?.message);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to upsert analysis:', message);
   }
 
   // ── 7. Score snapshot ──
@@ -564,8 +575,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       debt_account_count: result.profile.metrics.debtAccountCount || 0,
       archetype: rawAnalysis.archetype,
     });
-  } catch (e: any) {
-    console.warn('[sync] Failed to insert score snapshot:', e?.message || e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to insert score snapshot:', message);
   }
 
   // ── 8. Compute latest transaction date for freshness tracking ──
@@ -593,8 +605,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       identityData,
       debtAccountsData,
     );
-  } catch (e: any) {
-    console.warn('[sync] Reactive engine failed:', e?.message || e);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Reactive engine failed:', message);
   }
 
   return {
@@ -683,8 +696,8 @@ function buildWeeklyContext(
   const income = analysis.is_variable_income && analysis.income_floor
     ? analysis.income_floor
     : rawIncome;
-  const nonDiscTotal = (analysis.non_discretionary as any)?.total || 0;
-  const discTotal = (analysis.discretionary as any)?.total || 0;
+  const nonDiscTotal = (analysis.non_discretionary as BudgetSection)?.total || 0;
+  const discTotal = (analysis.discretionary as BudgetSection)?.total || 0;
   const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
   const staticBudget = leftToDecide / 4.33;
 

@@ -56,7 +56,7 @@ export default function Splash() {
   });
 
   return (
-    <Animated.View style={[s.container, { opacity: exitOpacity }]}>
+    <Animated.View style={[s.container, { opacity: exitOpacity }]} testID="splash-screen">
       <Animated.Text style={[s.brand, { opacity: wordOpacity }]}>
         BOCY
       </Animated.Text>

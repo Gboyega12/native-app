@@ -350,7 +350,7 @@ export default function Profile() {
   const hasAccounts = allAccounts.length > 0 || debtAccounts.length > 0;
 
   return (
-    <ScrollView style={s.container} contentContainerStyle={[s.scroll, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding }]}>
+    <ScrollView style={s.container} contentContainerStyle={[s.scroll, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding }]} testID="profile-screen">
       {/* ── Header ── */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(main)/(tabs)')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -512,7 +512,7 @@ export default function Profile() {
       )}
 
       <View style={s.addButtonsRow}>
-        <TouchableOpacity style={s.addBtn} onPress={handleAddAccount} activeOpacity={0.7}>
+        <TouchableOpacity style={s.addBtn} onPress={handleAddAccount} activeOpacity={0.7} testID="profile-add-account-button" accessibilityRole="button" accessibilityLabel="Add account">
           <Text style={s.addBtnText}>+ Add account</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -600,6 +600,7 @@ export default function Profile() {
             onValueChange={() => { trackEvent('Theme Toggled'); toggleTheme(); }}
             trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
             thumbColor={isDark ? colors.thumbOff : colors.green}
+            testID="profile-theme-toggle"
           />
         </View>
 
@@ -676,7 +677,7 @@ export default function Profile() {
 
       {/* ── Subscription management ── */}
       {!isSubscribed && (
-        <TouchableOpacity style={s.upgradeBtn} onPress={() => { trackEvent('Upgrade Tapped'); setShowPaywall(true); }} activeOpacity={0.8}>
+        <TouchableOpacity style={s.upgradeBtn} onPress={() => { trackEvent('Upgrade Tapped'); setShowPaywall(true); }} activeOpacity={0.8} testID="profile-upgrade-button" accessibilityRole="button" accessibilityLabel="Subscribe">
           <Text style={s.upgradeBtnText}>{isTrial ? 'Subscribe now' : 'Subscribe'}</Text>
         </TouchableOpacity>
       )}
@@ -715,14 +716,14 @@ export default function Profile() {
 
         <View style={s.groupDivider} />
 
-        <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Sign out of your account">
+        <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Sign out of your account" testID="profile-sign-out-button">
           <Text style={s.groupRowLabel}>Sign out</Text>
           <Text style={s.groupRowChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
         <View style={s.groupDivider} />
 
-        <TouchableOpacity style={s.groupRow} onPress={handleDeleteAccount} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Delete your account permanently">
+        <TouchableOpacity style={s.groupRow} onPress={handleDeleteAccount} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Delete your account permanently" testID="profile-delete-account-button">
           <Text style={[s.groupRowLabel, { color: colors.coral }]}>Delete account</Text>
           <Text style={[s.groupRowChevron, { color: colors.coral }]}>{'\u203A'}</Text>
         </TouchableOpacity>

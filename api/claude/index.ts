@@ -4,7 +4,33 @@
 // classify: batches unclassified transaction descriptions → Claude → structured JSON
 // enrich: takes ranked moves and rewrites them into BOCY-style output
 
+import { z } from 'zod';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const bodySchema = z.object({
+  action: z.enum(['classify', 'enrich']),
+  transactions: z.array(z.object({
+    description: z.string(),
+    amount: z.number(),
+  })).optional(),
+  moves: z.array(z.object({
+    action: z.string(),
+    category: z.string().optional(),
+    monthlyImpact: z.number(),
+    annualImpact: z.number(),
+    effort: z.string(),
+    merchants: z.array(z.string()).optional(),
+    strategy: z.string(),
+    steps: z.array(z.string()).optional(),
+    effect: z.string(),
+    trajectory: z.object({
+      insight: z.string(),
+      newMonths: z.number(),
+      goalLabel: z.string(),
+    }).optional(),
+  })).optional(),
+  context: z.record(z.string(), z.unknown()).optional(),
+});
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -96,7 +122,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { action } = req.body;
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
+  }
+  const { action } = parsed.data;
 
   if (action === 'classify') {
     return handleClassify(req, res);

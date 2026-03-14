@@ -5,8 +5,14 @@
 // POST /api/stt  (multipart/form-data with "audio" file, or JSON { audio: base64 })
 // Response: { success: true, text: "transcribed text", language: "en" }
 
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const bodySchema = z.object({
+  audio: z.string().min(1),
+  mimeType: z.string().optional(),
+});
 
 const DEEPGRAM_API_KEY = (process.env.DEEPGRAM_API_KEY || '').trim();
 const OPENAI_API_KEY = (process.env.OPENAI_API_KEY || '').trim();
@@ -45,11 +51,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // ── Extract audio ──
-  // Expects JSON body with base64-encoded audio and mime type
-  const { audio, mimeType } = req.body || {};
-  if (!audio || typeof audio !== 'string') {
-    return res.status(400).json({ error: 'Missing audio (base64-encoded)' });
+  const bodyParsed = bodySchema.safeParse(req.body);
+  if (!bodyParsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: bodyParsed.error.flatten().fieldErrors });
   }
+  const { audio, mimeType } = bodyParsed.data;
 
   const audioBuffer = Buffer.from(audio, 'base64');
   if (audioBuffer.length < 100) {

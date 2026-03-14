@@ -2135,6 +2135,7 @@ export default function Chat() {
       style={s.container}
       behavior={undefined}
       keyboardVerticalOffset={90}
+      testID="chat-screen"
     >
       {/* ── Header (always visible to prevent layout shift) ── */}
       <View style={[s.header, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
@@ -2243,6 +2244,8 @@ export default function Chat() {
                       multiline
                       maxLength={1000}
                       blurOnSubmit
+                      testID="chat-message-input"
+                      accessibilityLabel="Type your question"
                     />
                     {input.trim() ? (
                       <TouchableOpacity
@@ -2250,6 +2253,9 @@ export default function Chat() {
                         onPress={() => sendMessage(input)}
                         disabled={loading}
                         activeOpacity={0.7}
+                        testID="chat-send-button"
+                        accessibilityRole="button"
+                        accessibilityLabel="Send message"
                       >
                         <Text style={s.inlineSendIcon}>{'\u2191'}</Text>
                       </TouchableOpacity>
@@ -2437,6 +2443,8 @@ export default function Chat() {
                   multiline
                   maxLength={1000}
                   blurOnSubmit
+                  testID="chat-conversation-input"
+                  accessibilityLabel="Type or tap mic"
                 />
                 {/* Waveform in input bar when listening */}
                 {listening && <VoiceWaveform active={listening} />}
@@ -2447,6 +2455,9 @@ export default function Chat() {
                       onPress={() => sendMessage(input)}
                       disabled={loading}
                       activeOpacity={0.7}
+                      testID="chat-conversation-send-button"
+                      accessibilityRole="button"
+                      accessibilityLabel="Send message"
                     >
                       <Text style={s.actionButtonIcon}>{'\u2191'}</Text>
                     </TouchableOpacity>

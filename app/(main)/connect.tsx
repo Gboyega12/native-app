@@ -521,7 +521,7 @@ export default function Connect() {
 
   // ── Onboarding flow ──
   return (
-    <View style={styles.container}>
+    <View style={styles.container} testID="connect-screen">
       <View style={styles.content}>
         <Text style={styles.stepLabel}>STEP 1 OF 3</Text>
 

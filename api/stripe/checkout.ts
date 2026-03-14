@@ -4,9 +4,14 @@
 // Body: { price: "monthly" | "yearly" }
 // Auth: Bearer token (Supabase JWT)
 
+import { z } from 'zod';
 import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const bodySchema = z.object({
+  price: z.enum(['monthly', 'yearly']),
+});
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -18,10 +23,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: 'Missing authorization token' });
   }
 
-  const { price } = req.body;
-  if (!price || !['monthly', 'yearly'].includes(price)) {
-    return res.status(400).json({ error: 'price must be "monthly" or "yearly"' });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
   }
+  const { price } = parsed.data;
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
   const priceMonthly = process.env.STRIPE_PRICE_MONTHLY;

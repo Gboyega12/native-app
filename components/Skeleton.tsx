@@ -86,7 +86,7 @@ export function MoveCardSkeleton() {
 /** Full dashboard skeleton with hero + 3 move cards */
 export function DashboardSkeleton() {
   return (
-    <View style={{ gap: 16 }}>
+    <View style={{ gap: 16 }} testID="dashboard-skeleton" accessibilityLabel="Loading dashboard">
       <HeroCardSkeleton />
       <MoveCardSkeleton />
       <MoveCardSkeleton />

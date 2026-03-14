@@ -1,5 +1,17 @@
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { formatRelativeDate } from '../../lib/date-utils.js';
+
+const bodySchema = z.object({
+  messages: z.array(z.object({
+    role: z.string(),
+    content: z.string(),
+  })),
+  context: z.record(z.string(), z.unknown()).optional(),
+  stream: z.boolean().optional(),
+  user_id: z.string().nullable().optional(),
+});
 
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
@@ -8,15 +20,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function formatRelativeDate(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const diff = Math.floor((today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
-  if (diff === 0) return 'Today';
-  if (diff === 1) return 'Yesterday';
-  return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
-}
 
 // ── Tool definitions ──
 
@@ -166,21 +169,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { messages, context, stream, user_id } = req.body;
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'messages array required' });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
   }
+  const { messages, context, stream, user_id } = parsed.data;
 
   const systemPrompt = buildSystemPrompt(context);
-  const apiMessages = messages.map((m: { role: string; content: string }) => ({ role: m.role, content: m.content }));
+  const apiMessages = messages.map((m) => ({ role: m.role, content: m.content }));
 
   // ── Streaming mode ──
   if (stream) {
-    return handleStream(res, apiMessages, systemPrompt, user_id);
+    return handleStream(res, apiMessages, systemPrompt, user_id ?? null);
   }
 
   // ── Standard mode with tool loop ──
-  return handleStandard(res, apiMessages, systemPrompt, user_id);
+  return handleStandard(res, apiMessages, systemPrompt, user_id ?? null);
 }
 
 // ── Standard handler with tool loop ──

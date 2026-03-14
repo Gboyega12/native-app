@@ -5,8 +5,13 @@
 // POST /api/tts  { text: string }
 // Response: audio/mpeg binary stream
 
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const bodySchema = z.object({
+  text: z.string().min(1),
+});
 
 const ELEVENLABS_API_KEY = (process.env.ELEVENLABS_API_KEY || '').trim();
 // Default voice: "Rachel" — warm, friendly, natural British female voice
@@ -46,10 +51,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(503).json({ error: 'TTS not configured' });
   }
 
-  const { text } = req.body || {};
-  if (!text || typeof text !== 'string') {
-    return res.status(400).json({ error: 'Missing text' });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
   }
+  const { text } = parsed.data;
 
   // Limit text length to prevent abuse (ElevenLabs charges per character)
   const maxChars = 5000;

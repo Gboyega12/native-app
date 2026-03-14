@@ -1,4 +1,9 @@
+import { z } from 'zod';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const bodySchema = z.object({
+  pdf_base64: z.string().min(1),
+});
 
 const MAX_PDF_SIZE_MB = 10;
 
@@ -7,10 +12,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { pdf_base64 } = req.body;
-  if (!pdf_base64) {
-    return res.status(400).json({ error: 'pdf_base64 is required' });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
   }
+  const { pdf_base64 } = parsed.data;
 
   // Rough size check (base64 is ~4/3 of binary)
   const estimatedSizeMB = (pdf_base64.length * 3) / 4 / 1024 / 1024;

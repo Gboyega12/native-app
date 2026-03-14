@@ -71,6 +71,7 @@ export default function SignIn() {
     <KeyboardAvoidingView
       style={styles.container}
       behavior={undefined}
+      testID="sign-in-screen"
     >
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -97,6 +98,8 @@ export default function SignIn() {
             autoCorrect={false}
             value={email}
             onChangeText={setEmail}
+            testID="sign-in-email-input"
+            accessibilityLabel="Email address"
           />
           <TextInput
             style={styles.input}
@@ -105,6 +108,8 @@ export default function SignIn() {
             secureTextEntry
             value={password}
             onChangeText={setPassword}
+            testID="sign-in-password-input"
+            accessibilityLabel="Password"
           />
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -113,6 +118,9 @@ export default function SignIn() {
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleSignIn}
             disabled={loading || googleLoading}
+            testID="sign-in-submit-button"
+            accessibilityRole="button"
+            accessibilityLabel="Sign in"
           >
             {loading ? (
               <ActivityIndicator color={colors.bg} />
@@ -131,6 +139,9 @@ export default function SignIn() {
             style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
             onPress={handleGoogleSignIn}
             disabled={loading || googleLoading}
+            testID="sign-in-google-button"
+            accessibilityRole="button"
+            accessibilityLabel="Continue with Google"
           >
             {googleLoading ? (
               <ActivityIndicator color={colors.text} />
@@ -143,7 +154,7 @@ export default function SignIn() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity onPress={() => router.push('/(auth)/sign-up')}>
+        <TouchableOpacity onPress={() => router.push('/(auth)/sign-up')} testID="sign-in-sign-up-link" accessibilityRole="button" accessibilityLabel="Go to sign up">
           <Text style={styles.link}>
             Don't have an account? <Text style={styles.linkAccent}>Sign up</Text>
           </Text>

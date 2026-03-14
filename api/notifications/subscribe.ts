@@ -6,8 +6,19 @@
 // The subscription object comes from PushManager.subscribe().toJSON()
 // and contains { endpoint, keys: { p256dh, auth } }.
 
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const subscribeSchema = z.object({
+  subscription: z.object({
+    endpoint: z.string().url(),
+    keys: z.object({
+      p256dh: z.string(),
+      auth: z.string(),
+    }),
+  }),
+});
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -34,11 +45,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ── POST: Save subscription ──
   if (req.method === 'POST') {
-    const { subscription } = req.body;
-
-    if (!subscription?.endpoint || !subscription?.keys) {
-      return res.status(400).json({ error: 'Missing subscription' });
+    const parsed = subscribeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
     }
+    const { subscription } = parsed.data;
 
     try {
       // Upsert — one subscription per endpoint per user

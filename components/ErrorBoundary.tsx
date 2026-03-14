@@ -37,16 +37,16 @@ export default class ErrorBoundary extends Component<Props, State> {
       const errorMsg = this.state.error?.message || 'Unknown error';
       const errorName = this.state.error?.name || 'Error';
       return (
-        <View style={styles.container}>
+        <View style={styles.container} testID="error-boundary-fallback" accessibilityRole="alert">
           <Text style={styles.emoji}>!</Text>
-          <Text style={styles.title}>Something went wrong</Text>
+          <Text style={styles.title} accessibilityRole="header">Something went wrong</Text>
           <Text style={styles.message}>
             {this.props.fallbackMessage || 'An unexpected error occurred. Please try again.'}
           </Text>
           <Text style={styles.errorDetail}>
             {errorName}: {errorMsg}
           </Text>
-          <TouchableOpacity style={styles.button} onPress={this.handleRetry}>
+          <TouchableOpacity style={styles.button} onPress={this.handleRetry} testID="error-boundary-retry" accessibilityRole="button" accessibilityLabel="Retry after error">
             <Text style={styles.buttonText}>Try again</Text>
           </TouchableOpacity>
         </View>

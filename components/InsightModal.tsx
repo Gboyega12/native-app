@@ -122,7 +122,7 @@ export default function InsightModal({
   const bocyMood = getTypeMood(type);
 
   return (
-    <Modal transparent visible={visible} animationType="none" statusBarTranslucent>
+    <Modal transparent visible={visible} animationType="none" statusBarTranslucent testID="insight-modal">
       <Pressable style={styles.overlay} onPress={handleDismiss}>
         <Animated.View
           style={[
@@ -142,6 +142,9 @@ export default function InsightModal({
               onPress={handleDismiss}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               activeOpacity={0.7}
+              testID="insight-modal-close-button"
+              accessibilityRole="button"
+              accessibilityLabel="Close"
             >
               <Text style={[styles.closeIcon, { color: colors.dim }]}>{'\u2715'}</Text>
             </TouchableOpacity>
@@ -168,13 +171,16 @@ export default function InsightModal({
                 style={[styles.actionBtn, { backgroundColor: colors.accent }]}
                 onPress={handleAction}
                 activeOpacity={0.8}
+                testID="insight-modal-action-button"
+                accessibilityRole="button"
+                accessibilityLabel={actionLabel}
               >
                 <Text style={[styles.actionBtnText, { color: colors.bg }]}>{actionLabel}</Text>
               </TouchableOpacity>
             )}
 
             {/* Dismiss link */}
-            <TouchableOpacity style={styles.dismissLink} onPress={handleDismiss} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.dismissLink} onPress={handleDismiss} activeOpacity={0.7} testID="insight-modal-dismiss-button" accessibilityRole="button" accessibilityLabel="Dismiss">
               <Text style={[styles.dismissLinkText, { color: colors.muted }]}>Not now</Text>
             </TouchableOpacity>
           </Pressable>

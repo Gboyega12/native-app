@@ -214,13 +214,13 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
       {/* Actions */}
       <View style={styles.actions}>
         {isFirst ? (
-          <Pressable onPress={handleDone} hitSlop={10}>
+          <Pressable onPress={handleDone} hitSlop={10} testID="walkthrough-skip-button" accessibilityRole="button" accessibilityLabel="Skip walkthrough">
             <Text style={[styles.skipText, { color: colors.muted }]}>
               Skip
             </Text>
           </Pressable>
         ) : (
-          <Pressable onPress={handleBack} hitSlop={10}>
+          <Pressable onPress={handleBack} hitSlop={10} testID="walkthrough-back-button" accessibilityRole="button" accessibilityLabel="Go back">
             <Text style={[styles.backText, { color: colors.text2 }]}>
               Back
             </Text>
@@ -234,6 +234,9 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
           <Pressable
             style={[styles.nextBtn, { backgroundColor: colors.accent }]}
             onPress={handleNext}
+            testID="walkthrough-next-button"
+            accessibilityRole="button"
+            accessibilityLabel={isLast ? "Let's go" : 'Next step'}
           >
             <Text style={[styles.nextBtnText, { color: colors.bg }]}>
               {isLast ? 'Let\u2019s go' : 'Next'}
@@ -245,7 +248,7 @@ export default function Walkthrough({ visible, onDismiss, scrollRef, cardPositio
   );
 
   return (
-    <View style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.4)' }]} pointerEvents="box-none">
+    <View style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.4)' }]} pointerEvents="box-none" testID="walkthrough-overlay">
       <Pressable style={StyleSheet.absoluteFillObject} onPress={() => {}} />
       <View style={[
         styles.tooltipContainer,

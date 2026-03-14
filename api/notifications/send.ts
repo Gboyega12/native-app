@@ -3,9 +3,20 @@
 // web push via the web-push library (direct call, no HTTP round-trip).
 // Called by cron jobs and achievement triggers.
 
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import webPush from 'web-push';
+import sanitizeHtml from 'sanitize-html';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const bodySchema = z.object({
+  to: z.string(),
+  subject: z.string(),
+  html: z.string(),
+  user_id: z.string().optional(),
+  notification_type: z.string().optional(),
+  push_body: z.string().optional(),
+});
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -46,10 +57,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const { to, subject, html, user_id, notification_type, push_body } = req.body;
-  if (!to || !subject || !html) {
-    return res.status(400).json({ error: 'Missing required fields: to, subject, html' });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
   }
+  const { to, subject, html: rawHtml, user_id, notification_type, push_body } = parsed.data;
+
+  // Sanitize HTML to prevent injection attacks
+  const html = sanitizeHtml(rawHtml, {
+    allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'style']),
+    allowedAttributes: {
+      ...sanitizeHtml.defaults.allowedAttributes,
+      '*': ['style', 'class'],
+      img: ['src', 'alt', 'width', 'height'],
+      a: ['href', 'target', 'rel'],
+    },
+    allowedSchemes: ['https', 'mailto'],
+  });
 
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) {

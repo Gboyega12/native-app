@@ -1,5 +1,19 @@
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const bodySchema = z.object({
+  action: z.enum(['approve', 'dismiss', 'delete', 'delete_budget_item']),
+  plan_id: z.string().optional(),
+  budget_item_id: z.string().optional(),
+}).refine(
+  (data) => {
+    if (['approve', 'dismiss', 'delete'].includes(data.action) && !data.plan_id) return false;
+    if (data.action === 'delete_budget_item' && !data.budget_item_id) return false;
+    return true;
+  },
+  { message: 'plan_id required for approve/dismiss/delete; budget_item_id required for delete_budget_item' }
+);
 
 // Unified plans endpoint: POST /api/plans with { action: "approve" | "dismiss", plan_id }
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -26,16 +40,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: 'Invalid token' });
   }
 
-  const { action, plan_id, budget_item_id } = req.body;
-  if (action !== 'approve' && action !== 'dismiss' && action !== 'delete' && action !== 'delete_budget_item') {
-    return res.status(400).json({ error: 'action must be "approve", "dismiss", "delete", or "delete_budget_item"' });
+  const parsed = bodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ success: false, error: 'Invalid request', details: parsed.error.flatten().fieldErrors });
   }
-  if ((action === 'approve' || action === 'dismiss' || action === 'delete') && !plan_id) {
-    return res.status(400).json({ error: 'plan_id required' });
-  }
-  if (action === 'delete_budget_item' && !budget_item_id) {
-    return res.status(400).json({ error: 'budget_item_id required' });
-  }
+  const { action, plan_id, budget_item_id } = parsed.data;
 
   const admin = createClient(supabaseUrl, serviceKey);
 

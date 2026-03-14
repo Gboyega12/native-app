@@ -4,7 +4,7 @@
 //
 // Runs client-side: 1,000 sims × 60 months = 60k ops, <50ms on low-end phone.
 
-import type { FinancialProfile, Move, UserIdentity } from './types.js';
+import type { FinancialProfile, Move, UserIdentity, UpcomingEvent } from './types.js';
 
 // ── Simulation parameters ──
 
@@ -497,8 +497,8 @@ function buildScenarios(
   vol: VolatilityProfile,
 ): CashflowScenario[] {
   const scenarios: CashflowScenario[] = [];
-  const rawEvts: any[] = identity?.upcoming_events || [];
-  const evtTypes = rawEvts.map((e: any) => typeof e === 'string' ? e : e?.type || '');
+  const rawEvts: UpcomingEvent[] = identity?.upcoming_events || [];
+  const evtTypes = rawEvts.map((e: UpcomingEvent) => typeof e === 'string' ? e : e?.type || '');
   const events = evtTypes; // backwards-compatible: array of event type strings
   const deps = identity?.dependents || [];
   const household = identity?.household || 'single';
