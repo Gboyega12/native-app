@@ -6,10 +6,11 @@ import { useRouter } from 'expo-router';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { hapticTick } from '@/lib/haptics';
 import { colors, fonts, spacing, radius } from '@/theme';
-import { BocyFace } from '@/components/Bocy';
+import { BocyFace, MockupDashboard, MockupMoves, MockupChat } from '@/components/Bocy';
 
 const SLIDES = [
   {
+    mockup: 'dashboard' as const,
     illustration: 'scan' as const,
     tag: 'PHILOSOPHY',
     title: "This isn't a\nbudgeting app",
@@ -18,6 +19,7 @@ const SLIDES = [
     mood: 'neutral' as const,
   },
   {
+    mockup: 'moves' as const,
     illustration: 'plan' as const,
     tag: 'METHOD',
     title: 'See it. Rank it.\nDo it.',
@@ -30,6 +32,7 @@ const SLIDES = [
     mood: 'thinking' as const,
   },
   {
+    mockup: 'chat' as const,
     illustration: 'personal' as const,
     tag: 'PERSONALISED',
     title: 'Built around\nyour life',
@@ -110,8 +113,31 @@ export default function Education() {
               <View style={styles.content}>
                 {/* Bocy character */}
                 <View style={styles.bocyHero}>
-                  <BocyFace mood={slide.mood} size="lg" breathing />
+                  <BocyFace mood={slide.mood} size="md" breathing />
                 </View>
+
+                {/* Mockup card with scroll parallax */}
+                <Animated.View style={[
+                  styles.mockupWrap,
+                  containerWidth > 0 ? {
+                    opacity: scrollX.interpolate({
+                      inputRange: [(idx - 1) * containerWidth, idx * containerWidth, (idx + 1) * containerWidth],
+                      outputRange: [0.4, 1, 0.4],
+                      extrapolate: 'clamp',
+                    }),
+                    transform: [{
+                      scale: scrollX.interpolate({
+                        inputRange: [(idx - 1) * containerWidth, idx * containerWidth, (idx + 1) * containerWidth],
+                        outputRange: [0.88, 1, 0.88],
+                        extrapolate: 'clamp',
+                      }),
+                    }],
+                  } : {},
+                ]}>
+                  {slide.mockup === 'dashboard' && <MockupDashboard />}
+                  {slide.mockup === 'moves' && <MockupMoves />}
+                  {slide.mockup === 'chat' && <MockupChat />}
+                </Animated.View>
 
                 {/* Tag */}
                 <Text style={[styles.tag, { color: slide.accent }]}>{slide.tag}</Text>
@@ -233,8 +259,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bocyHero: {
-    marginBottom: spacing.xl + spacing.sm,
+    marginBottom: spacing.md,
     alignItems: 'center',
+  },
+  mockupWrap: {
+    alignItems: 'center',
+    marginBottom: spacing.lg,
   },
   tag: {
     fontFamily: fonts.mono,

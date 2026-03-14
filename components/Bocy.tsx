@@ -5,8 +5,9 @@
 // the user's financial state.
 
 import { useEffect, useRef, useState, useMemo } from 'react';
-import { View, Animated, Easing, StyleSheet } from 'react-native';
+import { View, Text, Animated, Easing, StyleSheet } from 'react-native';
 import { useTheme } from '@/lib/theme-context';
+import { fonts, radius } from '@/theme';
 
 // ── Bocy mood states ──
 export type BocyMood = 'neutral' | 'happy' | 'alert' | 'thinking' | 'celebrating' | 'sleepy';
@@ -458,6 +459,212 @@ export function IllustrationPersonal() {
     </View>
   );
 }
+
+// ── Mockup illustrations for education slides ──
+// Miniature app-preview cards on surface. All content is mathematical:
+// real £ values, percentages, multiplications — not generic advice.
+
+export function MockupDashboard() {
+  const { colors } = useTheme();
+  const anims = useRef(Array.from({ length: 4 }, () => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    Animated.stagger(100, anims.map(a =>
+      Animated.timing(a, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    )).start();
+  }, []);
+
+  const bars = [
+    { label: 'Housing', amt: '£840', pct: '44%', w: '88%', hi: true },
+    { label: 'Transport', amt: '£312', pct: '16%', w: '64%' },
+    { label: 'Food', amt: '£247', pct: '13%', w: '48%' },
+  ];
+
+  return (
+    <View style={[mockS.card, { backgroundColor: colors.surface }]}>
+      <Animated.View style={[mockS.headline, {
+        opacity: anims[0],
+        transform: [{ scale: anims[0].interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }],
+      }]}>
+        <Text style={[mockS.bigNum, { color: colors.green }]}>+£491</Text>
+        <Text style={[mockS.unit, { color: colors.muted }]}> /mo surplus</Text>
+      </Animated.View>
+      {bars.map((b, i) => (
+        <Animated.View key={i} style={[mockS.barRow, {
+          opacity: anims[i + 1],
+          transform: [{ translateX: anims[i + 1].interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }],
+        }]}>
+          <View style={mockS.barLabelRow}>
+            <Text style={[mockS.barLabel, { color: colors.text2 }]}>{b.label}</Text>
+            <Text style={[mockS.barValue, { color: b.hi ? colors.green : colors.dim }]}>{b.amt} · {b.pct}</Text>
+          </View>
+          <View style={[mockS.barTrack, { backgroundColor: colors.accentDim }]}>
+            <View style={[mockS.barFill, { width: b.w, backgroundColor: b.hi ? colors.green : colors.dim }]} />
+          </View>
+        </Animated.View>
+      ))}
+    </View>
+  );
+}
+
+export function MockupMoves() {
+  const { colors } = useTheme();
+  const anims = useRef(Array.from({ length: 3 }, () => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    Animated.stagger(150, anims.map(a =>
+      Animated.timing(a, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    )).start();
+  }, []);
+
+  const moves = [
+    { rank: '#1', action: 'Switch energy tariff', math: '£47/mo \u00D7 12 = £564/yr', hi: true },
+    { rank: '#2', action: 'Cancel 3 subscriptions', math: '£28/mo \u00D7 12 = £336/yr' },
+    { rank: '#3', action: 'Overpay Amex 4.2%', math: 'saves £847 in interest' },
+  ];
+
+  return (
+    <View style={[mockS.card, { backgroundColor: colors.surface }]}>
+      {moves.map((m, i) => (
+        <Animated.View key={i} style={[mockS.moveRow, {
+          opacity: anims[i],
+          transform: [{ translateX: anims[i].interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }],
+          borderLeftColor: m.hi ? colors.green : colors.accentDim,
+          marginTop: i > 0 ? 8 : 0,
+        }]}>
+          <View style={mockS.moveHeader}>
+            <Text style={[mockS.moveRank, { color: m.hi ? colors.green : colors.dim }]}>{m.rank}</Text>
+            <Text style={[mockS.moveAction, { color: m.hi ? colors.text : colors.text2 }]} numberOfLines={1}>{m.action}</Text>
+          </View>
+          <Text style={[mockS.moveMath, { color: m.hi ? colors.green : colors.dim }]}>{m.math}</Text>
+        </Animated.View>
+      ))}
+    </View>
+  );
+}
+
+export function MockupChat() {
+  const { colors } = useTheme();
+  const faceAnim = useRef(new Animated.Value(0)).current;
+  const bubbleAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(faceAnim, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(bubbleAnim, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  return (
+    <View style={[mockS.card, { backgroundColor: colors.surface }]}>
+      <Animated.View style={{ opacity: faceAnim, alignItems: 'flex-start', marginBottom: 8 }}>
+        <BocyFace mood="thinking" size="sm" breathing={false} />
+      </Animated.View>
+      <Animated.View style={[mockS.bubble, {
+        borderColor: colors.green + '40',
+        opacity: bubbleAnim,
+        transform: [{ translateY: bubbleAnim.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+      }]}>
+        <Text style={[mockS.bubbleLine, { color: colors.text2 }]}>
+          <Text style={{ color: colors.green }}>£340</Text>{' subs \u00F7 '}
+          <Text style={{ color: colors.text }}>£1,890</Text>{' income = '}
+          <Text style={{ color: colors.green }}>18%</Text>
+        </Text>
+        <Text style={[mockS.bubbleLine, { color: colors.text2, marginTop: 2 }]}>
+          {'Cut 3 \u2192 save '}
+          <Text style={{ color: colors.green }}>£71/mo</Text>
+          {' ('}
+          <Text style={{ color: colors.green }}>£852/yr</Text>
+          {')'}
+        </Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+const mockS = StyleSheet.create({
+  card: {
+    borderRadius: radius.md,
+    padding: 14,
+    width: '100%' as any,
+    maxWidth: 260,
+  },
+  headline: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginBottom: 6,
+  },
+  bigNum: {
+    fontFamily: fonts.mono,
+    fontSize: 20,
+    letterSpacing: 0.5,
+  },
+  unit: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1,
+  },
+  barRow: {
+    marginTop: 6,
+  },
+  barLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 3,
+  },
+  barLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+  },
+  barValue: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+  },
+  barTrack: {
+    height: 3,
+    borderRadius: 1.5,
+    overflow: 'hidden' as const,
+  },
+  barFill: {
+    height: 3,
+    borderRadius: 1.5,
+  },
+  moveRow: {
+    borderLeftWidth: 2,
+    paddingLeft: 10,
+  },
+  moveHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  moveRank: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1,
+  },
+  moveAction: {
+    fontFamily: fonts.medium,
+    fontSize: 11,
+    flex: 1,
+  },
+  moveMath: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 0.5,
+    marginTop: 2,
+  },
+  bubble: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+  },
+  bubbleLine: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    lineHeight: 15,
+  },
+});
 
 const styles = StyleSheet.create({
   // ── Face ──
