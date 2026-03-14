@@ -466,19 +466,13 @@ export function IllustrationPersonal() {
 
 export function MockupDashboard() {
   const { colors } = useTheme();
-  const anims = useRef(Array.from({ length: 4 }, () => new Animated.Value(0))).current;
+  const anims = useRef(Array.from({ length: 3 }, () => new Animated.Value(0))).current;
 
   useEffect(() => {
-    Animated.stagger(100, anims.map(a =>
+    Animated.stagger(150, anims.map(a =>
       Animated.timing(a, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true })
     )).start();
   }, []);
-
-  const bars = [
-    { label: 'Housing', amt: '£840', pct: '44%', w: '88%', hi: true },
-    { label: 'Transport', amt: '£312', pct: '16%', w: '64%' },
-    { label: 'Food', amt: '£247', pct: '13%', w: '48%' },
-  ];
 
   return (
     <View style={[mockS.card, { backgroundColor: colors.surface }]}>
@@ -489,20 +483,23 @@ export function MockupDashboard() {
         <Text style={[mockS.bigNum, { color: colors.green }]}>+£491</Text>
         <Text style={[mockS.unit, { color: colors.muted }]}> /mo surplus</Text>
       </Animated.View>
-      {bars.map((b, i) => (
-        <Animated.View key={i} style={[mockS.barRow, {
-          opacity: anims[i + 1],
-          transform: [{ translateX: anims[i + 1].interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }],
-        }]}>
-          <View style={mockS.barLabelRow}>
-            <Text style={[mockS.barLabel, { color: colors.text2 }]}>{b.label}</Text>
-            <Text style={[mockS.barValue, { color: b.hi ? colors.green : colors.dim }]}>{b.amt} · {b.pct}</Text>
-          </View>
-          <View style={[mockS.barTrack, { backgroundColor: colors.accentDim }]}>
-            <View style={[mockS.barFill, { width: b.w, backgroundColor: b.hi ? colors.green : colors.dim }]} />
-          </View>
-        </Animated.View>
-      ))}
+      <Animated.View style={[mockS.insightRow, {
+        opacity: anims[1],
+        transform: [{ translateX: anims[1].interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }],
+      }]}>
+        <Text style={[mockS.insightLabel, { color: colors.text2 }]}>
+          {'\u2192 Redirect £180 to notice account'}
+        </Text>
+      </Animated.View>
+      <Animated.View style={[mockS.insightRow, {
+        opacity: anims[2],
+        transform: [{ translateX: anims[2].interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }],
+      }]}>
+        <Text style={[mockS.insightHighlight, { color: colors.green }]}>
+          {'= £96/yr earned '}
+          <Text style={{ color: colors.dim }}>{'vs £11 now'}</Text>
+        </Text>
+      </Animated.View>
     </View>
   );
 }
@@ -519,8 +516,8 @@ export function MockupMoves() {
 
   const moves = [
     { rank: '#1', action: 'Switch energy tariff', math: '£47/mo \u00D7 12 = £564/yr', hi: true },
-    { rank: '#2', action: 'Cancel 3 subscriptions', math: '£28/mo \u00D7 12 = £336/yr' },
-    { rank: '#3', action: 'Overpay Amex 4.2%', math: 'saves £847 in interest' },
+    { rank: '#2', action: 'Move £2k to notice account', math: 'earns £96/yr vs £11 now' },
+    { rank: '#3', action: 'Consolidate debt at 3.1%', math: 'saves £1,240 in interest' },
   ];
 
   return (
@@ -565,17 +562,16 @@ export function MockupChat() {
         opacity: bubbleAnim,
         transform: [{ translateY: bubbleAnim.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
       }]}>
-        <Text style={[mockS.bubbleLine, { color: colors.text2 }]}>
-          <Text style={{ color: colors.green }}>£340</Text>{' subs \u00F7 '}
-          <Text style={{ color: colors.text }}>£1,890</Text>{' income = '}
-          <Text style={{ color: colors.green }}>18%</Text>
+        <Text style={[mockS.bubbleLine, { color: colors.text }]}>
+          {'Debt free by '}
+          <Text style={{ color: colors.green }}>Nov \u201927</Text>
         </Text>
         <Text style={[mockS.bubbleLine, { color: colors.text2, marginTop: 2 }]}>
-          {'Cut 3 \u2192 save '}
-          <Text style={{ color: colors.green }}>£71/mo</Text>
-          {' ('}
-          <Text style={{ color: colors.green }}>£852/yr</Text>
-          {')'}
+          {'if you redirect '}
+          <Text style={{ color: colors.green }}>£180/mo</Text>
+        </Text>
+        <Text style={[mockS.bubbleLine, { color: colors.dim, marginTop: 4, fontSize: 9 }]}>
+          {'Income varies \u00B123% \u2192 buffer built in'}
         </Text>
       </Animated.View>
     </View>
@@ -628,6 +624,19 @@ const mockS = StyleSheet.create({
   barFill: {
     height: 3,
     borderRadius: 1.5,
+  },
+  insightRow: {
+    marginTop: 6,
+  },
+  insightLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 0.3,
+  },
+  insightHighlight: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 0.3,
   },
   moveRow: {
     borderLeftWidth: 2,
