@@ -103,7 +103,81 @@
 
 ---
 
-## CURRENT SPRINT: Background Verification (2026-03-14)
+## CURRENT SPRINT: Sync, Categorisation Persistence & Surgical Plans (2026-03-14)
+
+### Fix 1: Re-sync window — 3 months → 1 month
+- [ ] `api/truelayer/sync.ts:96` — `setMonth(-3)` → `setMonth(-1)`
+- [ ] `api/cron/bank-sync.ts:103` — `setMonth(-3)` → `setMonth(-1)`
+- [ ] Update comments to reflect 1-month window
+- Initial 12-month pull in `callback.ts` stays as-is
+
+### Fix 2: Re-categorised transactions reverting on refresh/re-sync
+
+**Root cause:** The 120s time-based guard (`reviewSavedRef.current`) is a race condition. A sync started BEFORE overrides were saved can complete AFTER the 120s window expires, overwriting the correct state with stale data.
+
+**Fix — replace time-based guard with sync-generation tracking:**
+- [ ] Add `overridesSavedAt` ref (timestamp of last override save)
+- [ ] Thread a `syncStartedAt` timestamp through `requestSync()` → `syncBankData()` return value
+- [ ] In `syncInBackground`, only accept analysis results where `syncStartedAt > overridesSavedAt`
+- [ ] This is deterministic: syncs started before overrides were saved are always rejected
+- [ ] Remove the brittle 120s window and `AsyncStorage` persistence of `review_saved_at`
+
+**Files:**
+| File | Change |
+|------|--------|
+| `app/(main)/(tabs)/index.tsx` | Replace `reviewSavedRef` guard with `overridesSavedAt` check |
+| `lib/sync.ts` | Return `syncStartedAt` timestamp from `syncBankData()` |
+| `lib/sync-coordinator.ts` | Pass through `syncStartedAt` |
+
+### Fix 3: Surgical, data-driven plans
+
+**Problem:** Both plan systems (moves + user plans) fall back to generic, vague steps:
+- `hydrateSubGoals()` generates "Debt 1", "Debt 2" — no real names
+- `getPlanSteps()` generates "List all debts with their interest rates" — generic advice
+- User with Capital One + Amex sees "debt..." instead of specific accounts with balances
+
+**Fix A — `hydrateSubGoals()` gets real data:**
+- [ ] Add optional `debtAccounts` parameter to `hydrateSubGoals(move, debtAccounts?)`
+- [ ] For debt moves: use real account names, balances, APRs from `debtAccounts`
+- [ ] Each debt becomes its own trackable sub-goal: "Capital One — £2,400 at 22.9%"
+- [ ] In dashboard (line 2498 + 2451), pass current `debtAccounts` state to `hydrateSubGoals()`
+
+**Fix B — Replace `getPlanSteps()` with data-driven step generation:**
+- [ ] New function `generatePlanSteps(plan, analysis, debtAccounts)` replaces `getPlanSteps(plan)`
+- [ ] For debt plans: generate one step per debt account with real name, balance, APR, recommended payment
+  - e.g. `"Pay £180/mo to Capital One — £2,400 at 22.9% APR"`
+  - e.g. `"Pay £95/mo to Amex — £1,100 at 19.9% APR"`
+- [ ] For spending plans: generate steps per top spending category with real amounts
+  - e.g. `"Reduce Eating Out from £320 to £200/mo (Deliveroo, Uber Eats)"`
+- [ ] For subscription plans: generate steps per subscription with real merchant + amount
+  - e.g. `"Cancel Netflix — £15.99/mo"`
+  - e.g. `"Cancel Disney+ — £10.99/mo"`
+- [ ] For savings/buffer plans: generate step with real surplus amount and timeline
+  - e.g. `"Transfer £250/mo from surplus → reaches £3,000 in 12 months"`
+- [ ] Each step is individually completable with strike-through on tap
+- [ ] Steps show real numbers from the user's analysis, not generic advice
+
+**Fix C — User plans get sub-goals too:**
+- [ ] When user plan matches debt category: create `MoveSubGoal[]` from `debtAccounts` at display time
+- [ ] Sub-goals show progress bars with real balance tracking (same as move sub-goals)
+- [ ] Reactive engine already verifies debt_clear sub-goals — user plans benefit from same verification
+
+**Files:**
+| File | Change |
+|------|--------|
+| `lib/types.ts` | `hydrateSubGoals(move, debtAccounts?)` signature + debt account hydration |
+| `app/(main)/(tabs)/index.tsx` | Replace `getPlanSteps()` with `generatePlanSteps()`, pass data to hydration |
+
+### Verification
+- [ ] TypeScript compiles clean
+- [ ] Re-sync uses 1-month window in both endpoints
+- [ ] Recategorised transactions persist through sync cycles
+- [ ] Plan items show specific merchant names with real amounts
+- [ ] Plan sub-goals show progress bars with real balance data
+
+---
+
+## PREVIOUS SPRINT: Background Verification (2026-03-14)
 
 ### Problem
 During onboarding, the processing screen runs Claude AI verification (classifying low-confidence transactions) synchronously on the client. This takes 20-60 seconds depending on transaction volume. If the user leaves the screen, work is orphaned and restarts from scratch on return.
