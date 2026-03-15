@@ -55,9 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const session = event.data.object as Stripe.Checkout.Session;
         const customerId = session.customer as string;
         const subscriptionId = session.subscription as string;
-        const userId = (session as Record<string, unknown>).subscription_data
-          ? ((session as Record<string, unknown>).subscription_data as Record<string, unknown>)?.metadata?.supabase_user_id as string | undefined
-          : session.metadata?.supabase_user_id;
+        const userId = session.metadata?.supabase_user_id;
 
         if (!userId) {
           // Look up by customer metadata
@@ -94,7 +92,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'invoice.payment_failed': {
         const invoice = event.data.object as Stripe.Invoice;
         const customerId = invoice.customer as string;
-        const subscriptionId = invoice.subscription as string;
+        const subRef = invoice.parent?.subscription_details?.subscription;
+        const subscriptionId = (typeof subRef === 'string' ? subRef : subRef?.id) || null;
 
         if (subscriptionId) {
           const { data: sub } = await admin
@@ -127,10 +126,12 @@ async function upsertSubscription(admin: SupabaseClient, stripe: Stripe, userId:
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
   const status = mapStripeStatus(subscription.status);
-  const priceId = subscription.items.data[0]?.price?.id || null;
-  const interval = subscription.items.data[0]?.price?.recurring?.interval || null;
-  const periodEnd = subscription.current_period_end
-    ? new Date(subscription.current_period_end * 1000).toISOString()
+  const firstItem = subscription.items.data[0];
+  const priceId = firstItem?.price?.id || null;
+  const interval = firstItem?.price?.recurring?.interval || null;
+  const currentPeriodEnd = firstItem?.current_period_end;
+  const periodEnd = currentPeriodEnd
+    ? new Date(currentPeriodEnd * 1000).toISOString()
     : null;
 
   const row = {

@@ -114,7 +114,7 @@ async function transcribeDeepgram(audioBuffer: Buffer, contentType: string): Pro
         'Authorization': `Token ${DEEPGRAM_API_KEY}`,
         'Content-Type': contentType,
       },
-      body: audioBuffer,
+      body: new Uint8Array(audioBuffer),
     }
   );
 
@@ -141,7 +141,7 @@ async function transcribeWhisper(audioBuffer: Buffer, contentType: string): Prom
     : 'webm';
 
   const formData = new FormData();
-  const blob = new Blob([audioBuffer], { type: contentType });
+  const blob = new Blob([new Uint8Array(audioBuffer)], { type: contentType });
   formData.append('file', blob, `audio.${ext}`);
   formData.append('model', 'whisper-1');
   formData.append('language', 'en');
