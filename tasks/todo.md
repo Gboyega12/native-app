@@ -103,7 +103,15 @@
 
 ---
 
-## CURRENT SPRINT: Fix refresh redirect to connect page (2026-03-15)
+## CURRENT SPRINT: TrueLayer Data Continuity & Hidden Bugs (2026-03-15)
+
+### Investigation Status: COMPLETE — Awaiting approval to implement
+
+See detailed findings below in the discussion section.
+
+---
+
+## PREVIOUS SPRINT: Fix refresh redirect to connect page (2026-03-15)
 
 ### Problem
 On refresh, `app/index.tsx` unconditionally redirects to `/(auth)/sign-in`, forcing every authenticated user through the `session && inAuth` re-routing logic in `AuthGate`. This async DB query cascade is fragile — any query failure silently routes to `/(main)/connect` instead of the dashboard.
