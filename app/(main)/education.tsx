@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Animated,
+  View, Text, TouchableOpacity, StyleSheet, Animated, Easing,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
@@ -30,14 +30,86 @@ const SLIDES = [
   },
 ];
 
+// Staggered entrance for each slide's content elements
+function SlideContent({ slide, idx, containerWidth, scrollX }: {
+  slide: typeof SLIDES[number]; idx: number; containerWidth: number; scrollX: Animated.Value;
+}) {
+  const titleAnim = useRef(new Animated.Value(0)).current;
+  const mockupAnim = useRef(new Animated.Value(0)).current;
+  const bodyAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.stagger(140, [
+      Animated.timing(titleAnim, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(mockupAnim, { toValue: 1, duration: 700, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(bodyAnim, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  return (
+    <View style={styles.content}>
+      {/* Title */}
+      <Animated.Text style={[styles.title, {
+        opacity: titleAnim,
+        transform: [{ translateY: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+      }]}>
+        {slide.title}
+      </Animated.Text>
+
+      {/* Mockup hero with scroll parallax */}
+      <Animated.View style={[
+        styles.mockupWrap,
+        {
+          opacity: Animated.multiply(
+            mockupAnim,
+            containerWidth > 0 ? scrollX.interpolate({
+              inputRange: [(idx - 1) * containerWidth, idx * containerWidth, (idx + 1) * containerWidth],
+              outputRange: [0.4, 1, 0.4],
+              extrapolate: 'clamp',
+            }) : new Animated.Value(1),
+          ),
+          transform: [
+            { translateY: mockupAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) },
+            ...(containerWidth > 0 ? [{
+              scale: scrollX.interpolate({
+                inputRange: [(idx - 1) * containerWidth, idx * containerWidth, (idx + 1) * containerWidth],
+                outputRange: [0.88, 1, 0.88],
+                extrapolate: 'clamp',
+              }),
+            }] : []),
+          ],
+        },
+      ]}>
+        {slide.mockup === 'dashboard' && <MockupDashboard />}
+        {slide.mockup === 'moves' && <MockupMoves />}
+        {slide.mockup === 'chat' && <MockupChat />}
+      </Animated.View>
+
+      {/* Body text */}
+      {slide.body && (
+        <Animated.Text style={[styles.body, {
+          opacity: bodyAnim,
+          transform: [{ translateY: bodyAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+        }]}>
+          {slide.body}
+        </Animated.Text>
+      )}
+    </View>
+  );
+}
+
 export default function Education() {
   const router = useRouter();
   const scrollX = useRef(new Animated.Value(0)).current;
   const scrollRef = useRef<any>(null);
   const [currentPage, setCurrentPage] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
+  const bottomEnter = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => { trackScreen('Education'); }, []);
+  useEffect(() => {
+    trackScreen('Education');
+    Animated.timing(bottomEnter, { toValue: 1, duration: 700, delay: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, []);
 
   const isLast = currentPage === SLIDES.length - 1;
 
@@ -97,43 +169,17 @@ export default function Education() {
         >
           {SLIDES.map((slide, idx) => (
             <View key={idx} style={[styles.slideWrap, { width: containerWidth }]}>
-              <View style={styles.content}>
-                {/* Title — top, establishes context */}
-                <Text style={styles.title}>{slide.title}</Text>
-
-                {/* Mockup hero with scroll parallax */}
-                <Animated.View style={[
-                  styles.mockupWrap,
-                  containerWidth > 0 ? {
-                    opacity: scrollX.interpolate({
-                      inputRange: [(idx - 1) * containerWidth, idx * containerWidth, (idx + 1) * containerWidth],
-                      outputRange: [0.4, 1, 0.4],
-                      extrapolate: 'clamp',
-                    }),
-                    transform: [{
-                      scale: scrollX.interpolate({
-                        inputRange: [(idx - 1) * containerWidth, idx * containerWidth, (idx + 1) * containerWidth],
-                        outputRange: [0.88, 1, 0.88],
-                        extrapolate: 'clamp',
-                      }),
-                    }],
-                  } : {},
-                ]}>
-                  {slide.mockup === 'dashboard' && <MockupDashboard />}
-                  {slide.mockup === 'moves' && <MockupMoves />}
-                  {slide.mockup === 'chat' && <MockupChat />}
-                </Animated.View>
-
-                {/* Subtitle — punchy one-liner */}
-                {slide.body && <Text style={styles.body}>{slide.body}</Text>}
-              </View>
+              <SlideContent slide={slide} idx={idx} containerWidth={containerWidth} scrollX={scrollX} />
             </View>
           ))}
         </Animated.ScrollView>
       )}
 
       {/* Bottom area: animated dots + button */}
-      <View style={styles.bottomArea}>
+      <Animated.View style={[styles.bottomArea, {
+        opacity: bottomEnter,
+        transform: [{ translateY: bottomEnter.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+      }]}>
         {/* Animated progress dots */}
         <View style={styles.dots}>
           {SLIDES.map((slide, i) => {
@@ -173,7 +219,7 @@ export default function Education() {
             {isLast ? (SLIDES[currentPage].cta || 'Continue') : 'Next'}
           </Text>
         </TouchableOpacity>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -188,7 +234,7 @@ const styles = StyleSheet.create({
   },
   skipBtn: {
     position: 'absolute',
-    top: spacing.xxl + spacing.sm,
+    top: spacing.xxl + spacing.md,
     right: spacing.xl,
     zIndex: 10,
     paddingVertical: 8,
@@ -198,9 +244,9 @@ const styles = StyleSheet.create({
   },
   skipText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
+    fontSize: 11,
     color: colors.dim,
-    letterSpacing: 1,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
   carousel: {
@@ -208,26 +254,26 @@ const styles = StyleSheet.create({
   },
   slideWrap: {
     flex: 1,
-    paddingHorizontal: spacing.xl + 4,
+    paddingHorizontal: spacing.xl + spacing.sm,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingTop: spacing.xxl,
+    paddingTop: spacing.xxl + spacing.md,
   },
   mockupWrap: {
     alignItems: 'center',
-    marginTop: spacing.xl,
-    marginBottom: spacing.xl,
+    marginTop: spacing.xxl,
+    marginBottom: spacing.xxl,
   },
   title: {
     fontFamily: fonts.heading,
-    fontSize: 30,
+    fontSize: 32,
     color: colors.text,
     textAlign: 'center',
-    lineHeight: 38,
-    letterSpacing: -0.3,
+    lineHeight: 42,
+    letterSpacing: -0.5,
   },
   body: {
     fontFamily: fonts.medium,
@@ -236,16 +282,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 28,
     maxWidth: 480,
+    letterSpacing: 0.1,
   },
   bottomArea: {
-    paddingBottom: spacing.xxl + spacing.sm,
-    paddingHorizontal: spacing.xl + 4,
+    paddingBottom: spacing.xxl + spacing.md,
+    paddingHorizontal: spacing.xl + spacing.sm,
     alignItems: 'center',
   },
   dots: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: spacing.lg + spacing.xs,
+    gap: 10,
+    marginBottom: spacing.xl,
   },
   progressDot: {
     width: 8,
@@ -259,7 +306,7 @@ const styles = StyleSheet.create({
   },
   button: {
     width: '100%',
-    paddingVertical: 16,
+    paddingVertical: 18,
     borderRadius: 100,
     alignItems: 'center',
     backgroundColor: colors.accent,
@@ -268,6 +315,6 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
   },
 });

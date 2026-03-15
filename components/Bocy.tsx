@@ -467,15 +467,27 @@ export function IllustrationPersonal() {
 export function MockupDashboard() {
   const { colors } = useTheme();
   const anims = useRef(Array.from({ length: 3 }, () => new Animated.Value(0))).current;
+  const floatAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.stagger(150, anims.map(a =>
-      Animated.timing(a, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    Animated.stagger(200, anims.map(a =>
+      Animated.timing(a, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true })
     )).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, { toValue: 1, duration: 3000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(floatAnim, { toValue: 0, duration: 3000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    ).start();
   }, []);
 
   return (
-    <View style={[mockS.card, { backgroundColor: colors.surface }]}>
+    <Animated.View style={[mockS.card, {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      transform: [{ translateY: floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) }],
+    }]}>
       <Animated.View style={[mockS.headline, {
         opacity: anims[0],
         transform: [{ scale: anims[0].interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }],
@@ -483,9 +495,10 @@ export function MockupDashboard() {
         <Text style={[mockS.bigNum, { color: colors.green }]}>+£491</Text>
         <Text style={[mockS.unit, { color: colors.muted }]}> /mo surplus</Text>
       </Animated.View>
+      <View style={[mockS.divider, { backgroundColor: colors.border }]} />
       <Animated.View style={[mockS.insightRow, {
         opacity: anims[1],
-        transform: [{ translateX: anims[1].interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }],
+        transform: [{ translateX: anims[1].interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }],
       }]}>
         <Text style={[mockS.insightLabel, { color: colors.text2 }]}>
           {'\u2192 Redirect £180 to notice account'}
@@ -493,25 +506,33 @@ export function MockupDashboard() {
       </Animated.View>
       <Animated.View style={[mockS.insightRow, {
         opacity: anims[2],
-        transform: [{ translateX: anims[2].interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }],
+        transform: [{ translateX: anims[2].interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }],
       }]}>
         <Text style={[mockS.insightHighlight, { color: colors.green }]}>
           {'= £96/yr earned '}
           <Text style={{ color: colors.dim }}>{'vs £11 now'}</Text>
         </Text>
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 
 export function MockupMoves() {
   const { colors } = useTheme();
   const anims = useRef(Array.from({ length: 3 }, () => new Animated.Value(0))).current;
+  const floatAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.stagger(150, anims.map(a =>
-      Animated.timing(a, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    Animated.stagger(200, anims.map(a =>
+      Animated.timing(a, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true })
     )).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, { toValue: 1, duration: 3200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(floatAnim, { toValue: 0, duration: 3200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    ).start();
   }, []);
 
   const moves = [
@@ -521,13 +542,17 @@ export function MockupMoves() {
   ];
 
   return (
-    <View style={[mockS.card, { backgroundColor: colors.surface }]}>
+    <Animated.View style={[mockS.card, {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      transform: [{ translateY: floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) }],
+    }]}>
       {moves.map((m, i) => (
         <Animated.View key={i} style={[mockS.moveRow, {
           opacity: anims[i],
-          transform: [{ translateX: anims[i].interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }],
+          transform: [{ translateX: anims[i].interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
           borderLeftColor: m.hi ? colors.green : colors.accentDim,
-          marginTop: i > 0 ? 12 : 0,
+          marginTop: i > 0 ? 16 : 0,
         }]}>
           <View style={mockS.moveHeader}>
             <Text style={[mockS.moveRank, { color: m.hi ? colors.green : colors.dim }]}>{m.rank}</Text>
@@ -536,26 +561,38 @@ export function MockupMoves() {
           <Text style={[mockS.moveMath, { color: m.hi ? colors.green : colors.dim }]}>{m.math}</Text>
         </Animated.View>
       ))}
-    </View>
+    </Animated.View>
   );
 }
 
 export function MockupChat() {
   const { colors } = useTheme();
   const anims = useRef(Array.from({ length: 3 }, () => new Animated.Value(0))).current;
+  const floatAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.stagger(200, anims.map(a =>
-      Animated.timing(a, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    Animated.stagger(250, anims.map(a =>
+      Animated.timing(a, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true })
     )).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, { toValue: 1, duration: 2800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(floatAnim, { toValue: 0, duration: 2800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    ).start();
   }, []);
 
   return (
-    <View style={[mockS.card, { backgroundColor: colors.surface }]}>
+    <Animated.View style={[mockS.card, {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      transform: [{ translateY: floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) }],
+    }]}>
       {/* User message */}
       <Animated.View style={[mockS.chatRow, mockS.chatRowUser, {
         opacity: anims[0],
-        transform: [{ translateY: anims[0].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+        transform: [{ translateY: anims[0].interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
       }]}>
         <View style={[mockS.chatBubbleUser, { backgroundColor: colors.accent }]}>
           <Text style={[mockS.bubbleLine, { color: colors.bg }]}>When will I be debt free?</Text>
@@ -565,14 +602,14 @@ export function MockupChat() {
       {/* Response bubble */}
       <Animated.View style={[mockS.chatRow, {
         opacity: anims[1],
-        transform: [{ translateY: anims[1].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+        transform: [{ translateY: anims[1].interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
       }]}>
         <View style={[mockS.bubble, { borderColor: colors.green + '40' }]}>
           <Text style={[mockS.bubbleLine, { color: colors.text }]}>
             {'Debt free by '}
             <Text style={{ color: colors.green }}>Nov \u201927</Text>
           </Text>
-          <Text style={[mockS.bubbleLine, { color: colors.text2, marginTop: 3 }]}>
+          <Text style={[mockS.bubbleLine, { color: colors.text2, marginTop: 4 }]}>
             {'if you redirect '}
             <Text style={{ color: colors.green }}>£180/mo</Text>
           </Text>
@@ -582,27 +619,32 @@ export function MockupChat() {
       {/* Detail line */}
       <Animated.View style={[mockS.chatRow, {
         opacity: anims[2],
-        transform: [{ translateY: anims[2].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+        transform: [{ translateY: anims[2].interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
       }]}>
         <Text style={[mockS.bubbleLine, { color: colors.dim, fontSize: 10 }]}>
           {'Income varies \u00B123% \u2192 buffer built in'}
         </Text>
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 
 const mockS = StyleSheet.create({
   card: {
-    borderRadius: radius.lg,
-    padding: 20,
+    borderRadius: radius.xl,
+    padding: 28,
     width: '100%' as any,
     maxWidth: 340,
+    borderWidth: 1,
   },
   headline: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    marginBottom: 10,
+    marginBottom: 16,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginBottom: 16,
   },
   bigNum: {
     fontFamily: fonts.mono,
@@ -640,7 +682,7 @@ const mockS = StyleSheet.create({
     borderRadius: 1.5,
   },
   insightRow: {
-    marginTop: 8,
+    marginTop: 10,
   },
   insightLabel: {
     fontFamily: fonts.mono,
@@ -653,8 +695,8 @@ const mockS = StyleSheet.create({
     letterSpacing: 0.3,
   },
   moveRow: {
-    borderLeftWidth: 3,
-    paddingLeft: 12,
+    borderLeftWidth: 2,
+    paddingLeft: 14,
   },
   moveHeader: {
     flexDirection: 'row',
@@ -678,21 +720,21 @@ const mockS = StyleSheet.create({
     marginTop: 3,
   },
   chatRow: {
-    marginTop: 10,
+    marginTop: 14,
   },
   chatRowUser: {
     alignItems: 'flex-end',
     marginTop: 0,
   },
   chatBubbleUser: {
-    borderRadius: 12,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
   bubble: {
     borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 14,
+    padding: 16,
   },
   bubbleLine: {
     fontFamily: fonts.mono,
