@@ -1,33 +1,52 @@
-# Fix: New Users Bypass Onboarding Flow
+# Fix: "Go to Dashboard" redirects back to Connect screen
 
 **Date:** 2026-03-15
 
-## Problem
+## Root Cause Analysis
 
-New users are taken directly to the dashboard, skipping the entire onboarding process. Root cause is a two-part routing flaw between `app/index.tsx` and `AuthGate` in `app/_layout.tsx`.
+After TrueLayer bank connection (Open Banking), the browser does a **full page reload** (`window.location.href = authUrl`). This resets all React state, including the `routedForSession` ref in `AuthGate` to `null`.
 
-## Plan
+### The redirect chain that causes the bug:
 
-### Step 1: Fix `app/index.tsx` — stop blindly redirecting to dashboard
-- [ ] Remove `if (hasSession) return <Redirect href="/(main)/(tabs)" />;`
-- [ ] For authenticated users, render a loading screen and let AuthGate handle routing
-- [ ] Keep TrueLayer bank redirect detection as-is
+1. User on `/connect` → clicks "Connect via Open Banking"
+2. `window.location.href = authUrl` → **full page reload** to TrueLayer
+3. TrueLayer redirects back → app reloads from scratch
+4. `routedForSession.current` = `null` (ref reset on remount)
+5. `pendingSignals.bankCallback = true` (detected from URL params)
+6. AuthGate effect: `pendingSignals.bankCallback` → returns early → **never sets `routedForSession`**
+7. Connect screen handles callback → navigates to `/processing`
+8. Processing screen: AuthGate fires, `onOnboarding` guard catches it (processing is in list) → OK
+9. Analysis completes → user clicks "Go to Dashboard" → `router.replace('/(main)/(tabs)')`
+10. AuthGate fires: `(tabs)` NOT in onboarding list, `routedForSession.current` is still `null`
+11. **Routing logic re-runs**: queries DB for analysis
+12. If analysis DB insert failed (processing.tsx only warns, doesn't error) → `rows.length === 0` → **redirects to `/connect`**
+13. Even if insert succeeded, this unnecessary re-routing adds latency and risk
 
-### Step 2: Refactor `AuthGate` in `app/_layout.tsx` — guard ALL authenticated routes
-- [ ] Expand routing logic so onboarding checks run for ALL authenticated users, not just those on `(auth)` routes
-- [ ] Define onboarding screens as allowed pass-through routes (welcome, education, identity, connect, processing)
-- [ ] Guard protected routes (tabs, profile, etc.) — redirect incomplete users to correct onboarding step
-- [ ] Keep all special-case handling (email confirm, OAuth, bank callback) intact
+Same bug exists for the OAuth code exchange path (`pendingSignals.oauth`).
 
-### Step 3: Verify all flows
-- [ ] New user email signup → full onboarding
-- [ ] New user Google OAuth → full onboarding
-- [ ] Existing user → dashboard
-- [ ] Page refresh during onboarding → resume correct step
-- [ ] Email confirmation redirect → works as before
-- [ ] TrueLayer OAuth redirect → works as before
-- [ ] Bank callback redirect → works as before
+## Fixes
 
-### Files
-- `app/index.tsx`
-- `app/_layout.tsx`
+### Fix 1: Set `routedForSession` when consuming signals (`_layout.tsx`)
+- When clearing `bankCallback`, also set `routedForSession.current = session.user.id`
+- When consuming `oauth` signal, also set `routedForSession.current = session.user.id`
+- This ensures the guard works for all subsequent segment changes
+
+### Fix 2: Add `(tabs)` to the "don't re-route" guard (`_layout.tsx`)
+- If user is already on `(tabs)` (dashboard), don't run DB queries to potentially redirect them away
+- Safety net that prevents AuthGate from ever routing a user AWAY from the dashboard
+- Logout scenario is handled separately (`!session && !inAuth` check)
+
+### Fix 3: Retry analysis DB insert on failure (`processing.tsx`)
+- Currently, if the Supabase insert fails, it only logs a warning and continues
+- Add a single retry with brief delay before continuing
+- This reduces the window where AuthGate could find no analysis in DB
+
+## Checklist
+- [ ] Fix 1: Set `routedForSession` in `bankCallback` and `oauth` signal handlers
+- [ ] Fix 2: Add `(tabs)` to the don't-re-route guard in AuthGate
+- [ ] Fix 3: Add retry logic for analysis insert failure in processing.tsx
+- [ ] Verify: Walk through all navigation flows to confirm no regressions
+
+## Files
+- `app/_layout.tsx` (AuthGate routing logic)
+- `app/(main)/processing.tsx` (analysis DB insert)
