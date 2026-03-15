@@ -7,7 +7,11 @@
 // Auth: Bearer CRON_SECRET (internal calls from cron/triggers only)
 
 import { createClient } from '@supabase/supabase-js';
-import webPush from 'web-push';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const webPush = require('web-push') as {
+  setVapidDetails(subject: string, publicKey: string, privateKey: string): void;
+  sendNotification(sub: { endpoint: string; keys: { p256dh: string; auth: string } }, payload: string): Promise<{ statusCode: number }>;
+};
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;

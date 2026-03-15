@@ -5,7 +5,11 @@
 
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
-import webPush from 'web-push';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const webPush = require('web-push') as {
+  setVapidDetails(subject: string, publicKey: string, privateKey: string): void;
+  sendNotification(sub: { endpoint: string; keys: { p256dh: string; auth: string } }, payload: string): Promise<{ statusCode: number }>;
+};
 import sanitizeHtml from 'sanitize-html';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
