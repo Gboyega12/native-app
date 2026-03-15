@@ -83,6 +83,7 @@ export default function Home() {
   const cardPositions = useRef<Record<string, number>>({});
   const syncRetryRef = useRef<number>(0);
   const overridesSavedAt = useRef<number>(0); // Timestamp of last override save — syncs started before this are rejected
+  const overriddenMerchants = useRef<Set<string>>(new Set()); // Merchant keys categorised by user — reject sync results that still show these in "Other"
   const [retriesExhausted, setRetriesExhausted] = useState(false);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);
@@ -762,13 +763,23 @@ export default function Home() {
       setCatAssignments({});
       setSaveSuccess(false);
 
+      // Track which merchants were just categorised so we can reject stale sync results
+      // that still show them in "Other". This is more robust than the timestamp guard alone.
+      for (const matchKey of catKeys) {
+        const group = unresolvedGroups.find(g => g.key === matchKey);
+        for (const m of (group?.merchants || [matchKey])) {
+          overriddenMerchants.current.add(normalizeMerchant(m));
+        }
+      }
+
       // Re-sync so the enrichment engine re-runs with the new overrides.
       // The persisted optimistic state above protects against refresh in the meantime.
+      // Delay by 10s to give the enrichment engine time to ingest the new overrides.
       overridesSavedAt.current = Date.now();
       AsyncStorage.setItem('overrides_saved_at', String(overridesSavedAt.current)).catch(() => {});
       invalidateSyncCache();
       const uid = userIdRef.current;
-      if (uid) syncInBackground(uid, true);
+      if (uid) setTimeout(() => syncInBackground(uid, true), 10_000);
     } catch (err: any) {
       setSaveSuccess(false);
       Alert.alert('Couldn\u2019t save', err.message || 'Check your connection and try again.');
@@ -845,6 +856,11 @@ export default function Home() {
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
+
+        // Track recategorised merchant so stale sync results are rejected
+        const matchDesc = recatTx.tx.merchant || recatTx.tx.description;
+        overriddenMerchants.current.add(normalizeMerchant(matchDesc));
+
         overridesSavedAt.current = Date.now();
         AsyncStorage.setItem('overrides_saved_at', String(overridesSavedAt.current)).catch(() => {});
         invalidateSyncCache();
@@ -858,9 +874,9 @@ export default function Home() {
 
       // Trigger a delayed background sync so the analyses row in Supabase
       // gets updated with the correct category split from the enrichment pipeline.
-      // Delayed by 2s to ensure the transaction_overrides insert has committed.
+      // Delayed by 10s to give the enrichment engine time to ingest the new overrides.
       if (user) {
-        setTimeout(() => syncInBackground(user.id, true), 2000);
+        setTimeout(() => syncInBackground(user.id, true), 10_000);
       }
     } catch (err: any) {
       console.warn('[home] Recategorize failed:', err?.message);
@@ -1310,8 +1326,38 @@ export default function Home() {
         if (overridesSavedAt.current && result.syncStartedAt < overridesSavedAt.current) {
           return prev;
         }
-        // This sync started after overrides were saved — it has the latest data.
-        // Clear the guard so future syncs aren't blocked.
+
+        // Merchant-key guard: if we recently categorised merchants, check whether
+        // the incoming sync result still has them in "Other" with classifiedBy=default.
+        // If so, the enrichment engine hasn't ingested our overrides yet — reject.
+        if (overriddenMerchants.current.size > 0) {
+          const stillStale = new Set<string>();
+          for (const section of [fresh.discretionary, fresh.non_discretionary]) {
+            const items = (section as any)?.items;
+            if (!Array.isArray(items)) continue;
+            for (const item of items) {
+              if (item?.category !== 'Other') continue;
+              for (const tx of (item.transactions || [])) {
+                if (!tx) continue;
+                const key = normalizeMerchant(tx.merchant || tx.description || '');
+                if (overriddenMerchants.current.has(key)) {
+                  // Still in "Other" with default classification — stale result
+                  if (!tx.classifiedBy || tx.classifiedBy === 'default') {
+                    stillStale.add(key);
+                  }
+                }
+              }
+            }
+          }
+          if (stillStale.size > 0) {
+            console.log(`[home] Rejecting sync: ${stillStale.size} overridden merchants still in Other`);
+            return prev;
+          }
+          // All overridden merchants are correctly classified — clear the guard
+          overriddenMerchants.current = new Set();
+        }
+
+        // Clear the timestamp guard now that we've accepted a post-override sync
         if (overridesSavedAt.current && result.syncStartedAt >= overridesSavedAt.current) {
           overridesSavedAt.current = 0;
           AsyncStorage.removeItem('overrides_saved_at').catch(() => {});
@@ -2999,7 +3045,7 @@ export default function Home() {
             </TouchableOpacity>
 
             {budgetExpanded && (
-              <Card style={{ marginBottom: spacing.md }}>
+              <Card style={{ marginBottom: spacing.md, overflow: 'visible' as const }}>
                 <View style={{ position: 'absolute', top: 16, right: 20, zIndex: 1 }}>
                   <ExpandDots count={6} size={3} />
                 </View>

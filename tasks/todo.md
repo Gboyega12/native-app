@@ -110,20 +110,20 @@
 **Root cause:** The `overridesSavedAt` guard (added last sprint) is still insufficient. The guard at line 1310 compares `result.syncStartedAt < overridesSavedAt.current` — but the force-sync triggered at line 771 starts AFTER `overridesSavedAt` is set (line 767), so `syncStartedAt >= overridesSavedAt`. The guard clears at line 1316, and the enrichment engine may return stale data if overrides haven't propagated yet, overwriting the optimistic state.
 
 **Fix — merchant-key-based guard (deterministic, not time-based):**
-- [ ] After `saveReview()`, store the set of categorised merchant keys in a ref (`overriddenMerchants`)
-- [ ] In `setAnalysis()` updater (line 1306), if `overriddenMerchants.current` is non-empty, check the incoming `fresh` analysis: if ANY of those merchants still appear in "Other" with `classifiedBy === 'default'`, reject the sync result and keep `prev`
-- [ ] Only clear `overriddenMerchants` when a sync result correctly reflects the overrides (those merchants are NOT in "Other", or have `classifiedBy !== 'default'`)
-- [ ] Add a 10-second delay before triggering `syncInBackground` after saving overrides, giving the enrichment engine time to ingest the new overrides
+- [x] After `saveReview()`, store the set of categorised merchant keys in a ref (`overriddenMerchants`)
+- [x] In `setAnalysis()` updater (line 1306), if `overriddenMerchants.current` is non-empty, check the incoming `fresh` analysis: if ANY of those merchants still appear in "Other" with `classifiedBy === 'default'`, reject the sync result and keep `prev`
+- [x] Only clear `overriddenMerchants` when a sync result correctly reflects the overrides (those merchants are NOT in "Other", or have `classifiedBy !== 'default'`)
+- [x] Add a 10-second delay before triggering `syncInBackground` after saving overrides, giving the enrichment engine time to ingest the new overrides
 
 ### Bug 2: Can't scroll on transactions card in spending section
 
 **Root cause:** `Card` component has `overflow: 'hidden'` (Card.tsx:518) which clips content. The FlatLists inside have `scrollEnabled={false}` (correct — they rely on the parent ScrollView), but the Card clips them before the parent ScrollView can render them.
 
 **Fix:**
-- [ ] Override `overflow: 'visible'` on the spending details Card specifically (don't change the global Card style as other cards may need clipping for charts/images)
+- [x] Override `overflow: 'visible'` on the spending details Card specifically (don't change the global Card style as other cards may need clipping for charts/images)
 
 ### Verification
-- [ ] TypeScript compiles clean
+- [x] TypeScript compiles clean (0 errors in changed files)
 - [ ] Categorisation banner stays dismissed after saving
 - [ ] Transactions card scrolls vertically in spending section
 
