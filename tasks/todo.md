@@ -1,49 +1,51 @@
-# Fix: "Go to Dashboard" redirects back to Connect screen
+# Fix: Browser refresh from homepage redirects to connect screen
 
 **Date:** 2026-03-15
-**Status:** Complete
+**Status:** In Progress
 
-## Root Cause Analysis
+## Diagnosis
 
-After TrueLayer bank connection (Open Banking), the browser does a **full page reload** (`window.location.href = authUrl`). This resets all React state, including the `routedForSession` ref in `AuthGate` to `null`.
+**Symptom**: Refreshing the browser while on the homepage `/(main)/(tabs)` redirects to the connect account screen `/(main)/connect`.
 
-### The redirect chain that causes the bug:
+**Root cause** — `app/_layout.tsx`, `AuthGate` component:
 
-1. User on `/connect` → clicks "Connect via Open Banking"
-2. `window.location.href = authUrl` → **full page reload** to TrueLayer
-3. TrueLayer redirects back → app reloads from scratch
-4. `routedForSession.current` = `null` (ref reset on remount)
-5. `pendingSignals.bankCallback = true` (detected from URL params)
-6. AuthGate effect: `pendingSignals.bankCallback` → returns early → **never sets `routedForSession`**
-7. Connect screen handles callback → navigates to `/processing`
-8. Processing screen: AuthGate fires, `onOnboarding` guard catches it (processing is in list) → OK
-9. Analysis completes → user clicks "Go to Dashboard" → `router.replace('/(main)/(tabs)')`
-10. AuthGate fires: `(tabs)` NOT in onboarding list, `routedForSession.current` is still `null`
-11. **Routing logic re-runs**: queries DB for analysis
-12. If analysis DB insert failed (processing.tsx only warns, doesn't error) → `rows.length === 0` → **redirects to `/connect`**
-13. Even if insert succeeded, this unnecessary re-routing adds latency and risk
+`routedForSession` is a `useRef` (line 52). On a full page refresh, React unmounts and remounts the entire tree, resetting this ref to `null`. This triggers the full routing gauntlet:
 
-Same bug exists for the OAuth code exchange path (`pendingSignals.oauth`).
+1. Session restores from `localStorage` via Supabase ✓
+2. `routedForSession.current` is `null` (ref reset) → routing logic re-runs
+3. Onboarding guard (line 129-132) checks `['welcome', 'education', 'identity', 'connect', 'processing']` — `(tabs)` is NOT in this list, so no protection
+4. Queries `user_identity` → succeeds
+5. Queries `analyses` → **returns empty or fails silently** (likely RLS race: the restored session token may not be ready for PostgREST yet)
+6. `rows.length === 0` → `router.replace('/(main)/connect')` ← **BUG**
 
-## Fixes Applied
+**Why the previous fix didn't cover this**: The earlier fix (see history below) only set `routedForSession` during signal-consumption paths (TrueLayer callback, OAuth). A plain browser refresh has no pending signals, so that fix doesn't apply.
 
-### Fix 1: Set `routedForSession` when consuming signals (`_layout.tsx`)
-- [x] When clearing `bankCallback`, also set `routedForSession.current = session.user.id`
-- [x] When consuming `oauth` signal, also set `routedForSession.current = session.user.id`
+**Why this is fundamentally a ref problem**: The routing cache needs to survive page refreshes. A React ref cannot do that. `sessionStorage` can.
 
-### Fix 2: Gate completion UI on confirmed DB insert (`processing.tsx`)
-- [x] Extract insert payload, retry once on failure with 1s delay
-- [x] If both attempts fail, throw error → shows error UI instead of fake "Your plan is ready"
+## Fix
 
-## Verified Flows
-- [x] TrueLayer bank connection (the bug scenario) → dashboard
-- [x] CSV/PDF upload (no page reload) → dashboard
-- [x] OAuth code exchange path → dashboard
-- [x] Existing user normal load → dashboard
-- [x] DB insert failure → error UI (not fake success)
-- [x] Email confirmation redirect → unaffected
-- [x] Bank callback with delayed session restore → protected by guard
+**Replace `useRef` with `sessionStorage`** for `routedForSession`:
 
-## Files
-- `app/_layout.tsx` (AuthGate routing logic)
-- `app/(main)/processing.tsx` (analysis DB insert)
+- `sessionStorage.getItem('routedForSession')` replaces `routedForSession.current`
+- `sessionStorage.setItem('routedForSession', id)` replaces `routedForSession.current = id`
+- `sessionStorage.removeItem('routedForSession')` replaces `routedForSession.current = null`
+
+**Why `sessionStorage`**:
+- Survives page refreshes within the same tab ✓
+- Clears when tab/window closes (new tab → fresh routing) ✓
+- Different session ID on new login → routing runs correctly ✓
+- Logout sets it to null → next login routes correctly ✓
+
+This is 1 file, ~10 line changes. No new dependencies. No behavioral change except the bug fix.
+
+## Tasks
+
+- [ ] Replace `routedForSession` ref with `sessionStorage` in `app/_layout.tsx`
+- [ ] Verify logout clears the storage (line 124 already sets null)
+- [ ] Commit and push
+
+---
+
+## Previous Fix History
+
+**2026-03-15 (earlier)**: Fixed TrueLayer/OAuth callback flows not setting `routedForSession` after consuming signals. That fix was correct but only covered signal paths, not plain refresh.
