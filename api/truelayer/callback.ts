@@ -242,8 +242,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : accounts.length > 0 ? 'bank' : null;
 
     // Insert bank data row with all available fields.
-    // Set last_successful_sync_date to the start of the fetched range so
-    // subsequent incremental syncs know where to pick up from.
     const insertRow: Record<string, unknown> = {
       connection_id: connectionId,
       csv_data: csv,
@@ -255,7 +253,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (providerName) insertRow.provider_name = providerName;
     if (accountType) insertRow.account_type = accountType;
 
-    const { error: dbError } = await admin.from('bank_data').insert(insertRow);
+    let { error: dbError } = await admin.from('bank_data').insert(insertRow);
+
+    // Fallback: if last_successful_sync_date column doesn't exist yet
+    // (migration not applied), retry without it so the insert still succeeds.
+    if (dbError && dbError.code === 'PGRST204' && dbError.message?.includes('last_successful_sync_date')) {
+      console.warn('[callback] last_successful_sync_date column not found, retrying insert without it');
+      delete insertRow.last_successful_sync_date;
+      ({ error: dbError } = await admin.from('bank_data').insert(insertRow));
+    }
 
     if (dbError) {
       console.error('Failed to save bank data:', dbError);

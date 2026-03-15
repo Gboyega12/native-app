@@ -22,7 +22,7 @@ interface BankRow {
   provider_name: string | null;
   created_at: string;
   csv_data: string | null;
-  last_successful_sync_date: string | null;
+  last_successful_sync_date?: string | null;
 }
 
 interface SyncResult {
@@ -277,13 +277,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     // Find ALL TrueLayer connections for this user
-    const { data: bankRows, error: findErr } = await admin
+    let { data: bankRows, error: findErr } = await admin
       .from('bank_data')
       .select('id, connection_id, refresh_token, updated_at, provider_name, created_at, csv_data, last_successful_sync_date')
       .eq('user_id', userId)
       .eq('source', 'truelayer')
       .not('refresh_token', 'is', null)
       .order('created_at', { ascending: false });
+
+    // Fallback: if last_successful_sync_date column doesn't exist yet, query without it
+    if (findErr && findErr.code === 'PGRST204' && findErr.message?.includes('last_successful_sync_date')) {
+      console.warn('[sync] last_successful_sync_date column not found, querying without it');
+      const fallback = await admin
+        .from('bank_data')
+        .select('id, connection_id, refresh_token, updated_at, provider_name, created_at, csv_data')
+        .eq('user_id', userId)
+        .eq('source', 'truelayer')
+        .not('refresh_token', 'is', null)
+        .order('created_at', { ascending: false });
+      bankRows = fallback.data as typeof bankRows;
+      findErr = fallback.error;
+    }
 
     if (findErr || !bankRows || bankRows.length === 0) {
       return res.json({ success: false, reason: 'no_connection' });
@@ -358,7 +372,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!row.provider_name && result.providerName) {
         updateFields.provider_name = result.providerName;
       }
-      await admin.from('bank_data').update(updateFields).eq('id', row.id);
+      let { error: updateErr } = await admin.from('bank_data').update(updateFields).eq('id', row.id);
+      // Fallback: if last_successful_sync_date column doesn't exist yet, retry without it
+      if (updateErr && updateErr.code === 'PGRST204' && updateErr.message?.includes('last_successful_sync_date')) {
+        console.warn('[sync] last_successful_sync_date column not found, retrying update without it');
+        delete updateFields.last_successful_sync_date;
+        await admin.from('bank_data').update(updateFields).eq('id', row.id);
+      }
     }
 
     if (syncedCount === 0) {
