@@ -330,3 +330,13 @@ ALTER TABLE bank_data
 ALTER TABLE analyses
   ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT 'verified',
   ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+
+
+-- ============================================================
+-- Migration: add last_successful_sync_date to bank_data
+-- Tracks the date of the last successful transaction fetch so
+-- incremental syncs can pick up from where they left off,
+-- preventing permanent data gaps when syncs fail.
+-- ============================================================
+ALTER TABLE bank_data
+  ADD COLUMN IF NOT EXISTS last_successful_sync_date DATE;

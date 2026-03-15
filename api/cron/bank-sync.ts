@@ -31,6 +31,7 @@ interface BankRow {
   created_at: string;
   updated_at: string;
   csv_data: string | null;
+  last_successful_sync_date: string | null;
 }
 
 interface RefreshResult {
@@ -46,7 +47,7 @@ interface RefreshResult {
  * Refresh a single TrueLayer connection: refresh token → fetch transactions + balances.
  * Returns updated data or null on failure.
  */
-async function refreshConnection(bankRow: BankRow, clientId: string, clientSecret: string, admin: SupabaseClient): Promise<RefreshResult> {
+async function refreshConnection(bankRow: BankRow, clientId: string, clientSecret: string, admin: SupabaseClient, lastSyncDate: string | null): Promise<RefreshResult> {
   let newRefreshToken: string | null = null;
   try {
     const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
@@ -98,9 +99,14 @@ async function refreshConnection(bankRow: BankRow, clientId: string, clientSecre
     const toDate = new Date();
     toDate.setDate(toDate.getDate() + 1);
     const to = toDate.toISOString().split('T')[0];
+    // Fetch from last successful sync date to avoid gaps. Fall back to 1 month
+    // if no sync date is recorded (e.g. legacy rows before this column existed).
     const fromDate = new Date();
-    // Re-syncs fetch 1 month of data (incremental). Initial 12-month pull is in callback.ts.
-    fromDate.setMonth(fromDate.getMonth() - 1);
+    if (lastSyncDate) {
+      fromDate.setTime(new Date(lastSyncDate).getTime());
+    } else {
+      fromDate.setMonth(fromDate.getMonth() - 1);
+    }
     const from = fromDate.toISOString().split('T')[0];
 
     const txPromises = [
@@ -212,7 +218,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Get all TrueLayer connections with valid refresh tokens
     const { data: bankRows, error: fetchErr } = await admin
       .from('bank_data')
-      .select('id, connection_id, refresh_token, user_id, provider_name, created_at, updated_at, csv_data')
+      .select('id, connection_id, refresh_token, user_id, provider_name, created_at, updated_at, csv_data, last_successful_sync_date')
       .eq('source', 'truelayer')
       .not('refresh_token', 'is', null)
       .order('updated_at', { ascending: true }); // Oldest first — prioritize stale data
@@ -230,15 +236,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const batchResults = await Promise.all(
         batch.map(async (row) => {
-          // Skip connections past the 90-day consent window — they need manual re-auth
-          const created = new Date(row.created_at || row.updated_at);
-          const expiry = new Date(created);
-          expiry.setDate(expiry.getDate() + 90);
-          if (Date.now() >= expiry.getTime()) {
-            return { row, result: { success: false, expired: true } as RefreshResult };
-          }
-
-          const result = await refreshConnection(row, clientId, clientSecret, admin);
+          // Don't pre-calculate 90-day expiry — let TrueLayer's token refresh
+          // response determine if consent has actually expired (400 invalid_grant).
+          // The FCA changed rules in 2022: UK banks issue long-lived tokens and
+          // only require consent reconfirmation, not re-authentication.
+          const result = await refreshConnection(row, clientId, clientSecret, admin, row.last_successful_sync_date);
           return { row, result };
         })
       );
@@ -260,21 +262,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Guard: never overwrite stored CSV with empty data.
         const updateFields: Record<string, unknown> = {
           updated_at: new Date().toISOString(),
+          last_successful_sync_date: new Date().toISOString().split('T')[0],
         };
         if (result.csvLines && result.csvLines.length > 0) {
           // Merge new transactions with existing stored CSV (incremental sync).
+          // Uses count-based dedup: if the same transaction key appears N times in
+          // existing data and M times in fresh data, keep max(N, M). This preserves
+          // legitimate duplicate transactions (e.g. two identical coffees same day)
+          // while preventing inflation from re-fetching the same period.
+          const normalise = (line: string) => line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
+          const countByKey = (lines: string[]) => {
+            const counts = new Map<string, number>();
+            const lineByKey = new Map<string, string>();
+            for (const line of lines) {
+              const key = normalise(line);
+              counts.set(key, (counts.get(key) || 0) + 1);
+              if (!lineByKey.has(key)) lineByKey.set(key, line);
+            }
+            return { counts, lineByKey };
+          };
           const existingLines: string[] = [];
           if (row.csv_data) {
             const lines = row.csv_data.split('\n');
             existingLines.push(...lines.slice(1).filter((l: string) => l.trim()));
           }
-          const allLines = [...existingLines, ...result.csvLines];
-          const seen = new Set<string>();
+          const existing = countByKey(existingLines);
+          const fresh = countByKey(result.csvLines);
+          const allKeys = new Set([...existing.counts.keys(), ...fresh.counts.keys()]);
           const unique: string[] = [];
-          for (const line of allLines) {
-            const key = line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
-            if (!seen.has(key)) {
-              seen.add(key);
+          for (const key of allKeys) {
+            const maxCount = Math.max(existing.counts.get(key) || 0, fresh.counts.get(key) || 0);
+            const line = fresh.lineByKey.get(key) || existing.lineByKey.get(key)!;
+            for (let i = 0; i < maxCount; i++) {
               unique.push(line);
             }
           }

@@ -22,6 +22,7 @@ interface BankRow {
   provider_name: string | null;
   created_at: string;
   csv_data: string | null;
+  last_successful_sync_date: string | null;
 }
 
 interface SyncResult {
@@ -37,7 +38,7 @@ interface SyncResult {
 /**
  * Sync a single TrueLayer connection: refresh token → fetch transactions + balances.
  */
-async function syncConnection(bankRow: BankRow, clientId: string, clientSecret: string, admin: SupabaseClient): Promise<SyncResult | null> {
+async function syncConnection(bankRow: BankRow, clientId: string, clientSecret: string, admin: SupabaseClient, lastSyncDate: string | null): Promise<SyncResult | null> {
   let newRefreshToken: string | null = null;
   try {
     const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
@@ -96,9 +97,14 @@ async function syncConnection(bankRow: BankRow, clientId: string, clientSecret: 
     const providerName = accounts[0]?.provider?.display_name || cards[0]?.provider?.display_name || null;
 
     const to = new Date().toISOString().split('T')[0];
+    // Fetch from last successful sync date to avoid gaps. Fall back to 1 month
+    // if no sync date is recorded (e.g. legacy rows before this column existed).
     const fromDate = new Date();
-    // Re-syncs fetch 1 month of data (incremental). Initial 12-month pull is in callback.ts.
-    fromDate.setMonth(fromDate.getMonth() - 1);
+    if (lastSyncDate) {
+      fromDate.setTime(new Date(lastSyncDate).getTime());
+    } else {
+      fromDate.setMonth(fromDate.getMonth() - 1);
+    }
     const from = fromDate.toISOString().split('T')[0];
 
     const txPromises = [
@@ -209,8 +215,9 @@ async function syncConnection(bankRow: BankRow, clientId: string, clientSecret: 
   }
 }
 
-const CONSENT_DAYS = 90;
-const WARN_DAYS = 14;
+// CONSENT_DAYS / WARN_DAYS removed — FCA rule changes mean UK banks issue
+// long-lived tokens. Expiry is now determined by TrueLayer's actual token
+// refresh response, not a pre-calculated date.
 
 /**
  * POST /api/truelayer/sync
@@ -272,7 +279,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Find ALL TrueLayer connections for this user
     const { data: bankRows, error: findErr } = await admin
       .from('bank_data')
-      .select('id, connection_id, refresh_token, updated_at, provider_name, created_at, csv_data')
+      .select('id, connection_id, refresh_token, updated_at, provider_name, created_at, csv_data, last_successful_sync_date')
       .eq('user_id', userId)
       .eq('source', 'truelayer')
       .not('refresh_token', 'is', null)
@@ -284,7 +291,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Sync all connections in parallel
     const results = await Promise.all(
-      (bankRows as BankRow[]).map((row) => syncConnection(row, clientId, clientSecret, admin).then((r) => ({ row, result: r })))
+      (bankRows as BankRow[]).map((row) => syncConnection(row, clientId, clientSecret, admin, row.last_successful_sync_date).then((r) => ({ row, result: r })))
     );
 
     let mergedBalances: Array<{ name: string; type: string; balance: number; limit: number | null; available: number | null }> = [];
@@ -293,15 +300,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const expiredConnections: Array<{ connection_id: string; provider_name: string | null }> = [];
 
     for (const { row, result } of results) {
-      if (!result || result.tokenOnlyRecovery) {
-        const created = new Date(row.created_at);
-        if (!created || isNaN(created.getTime())) continue;
-        const expiry = new Date(created);
-        expiry.setDate(expiry.getDate() + CONSENT_DAYS);
-        if (Date.now() >= expiry.getTime()) {
-          const name = row.provider_name || result?.providerName || null;
-          expiredConnections.push({ connection_id: row.connection_id, provider_name: name });
-        }
+      if (!result) {
+        // Token refresh was rejected by TrueLayer (400 invalid_grant) — consent truly expired.
+        expiredConnections.push({ connection_id: row.connection_id, provider_name: row.provider_name });
+        continue;
+      }
+      if (result.tokenOnlyRecovery) {
+        // Token refreshed OK but data fetch failed (e.g. 403, 429, timeout).
+        // Connection is alive — don't mark as expired. Data will be fetched next sync.
         continue;
       }
 
@@ -311,6 +317,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const updateFields: Record<string, unknown> = {
         updated_at: new Date().toISOString(),
+        last_successful_sync_date: new Date().toISOString().split('T')[0],
       };
       if (result.csvLines.length > 0) {
         const existingLines: string[] = [];
@@ -392,21 +399,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const mergedCsv = ['Date,Description,Amount', ...uniqueLines].join('\n');
 
-    // Check for connections approaching 90-day consent expiry
+    // Note: We no longer pre-calculate 90-day consent expiry from created_at.
+    // The FCA changed rules in 2022 — UK banks issue long-lived tokens and only
+    // require consent reconfirmation, not re-authentication. Expiry is determined
+    // by TrueLayer's actual token refresh response (400 invalid_grant).
     const expiringConnections: Array<{ provider_name: string | null; days_left: number }> = [];
-    for (const row of bankRows as BankRow[]) {
-      const created = new Date(row.created_at);
-      if (!created || isNaN(created.getTime())) continue;
-      const expiry = new Date(created);
-      expiry.setDate(expiry.getDate() + CONSENT_DAYS);
-      const daysLeft = Math.ceil((expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-      if (daysLeft <= WARN_DAYS && daysLeft > 0) {
-        expiringConnections.push({
-          provider_name: row.provider_name || null,
-          days_left: daysLeft,
-        });
-      }
-    }
 
     console.log(`[sync] Synced ${syncedCount}/${bankRows.length} connections, ${totalTx} transactions, ${mergedBalances.length} balance(s)`);
 

@@ -241,12 +241,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : cards.length > 0 && accounts.length === 0 ? 'credit'
       : accounts.length > 0 ? 'bank' : null;
 
-    // Insert bank data row with all available fields
+    // Insert bank data row with all available fields.
+    // Set last_successful_sync_date to the start of the fetched range so
+    // subsequent incremental syncs know where to pick up from.
     const insertRow: Record<string, unknown> = {
       connection_id: connectionId,
       csv_data: csv,
       source: 'truelayer',
       refresh_token: tokenData.refresh_token || null,
+      last_successful_sync_date: from,
     };
     if (postUserId) insertRow.user_id = postUserId;
     if (providerName) insertRow.provider_name = providerName;
