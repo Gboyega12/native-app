@@ -253,7 +253,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // response determine if consent has actually expired (400 invalid_grant).
           // The FCA changed rules in 2022: UK banks issue long-lived tokens and
           // only require consent reconfirmation, not re-authentication.
-          const result = await refreshConnection(row, clientId, clientSecret, admin, row.last_successful_sync_date);
+          const result = await refreshConnection(row, clientId, clientSecret, admin, row.last_successful_sync_date ?? null);
           return { row, result };
         })
       );

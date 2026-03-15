@@ -305,7 +305,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Sync all connections in parallel
     const results = await Promise.all(
-      (bankRows as BankRow[]).map((row) => syncConnection(row, clientId, clientSecret, admin, row.last_successful_sync_date).then((r) => ({ row, result: r })))
+      (bankRows as BankRow[]).map((row) => syncConnection(row, clientId, clientSecret, admin, row.last_successful_sync_date ?? null).then((r) => ({ row, result: r })))
     );
 
     let mergedBalances: Array<{ name: string; type: string; balance: number; limit: number | null; available: number | null }> = [];
