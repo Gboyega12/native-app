@@ -103,7 +103,27 @@
 
 ---
 
-## CURRENT SPRINT: Categorisation Banner + Scroll Fix (2026-03-15)
+## CURRENT SPRINT: Fix refresh redirect to connect page (2026-03-15)
+
+### Problem
+On refresh, `app/index.tsx` unconditionally redirects to `/(auth)/sign-in`, forcing every authenticated user through the `session && inAuth` re-routing logic in `AuthGate`. This async DB query cascade is fragile — any query failure silently routes to `/(main)/connect` instead of the dashboard.
+
+### Step 1: Change `app/index.tsx` — loading screen instead of blind redirect
+- [ ] Remove `<Redirect href="/(auth)/sign-in" />`
+- [ ] Render a loading view (matching splash bg) while AuthGate determines the route
+- [ ] Keep TrueLayer OAuth param detection as-is
+
+### Step 2: Update `AuthGate` routing in `app/_layout.tsx`
+- [ ] Change `session && inAuth` condition to `session && !inMain` so authenticated users at root index get routed correctly
+- [ ] Fix catch fallback at line 145: `/(main)/connect` → `/(main)/(tabs)` (if identity exists, dashboard is safer than re-onboarding)
+
+### Files
+- `app/index.tsx`
+- `app/_layout.tsx`
+
+---
+
+## PREVIOUS SPRINT: Categorisation Banner + Scroll Fix (2026-03-15)
 
 ### Bug 1: Categorisation banner reappears after saving
 
