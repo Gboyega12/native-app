@@ -84,6 +84,7 @@ export default function Home() {
   const syncRetryRef = useRef<number>(0);
   const overridesSavedAt = useRef<number>(0); // Timestamp of last override save — syncs started before this are rejected
   const overriddenMerchants = useRef<Set<string>>(new Set()); // Merchant keys categorised by user — reject sync results that still show these in "Other"
+  const [savedOverrideKeys, setSavedOverrideKeys] = useState<Set<string>>(new Set()); // Persisted override match_descriptions from Supabase — used to filter unresolvedGroups
   const [retriesExhausted, setRetriesExhausted] = useState(false);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);
@@ -539,6 +540,10 @@ export default function Home() {
       if (!tx) continue;
       const raw = tx.merchant || tx.description || '';
       const normalized = normalizeMerchant(raw);
+      // Skip merchants that already have a persisted override — they were already
+      // categorised by the user. This prevents the review modal from repopulating
+      // with the same items after a sync overwrites the optimistic analysis state.
+      if (savedOverrideKeys.has(normalized)) continue;
       if (!groups.has(normalized)) groups.set(normalized, { key: normalized, label: raw, merchants: [], txs: [], total: 0 });
       const g = groups.get(normalized)!;
       if (!g.merchants.includes(raw)) g.merchants.push(raw);
@@ -546,7 +551,7 @@ export default function Home() {
       g.total += Math.abs(tx.amount ?? 0);
     }
     return Array.from(groups.values()).sort((a, b) => b.total - a.total);
-  }, [analysis]);
+  }, [analysis, savedOverrideKeys]);
 
   const unresolvedTxCount = useMemo(
     () => unresolvedGroups.reduce((sum, g) => sum + g.txs.length, 0),
@@ -765,12 +770,19 @@ export default function Home() {
 
       // Track which merchants were just categorised so we can reject stale sync results
       // that still show them in "Other". This is more robust than the timestamp guard alone.
-      for (const matchKey of catKeys) {
-        const group = unresolvedGroups.find(g => g.key === matchKey);
-        for (const m of (group?.merchants || [matchKey])) {
-          overriddenMerchants.current.add(normalizeMerchant(m));
+      // Also update savedOverrideKeys so unresolvedGroups filters them immediately.
+      setSavedOverrideKeys((prev) => {
+        const next = new Set(prev);
+        for (const matchKey of catKeys) {
+          const group = unresolvedGroups.find(g => g.key === matchKey);
+          for (const m of (group?.merchants || [matchKey])) {
+            const key = normalizeMerchant(m);
+            overriddenMerchants.current.add(key);
+            next.add(key);
+          }
         }
-      }
+        return next;
+      });
 
       // Re-sync so the enrichment engine re-runs with the new overrides.
       // The persisted optimistic state above protects against refresh in the meantime.
@@ -859,7 +871,9 @@ export default function Home() {
 
         // Track recategorised merchant so stale sync results are rejected
         const matchDesc = recatTx.tx.merchant || recatTx.tx.description;
-        overriddenMerchants.current.add(normalizeMerchant(matchDesc));
+        const normalizedKey = normalizeMerchant(matchDesc);
+        overriddenMerchants.current.add(normalizedKey);
+        setSavedOverrideKeys((prev) => new Set(prev).add(normalizedKey));
 
         overridesSavedAt.current = Date.now();
         AsyncStorage.setItem('overrides_saved_at', String(overridesSavedAt.current)).catch(() => {});
@@ -1116,6 +1130,19 @@ export default function Home() {
       // This single call replaces the 6+ independent Supabase queries that were here.
       // The snapshot gives us immediate access to fresh data (React state may not be updated yet).
       const snapshot = await appData.refresh();
+
+      // Load persisted transaction overrides so unresolvedGroups can exclude
+      // merchants the user has already categorised (survives app restarts).
+      try {
+        const { data: overrides } = await supabase
+          .from('transaction_overrides')
+          .select('match_description')
+          .eq('user_id', user.id);
+        if (overrides && overrides.length > 0) {
+          const keys = new Set(overrides.map((o: { match_description: string }) => normalizeMerchant(o.match_description)));
+          setSavedOverrideKeys(keys);
+        }
+      } catch {}
 
       // Use fresh budget adjustments for mergeAdjustments
       const adjustments = snapshot.budgetAdjustments;
@@ -3157,57 +3184,41 @@ export default function Home() {
                   <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
                     TRANSACTIONS
                   </Text>
-                  <FlatList
-                    data={[
-                      ...periodNonDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'essential' as const, colorKey: 'text' as const })),
-                      ...periodDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'lifestyle' as const, colorKey: 'dim' as const })),
-                    ]}
-                    keyExtractor={(item, i) => `${item.section}-${item.category}-${i}`}
-                    scrollEnabled={false}
-                    initialNumToRender={8}
-                    maxToRenderPerBatch={5}
-                    windowSize={3}
-                    renderItem={({ item }) => {
-                      const key = `${item.section === 'essential' ? 'nd' : 'd'}-${item.category}`;
-                      const isExp = expandedCategories.has(key);
-                      const accentColor = item.colorKey === 'text' ? colors.text : colors.dim;
-                      return (
-                        <View>
-                          <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
-                            <View style={s.dataRowLeft}>
-                              <Text style={[s.catArrow, { color: accentColor }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
-                              <Text style={s.dataLabel}>{item.category}</Text>
+                  {[
+                    ...periodNonDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'essential' as const, colorKey: 'text' as const })),
+                    ...periodDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'lifestyle' as const, colorKey: 'dim' as const })),
+                  ].map((item, i) => {
+                    const key = `${item.section === 'essential' ? 'nd' : 'd'}-${item.category}`;
+                    const isExp = expandedCategories.has(key);
+                    const accentColor = item.colorKey === 'text' ? colors.text : colors.dim;
+                    return (
+                      <View key={`${item.section}-${item.category}-${i}`}>
+                        <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
+                          <View style={s.dataRowLeft}>
+                            <Text style={[s.catArrow, { color: accentColor }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
+                            <Text style={s.dataLabel}>{item.category}</Text>
+                          </View>
+                          <Text style={[s.dataValue, { color: accentColor }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
+                        </TouchableOpacity>
+                        {isExp && (
+                          <>
+                            <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
+                              <ExpandDots count={4} size={2} />
                             </View>
-                            <Text style={[s.dataValue, { color: accentColor }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
-                          </TouchableOpacity>
-                          {isExp && (
-                            <>
-                              <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
-                                <ExpandDots count={4} size={2} />
-                              </View>
-                              <FlatList
-                                data={item.txs}
-                                keyExtractor={(tx, j) => `${key}-tx-${j}`}
-                                scrollEnabled={false}
-                                initialNumToRender={10}
-                                maxToRenderPerBatch={10}
-                                windowSize={3}
-                                renderItem={({ item: tx }) => (
-                                  <TouchableOpacity style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: item.section }); setRecatTarget(''); setRecatEssential(item.section === 'essential'); }} activeOpacity={0.7}>
-                                    <View style={s.txLeft}>
-                                      <Text style={s.txMerchant}>{tx.merchant}</Text>
-                                      <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                                    </View>
-                                    <Text style={[s.txAmount, { color: item.colorKey === 'text' ? colors.text2 : colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
-                                  </TouchableOpacity>
-                                )}
-                              />
-                            </>
-                          )}
-                        </View>
-                      );
-                    }}
-                  />
+                            {item.txs.map((tx: any, j: number) => (
+                              <TouchableOpacity key={`${key}-tx-${j}`} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: item.section }); setRecatTarget(''); setRecatEssential(item.section === 'essential'); }} activeOpacity={0.7}>
+                                <View style={s.txLeft}>
+                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
+                                  <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                                </View>
+                                <Text style={[s.txAmount, { color: item.colorKey === 'text' ? colors.text2 : colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </>
+                        )}
+                      </View>
+                    );
+                  })}
                   <Text style={s.cardFooter}>Hold a transaction to re-categorise</Text>
                 </View>
               </Card>
