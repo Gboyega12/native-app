@@ -49,9 +49,19 @@ if (typeof window !== 'undefined') {
 function AuthGate({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
-  const routedForSession = useRef<string | null>(null);
   const router = useRouter();
   const segments = useSegments();
+
+  // Persist routing cache in sessionStorage so it survives page refreshes
+  // (useRef resets on remount, causing unnecessary DB queries + wrong redirects).
+  const ROUTED_KEY = '_routedForSession';
+  const getRouted = () =>
+    typeof window !== 'undefined' ? sessionStorage.getItem(ROUTED_KEY) : null;
+  const setRouted = (id: string | null) => {
+    if (typeof window === 'undefined') return;
+    if (id) sessionStorage.setItem(ROUTED_KEY, id);
+    else sessionStorage.removeItem(ROUTED_KEY);
+  };
 
   useEffect(() => {
     let subscription: { unsubscribe: () => void } | null = null;
@@ -103,7 +113,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (session && pendingSignals.oauth) {
       const { code, state } = pendingSignals.oauth;
       pendingSignals.oauth = null; // consume so it doesn't fire again
-      routedForSession.current = session.user.id;
+      setRouted(session.user.id);
       router.replace({ pathname: '/(main)/connect', params: { code, state } });
       return;
     }
@@ -113,7 +123,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (pendingSignals.bankCallback) {
       if (session) {
         pendingSignals.bankCallback = false; // session restored, connect screen is handling it
-        routedForSession.current = session.user.id;
+        setRouted(session.user.id);
       }
       // Whether session is null (restoring) or present, don't interfere —
       // connect is already mounted with connection_id + status in the URL.
@@ -121,7 +131,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     if (!session && !inAuth) {
-      routedForSession.current = null;
+      setRouted(null);
       router.replace('/(auth)/splash');
     } else if (session) {
       // Onboarding screens the user progresses through sequentially.
@@ -134,12 +144,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       // Once we've evaluated and routed for this session, don't re-run the
       // DB queries on every segment change (e.g. switching tabs). Reset on
       // session change (login/logout).
-      if (routedForSession.current === session.user.id) return;
+      if (getRouted() === session.user.id) return;
 
       // Route to the correct onboarding step (or dashboard) based on DB state.
       const name = session.user.user_metadata?.full_name;
       if (!name) {
-        routedForSession.current = session.user.id;
+        setRouted(session.user.id);
         router.replace('/(main)/welcome');
       } else {
         void (async () => {
@@ -158,21 +168,21 @@ function AuthGate({ children }: { children: React.ReactNode }) {
                   .eq('user_id', session.user.id)
                   .order('created_at', { ascending: false })
                   .limit(1);
-                routedForSession.current = session.user.id;
+                setRouted(session.user.id);
                 router.replace(rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect');
               } catch {
                 // Transient DB error — let dashboard handle missing data
-                routedForSession.current = session.user.id;
+                setRouted(session.user.id);
                 router.replace('/(main)/(tabs)');
               }
             } else {
               // No identity yet — start education flow
-              routedForSession.current = session.user.id;
+              setRouted(session.user.id);
               router.replace('/(main)/education');
             }
           } catch {
             // Query failed — fall back to education flow
-            routedForSession.current = session.user.id;
+            setRouted(session.user.id);
             router.replace('/(main)/education');
           }
         })();
