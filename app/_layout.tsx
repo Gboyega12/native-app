@@ -143,7 +143,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
                   .limit(1);
                 router.replace(rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect');
               } catch {
-                router.replace('/(main)/connect');
+                // Don't block the user on transient DB errors — let home
+                // screen handle missing data gracefully.
+                router.replace('/(main)/(tabs)');
               }
             } else {
               // No identity yet — start education flow
