@@ -6,30 +6,27 @@ import { useRouter } from 'expo-router';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { hapticTick } from '@/lib/haptics';
 import { colors, fonts, spacing, radius } from '@/theme';
-import { BocyFace, MockupDashboard, MockupMoves, MockupChat } from '@/components/Bocy';
+import { MockupDashboard, MockupMoves, MockupChat } from '@/components/Bocy';
 
 const SLIDES = [
   {
     mockup: 'dashboard' as const,
     title: "This isn't a\nbudgeting app",
-    body: "Bocy looks at your whole financial picture and finds the smartest thing to do with your money right now.",
+    body: "Your whole picture.\nOne smart move.",
     accent: colors.accent,
-    mood: 'neutral' as const,
   },
   {
     mockup: 'moves' as const,
     title: 'One step at\na time',
-    body: "Bocy spots what's costing you money, then walks you through fixing it. Biggest wins first.",
+    body: "Biggest wins first.\nStep by step.",
     accent: colors.text2,
-    mood: 'thinking' as const,
   },
   {
     mockup: 'chat' as const,
     title: 'Built around\nyour life',
-    body: "Freelancer, parent, or just starting out. Bocy adapts to your life and plans around it.",
+    body: "Adapts to your life.\nAlways learning.",
     cta: "Let's get to know you",
     accent: colors.green,
-    mood: 'happy' as const,
   },
 ];
 
@@ -101,12 +98,10 @@ export default function Education() {
           {SLIDES.map((slide, idx) => (
             <View key={idx} style={[styles.slideWrap, { width: containerWidth }]}>
               <View style={styles.content}>
-                {/* Bocy character */}
-                <View style={styles.bocyHero}>
-                  <BocyFace mood={slide.mood} size="md" breathing />
-                </View>
+                {/* Title — top, establishes context */}
+                <Text style={styles.title}>{slide.title}</Text>
 
-                {/* Mockup card with scroll parallax */}
+                {/* Mockup hero with scroll parallax */}
                 <Animated.View style={[
                   styles.mockupWrap,
                   containerWidth > 0 ? {
@@ -129,10 +124,7 @@ export default function Education() {
                   {slide.mockup === 'chat' && <MockupChat />}
                 </Animated.View>
 
-                {/* Title */}
-                <Text style={styles.title}>{slide.title}</Text>
-
-                {/* Body */}
+                {/* Subtitle — punchy one-liner */}
                 {slide.body && <Text style={styles.body}>{slide.body}</Text>}
               </View>
             </View>
@@ -222,14 +214,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  bocyHero: {
-    marginBottom: spacing.md,
-    alignItems: 'center',
+    paddingTop: spacing.xxl,
   },
   mockupWrap: {
     alignItems: 'center',
-    marginBottom: spacing.lg,
+    marginTop: spacing.xl,
+    marginBottom: spacing.xl,
   },
   title: {
     fontFamily: fonts.heading,
@@ -238,16 +228,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 38,
     letterSpacing: -0.3,
-    marginBottom: spacing.md,
   },
   body: {
-    fontFamily: fonts.regular,
-    fontSize: 16,
+    fontFamily: fonts.medium,
+    fontSize: 17,
     color: colors.text2,
     textAlign: 'center',
-    lineHeight: 26,
+    lineHeight: 28,
     maxWidth: 480,
-    paddingHorizontal: spacing.sm,
   },
   bottomArea: {
     paddingBottom: spacing.xxl + spacing.sm,

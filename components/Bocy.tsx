@@ -527,7 +527,7 @@ export function MockupMoves() {
           opacity: anims[i],
           transform: [{ translateX: anims[i].interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }],
           borderLeftColor: m.hi ? colors.green : colors.accentDim,
-          marginTop: i > 0 ? 8 : 0,
+          marginTop: i > 0 ? 12 : 0,
         }]}>
           <View style={mockS.moveHeader}>
             <Text style={[mockS.moveRank, { color: m.hi ? colors.green : colors.dim }]}>{m.rank}</Text>
@@ -542,35 +542,49 @@ export function MockupMoves() {
 
 export function MockupChat() {
   const { colors } = useTheme();
-  const faceAnim = useRef(new Animated.Value(0)).current;
-  const bubbleAnim = useRef(new Animated.Value(0)).current;
+  const anims = useRef(Array.from({ length: 3 }, () => new Animated.Value(0))).current;
 
   useEffect(() => {
-    Animated.sequence([
-      Animated.timing(faceAnim, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(bubbleAnim, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-    ]).start();
+    Animated.stagger(200, anims.map(a =>
+      Animated.timing(a, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    )).start();
   }, []);
 
   return (
     <View style={[mockS.card, { backgroundColor: colors.surface }]}>
-      <Animated.View style={{ opacity: faceAnim, alignItems: 'flex-start', marginBottom: 8 }}>
-        <BocyFace mood="thinking" size="sm" breathing={false} />
-      </Animated.View>
-      <Animated.View style={[mockS.bubble, {
-        borderColor: colors.green + '40',
-        opacity: bubbleAnim,
-        transform: [{ translateY: bubbleAnim.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+      {/* User message */}
+      <Animated.View style={[mockS.chatRow, mockS.chatRowUser, {
+        opacity: anims[0],
+        transform: [{ translateY: anims[0].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
       }]}>
-        <Text style={[mockS.bubbleLine, { color: colors.text }]}>
-          {'Debt free by '}
-          <Text style={{ color: colors.green }}>Nov \u201927</Text>
-        </Text>
-        <Text style={[mockS.bubbleLine, { color: colors.text2, marginTop: 2 }]}>
-          {'if you redirect '}
-          <Text style={{ color: colors.green }}>£180/mo</Text>
-        </Text>
-        <Text style={[mockS.bubbleLine, { color: colors.dim, marginTop: 4, fontSize: 9 }]}>
+        <View style={[mockS.chatBubbleUser, { backgroundColor: colors.accent }]}>
+          <Text style={[mockS.bubbleLine, { color: colors.bg }]}>When will I be debt free?</Text>
+        </View>
+      </Animated.View>
+
+      {/* Response bubble */}
+      <Animated.View style={[mockS.chatRow, {
+        opacity: anims[1],
+        transform: [{ translateY: anims[1].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+      }]}>
+        <View style={[mockS.bubble, { borderColor: colors.green + '40' }]}>
+          <Text style={[mockS.bubbleLine, { color: colors.text }]}>
+            {'Debt free by '}
+            <Text style={{ color: colors.green }}>Nov \u201927</Text>
+          </Text>
+          <Text style={[mockS.bubbleLine, { color: colors.text2, marginTop: 3 }]}>
+            {'if you redirect '}
+            <Text style={{ color: colors.green }}>£180/mo</Text>
+          </Text>
+        </View>
+      </Animated.View>
+
+      {/* Detail line */}
+      <Animated.View style={[mockS.chatRow, {
+        opacity: anims[2],
+        transform: [{ translateY: anims[2].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+      }]}>
+        <Text style={[mockS.bubbleLine, { color: colors.dim, fontSize: 10 }]}>
           {'Income varies \u00B123% \u2192 buffer built in'}
         </Text>
       </Animated.View>
@@ -580,24 +594,24 @@ export function MockupChat() {
 
 const mockS = StyleSheet.create({
   card: {
-    borderRadius: radius.md,
-    padding: 14,
+    borderRadius: radius.lg,
+    padding: 20,
     width: '100%' as any,
-    maxWidth: 260,
+    maxWidth: 340,
   },
   headline: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   bigNum: {
     fontFamily: fonts.mono,
-    fontSize: 20,
+    fontSize: 26,
     letterSpacing: 0.5,
   },
   unit: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 12,
     letterSpacing: 1,
   },
   barRow: {
@@ -626,52 +640,64 @@ const mockS = StyleSheet.create({
     borderRadius: 1.5,
   },
   insightRow: {
-    marginTop: 6,
+    marginTop: 8,
   },
   insightLabel: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 12,
     letterSpacing: 0.3,
   },
   insightHighlight: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 12,
     letterSpacing: 0.3,
   },
   moveRow: {
-    borderLeftWidth: 2,
-    paddingLeft: 10,
+    borderLeftWidth: 3,
+    paddingLeft: 12,
   },
   moveHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
   moveRank: {
     fontFamily: fonts.mono,
-    fontSize: 10,
+    fontSize: 12,
     letterSpacing: 1,
   },
   moveAction: {
     fontFamily: fonts.medium,
-    fontSize: 11,
+    fontSize: 13,
     flex: 1,
   },
   moveMath: {
     fontFamily: fonts.mono,
-    fontSize: 9,
+    fontSize: 11,
     letterSpacing: 0.5,
-    marginTop: 2,
+    marginTop: 3,
+  },
+  chatRow: {
+    marginTop: 10,
+  },
+  chatRowUser: {
+    alignItems: 'flex-end',
+    marginTop: 0,
+  },
+  chatBubbleUser: {
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
   },
   bubble: {
     borderWidth: 1,
-    borderRadius: 10,
-    padding: 10,
+    borderRadius: 12,
+    padding: 14,
   },
   bubbleLine: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    lineHeight: 15,
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
 
