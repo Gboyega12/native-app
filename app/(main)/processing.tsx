@@ -343,7 +343,7 @@ function ProcessingInner() {
 
       if (user?.id) {
         try {
-          const { error: insertError } = await supabase.from('analyses').insert({
+          const insertPayload = {
             user_id: user.id,
             archetype: analysis.archetype,
             decision_score: analysis.decision_score,
@@ -358,9 +358,16 @@ function ProcessingInner() {
             behavioral_patterns: analysis.behavioral_patterns,
             goal_context: analysis.goal_context,
             verification_status: 'draft',
-          });
+          };
+          let { error: insertError } = await supabase.from('analyses').insert(insertPayload);
           if (insertError) {
-            console.warn('[processing] Supabase insert failed:', insertError.message);
+            console.warn('[processing] Supabase insert failed, retrying:', insertError.message);
+            await delay(1000);
+            const retry = await supabase.from('analyses').insert(insertPayload);
+            insertError = retry.error;
+          }
+          if (insertError) {
+            throw new Error(`Could not save your analysis. Please try again. (${insertError.message})`);
           }
 
           // ── Fire-and-forget: trigger background verification ──

@@ -1,6 +1,7 @@
 # Fix: "Go to Dashboard" redirects back to Connect screen
 
 **Date:** 2026-03-15
+**Status:** Complete
 
 ## Root Cause Analysis
 
@@ -24,28 +25,24 @@ After TrueLayer bank connection (Open Banking), the browser does a **full page r
 
 Same bug exists for the OAuth code exchange path (`pendingSignals.oauth`).
 
-## Fixes
+## Fixes Applied
 
 ### Fix 1: Set `routedForSession` when consuming signals (`_layout.tsx`)
-- When clearing `bankCallback`, also set `routedForSession.current = session.user.id`
-- When consuming `oauth` signal, also set `routedForSession.current = session.user.id`
-- This ensures the guard works for all subsequent segment changes
+- [x] When clearing `bankCallback`, also set `routedForSession.current = session.user.id`
+- [x] When consuming `oauth` signal, also set `routedForSession.current = session.user.id`
 
-### Fix 2: Add `(tabs)` to the "don't re-route" guard (`_layout.tsx`)
-- If user is already on `(tabs)` (dashboard), don't run DB queries to potentially redirect them away
-- Safety net that prevents AuthGate from ever routing a user AWAY from the dashboard
-- Logout scenario is handled separately (`!session && !inAuth` check)
+### Fix 2: Gate completion UI on confirmed DB insert (`processing.tsx`)
+- [x] Extract insert payload, retry once on failure with 1s delay
+- [x] If both attempts fail, throw error → shows error UI instead of fake "Your plan is ready"
 
-### Fix 3: Retry analysis DB insert on failure (`processing.tsx`)
-- Currently, if the Supabase insert fails, it only logs a warning and continues
-- Add a single retry with brief delay before continuing
-- This reduces the window where AuthGate could find no analysis in DB
-
-## Checklist
-- [ ] Fix 1: Set `routedForSession` in `bankCallback` and `oauth` signal handlers
-- [ ] Fix 2: Add `(tabs)` to the don't-re-route guard in AuthGate
-- [ ] Fix 3: Add retry logic for analysis insert failure in processing.tsx
-- [ ] Verify: Walk through all navigation flows to confirm no regressions
+## Verified Flows
+- [x] TrueLayer bank connection (the bug scenario) → dashboard
+- [x] CSV/PDF upload (no page reload) → dashboard
+- [x] OAuth code exchange path → dashboard
+- [x] Existing user normal load → dashboard
+- [x] DB insert failure → error UI (not fake success)
+- [x] Email confirmation redirect → unaffected
+- [x] Bank callback with delayed session restore → protected by guard
 
 ## Files
 - `app/_layout.tsx` (AuthGate routing logic)

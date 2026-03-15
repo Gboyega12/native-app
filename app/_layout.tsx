@@ -103,6 +103,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (session && pendingSignals.oauth) {
       const { code, state } = pendingSignals.oauth;
       pendingSignals.oauth = null; // consume so it doesn't fire again
+      routedForSession.current = session.user.id;
       router.replace({ pathname: '/(main)/connect', params: { code, state } });
       return;
     }
@@ -112,6 +113,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (pendingSignals.bankCallback) {
       if (session) {
         pendingSignals.bankCallback = false; // session restored, connect screen is handling it
+        routedForSession.current = session.user.id;
       }
       // Whether session is null (restoring) or present, don't interfere —
       // connect is already mounted with connection_id + status in the URL.
