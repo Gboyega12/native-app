@@ -49,6 +49,7 @@ if (typeof window !== 'undefined') {
 function AuthGate({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
+  const routedForSession = useRef<string | null>(null);
   const router = useRouter();
   const segments = useSegments();
 
@@ -118,13 +119,27 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     if (!session && !inAuth) {
+      routedForSession.current = null;
       router.replace('/(auth)/splash');
-    } else if (session && inAuth) {
+    } else if (session) {
+      // Onboarding screens the user progresses through sequentially.
+      // Don't re-route if they're already on one — let them continue.
+      const onboardingScreens = ['welcome', 'education', 'identity', 'connect', 'processing'];
+      const currentMain = segments[0] === '(main)' ? (segments as string[])[1] : null;
+      const onOnboarding = currentMain != null && onboardingScreens.includes(currentMain as string);
+      if (onOnboarding) return;
+
+      // Once we've evaluated and routed for this session, don't re-run the
+      // DB queries on every segment change (e.g. switching tabs). Reset on
+      // session change (login/logout).
+      if (routedForSession.current === session.user.id) return;
+
+      // Route to the correct onboarding step (or dashboard) based on DB state.
       const name = session.user.user_metadata?.full_name;
       if (!name) {
+        routedForSession.current = session.user.id;
         router.replace('/(main)/welcome');
       } else {
-        // Check if user has completed identity discovery
         void (async () => {
           try {
             const { data } = await supabase
@@ -141,18 +156,21 @@ function AuthGate({ children }: { children: React.ReactNode }) {
                   .eq('user_id', session.user.id)
                   .order('created_at', { ascending: false })
                   .limit(1);
+                routedForSession.current = session.user.id;
                 router.replace(rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect');
               } catch {
-                // Don't block the user on transient DB errors — let home
-                // screen handle missing data gracefully.
+                // Transient DB error — let dashboard handle missing data
+                routedForSession.current = session.user.id;
                 router.replace('/(main)/(tabs)');
               }
             } else {
               // No identity yet — start education flow
+              routedForSession.current = session.user.id;
               router.replace('/(main)/education');
             }
           } catch {
             // Query failed — fall back to education flow
+            routedForSession.current = session.user.id;
             router.replace('/(main)/education');
           }
         })();
