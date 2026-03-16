@@ -260,7 +260,7 @@ export default function Connect() {
     // Onboarding: single account connect → proceed straight to analysis
     clearConnectState();
     const source = _label === 'Bank account' ? 'bank' : 'csv';
-    router.push({ pathname: '/(main)/processing', params: { csvData, source } });
+    router.replace({ pathname: '/(main)/processing', params: { csvData, source } });
   };
 
   const handleTrueLayer = async () => {

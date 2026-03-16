@@ -96,7 +96,34 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       console.warn('[AuthGate] onAuthStateChange error:', e);
       setReady(true); // unblock the UI so it shows sign-in
     }
-    return () => subscription?.unsubscribe();
+
+    // Proactively refresh token when browser tab resumes from idle/background.
+    // After overnight idle, the JWT is expired. autoRefreshToken runs on an
+    // interval but doesn't fire immediately on tab resume — this prevents
+    // stale tokens from corrupting the routing DB queries.
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        supabase.auth.getSession().then(({ data: { session: s } }) => {
+          if (s) {
+            const expiresAt = s.expires_at ?? 0;
+            const nowSec = Math.floor(Date.now() / 1000);
+            if (expiresAt - nowSec < 120) {
+              supabase.auth.refreshSession().catch(() => {});
+            }
+          }
+        });
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    return () => {
+      subscription?.unsubscribe();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+    };
   }, []);
 
   // Register service worker + init analytics once session is available
@@ -171,6 +198,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
           const onTabs = (segments as string[])[1] === '(tabs)';
           if (onTabs && getRoutedDest() !== '/(main)/(tabs)') {
             setRouted(session.user.id, '/(main)/(tabs)');
+            // Backfill durable flag so future cold starts skip DB queries
+            if (typeof window !== 'undefined' && !localStorage.getItem('bocy_onboarding_done')) {
+              localStorage.setItem('bocy_onboarding_done', 'true');
+            }
           }
           return;
         }
@@ -178,6 +209,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         // to skip DB queries and route directly.
         const cachedDest = getRoutedDest();
         if (cachedDest) {
+          // Backfill durable flag when restoring a dashboard destination
+          if (cachedDest === '/(main)/(tabs)' && typeof window !== 'undefined' && !localStorage.getItem('bocy_onboarding_done')) {
+            localStorage.setItem('bocy_onboarding_done', 'true');
+          }
           router.replace(cachedDest as any);
           return;
         }
@@ -205,19 +240,26 @@ function AuthGate({ children }: { children: React.ReactNode }) {
               .eq('user_id', session.user.id)
               .maybeSingle();
             if (data) {
-              // Identity complete — check if they have an analysis
-              try {
-                const { data: rows } = await supabase
-                  .from('analyses')
-                  .select('id')
-                  .eq('user_id', session.user.id)
-                  .order('created_at', { ascending: false })
-                  .limit(1);
-                const dest = rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect';
-                setRouted(session.user.id, dest);
-                router.replace(dest);
-              } catch {
-                // Transient DB error — let dashboard handle missing data
+              // Identity exists — check analyses. Default to dashboard on
+              // any error or ambiguity. Only route to connect when the query
+              // SUCCEEDS and returns confirmed zero rows.
+              const { data: rows, error: analysisError } = await supabase
+                .from('analyses')
+                .select('id')
+                .eq('user_id', session.user.id)
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+              if (!analysisError && rows && rows.length === 0) {
+                // Confirmed zero analyses — route to connect
+                setRouted(session.user.id, '/(main)/connect');
+                router.replace('/(main)/connect');
+              } else {
+                // Has analyses OR query failed — go to dashboard
+                // Backfill durable flag so future cold starts skip DB queries
+                if (typeof window !== 'undefined' && rows && rows.length > 0) {
+                  localStorage.setItem('bocy_onboarding_done', 'true');
+                }
                 setRouted(session.user.id, '/(main)/(tabs)');
                 router.replace('/(main)/(tabs)');
               }
@@ -227,9 +269,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
               router.replace('/(main)/education');
             }
           } catch {
-            // Query failed — fall back to education flow
-            setRouted(session.user.id, '/(main)/education');
-            router.replace('/(main)/education');
+            // DB error — default to dashboard, never education/connect
+            setRouted(session.user.id, '/(main)/(tabs)');
+            router.replace('/(main)/(tabs)');
           }
         })();
       }
