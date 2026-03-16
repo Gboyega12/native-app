@@ -616,11 +616,35 @@ export default function Home() {
     }
   }, [catAssignments]);
 
-  // Persist the current optimistic analysis state to Supabase so it survives page refreshes
+  // Persist the current optimistic analysis state to Supabase so it survives page refreshes.
+  // Strips budget adjustment synthetic transactions before saving so that
+  // mergeAdjustments() doesn't double-count them when the analysis is next loaded.
   const persistAnalysis = async (updatedAnalysis: Analysis) => {
     try {
       const uid = userIdRef.current;
       if (!uid) return;
+
+      // Strip budget-adjustment synthetic transactions (description ends with " (manual)")
+      // from the persisted copy. mergeAdjustments() re-adds them at display time.
+      const stripManualTxs = (section: any) => {
+        if (!section?.items || !Array.isArray(section.items)) return section;
+        const cleaned = { ...section, items: section.items.map((item: BudgetCategory) => {
+          const realTxs = (item.transactions || []).filter(
+            (tx: TransactionDetail) => !tx.description?.endsWith(' (manual)')
+          );
+          if (realTxs.length === item.transactions?.length) return item;
+          const realMonthly = realTxs.reduce((s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0);
+          return { ...item, transactions: realTxs, txs: realTxs.length, monthly: realMonthly };
+        }).filter((item: BudgetCategory) => item.txs > 0)};
+        cleaned.total = cleaned.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+        return cleaned;
+      };
+
+      const cleanNonDisc = stripManualTxs(updatedAnalysis.non_discretionary);
+      const cleanDisc = stripManualTxs(updatedAnalysis.discretionary);
+      const manualSpend = (updatedAnalysis.non_discretionary as any)?.total - cleanNonDisc.total
+        + (updatedAnalysis.discretionary as any)?.total - cleanDisc.total;
+
       const { data: latest } = await supabase.from('analyses')
         .select('id')
         .eq('user_id', uid)
@@ -629,10 +653,10 @@ export default function Home() {
         .maybeSingle();
       if (latest?.id) {
         await supabase.from('analyses').update({
-          non_discretionary: updatedAnalysis.non_discretionary,
-          discretionary: updatedAnalysis.discretionary,
-          monthly_spending: updatedAnalysis.monthly_spending,
-          surplus: updatedAnalysis.surplus,
+          non_discretionary: cleanNonDisc,
+          discretionary: cleanDisc,
+          monthly_spending: (updatedAnalysis.monthly_spending || 0) - manualSpend,
+          surplus: (updatedAnalysis.surplus || 0) + manualSpend,
           person_transfers: (updatedAnalysis as any).person_transfers ?? null,
         }).eq('id', latest.id);
       }
