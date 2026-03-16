@@ -511,6 +511,7 @@ const EnrichmentEngine = {
       //   annual: 340-400 days (annual subscriptions, TV licence)
       let frequency: RecurringItem['frequency'] = 'irregular';
       if (avgInterval >= 5 && avgInterval <= 10) frequency = 'weekly';
+      else if (avgInterval >= 12 && avgInterval <= 18) frequency = 'fortnightly';
       else if (avgInterval >= 25 && avgInterval <= 35) frequency = 'monthly';
       else if (avgInterval >= 80 && avgInterval <= 100) frequency = 'quarterly';
       else if (avgInterval >= 170 && avgInterval <= 200) frequency = 'semi_annual';
@@ -895,6 +896,7 @@ const EnrichmentEngine = {
         const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
 
         if (avgInterval >= 5 && avgInterval <= 10) frequency = 'weekly';
+        else if (avgInterval >= 12 && avgInterval <= 18) frequency = 'fortnightly';
         else if (avgInterval >= 25 && avgInterval <= 35) frequency = 'monthly';
         else if (avgInterval >= 80 && avgInterval <= 100) frequency = 'quarterly';
         else if (avgInterval >= 170 && avgInterval <= 200) frequency = 'semi_annual';

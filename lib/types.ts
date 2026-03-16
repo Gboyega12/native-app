@@ -36,7 +36,7 @@ export interface LearnedPattern {
 
 export interface RecurringItem {
   merchant: string;
-  frequency: 'weekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
+  frequency: 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
   averageAmount: number;
   category: string;
   isSubscription: boolean;
@@ -414,7 +414,7 @@ export interface VerifiedBill {
   /** Verified monthly amount (annualized from actual payments) */
   monthlyAmount: number;
   /** How often the bill is paid */
-  frequency: 'weekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
+  frequency: 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
   /** Last payment amount seen */
   lastPayment: number;
   /** Date of last payment */
