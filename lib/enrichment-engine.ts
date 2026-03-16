@@ -8,6 +8,7 @@ import { normaliseDescription } from './normalise.js';
 import { extractLearnedPatterns, matchLearnedPattern } from './learned-patterns.js';
 import { buildFrequencyMap, classifyByAmountHeuristic } from './amount-heuristics.js';
 import type { FrequencyMap } from './amount-heuristics.js';
+import { trainEnsemble, predictWithEnsemble, shouldAcceptPrediction } from './bayesian-ensemble.js';
 import type { LearnedPattern } from './types.js';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes.js';
 import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS, PLATFORM_FEES, DEFAULT_APR, defaultMinimumPayment } from './constants.js';
@@ -90,6 +91,29 @@ const EnrichmentEngine = {
     const frequencyMap = buildFrequencyMap(transactions);
     const learnedPatterns = overrides?.length ? extractLearnedPatterns(overrides) : [];
     const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides, learnedPatterns, frequencyMap));
+
+    // ── Pass 2: Bayesian Ensemble re-classification ──
+    // Train on confident Pass 1 results, then re-classify unresolved transactions.
+    const confidentTraining = enriched.filter(
+      (t) => t.confidence !== 'low' && t.category !== 'Other',
+    );
+    const ensemble = trainEnsemble(confidentTraining);
+    if (ensemble) {
+      for (let i = 0; i < enriched.length; i++) {
+        if (enriched[i].classifiedBy === 'default' && enriched[i].confidence === 'low') {
+          const prediction = predictWithEnsemble(ensemble, transactions[i], enriched);
+          if (prediction && shouldAcceptPrediction(prediction)) {
+            enriched[i] = {
+              ...enriched[i],
+              category: prediction.category,
+              isEssential: prediction.isEssential,
+              confidence: 'medium' as const,
+              classifiedBy: 'bayesian_ensemble' as const,
+            };
+          }
+        }
+      }
+    }
 
     // Reclassify credit card payoffs for full-payers.
     // Users who use credit cards for points and pay off in full each month
@@ -2682,6 +2706,7 @@ const EnrichmentEngine = {
       fuzzyMatch: enriched.filter((t) => t.classifiedBy === 'fuzzy_match').length,
       keyword: enriched.filter((t) => t.classifiedBy === 'keyword').length,
       amountHeuristic: enriched.filter((t) => t.classifiedBy === 'amount_heuristic').length,
+      bayesianEnsemble: enriched.filter((t) => t.classifiedBy === 'bayesian_ensemble').length,
       unresolved: enriched.filter((t) => t.classifiedBy === 'default' || !t.classifiedBy).length,
     };
 
