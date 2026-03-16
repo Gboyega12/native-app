@@ -18,14 +18,49 @@ export const config = { maxDuration: 30 };
 
 /**
  * Deduplicate CSV lines across multiple bank_data rows.
+ * Count-based: if the same key appears N times in one row and M times
+ * in another, we keep max(N, M) — not N+M — so cross-account duplicates
+ * are merged while legitimate same-day/same-amount transactions within
+ * one account are preserved.
  */
-function deduplicateCSVLines(csvLines: string[]): string[] {
+function deduplicateCSVLines(csvLines: string[], perRowLines?: string[][]): string[] {
+  const normalise = (l: string) => l.trim().toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ');
+
+  if (perRowLines && perRowLines.length > 0) {
+    const rowMaps = perRowLines.map((lines) => {
+      const counts = new Map<string, number>();
+      const ref = new Map<string, string>();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const key = normalise(trimmed);
+        counts.set(key, (counts.get(key) || 0) + 1);
+        if (!ref.has(key)) ref.set(key, trimmed);
+      }
+      return { counts, ref };
+    });
+    const allKeys = new Set<string>();
+    for (const { counts } of rowMaps) for (const k of counts.keys()) allKeys.add(k);
+    const unique: string[] = [];
+    for (const k of allKeys) {
+      let best = 0;
+      let line = '';
+      for (const { counts, ref } of rowMaps) {
+        const c = counts.get(k) || 0;
+        if (c > best) { best = c; line = ref.get(k) || line; }
+      }
+      for (let i = 0; i < best; i++) unique.push(line);
+    }
+    return unique;
+  }
+
+  // Fallback: simple Set-based dedup (single source)
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const line of csvLines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const key = trimmed.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ');
+    const key = normalise(trimmed);
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(trimmed);
@@ -87,12 +122,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const rawLines: string[] = [];
+    const perRowLines: string[][] = [];
     for (const row of bankRows) {
       if (!row.csv_data) continue;
-      const lines = (row.csv_data as string).split('\n');
-      rawLines.push(...lines.slice(1).filter((l: string) => l.trim()));
+      const lines = (row.csv_data as string).split('\n').slice(1).filter((l: string) => l.trim());
+      perRowLines.push(lines);
+      rawLines.push(...lines);
     }
-    const uniqueLines = deduplicateCSVLines(rawLines);
+    const uniqueLines = deduplicateCSVLines(rawLines, perRowLines);
     if (uniqueLines.length === 0) {
       return res.json({ success: false, reason: 'no_transactions' });
     }

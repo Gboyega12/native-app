@@ -102,7 +102,7 @@ const EnrichmentEngine = {
     const ensemble = trainEnsemble(confidentTraining);
     if (ensemble) {
       for (let i = 0; i < enriched.length; i++) {
-        if (enriched[i].classifiedBy === 'default' && enriched[i].confidence === 'low') {
+        if (enriched[i].classifiedBy === 'default' && enriched[i].confidence === 'low' && !enriched[i].isTransfer) {
           const prediction = predictWithEnsemble(ensemble, transactions[i], enriched);
           if (prediction && shouldAcceptPrediction(prediction)) {
             enriched[i] = {
@@ -414,9 +414,10 @@ const EnrichmentEngine = {
         confidence = 'high';
         classifiedBy = 'keyword';
       } else if (isPerson) {
-        // Inbound person transfer — uncategorised, let user decide
+        // Inbound person transfer — uncategorised, let user decide.
+        // Keep isPerson=true so isTransfer is set in the return value,
+        // preventing this credit from inflating income totals.
         category = 'Other';
-        isPerson = false;
       } else if (this._isInternationalTransfer(tx.description)) {
         // Inbound international transfer — NOT income
         category = 'Transfers';
@@ -451,9 +452,10 @@ const EnrichmentEngine = {
         isPerson = false;
         classifiedBy = 'keyword';
       } else if (isPerson) {
-        // Outbound person transfer — uncategorised, let user decide
+        // Outbound person transfer — uncategorised, let user decide.
+        // Keep isPerson=true so isTransfer is set in the return value,
+        // preventing this debit from inflating spending totals.
         category = 'Other';
-        isPerson = false;
       } else {
         // ── Amount/frequency heuristic ──
         // Last chance before default: check amount patterns and recurrence
@@ -597,9 +599,17 @@ const EnrichmentEngine = {
 
     const dates = recent.map((t) => new Date(t.date).getTime()).filter(Boolean);
     const span = dates.length >= 2
-      ? (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24 * 30)
+      ? (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24 * 30.44)
       : 1;
-    const months = Math.max(span, 1);
+    // Count distinct calendar months in the data — prevents the divisor from
+    // being too small when transactions cluster near month boundaries.
+    const calendarMonths = new Set(
+      recent.map((t) => {
+        const d = new Date(t.date);
+        return `${d.getFullYear()}-${d.getMonth()}`;
+      })
+    ).size;
+    const months = Math.max(span, calendarMonths, 1);
 
     const totalIncome = income.reduce((s, t) => s + t.amount, 0);
     const totalSpending = Math.abs(spending.reduce((s, t) => s + t.amount, 0));
@@ -691,19 +701,22 @@ const EnrichmentEngine = {
       // Known salary/employer/benefit keywords → always income
       if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
 
-      // Regular credits: require 3+ occurrences and minimum amount
+      // Regular credits: require 3+ occurrences, minimum amount, and low variability.
+      // High variability (CV > 0.5) suggests ad-hoc transfers, not real income.
       if (
         src.frequency !== 'irregular' &&
         src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount &&
-        src.count >= INCOME_THRESHOLDS.minRegularCount
+        src.count >= INCOME_THRESHOLDS.minRegularCount &&
+        src.variability <= 0.5
       ) return true;
 
-      // Large recurring credits: require 3+ with regular intervals
+      // Large recurring credits: require 3+ with regular intervals and low variability
       if (
         src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin &&
         src.count >= INCOME_THRESHOLDS.largeCreditMinCount &&
         src.avgInterval >= INCOME_THRESHOLDS.largeCreditIntervalMin &&
-        src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax
+        src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax &&
+        src.variability <= 0.5
       ) return true;
 
       // One-off large credits below windfall threshold with only 1-2 occurrences
