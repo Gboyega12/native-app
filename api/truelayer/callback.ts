@@ -85,9 +85,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Helper: for GET requests, redirect errors back to the app instead of returning JSON.
   const fail = (status: number, error: string, details?: string) => {
-    if (req.method === 'GET' && webOrigin) {
+    if (req.method === 'GET') {
       const errMsg = encodeURIComponent(details ? `${error}: ${details}` : error);
-      return res.redirect(302, `${webOrigin}/connect?status=error&error=${errMsg}`);
+      if (webOrigin) {
+        return res.redirect(302, `${webOrigin}/connect?status=error&error=${errMsg}`);
+      }
+      // Native app: redirect via deep link so the app can show the error
+      return res.redirect(302, `bocy://callback?status=error&error=${errMsg}`);
     }
     return res.status(status).json({ error, details });
   };

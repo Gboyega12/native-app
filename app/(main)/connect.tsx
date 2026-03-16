@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
-  Linking,
+  Linking, Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
@@ -276,7 +276,11 @@ export default function Connect() {
       const connectionId = `conn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       const authUrl = getTrueLayerAuthUrl(connectionId);
 
-      window.location.href = authUrl;
+      if (Platform.OS === 'web') {
+        window.location.href = authUrl;
+      } else {
+        await Linking.openURL(authUrl);
+      }
     } catch (err: any) {
       setLoading(false);
       setStatusMsg('');
