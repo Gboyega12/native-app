@@ -1,7 +1,7 @@
 # Fix: Browser refresh from homepage redirects to connect screen
 
 **Date:** 2026-03-15
-**Status:** In Progress
+**Status:** Complete
 
 ## Diagnosis
 
@@ -40,9 +40,9 @@ This is 1 file, ~10 line changes. No new dependencies. No behavioral change exce
 
 ## Tasks
 
-- [ ] Replace `routedForSession` ref with `sessionStorage` in `app/_layout.tsx`
-- [ ] Verify logout clears the storage (line 124 already sets null)
-- [ ] Commit and push
+- [x] Replace `routedForSession` ref with `sessionStorage` in `app/_layout.tsx`
+- [x] Verify logout clears the storage (line 144 calls `setRouted(null)`)
+- [x] Commit and push
 
 ---
 
