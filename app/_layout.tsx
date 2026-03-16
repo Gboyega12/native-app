@@ -180,7 +180,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     } else if (session) {
       // Onboarding screens the user progresses through sequentially.
       // Don't re-route if they're already on one — let them continue.
-      const onboardingScreens = ['welcome', 'education', 'identity', 'connect', 'processing'];
+      const onboardingScreens = ['welcome', 'education', 'identity', 'connect', 'processing', 'callback'];
       const currentMain = segments[0] === '(main)' ? (segments as string[])[1] : null;
       const onOnboarding = currentMain != null && onboardingScreens.includes(currentMain as string);
       if (onOnboarding) return;
