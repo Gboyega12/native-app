@@ -1,51 +1,51 @@
-# Fix: Browser refresh from homepage redirects to connect screen
+# Fix: Persistent routing & navigation issues
 
-**Date:** 2026-03-15
+**Date:** 2026-03-16
 **Status:** Complete
 
 ## Diagnosis
 
-**Symptom**: Refreshing the browser while on the homepage `/(main)/(tabs)` redirects to the connect account screen `/(main)/connect`.
+**Symptoms** (overnight idle):
+1. App reopens to connect bank screen instead of dashboard
+2. Back button walks through stale onboarding history (processing → dashboard)
 
-**Root cause** — `app/_layout.tsx`, `AuthGate` component:
+**Root causes** — three compounding bugs:
 
-`routedForSession` is a `useRef` (line 52). On a full page refresh, React unmounts and remounts the entire tree, resetting this ref to `null`. This triggers the full routing gauntlet:
+1. **Token refresh nukes routing cache**: `onAuthStateChange` ignored the `_event` param. Overnight token refresh fires a transient null session → `setRouted(null)` wipes cache → full DB reconstruction runs → fragile query chain routes to wrong screen.
 
-1. Session restores from `localStorage` via Supabase ✓
-2. `routedForSession.current` is `null` (ref reset) → routing logic re-runs
-3. Onboarding guard (line 129-132) checks `['welcome', 'education', 'identity', 'connect', 'processing']` — `(tabs)` is NOT in this list, so no protection
-4. Queries `user_identity` → succeeds
-5. Queries `analyses` → **returns empty or fails silently** (likely RLS race: the restored session token may not be ready for PostgREST yet)
-6. `rows.length === 0` → `router.replace('/(main)/connect')` ← **BUG**
+2. **No durable onboarding flag**: Every cache miss reconstructs onboarding state by querying 3 tables (`user_identity` → `analyses` → routing). Any failure defaults to an earlier onboarding step.
 
-**Why the previous fix didn't cover this**: The earlier fix (see history below) only set `routedForSession` during signal-consumption paths (TrueLayer callback, OAuth). A plain browser refresh has no pending signals, so that fix doesn't apply.
+3. **Navigation stack not cleared**: `router.replace()` in processing.tsx only replaces the top entry. Onboarding screens (welcome → education → identity → connect → processing) remain in back stack.
 
-**Why this is fundamentally a ref problem**: The routing cache needs to survive page refreshes. A React ref cannot do that. `sessionStorage` can.
+## Fix (3 parts)
 
-## Fix
+### 1. Use `_event` parameter in `onAuthStateChange`
+- Only clear routing cache + analytics on `SIGNED_OUT` event
+- Ignore transient null sessions from `TOKEN_REFRESHED` / `INITIAL_SESSION`
+- File: `app/_layout.tsx`
 
-**Replace `useRef` with `sessionStorage`** for `routedForSession`:
+### 2. Durable `bocy_onboarding_done` localStorage flag
+- Set in `processing.tsx` after analysis saves successfully
+- Checked in `_layout.tsx` routing — if flag exists + valid session → dashboard directly
+- Cleared on `SIGNED_OUT` so new login routes correctly
+- Files: `app/_layout.tsx`, `app/(main)/processing.tsx`
 
-- `sessionStorage.getItem('routedForSession')` replaces `routedForSession.current`
-- `sessionStorage.setItem('routedForSession', id)` replaces `routedForSession.current = id`
-- `sessionStorage.removeItem('routedForSession')` replaces `routedForSession.current = null`
-
-**Why `sessionStorage`**:
-- Survives page refreshes within the same tab ✓
-- Clears when tab/window closes (new tab → fresh routing) ✓
-- Different session ID on new login → routing runs correctly ✓
-- Logout sets it to null → next login routes correctly ✓
-
-This is 1 file, ~10 line changes. No new dependencies. No behavioral change except the bug fix.
+### 3. Reset navigation stack after processing
+- Use `CommonActions.reset()` instead of `router.replace()` in processing.tsx
+- Resets `(main)` stack to only contain `(tabs)` — no onboarding ghost entries
+- File: `app/(main)/processing.tsx`
 
 ## Tasks
 
-- [x] Replace `routedForSession` ref with `sessionStorage` in `app/_layout.tsx`
-- [x] Verify logout clears the storage (line 144 calls `setRouted(null)`)
+- [x] Fix 1: Use `_event` param, only clear cache on `SIGNED_OUT`
+- [x] Fix 2: Add `bocy_onboarding_done` localStorage flag
+- [x] Fix 3: Clear navigation stack with `CommonActions.reset()`
 - [x] Commit and push
 
 ---
 
 ## Previous Fix History
 
-**2026-03-15 (earlier)**: Fixed TrueLayer/OAuth callback flows not setting `routedForSession` after consuming signals. That fix was correct but only covered signal paths, not plain refresh.
+**2026-03-15**: Replaced `useRef` with `sessionStorage` for `routedForSession` to survive page refreshes. Added destination caching to skip DB queries on refresh.
+
+**2026-03-15 (earlier)**: Fixed TrueLayer/OAuth callback flows not setting `routedForSession` after consuming signals.

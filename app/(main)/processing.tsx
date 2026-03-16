@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { View, Text, Animated, StyleSheet, Easing, TouchableOpacity } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useNavigation } from 'expo-router';
+import { CommonActions } from '@react-navigation/native';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
@@ -95,7 +96,18 @@ const DotMatrix = () => {
 
 function ProcessingInner() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { csvData, source } = useLocalSearchParams<{ csvData: string; source?: string }>();
+
+  // Reset the (main) stack to only contain (tabs), clearing onboarding history
+  const goToDashboard = () => {
+    navigation.dispatch(
+      CommonActions.reset({
+        index: 0,
+        routes: [{ name: '(tabs)' }],
+      }),
+    );
+  };
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState('');
   const [enrichProgress, setEnrichProgress] = useState('');
@@ -370,6 +382,11 @@ function ProcessingInner() {
             throw new Error(`Could not save your analysis. Please try again. (${insertError.message})`);
           }
 
+          // Mark onboarding complete so cold starts skip DB reconstruction
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('bocy_onboarding_done', 'true');
+          }
+
           // ── Fire-and-forget: trigger background verification ──
           // Claude AI classify + refinement runs server-side without blocking the user.
           try {
@@ -572,7 +589,7 @@ function ProcessingInner() {
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity
           style={styles.insightButton}
-          onPress={() => router.replace('/(main)/(tabs)')}
+          onPress={goToDashboard}
           activeOpacity={0.8}
         >
           <Text style={styles.insightButtonText}>Go to dashboard</Text>
@@ -617,7 +634,7 @@ function ProcessingInner() {
 
         <TouchableOpacity
           style={styles.insightButton}
-          onPress={() => router.replace('/(main)/(tabs)')}
+          onPress={goToDashboard}
           activeOpacity={0.8}
         >
           <Text style={styles.insightButtonText}>Go to dashboard</Text>

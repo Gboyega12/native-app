@@ -76,10 +76,16 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let subscription: { unsubscribe: () => void } | null = null;
     try {
-      const { data } = supabase.auth.onAuthStateChange((_event, sess) => {
-        if (!sess && session) {
+      const { data } = supabase.auth.onAuthStateChange((event, sess) => {
+        // Only clear analytics/routing on explicit sign-out — not on transient
+        // null sessions from TOKEN_REFRESHED or INITIAL_SESSION events.
+        if (event === 'SIGNED_OUT') {
           resetMixpanel();
           clearSentryUser();
+          setRouted(null);
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('bocy_onboarding_done');
+          }
         }
         if (sess?.user) setSentryUser(sess.user.id, sess.user.email);
         setSession(sess);
@@ -141,7 +147,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     if (!session && !inAuth) {
-      setRouted(null);
+      // Cache is cleared in onAuthStateChange SIGNED_OUT handler above.
+      // Don't clear here — transient null sessions (token refresh) reach this path too.
       router.replace('/(auth)/splash');
     } else if (session) {
       // Onboarding screens the user progresses through sequentially.
@@ -174,6 +181,14 @@ function AuthGate({ children }: { children: React.ReactNode }) {
           router.replace(cachedDest as any);
           return;
         }
+      }
+
+      // Durable onboarding flag — if the user has completed onboarding before,
+      // skip the fragile multi-table DB reconstruction and go straight to dashboard.
+      if (typeof window !== 'undefined' && localStorage.getItem('bocy_onboarding_done')) {
+        setRouted(session.user.id, '/(main)/(tabs)');
+        router.replace('/(main)/(tabs)');
+        return;
       }
 
       // Route to the correct onboarding step (or dashboard) based on DB state.
