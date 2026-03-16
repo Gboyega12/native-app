@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { useEffect, useState, useRef } from 'react';
+import { View, Animated, Easing, StyleSheet } from 'react-native';
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -7,38 +7,42 @@ import { StatusBar } from 'expo-status-bar';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
-import { registerPushToken, configureNotificationChannels } from '@/lib/notifications';
 import { registerServiceWorker } from '@/lib/register-sw';
-import { initRevenueCat } from '@/lib/revenuecat';
+import { initMixpanel, resetMixpanel } from '@/lib/mixpanel';
+import { initSentryClient, setSentryUser, clearSentryUser } from '@/lib/sentry';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
+import AppDataProvider from '@/providers/AppDataProvider';
+
+// Initialise Sentry as early as possible
+initSentryClient();
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
-// Capture OAuth code+state at module load time — before any component renders.
+// Capture URL-based signals at module load time — before any component renders.
 // This is critical because app/index.tsx's <Redirect> fires during render and
-// clears the URL params before useEffect can read them.
-let _pendingOAuth: { code: string; state: string } | null = null;
-let _pendingBankCallback = false;
-let _emailConfirmed = false;
-// Guard with Platform.OS — not just `typeof window !== 'undefined'` — because
-// React Native (Hermes) defines `window` as globalThis but does NOT provide
-// window.location, so the old check caused a fatal TypeError on iOS launch.
-if (Platform.OS === 'web' && typeof window !== 'undefined') {
+// clears the URL params before useEffect can read them. Each flag is consumed
+// (set to null/false) on first read so it fires exactly once.
+const pendingSignals = {
+  oauth: null as { code: string; state: string } | null,
+  bankCallback: false,
+  emailConfirmed: false,
+};
+if (typeof window !== 'undefined') {
   const p = new URLSearchParams(window.location.search);
   const code = p.get('code');
   const state = p.get('state');
   if (code && state) {
-    _pendingOAuth = { code, state };
+    pendingSignals.oauth = { code, state };
   }
   // Detect return from TrueLayer server callback (GET redirect flow)
   if (p.get('connection_id') && p.get('status')) {
-    _pendingBankCallback = true;
+    pendingSignals.bankCallback = true;
   }
   // Detect email confirmation redirect (Supabase appends #...&type=signup)
   const hash = window.location.hash;
   if (hash.includes('type=signup') || hash.includes('type=email')) {
-    _emailConfirmed = true;
+    pendingSignals.emailConfirmed = true;
   }
 }
 
@@ -48,10 +52,42 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const segments = useSegments();
 
+  // Persist routing cache in sessionStorage so it survives page refreshes
+  // (useRef resets on remount, causing unnecessary DB queries + wrong redirects).
+  // We store BOTH the session id and the destination so that on refresh we can
+  // skip the DB queries entirely and route directly.
+  const ROUTED_KEY = '_routedForSession';
+  const ROUTED_DEST_KEY = '_routedDestination';
+  const getRouted = () =>
+    typeof window !== 'undefined' ? sessionStorage.getItem(ROUTED_KEY) : null;
+  const getRoutedDest = () =>
+    typeof window !== 'undefined' ? sessionStorage.getItem(ROUTED_DEST_KEY) : null;
+  const setRouted = (id: string | null, destination?: string) => {
+    if (typeof window === 'undefined') return;
+    if (id) {
+      sessionStorage.setItem(ROUTED_KEY, id);
+      if (destination) sessionStorage.setItem(ROUTED_DEST_KEY, destination);
+    } else {
+      sessionStorage.removeItem(ROUTED_KEY);
+      sessionStorage.removeItem(ROUTED_DEST_KEY);
+    }
+  };
+
   useEffect(() => {
     let subscription: { unsubscribe: () => void } | null = null;
     try {
-      const { data } = supabase.auth.onAuthStateChange((_event, sess) => {
+      const { data } = supabase.auth.onAuthStateChange((event, sess) => {
+        // Only clear analytics/routing on explicit sign-out — not on transient
+        // null sessions from TOKEN_REFRESHED or INITIAL_SESSION events.
+        if (event === 'SIGNED_OUT') {
+          resetMixpanel();
+          clearSentryUser();
+          setRouted(null);
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('bocy_onboarding_done');
+          }
+        }
+        if (sess?.user) setSentryUser(sess.user.id, sess.user.email);
         setSession(sess);
         setReady(true);
       });
@@ -63,18 +99,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return () => subscription?.unsubscribe();
   }, []);
 
-  // Register push token + init RevenueCat once session is available
+  // Register service worker + init analytics once session is available
   useEffect(() => {
     if (session?.user?.id) {
-      try { configureNotificationChannels(); } catch (e) {
-        console.warn('[Layout] configureNotificationChannels error:', e);
-      }
-      registerPushToken(session.user.id).catch((e) =>
-        console.warn('[Layout] registerPushToken error:', e),
-      );
       registerServiceWorker();
-      initRevenueCat(session.user.id).catch((e) =>
-        console.warn('[Layout] initRevenueCat error:', e),
+      initMixpanel(session.user.id, session.user.email).catch((e) =>
+        console.warn('[Layout] initMixpanel error:', e),
       );
     }
   }, [session?.user?.id]);
@@ -85,9 +115,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
     // Email confirmation opened in email browser — sign out to prevent
     // onboarding in the wrong browser. Show confirmation on sign-in instead.
-    if (session && _emailConfirmed) {
-      _emailConfirmed = false;
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (session && pendingSignals.emailConfirmed) {
+      pendingSignals.emailConfirmed = false;
+      if (typeof window !== 'undefined') {
         sessionStorage.setItem('_emailConfirmed', '1');
       }
       supabase.auth.signOut().catch(() => {});
@@ -96,18 +126,20 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     // Forward captured OAuth code+state to the connect screen
-    if (session && _pendingOAuth) {
-      const { code, state } = _pendingOAuth;
-      _pendingOAuth = null; // consume so it doesn't fire again
+    if (session && pendingSignals.oauth) {
+      const { code, state } = pendingSignals.oauth;
+      pendingSignals.oauth = null; // consume so it doesn't fire again
+      setRouted(session.user.id, '/(main)/connect');
       router.replace({ pathname: '/(main)/connect', params: { code, state } });
       return;
     }
 
     // If returning from TrueLayer bank callback, let connect screen handle the URL params.
     // Don't reroute — just clear the flag once session arrives.
-    if (_pendingBankCallback) {
+    if (pendingSignals.bankCallback) {
       if (session) {
-        _pendingBankCallback = false; // session restored, connect screen is handling it
+        pendingSignals.bankCallback = false; // session restored, connect screen is handling it
+        setRouted(session.user.id, '/(main)/connect');
       }
       // Whether session is null (restoring) or present, don't interfere —
       // connect is already mounted with connection_id + status in the URL.
@@ -115,13 +147,56 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     }
 
     if (!session && !inAuth) {
+      // Cache is cleared in onAuthStateChange SIGNED_OUT handler above.
+      // Don't clear here — transient null sessions (token refresh) reach this path too.
       router.replace('/(auth)/splash');
-    } else if (session && inAuth) {
+    } else if (session) {
+      // Onboarding screens the user progresses through sequentially.
+      // Don't re-route if they're already on one — let them continue.
+      const onboardingScreens = ['welcome', 'education', 'identity', 'connect', 'processing'];
+      const currentMain = segments[0] === '(main)' ? (segments as string[])[1] : null;
+      const onOnboarding = currentMain != null && onboardingScreens.includes(currentMain as string);
+      if (onOnboarding) return;
+
+      // Once we've evaluated and routed for this session, don't re-run the
+      // DB queries on every segment change (e.g. switching tabs). Reset on
+      // session change (login/logout).
+      // On page refresh, Expo Router starts at the root index (segments=[''])
+      // before resolving — use the cached destination to route directly.
+      const inMain = segments[0] === '(main)';
+      if (getRouted() === session.user.id) {
+        if (inMain) {
+          // Update cached destination when user reaches the dashboard,
+          // so a future page refresh goes straight there.
+          const onTabs = (segments as string[])[1] === '(tabs)';
+          if (onTabs && getRoutedDest() !== '/(main)/(tabs)') {
+            setRouted(session.user.id, '/(main)/(tabs)');
+          }
+          return;
+        }
+        // Page refresh starts at root index — use cached destination
+        // to skip DB queries and route directly.
+        const cachedDest = getRoutedDest();
+        if (cachedDest) {
+          router.replace(cachedDest as any);
+          return;
+        }
+      }
+
+      // Durable onboarding flag — if the user has completed onboarding before,
+      // skip the fragile multi-table DB reconstruction and go straight to dashboard.
+      if (typeof window !== 'undefined' && localStorage.getItem('bocy_onboarding_done')) {
+        setRouted(session.user.id, '/(main)/(tabs)');
+        router.replace('/(main)/(tabs)');
+        return;
+      }
+
+      // Route to the correct onboarding step (or dashboard) based on DB state.
       const name = session.user.user_metadata?.full_name;
       if (!name) {
+        setRouted(session.user.id, '/(main)/welcome');
         router.replace('/(main)/welcome');
       } else {
-        // Check if user has completed identity discovery
         void (async () => {
           try {
             const { data } = await supabase
@@ -138,16 +213,22 @@ function AuthGate({ children }: { children: React.ReactNode }) {
                   .eq('user_id', session.user.id)
                   .order('created_at', { ascending: false })
                   .limit(1);
-                router.replace(rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect');
+                const dest = rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect';
+                setRouted(session.user.id, dest);
+                router.replace(dest);
               } catch {
-                router.replace('/(main)/connect');
+                // Transient DB error — let dashboard handle missing data
+                setRouted(session.user.id, '/(main)/(tabs)');
+                router.replace('/(main)/(tabs)');
               }
             } else {
               // No identity yet — start education flow
+              setRouted(session.user.id, '/(main)/education');
               router.replace('/(main)/education');
             }
           } catch {
             // Query failed — fall back to education flow
+            setRouted(session.user.id, '/(main)/education');
             router.replace('/(main)/education');
           }
         })();
@@ -158,6 +239,36 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Full-screen overlay that flashes on theme toggle and fades out */
+function ThemeOverlay() {
+  const { colors, isDark } = useTheme();
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [overlayBg, setOverlayBg] = useState<string | null>(null);
+  const prevTheme = useRef(isDark);
+
+  useEffect(() => {
+    if (prevTheme.current !== isDark) {
+      prevTheme.current = isDark;
+      setOverlayBg(colors.bg);
+      fadeAnim.setValue(1);
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 400,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(() => setOverlayBg(null));
+    }
+  }, [isDark]);
+
+  if (!overlayBg) return null;
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[StyleSheet.absoluteFill, { backgroundColor: overlayBg, opacity: fadeAnim, zIndex: 9999 }]}
+    />
+  );
+}
+
 function InnerLayout() {
   const { colors, isDark } = useTheme();
 
@@ -165,6 +276,7 @@ function InnerLayout() {
     <AuthGate>
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }} />
       <StatusBar style={isDark ? 'light' : 'dark'} />
+      <ThemeOverlay />
     </AuthGate>
   );
 }
@@ -189,8 +301,10 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <InnerLayout />
-        <UpdateBanner />
+        <AppDataProvider>
+          <InnerLayout />
+          <UpdateBanner />
+        </AppDataProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );

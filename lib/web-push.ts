@@ -1,6 +1,6 @@
 // ── Web Push Subscription ──
 // Client-side hook for subscribing to web push notifications via the
-// Push API. Only active on web — returns no-ops on native platforms.
+// Push API.
 //
 // Flow:
 //   1. Register service worker
@@ -10,7 +10,6 @@
 //   5. Store subscription state in Supabase notification_preferences
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
 
 const VAPID_PUBLIC_KEY = process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY || '';
@@ -56,7 +55,6 @@ export function useWebPush(userId?: string): WebPushState {
   const swReg = useRef<ServiceWorkerRegistration | null>(null);
 
   const supported =
-    Platform.OS === 'web' &&
     typeof window !== 'undefined' &&
     'serviceWorker' in navigator &&
     'PushManager' in window &&
@@ -96,7 +94,7 @@ export function useWebPush(userId?: string): WebPushState {
       // Subscribe via PushManager
       const subscription = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
       });
 
       // Send subscription to server
@@ -108,7 +106,6 @@ export function useWebPush(userId?: string): WebPushState {
           ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
         },
         body: JSON.stringify({
-          user_id: userId,
           subscription: subscription.toJSON(),
         }),
       });
@@ -144,7 +141,7 @@ export function useWebPush(userId?: string): WebPushState {
             'Content-Type': 'application/json',
             ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
           },
-          body: JSON.stringify({ user_id: userId }),
+          body: JSON.stringify({}),
         });
       }
 

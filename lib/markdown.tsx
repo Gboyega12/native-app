@@ -1,5 +1,5 @@
 import React, { useMemo, useState, createContext, useContext } from 'react';
-import { Text, View, Image, StyleSheet, Platform } from 'react-native';
+import { Text, View, StyleSheet } from 'react-native';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 
@@ -44,28 +44,18 @@ function GifImage({ uri, style }: { uri: string; style: any }) {
 
   if (failed) return null;
 
-  if (Platform.OS === 'web') {
-    return React.createElement('img', {
-      src: uri,
-      alt: '',
-      onError: () => setFailed(true),
-      style: {
-        width: style.width ?? 200,
-        height: style.height ?? 150,
-        borderRadius: style.borderRadius ?? 0,
-        objectFit: 'cover',
-        display: 'block',
-      },
-    });
-  }
-  return (
-    <Image
-      source={{ uri }}
-      style={style}
-      resizeMode="cover"
-      onError={() => setFailed(true)}
-    />
-  );
+  return React.createElement('img', {
+    src: uri,
+    alt: '',
+    onError: () => setFailed(true),
+    style: {
+      width: '100%',
+      aspectRatio: '4 / 3',
+      borderRadius: style.borderRadius ?? 0,
+      objectFit: 'cover',
+      display: 'block',
+    },
+  });
 }
 
 function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
@@ -218,12 +208,12 @@ function Inline({ text }: { text: string }) {
 const createStyles = (c: ThemeColors) => StyleSheet.create({
   paragraph: {
     fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 24,
     color: c.text2,
   },
   paragraphGap: {
-    marginBottom: spacing.sm + 2,
+    marginBottom: spacing.sm + 4,
   },
   bold: {
     fontFamily: fonts.semibold,
@@ -240,41 +230,41 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   listRow: {
     flexDirection: 'row',
-    marginBottom: 4,
+    marginBottom: 6,
     paddingRight: spacing.md,
   },
   bullet: {
     fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 24,
     color: c.accent,
     width: 18,
   },
   listNumber: {
     fontFamily: fonts.medium,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 24,
     color: c.accent,
     width: 22,
   },
   listText: {
     flex: 1,
     fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 24,
     color: c.text2,
   },
   // GIF images
   gifContainer: {
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
     marginBottom: spacing.xs,
     borderRadius: radius.md,
     overflow: 'hidden',
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
   },
   gif: {
-    width: 200,
-    height: 150,
+    width: '100%' as any,
+    aspectRatio: 4 / 3,
     borderRadius: radius.md,
   },
 });

@@ -13,8 +13,9 @@
 // Layered with liquidity tiers: a £1 locked in a pension is worth less
 // than £1 in your current account when your buffer is thin.
 
-import type { Move, FinancialProfile, UserIdentity } from './types';
-import type { VolatilityProfile } from './monte-carlo';
+import type { Move, FinancialProfile, UserIdentity } from './types.js';
+import type { VolatilityProfile } from './monte-carlo.js';
+import { calcMarginalRate, calcPensionEffectiveReturn, inferTaxSituation, type TaxSituation } from './surplus-engine.js';
 
 // ── Liquidity Tiers ──
 // Discount factor applied to the marginal utility based on how quickly
@@ -224,6 +225,16 @@ export function calcMoveMarginalUtility(
   const cat = move.category || 'spending';
   const tier = inferLiquidityTier(move);
 
+  // ── Conservative surplus when essential gaps exist ──
+  // If we detect essentials missing from the data (rent via partner, variable
+  // bills, etc.), the surplus is likely overstated. Use the midpoint of
+  // typical ranges as a conservative deduction.
+  let effectiveSurplus = profile.monthly.surplus;
+  const essentialGapDeduction = (profile as any).essentialGapDeduction || 0;
+  if (essentialGapDeduction > 0) {
+    effectiveSurplus = Math.max(0, effectiveSurplus - essentialGapDeduction);
+  }
+
   // ── Current allocation in this move's category ──
   let currentSpend: number;
   switch (cat) {
@@ -236,7 +247,7 @@ export function calcMoveMarginalUtility(
       currentSpend = profile.monthly.debtPayments;
       break;
     case 'invest':
-      currentSpend = Math.max(0, profile.monthly.surplus * 0.3);
+      currentSpend = Math.max(0, effectiveSurplus * 0.3);
       break;
     case 'break_even':
       currentSpend = 0; // in deficit — zero positive allocation
@@ -273,11 +284,32 @@ export function calcMoveMarginalUtility(
     if (work === 'self_employed') bufferTargetRate = 25;
     else if (work === 'multiple_jobs' || work === 'student') bufferTargetRate = 20;
   }
-  const bufferGap = Math.max(0, Math.min(1, 1 - savingsRate / bufferTargetRate));
+  let bufferGap = Math.max(0, Math.min(1, 1 - savingsRate / bufferTargetRate));
+
+  // ── Pay frequency adjustment ──
+  // Weekly/fortnightly earners replenish faster, reducing effective buffer gap.
+  // A weekly earner with a thin buffer is less exposed than a monthly earner
+  // with the same buffer — their next paycheck is days away, not weeks.
+  const primaryIncome = profile.incomeSources?.find((s) => s.isSalary) || profile.incomeSources?.[0];
+  const payFrequency = primaryIncome?.frequency || 'monthly';
+  if (payFrequency === 'weekly') {
+    bufferGap *= 0.80; // 20% reduction — cash replenishes every 7 days
+  } else if (payFrequency === 'fortnightly') {
+    bufferGap *= 0.90; // 10% reduction — cash replenishes every 14 days
+  }
 
   // ── Apply liquidity discount ──
   const discount = getLiquidityDiscount(tier, bufferGap);
   mu *= discount;
+
+  // ── Tax efficiency multiplier ──
+  // For invest/savings moves, the effective value of £1 depends on the tax
+  // wrapper. A pension contribution with 40% relief turns £0.60 net into £1.00
+  // in the pension — that's a 1.67x multiplier on utility per pound of take-home.
+  // This makes the CRRA model tax-aware: pension moves naturally rank higher for
+  // higher-rate taxpayers, ISA beats GIA, employer match dominates everything.
+  const taxMultiplier = calcTaxEfficiencyMultiplier(move, profile, identity);
+  mu *= taxMultiplier;
 
   // ── Debt closing bonus ──
   if (cat === 'debt' && debtAccounts) {
@@ -292,9 +324,149 @@ export function calcMoveMarginalUtility(
 
   // ── Clamp ──
   return {
-    multiplier: Math.max(0.25, Math.min(3.5, mu)),
+    multiplier: Math.max(0.25, Math.min(4.0, mu)), // raised cap to 4.0 for tax-boosted moves
     liquidityTier: tier,
   };
+}
+
+// ── Tax Efficiency Multiplier ──
+// Adjusts the marginal utility of invest/savings moves based on the
+// tax wrapper they target. This is where UK tax math enters the CRRA model.
+//
+// The multiplier represents how many £ of value each £1 of take-home
+// produces in the target wrapper:
+//   - Employer match: 2.0+ (your £1 → £2+ in pension)
+//   - Salary sacrifice pension (higher rate): ~1.67 (£0.60 net → £1.00)
+//   - SIPP (higher rate): ~1.67 (£1 net → £1.67 in pension after relief)
+//   - ISA: 1.0 (no tax on growth, but no upfront boost)
+//   - GIA: <1.0 (tax drag on gains reduces effective value)
+//   - Mortgage overpay: guaranteed return at mortgage rate (no tax)
+
+function calcTaxEfficiencyMultiplier(
+  move: Move,
+  profile: FinancialProfile,
+  identity: UserIdentity | null,
+): number {
+  const cat = move.category || 'spending';
+  if (cat !== 'invest' && cat !== 'savings' && cat !== 'debt') return 1.0;
+
+  const action = (move.action || '').toLowerCase();
+
+  // Infer tax situation for the marginal rate calculation
+  let tax: TaxSituation;
+  try {
+    tax = inferTaxSituation(profile, identity);
+  } catch {
+    return 1.0; // can't compute — no penalty, no boost
+  }
+
+  const marginal = calcMarginalRate(
+    tax.grossIncome,
+    tax.studentLoan,
+    tax.hasChildBenefit,
+    tax.numberOfChildren,
+  );
+
+  // ── Employer pension match ──
+  // £1 you contribute → employer adds £1 → 100% instant return.
+  // Plus tax savings if salary sacrifice.
+  if (action.includes('employer match') || action.includes('full employer')) {
+    const pensionBoost = tax.salarySacrifice
+      ? calcPensionEffectiveReturn(tax.grossIncome, 'salary_sacrifice', tax.studentLoan, tax.hasChildBenefit, tax.numberOfChildren)
+      : 1.0;
+    return 1.0 + pensionBoost; // match + tax relief
+  }
+
+  // ── Pension (salary sacrifice or SIPP) ──
+  if (action.includes('pension') || action.includes('salary sacrifice') || action.includes('sipp')) {
+    const method = (action.includes('salary sacrifice') || tax.salarySacrifice)
+      ? 'salary_sacrifice' as const
+      : 'sipp' as const;
+
+    // Pension in the PA taper zone (£100k-£125,140) is exceptionally valuable
+    const boost = calcPensionEffectiveReturn(
+      tax.grossIncome, method, tax.studentLoan, tax.hasChildBenefit, tax.numberOfChildren,
+    );
+
+    // Pension multiplier: how many pension-pounds per take-home pound.
+    // Capped to avoid extreme values from edge cases.
+    return Math.min(2.5, boost);
+  }
+
+  // ── ISA ──
+  // No upfront tax boost, but all growth is tax-free.
+  // Compare to GIA where growth is taxed at CGT rate.
+  // Effective multiplier: 1.0 + the tax drag avoided.
+  if (action.includes(' isa') || action.includes('stocks and shares isa') || action.includes('stocks & shares isa')) {
+    // Tax drag on a GIA at ~7% growth over 10 years averages ~0.5-1% pa
+    // ISA avoids this → worth ~1.05-1.10x per pound vs GIA
+    const cgtRate = marginal.incomeTax >= 0.40 ? 0.20 : 0.10;
+    return 1.0 + (cgtRate * 0.15); // modest boost for tax-free wrapper
+  }
+
+  // ── Mortgage overpayment ──
+  // Guaranteed return at the mortgage rate, tax-free.
+  // This should compete with post-tax returns on savings.
+  if (action.includes('mortgage') && action.includes('overpay')) {
+    // Mortgage rate as a multiplier: 4.5% mortgage ≈ 1.045x per pound.
+    // Compare to post-tax savings rate to determine relative value.
+    const mortgageRate = tax.mortgageRate || 0.045;
+    const postTaxSavingsRate = 0.04 * (1 - marginal.incomeTax); // savings interest taxed
+    if (mortgageRate > postTaxSavingsRate) {
+      return 1.0 + (mortgageRate - postTaxSavingsRate); // small bonus
+    }
+    return 1.0;
+  }
+
+  // ── Premium Bonds ──
+  // Prize rate ~4%, tax-free. Compare to post-tax savings.
+  if (action.includes('premium bond')) {
+    const postTaxSavings = 0.04 * (1 - marginal.incomeTax);
+    return 1.0 + Math.max(0, 0.04 - postTaxSavings); // tax-free advantage
+  }
+
+  // ── Debt overpayment ──
+  // Rate-based return is now handled by calcOpportunityCostMultiplier in move-engine.
+  // No additional tax multiplier here to avoid double-counting.
+
+  return 1.0;
+}
+
+// ── Opportunity Cost Multiplier ──
+// Compares effective return of a move to the risk-free rate.
+// Paying 39.9% debt = 39.9% guaranteed return → much higher than 4.5% savings.
+
+export function calcOpportunityCostMultiplier(
+  move: Move,
+  profile: FinancialProfile,
+  debtAccounts?: any[],
+): number {
+  const cat = move.category || 'spending';
+  const boeRate = 0.045; // risk-free baseline (BOE base rate)
+
+  if (cat === 'debt') {
+    // Effective return = APR of the debt being targeted
+    const debts = debtAccounts || [];
+    const highestAPR = debts.reduce((max: number, d: any) => {
+      const apr = d.interest_rate || 0;
+      return apr > max ? apr : max;
+    }, 0.079); // floor at personal loan rate
+    return Math.min(3.0, highestAPR / boeRate); // cap at 3x to avoid extreme distortion
+  }
+
+  if (cat === 'savings' || cat === 'buffer') {
+    // Effective return = best savings rate available
+    return 1.0; // savings rate ≈ base rate → 1x multiplier
+  }
+
+  if (cat === 'invest') {
+    // Expected equity return minus risk discount
+    const expectedReturn = 0.07; // long-run UK equity ~7%
+    const riskDiscount = 0.02;   // volatility penalty
+    return Math.max(1.0, (expectedReturn - riskDiscount) / boeRate);
+  }
+
+  return 1.0; // spending moves: no rate comparison
 }
 
 // ── Spending-Category Utility (for the budget solver) ──

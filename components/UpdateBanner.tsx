@@ -1,10 +1,8 @@
 // ── PWA Update Banner ──
 // Listens for service worker updates and shows a dismissible banner
 // prompting the user to reload for the latest version.
-// Only renders on web — returns null on native.
-
 import { useEffect, useRef, useState } from 'react';
-import { Platform, View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated } from 'react-native';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 
@@ -15,7 +13,7 @@ export default function UpdateBanner() {
   const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (Platform.OS !== 'web' || typeof navigator === 'undefined') return;
+    if (typeof navigator === 'undefined') return;
     if (!('serviceWorker' in navigator)) return;
 
     const onMessage = (event: MessageEvent) => {
@@ -69,7 +67,7 @@ export default function UpdateBanner() {
     }
   }, [visible]);
 
-  if (Platform.OS !== 'web' || !visible) return null;
+  if (!visible) return null;
 
   const reload = () => {
     if (typeof window !== 'undefined') {

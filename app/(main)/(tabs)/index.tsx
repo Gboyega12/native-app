@@ -1,89 +1,132 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
-  LayoutAnimation, Platform, UIManager, TextInput, Modal, Alert, Pressable,
-  RefreshControl,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, FlatList, ActivityIndicator,
+  LayoutAnimation, TextInput, Modal, Pressable, Animated, Easing, PanResponder,
+  RefreshControl, Linking, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { hapticLight, hapticMedium, hapticSuccess, hapticWarning, hapticTick } from '@/lib/haptics';
 import { getLastResult } from '@/app/(main)/processing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { requestSync, onSyncComplete, getLastSyncTime, invalidateSyncCache } from '@/lib/sync-coordinator';
 import type { WeeklyContext } from '@/lib/sync';
+import type { ReactiveEvent } from '@/lib/reactive-engine';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
-import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals } from '@/lib/types';
+import { hydrateSubGoals } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType } from '@/lib/types';
 import { useSubscription } from '@/lib/subscription';
-import Paywall from '@/components/Paywall';
-import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, SMOOTH_ANIM } from '@/components/Card';
+import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
+import AnimatedNumber from '@/components/AnimatedNumber';
+import { DashboardSkeleton } from '@/components/Skeleton';
+import { SpendingRing, CategoryBars, WeeklySparkline } from '@/components/Charts';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
+import InsightModal from '@/components/InsightModal';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { useAppData } from '@/hooks/useAppData';
+import { formatTimeAgo, formatTxDateAge } from '@/lib/date-utils';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+
+// Cache the beforeinstallprompt event for the install modal
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e: Event) => {
+    e.preventDefault();
+    (window as any).__pwaInstallPrompt = e;
+  });
+}
 
 /** Strip markdown bold/italic markers from text rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 
-/** Human-friendly "X ago" label from epoch ms */
-function formatTimeAgo(epochMs: number): string {
-  const diffSec = Math.round((Date.now() - epochMs) / 1000);
-  if (diffSec < 10) return 'just now';
-  if (diffSec < 60) return `${diffSec}s ago`;
-  const mins = Math.floor(diffSec / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 
 export default function Home() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
+  const { maxContentWidth, isTablet, horizontalPadding, width: screenWidth } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [userName, setUserName] = useState('');
+  const { isOnline, isActive } = useOnlineStatus();
+  // ── Shared data from AppDataProvider (eliminates redundant fetches across tabs) ──
+  const appData = useAppData();
+  // Local overrides — Home screen applies mergeAdjustments and optimistic updates
+  // on top of the shared analysis, so we keep local state that shadows the context.
+  const [analysisLocal, setAnalysisLocal] = useState<Analysis | null>(null);
+  const [loadingLocal, setLoadingLocal] = useState(true);
+  // Derive effective values: prefer local override, fall back to shared context
+  const analysis = analysisLocal ?? appData.analysis;
+  const setAnalysis = setAnalysisLocal;
+  const loading = loadingLocal && appData.loading;
+  const userName = appData.userName;
+  const debtAccounts = appData.debtAccounts;
+  const setDebtAccounts = appData.setDebtAccounts;
+  const weeklyCtx = appData.weeklyCtx;
+  const setWeeklyCtx = appData.setWeeklyCtx;
+
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
   const [txCardExpanded, setTxCardExpanded] = useState(false);
-  const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
-  const [weeklyCtx, setWeeklyCtx] = useState<WeeklyContext | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<number>(0);
+  const [latestTxDate, setLatestTxDate] = useState<string | null>(null);
+  const [syncDataSource, setSyncDataSource] = useState<'truelayer' | 'fallback' | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [connectionWarning, setConnectionWarning] = useState<{ message: string; banks: string[] } | null>(null);
-  const [connectionDismissed, setConnectionDismissed] = useState(false);
+  const [connectionDismissed, setConnectionDismissed] = useState(true); // Default hidden; show only after confirming not dismissed
   const [incomeDismissed, setIncomeDismissed] = useState(false);
+  const [hasBankConnection, setHasBankConnection] = useState(false);
   const { showWalkthrough, dismissWalkthrough } = useWalkthrough();
   const dashScrollRef = useRef<ScrollView>(null);
   const cardPositions = useRef<Record<string, number>>({});
+  const syncRetryRef = useRef<number>(0);
+  const overridesSavedAt = useRef<number>(0); // Timestamp of last override save — syncs started before this are rejected
+  const overriddenMerchants = useRef<Set<string>>(new Set()); // Merchant keys categorised by user — reject sync results that still show these in "Other"
+  const [savedOverrideKeys, setSavedOverrideKeys] = useState<Set<string>>(new Set()); // Persisted override match_descriptions from Supabase — used to filter unresolvedGroups
+  const [retriesExhausted, setRetriesExhausted] = useState(false);
+  const heroScrollX = useRef(new Animated.Value(0)).current;
+  const [heroPage, setHeroPage] = useState(0);
+  const [verificationStatus, setVerificationStatus] = useState<'draft' | 'verifying' | 'verified' | null>(null);
+  const verifyPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dismissCache = useRef<Record<string, string>>({});
+
+  // Review modal animation
+  const reviewModalFade = useRef(new Animated.Value(0)).current;
+  const reviewModalSlide = useRef(new Animated.Value(40)).current;
+
+  // ── Safety timeout: if bank is connected but no analysis after 3 minutes, show escape hatch ──
+  useEffect(() => {
+    if (analysis || !hasBankConnection || retriesExhausted) return;
+    const timer = setTimeout(() => {
+      setRetriesExhausted(true);
+      console.warn('[home] Safety timeout — showing action buttons after 3 minutes');
+    }, 3 * 60 * 1000);
+    return () => clearTimeout(timer);
+  }, [analysis, hasBankConnection, retriesExhausted]);
 
   // ── Connection banner dismiss ──
   // Keyed by the sorted bank names. Dismissing stores these bank names.
   // Banner only reappears if the set of expired banks actually changes
   // (i.e. a new bank expires, or the user reconnects and a different one lapses).
-  // Cleared automatically when all connections sync OK (connectionWarning = null).
   const CONN_DISMISS_KEY = 'dismiss:conn:banks';
 
+  // Hydrate dismiss cache on mount (once)
   useEffect(() => {
-    if (!connectionWarning) return; // Don't reset — keep dismissed state until warning arrives
     AsyncStorage.getItem(CONN_DISMISS_KEY).then((stored) => {
-      if (!stored) { setConnectionDismissed(false); return; }
-      // Compare stored bank fingerprint with current warning
-      const currentFingerprint = connectionWarning.banks.sort().join(',');
-      setConnectionDismissed(stored === currentFingerprint);
+      if (stored) dismissCache.current[CONN_DISMISS_KEY] = stored;
     }).catch(() => {});
-  }, [connectionWarning]);
+  }, []);
 
-  // When connections are healthy, clear the stored dismiss so future warnings are fresh
+  // When warning changes, compare synchronously against cache
   useEffect(() => {
-    if (connectionWarning === null) {
-      AsyncStorage.removeItem(CONN_DISMISS_KEY).catch(() => {});
+    if (!connectionWarning) return; // warning cleared = leave dismiss state alone
+    const currentFingerprint = connectionWarning.banks.sort().join(',');
+    if (dismissCache.current[CONN_DISMISS_KEY] === currentFingerprint) {
+      setConnectionDismissed(true); // same banks as dismissed — stay hidden
+    } else {
+      setConnectionDismissed(false); // new bank set — show banner
     }
   }, [connectionWarning]);
 
@@ -93,9 +136,9 @@ export default function Home() {
   const INCOME_DISMISS_KEY = 'dismiss:income:events';
 
   const incomeFingerprint = useMemo(() => {
-    const events = weeklyCtx?.recentIncomeEvents ?? [];
+    const events = Array.isArray(weeklyCtx?.recentIncomeEvents) ? weeklyCtx.recentIncomeEvents : [];
     if (events.length === 0) return '';
-    return events.map((e) => `${e.source}:${Math.round(e.amount)}`).sort().join('|');
+    return events.map((e) => `${e?.source ?? ''}:${Math.round(e?.amount ?? 0)}`).sort().join('|');
   }, [weeklyCtx?.recentIncomeEvents]);
 
   useEffect(() => {
@@ -106,9 +149,12 @@ export default function Home() {
   }, [incomeFingerprint]);
 
   const dismissConnection = () => {
+    trackEvent('Connection Warning Dismissed');
     setConnectionDismissed(true);
     if (connectionWarning) {
-      AsyncStorage.setItem(CONN_DISMISS_KEY, connectionWarning.banks.sort().join(',')).catch(() => {});
+      const fp = connectionWarning.banks.sort().join(',');
+      dismissCache.current[CONN_DISMISS_KEY] = fp;
+      AsyncStorage.setItem(CONN_DISMISS_KEY, fp).catch(() => {});
     }
   };
   const dismissIncome = () => {
@@ -118,7 +164,32 @@ export default function Home() {
     }
   };
 
+  // ── Show insight modal on app open when income arrives ──
+  useEffect(() => {
+    if (weeklyCtx?.incomeArrivedThisWeek && Array.isArray(weeklyCtx?.recentIncomeEvents) && weeklyCtx.recentIncomeEvents.length > 0 && !incomeDismissed) {
+      // Small delay to let the dashboard render first
+      const timer = setTimeout(() => setShowInsightModal(true), 600);
+      return () => clearTimeout(timer);
+    }
+  }, [weeklyCtx?.incomeArrivedThisWeek, incomeDismissed]);
+
+  // ── Show install-app modal once after first analysis (post-onboarding) ──
+  useEffect(() => {
+    if (!analysis) return;
+    if (typeof window === 'undefined') return;
+    // Skip if already installed as standalone PWA
+    if (window.matchMedia?.('(display-mode: standalone)')?.matches || (window.navigator as any)?.standalone) return;
+    AsyncStorage.getItem('install_modal_shown').then((v) => {
+      if (!v) {
+        const timer = setTimeout(() => setShowInstallModal(true), 1500);
+        return () => clearTimeout(timer);
+      }
+    }).catch(() => {});
+  }, [!!analysis]);
+
   const toggleCategory = (key: string) => {
+    trackEvent('Category Toggled', { category: key });
+    hapticMedium();
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedCategories((prev) => {
       const next = new Set(prev);
@@ -129,6 +200,8 @@ export default function Home() {
   };
 
   const toggleMove = (idx: number) => {
+    trackEvent('Move Toggled', { move_index: idx });
+    hapticMedium();
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedMoves((prev) => {
       const next = new Set(prev);
@@ -141,6 +214,10 @@ export default function Home() {
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
     return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  };
+
+  const isCurrentYear = (dateStr: string) => {
+    return new Date(dateStr).getFullYear() === new Date().getFullYear();
   };
 
   const isCurrentMonth = (dateStr: string) => {
@@ -160,8 +237,8 @@ export default function Home() {
     return d >= monday;
   };
 
-  const { isPro } = useSubscription();
-  const [showPaywall, setShowPaywall] = useState(false);
+  const { isTrial, trialDaysLeft } = useSubscription();
+  const [showInsightModal, setShowInsightModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [verifyMove, setVerifyMove] = useState<Move | null>(null);
   const [infoCard, setInfoCard] = useState<string | null>(null);
@@ -181,14 +258,50 @@ export default function Home() {
   const [addItemError, setAddItemError] = useState('');
 
   // Previous month snapshot for real income comparison
-  const [prevSnapshot, setPrevSnapshot] = useState<{ monthly_spending: number; monthly_income: number } | null>(null);
+  // Previous month snapshot — from shared context
+  const prevSnapshot = appData.prevSnapshot;
+
+  // ── Reactive engine state ──
+  const [reactiveEvents, setReactiveEvents] = useState<ReactiveEvent[]>([]);
+  const [showReactiveModal, setShowReactiveModal] = useState(false);
+  const [reactiveEventIndex, setReactiveEventIndex] = useState(0);
+  // ── Plan data (merged from plan page) ──
+  // ── Plan data — from shared context ──
+  const userPlans = appData.userPlans;
+  const planProgress = appData.planProgress;
+  const setPlanProgress = appData.setPlanProgress;
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [expandedMove, setExpandedMove] = useState<number | null>(null);
+  const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
+  const [budgetExpanded, setBudgetExpanded] = useState(false);
+  const [showAllMoves, setShowAllMoves] = useState(false);
+  const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
+  const userIdRef = useRef<string | null>(null);
 
   // Custom weekly spending limit
   const [customWeeklyLimit, setCustomWeeklyLimit] = useState<number | null>(null);
   const [showLimitEditor, setShowLimitEditor] = useState(false);
+  const [showWeeklyInfo, setShowWeeklyInfo] = useState(false);
   const [limitInput, setLimitInput] = useState('');
   const [breakdownExpanded, setBreakdownExpanded] = useState(false);
-  const [budgetPeriod, setBudgetPeriod] = useState<'month' | 'week'>('month');
+  const [budgetPeriod, setBudgetPeriod] = useState<'year' | 'month' | 'week'>('month');
+  const budgetPeriodInitialised = useRef(false);
+
+  // Default budget period matches salary frequency
+  useEffect(() => {
+    if (budgetPeriodInitialised.current) return;
+    const sources = Array.isArray(analysis?.income_sources) ? analysis.income_sources : [];
+    const primary = sources.find((s: IncomeSource) => s?.isSalary)
+      || (sources.length > 0
+        ? sources.reduce((a: IncomeSource, b: IncomeSource) => (a?.avgAmount ?? 0) > (b?.avgAmount ?? 0) ? a : b)
+        : null);
+    if (!primary) return;
+    budgetPeriodInitialised.current = true;
+    const freq = primary.frequency;
+    if (freq === 'weekly' || freq === 'fortnightly') setBudgetPeriod('week');
+    else setBudgetPeriod('month');
+  }, [analysis]);
+
 
   // Load custom weekly limit from storage
   useEffect(() => {
@@ -197,18 +310,47 @@ export default function Home() {
     }).catch(() => {});
   }, []);
 
-  // Categorise review modal state
-  const [showCatReview, setShowCatReview] = useState(false);
-  const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean }>>({});
-  const [savingCatReview, setSavingCatReview] = useState(false);
+  // Hydrate overridesSavedAt from AsyncStorage so the guard survives page refreshes
+  useEffect(() => {
+    AsyncStorage.getItem('overrides_saved_at').then((val) => {
+      if (val) {
+        const ts = parseInt(val, 10);
+        if (ts) overridesSavedAt.current = ts;
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Unified review modal state
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean; aiSuggested?: boolean }>>({});
+  const [savingReview, setSavingReview] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [reviewModalVisible, setReviewModalVisible] = useState(false);
+
+  // Animate review modal in/out (matching InsightModal pattern)
+  useEffect(() => {
+    if (showReviewModal) {
+      setReviewModalVisible(true);
+      Animated.parallel([
+        Animated.timing(reviewModalFade, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+        Animated.timing(reviewModalSlide, { toValue: 0, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(reviewModalFade, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+        Animated.timing(reviewModalSlide, { toValue: 40, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+      ]).start(() => setReviewModalVisible(false));
+    }
+  }, [showReviewModal]);
 
   const ESSENTIAL_CATS = new Set(['Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Childcare', 'Health', 'Education', 'Debt Payments', 'Savings']);
 
   const BUDGET_CATEGORIES = [
     'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Travel',
     'Eating Out', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
-    'Childcare', 'Education', 'Charity', 'Transfers', 'Savings', 'Investments', 'Other',
+    'Childcare', 'Education', 'Charity', 'Transfers', 'Savings', 'Investments',
+    'Refund', 'Internal Transfer', 'Other',
   ];
 
   // Map Claude's broader categories to our BUDGET_CATEGORIES
@@ -221,12 +363,16 @@ export default function Home() {
       'TV Licence': 'Bills', 'Personal Care': 'Shopping',
       'Gambling': 'Entertainment', 'Pets': 'Shopping',
       'Debt Payments': 'Bills',
+      'Refund': 'Refund', 'Refunds': 'Refund',
+      'Internal Transfer': 'Internal Transfer', 'Internal Transfers': 'Internal Transfer',
+      'Bank Transfer': 'Internal Transfer', 'Account Transfer': 'Internal Transfer',
     };
     const mapped = map[cat] || cat;
     return BUDGET_CATEGORIES.includes(mapped) ? mapped : 'Other';
   };
 
   const saveAddItem = async () => {
+    trackEvent('Budget Item Added', { category: addItemCategory, is_essential: addItemEssential });
     setAddItemError('');
     const amount = parseFloat(addItemAmount);
     if (!addItemDesc.trim()) {
@@ -339,42 +485,73 @@ export default function Home() {
   // Normalize merchant names so similar transactions group together
   const normalizeMerchant = (raw: string) => {
     let n = raw.trim();
-    // Remove common bank prefixes
-    n = n.replace(/^(PAYMENT TO |DIRECT DEBIT |DEBIT CARD PAYMENT |CARD PAYMENT TO |CARD PAYMENT |CONTACTLESS |POS )/i, '');
-    // Remove trailing reference numbers (6+ digits)
-    n = n.replace(/\s+\d{6,}$/, '');
-    // Remove trailing dates (dd/mm or dd-mm patterns)
+    // Remove common bank prefixes (Revolut, Monzo, HSBC, etc. patterns)
+    n = n.replace(/^(PAYMENT TO |DIRECT DEBIT |DEBIT CARD PAYMENT |CARD PAYMENT TO |CARD PAYMENT |CONTACTLESS |POS |MOBILE-|BGC |FPO |STO |FPI |DPC |BBP |FASTER PAYMENT |STANDING ORDER )/i, '');
+    // Remove trailing reference numbers (4+ digits, often transaction IDs)
+    n = n.replace(/\s+[\dA-Z]{4,}$/, '');
+    // Remove trailing card suffixes (e.g., "ON 28 DEC", "CD 1234", "GBP 12.34")
+    n = n.replace(/\s+(ON \d{1,2} [A-Z]{3}|CD \d{4}|GBP \d+\.?\d*|REF\s*\S+)$/i, '');
+    // Remove trailing dates (dd/mm, dd-mm, ddMMMyy patterns)
     n = n.replace(/\s+\d{2}[\/\-]\d{2}([\/\-]\d{2,4})?$/, '');
-    // Collapse whitespace
-    n = n.replace(/\s+/g, ' ').trim();
+    n = n.replace(/\s+\d{2}[A-Z]{3}\d{2,4}$/i, '');
+    // Remove location suffixes (city/country codes like "LONDON GB", "LDN GBR")
+    n = n.replace(/\s+[A-Z]{2,3}\s+[A-Z]{2,3}$/, '');
+    // Remove asterisk/star separators common in card processors ("AMZN*", "SQ *")
+    n = n.replace(/^([A-Z]+)\s*\*\s*/, '$1 ');
+    // Collapse whitespace and lowercase for matching
+    n = n.replace(/\s+/g, ' ').trim().toLowerCase();
     return n;
   };
 
   // ── Unresolved transaction groups (for categorise modal) ──
+  // Only shows truly unclassifiable items — transactions the enrichment engine
+  // AND Claude AI couldn't identify. Medium/high confidence results are auto-applied.
+  // Users can always re-categorise from the budget section.
   const unresolvedGroups = useMemo(() => {
     if (!analysis) return [];
     const txs: TransactionDetail[] = [];
+    const seen = new Set<string>();
     for (const section of [analysis.discretionary, analysis.non_discretionary]) {
-      if (!(section as any)?.items) continue;
-      for (const item of (section as any).items) {
-        if (item.category === 'Other') {
-          txs.push(...(item.transactions || []));
+      const items = (section as any)?.items;
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        if (item?.category === 'Other') {
+          const otherTxs: TransactionDetail[] = Array.isArray(item.transactions) ? item.transactions : [];
+          for (const tx of otherTxs) {
+            if (!tx) continue;
+            // Dedup: skip if we've already collected this transaction
+            const key = `${tx.date}|${tx.description}|${tx.amount}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            // Backwards compat: if confidence/classifiedBy undefined (cached pre-deploy data),
+            // include all 'Other' txs as a conservative fallback
+            if (tx.confidence !== undefined) {
+              if (tx.confidence === 'low' && tx.classifiedBy === 'default') txs.push(tx);
+            } else {
+              txs.push(tx);
+            }
+          }
         }
       }
     }
     // Group by normalized merchant/description — user assigns one category per group
     const groups = new Map<string, { key: string; label: string; merchants: string[]; txs: TransactionDetail[]; total: number }>();
     for (const tx of txs) {
-      const raw = tx.merchant || tx.description;
+      if (!tx) continue;
+      const raw = tx.merchant || tx.description || '';
       const normalized = normalizeMerchant(raw);
+      // Skip merchants that already have a persisted override — they were already
+      // categorised by the user. This prevents the review modal from repopulating
+      // with the same items after a sync overwrites the optimistic analysis state.
+      if (savedOverrideKeys.has(normalized)) continue;
       if (!groups.has(normalized)) groups.set(normalized, { key: normalized, label: raw, merchants: [], txs: [], total: 0 });
       const g = groups.get(normalized)!;
       if (!g.merchants.includes(raw)) g.merchants.push(raw);
       g.txs.push(tx);
-      g.total += Math.abs(tx.amount);
+      g.total += Math.abs(tx.amount ?? 0);
     }
     return Array.from(groups.values()).sort((a, b) => b.total - a.total);
-  }, [analysis]);
+  }, [analysis, savedOverrideKeys]);
 
   const unresolvedTxCount = useMemo(
     () => unresolvedGroups.reduce((sum, g) => sum + g.txs.length, 0),
@@ -383,7 +560,7 @@ export default function Home() {
 
   // Auto-suggest categories using Claude AI when modal opens
   useEffect(() => {
-    if (!showCatReview || unresolvedGroups.length === 0) return;
+    if (!showReviewModal || unresolvedGroups.length === 0) return;
     let cancelled = false;
 
     const fetchSuggestions = async () => {
@@ -403,13 +580,13 @@ export default function Home() {
 
         if (cancelled || !data.success || !data.classifications) return;
 
-        const suggestions: Record<string, { category: string; isEssential: boolean }> = {};
+        const suggestions: Record<string, { category: string; isEssential: boolean; aiSuggested?: boolean }> = {};
         for (const cls of data.classifications) {
           const group = unresolvedGroups[cls.index];
           if (!group) continue;
           const category = mapClaudeCategory(cls.category);
           if (category === 'Other') continue;
-          suggestions[group.key] = { category, isEssential: ESSENTIAL_CATS.has(category) };
+          suggestions[group.key] = { category, isEssential: ESSENTIAL_CATS.has(category), aiSuggested: true };
         }
         setCatAssignments((prev) => {
           const merged = { ...suggestions };
@@ -424,18 +601,83 @@ export default function Home() {
 
     fetchSuggestions();
     return () => { cancelled = true; };
-  }, [showCatReview, unresolvedGroups.length]);
+  }, [showReviewModal, unresolvedGroups.length]);
 
-  const saveCatReview = async () => {
-    const keys = Object.keys(catAssignments);
-    if (keys.length === 0) { setShowCatReview(false); return; }
-    setSavingCatReview(true);
+  const dismissReviewModal = useCallback(() => {
+    const hasUnsaved = Object.keys(catAssignments).length > 0;
+    if (hasUnsaved) {
+      hapticWarning();
+      Alert.alert('Discard changes?', `You have ${Object.keys(catAssignments).length} unsaved categorisations.`, [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => { setShowReviewModal(false); setCatAssignments({}); } },
+      ]);
+    } else {
+      setShowReviewModal(false);
+    }
+  }, [catAssignments]);
+
+  // Persist the current optimistic analysis state to Supabase so it survives page refreshes.
+  // Strips budget adjustment synthetic transactions before saving so that
+  // mergeAdjustments() doesn't double-count them when the analysis is next loaded.
+  const persistAnalysis = async (updatedAnalysis: Analysis) => {
+    try {
+      const uid = userIdRef.current;
+      if (!uid) return;
+
+      // Strip budget-adjustment synthetic transactions (description ends with " (manual)")
+      // from the persisted copy. mergeAdjustments() re-adds them at display time.
+      const stripManualTxs = (section: any) => {
+        if (!section?.items || !Array.isArray(section.items)) return section;
+        const cleaned = { ...section, items: section.items.map((item: BudgetCategory) => {
+          const realTxs = (item.transactions || []).filter(
+            (tx: TransactionDetail) => !tx.description?.endsWith(' (manual)')
+          );
+          if (realTxs.length === item.transactions?.length) return item;
+          const realMonthly = realTxs.reduce((s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0);
+          return { ...item, transactions: realTxs, txs: realTxs.length, monthly: realMonthly };
+        }).filter((item: BudgetCategory) => item.txs > 0)};
+        cleaned.total = cleaned.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+        return cleaned;
+      };
+
+      const cleanNonDisc = stripManualTxs(updatedAnalysis.non_discretionary);
+      const cleanDisc = stripManualTxs(updatedAnalysis.discretionary);
+      const manualSpend = (updatedAnalysis.non_discretionary as any)?.total - cleanNonDisc.total
+        + (updatedAnalysis.discretionary as any)?.total - cleanDisc.total;
+
+      const { data: latest } = await supabase.from('analyses')
+        .select('id')
+        .eq('user_id', uid)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latest?.id) {
+        await supabase.from('analyses').update({
+          non_discretionary: cleanNonDisc,
+          discretionary: cleanDisc,
+          monthly_spending: (updatedAnalysis.monthly_spending || 0) - manualSpend,
+          surplus: (updatedAnalysis.surplus || 0) + manualSpend,
+          person_transfers: (updatedAnalysis as any).person_transfers ?? null,
+        }).eq('id', latest.id);
+      }
+    } catch (err: any) {
+      console.warn('[home] persistAnalysis failed:', err?.message);
+    }
+  };
+
+  const saveReview = async () => {
+    const catKeys = Object.keys(catAssignments);
+    if (catKeys.length === 0) { setShowReviewModal(false); return; }
+
+    trackEvent('Unified Review Saved', { categories: catKeys.length });
+    setSavingReview(true);
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not signed in');
 
-      // Save overrides for each raw merchant name in the group
-      for (const matchKey of keys) {
+      // ── Save category overrides ──
+      for (const matchKey of catKeys) {
         const a = catAssignments[matchKey];
         const group = unresolvedGroups.find(g => g.key === matchKey);
         const merchantNames = group?.merchants || [matchKey];
@@ -455,59 +697,134 @@ export default function Home() {
         }
       }
 
-      // Optimistic UI: remove categorised transactions from "Other"
+      // ── Optimistic UI: move categorised transactions from "Other" to their target categories ──
       if (analysis) {
         const updated = { ...analysis };
-        // Build set of all raw merchant names covered by assigned groups
-        const assignedMerchants = new Set<string>();
-        for (const matchKey of keys) {
+
+        // Build a map of merchant name → { target category, isEssential, transactions }
+        const merchantToTarget = new Map<string, { category: string; isEssential: boolean }>();
+        for (const matchKey of catKeys) {
+          const a = catAssignments[matchKey];
           const group = unresolvedGroups.find(g => g.key === matchKey);
-          (group?.merchants || [matchKey]).forEach(m => assignedMerchants.add(m));
+          for (const m of (group?.merchants || [matchKey])) {
+            merchantToTarget.set(m, { category: a.category, isEssential: a.isEssential });
+          }
         }
 
-        for (const sectionKey of ['discretionary', 'non_discretionary'] as const) {
-          const section = { ...(updated as any)[sectionKey] };
-          section.items = [...(section.items || [])];
+        // Deep-clone both sections so mutations are safe
+        const disc = { ...((updated as any).discretionary || { total: 0, items: [] }) };
+        disc.items = [...(disc.items || [])].map((i: BudgetCategory) => ({ ...i, transactions: [...(i.transactions || [])] }));
+        const nonDisc = { ...((updated as any).non_discretionary || { total: 0, items: [] }) };
+        nonDisc.items = [...(nonDisc.items || [])].map((i: BudgetCategory) => ({ ...i, transactions: [...(i.transactions || [])] }));
+
+        // Collect removed transactions from "Other" in both sections
+        const removedTxs: { tx: TransactionDetail; target: { category: string; isEssential: boolean } }[] = [];
+
+        for (const section of [disc, nonDisc]) {
           const otherIdx = section.items.findIndex((i: BudgetCategory) => i.category === 'Other');
-          if (otherIdx >= 0) {
-            const otherCat = { ...section.items[otherIdx] };
-            otherCat.transactions = (otherCat.transactions || []).filter(
-              (tx: TransactionDetail) => !assignedMerchants.has(tx.merchant || tx.description)
-            );
-            otherCat.txs = otherCat.transactions.length;
-            if (otherCat.txs === 0) {
-              section.items.splice(otherIdx, 1);
+          if (otherIdx < 0) continue;
+          const otherCat = section.items[otherIdx];
+          const kept: TransactionDetail[] = [];
+          for (const tx of (otherCat.transactions || [])) {
+            const target = merchantToTarget.get(tx.merchant || tx.description);
+            if (target) {
+              removedTxs.push({ tx, target });
             } else {
-              otherCat.monthly = otherCat.transactions.reduce(
-                (s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0
-              );
-              section.items[otherIdx] = otherCat;
+              kept.push(tx);
             }
-            section.total = section.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
           }
-          (updated as any)[sectionKey] = section;
+          otherCat.transactions = kept;
+          otherCat.txs = kept.length;
+          if (otherCat.txs === 0) {
+            section.items.splice(otherIdx, 1);
+          } else {
+            otherCat.monthly = kept.reduce((s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0);
+          }
+        }
+
+        // Non-spending categories: Refund and Internal Transfer are excluded from budget totals.
+        // They are removed from "Other" but not added to any spending section.
+        const NON_SPENDING_CATS = new Set(['Refund', 'Internal Transfer']);
+
+        // Add removed transactions to their target categories in the correct section
+        for (const { tx, target } of removedTxs) {
+          // Skip adding to budget sections for non-spending categories
+          if (NON_SPENDING_CATS.has(target.category)) continue;
+          const destSection = target.isEssential ? nonDisc : disc;
+          const destIdx = destSection.items.findIndex((i: BudgetCategory) => i.category === target.category);
+          const txAmt = Math.abs(tx.amount);
+          if (destIdx >= 0) {
+            destSection.items[destIdx].transactions.push(tx);
+            destSection.items[destIdx].monthly += txAmt;
+            destSection.items[destIdx].txs += 1;
+          } else {
+            destSection.items.push({ category: target.category, monthly: txAmt, txs: 1, transactions: [tx] });
+          }
+        }
+
+        // Recalculate section totals
+        disc.total = disc.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+        nonDisc.total = nonDisc.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+        (updated as any).discretionary = disc;
+        (updated as any).non_discretionary = nonDisc;
+
+        // Remove classified person transfers
+        if (Array.isArray((updated as any).person_transfers)) {
+          (updated as any).person_transfers = (updated as any).person_transfers.filter(
+            (t: any) => !merchantToTarget.has(t?.merchant || t?.description)
+          );
         }
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
+
+        // Persist optimistic state to Supabase immediately so it survives page refreshes.
+        // The background sync will eventually overwrite with the canonical enrichment result.
+        persistAnalysis(updated);
       }
 
-      setShowCatReview(false);
+      // ── Completion celebration ──
+      hapticSuccess();
+      setSaveSuccess(true);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      setShowReviewModal(false);
       setCatAssignments({});
+      setSaveSuccess(false);
 
-      // Re-enrich in background so scores/moves update
-      syncInBackground(user.id);
+      // Track which merchants were just categorised so we can reject stale sync results
+      // that still show them in "Other". This is more robust than the timestamp guard alone.
+      // Also update savedOverrideKeys so unresolvedGroups filters them immediately.
+      setSavedOverrideKeys((prev) => {
+        const next = new Set(prev);
+        for (const matchKey of catKeys) {
+          const group = unresolvedGroups.find(g => g.key === matchKey);
+          for (const m of (group?.merchants || [matchKey])) {
+            const key = normalizeMerchant(m);
+            overriddenMerchants.current.add(key);
+            next.add(key);
+          }
+        }
+        return next;
+      });
+
+      // Re-sync so the enrichment engine re-runs with the new overrides.
+      // The persisted optimistic state above protects against refresh in the meantime.
+      // Delay by 10s to give the enrichment engine time to ingest the new overrides.
+      overridesSavedAt.current = Date.now();
+      AsyncStorage.setItem('overrides_saved_at', String(overridesSavedAt.current)).catch(() => {});
+      invalidateSyncCache();
+      const uid = userIdRef.current;
+      if (uid) setTimeout(() => syncInBackground(uid, true), 10_000);
     } catch (err: any) {
-      if (Platform.OS === 'web') {
-        window.alert(err.message || 'Could not save categories');
-      } else {
-        Alert.alert('Error', err.message || 'Could not save categories');
-      }
+      setSaveSuccess(false);
+      Alert.alert('Couldn\u2019t save', err.message || 'Check your connection and try again.');
     }
-    setSavingCatReview(false);
+    setSavingReview(false);
   };
 
   const saveRecategorize = async () => {
+    trackEvent('Transaction Recategorized', { category: recatTarget });
     if (!recatTx || !recatTarget) return;
     setSavingRecat(true);
     try {
@@ -545,23 +862,26 @@ export default function Home() {
           srcCat.transactions = (srcCat.transactions || []).filter(
             (t: TransactionDetail) => !(t.description === recatTx.tx.description && t.date === recatTx.tx.date && t.amount === recatTx.tx.amount)
           );
-          srcCat.monthly = Math.max(0, srcCat.monthly - txAmt / Math.max(1, (analysis.monthly_spending || 1) / (srcCat.monthly || 1)));
+          srcCat.monthly = Math.max(0, srcCat.monthly - txAmt);
           srcCat.txs = Math.max(0, srcCat.txs - 1);
           if (srcCat.txs === 0) fromSection.items.splice(srcCatIdx, 1);
           else fromSection.items[srcCatIdx] = srcCat;
         }
 
-        // Add tx to target category
-        const destCatIdx = toSection.items.findIndex((i: BudgetCategory) => i.category === recatTarget);
-        const txAmt = Math.abs(recatTx.tx.amount);
-        if (destCatIdx >= 0) {
-          const destCat = { ...toSection.items[destCatIdx] };
-          destCat.transactions = [...(destCat.transactions || []), recatTx.tx];
-          destCat.monthly += txAmt;
-          destCat.txs += 1;
-          toSection.items[destCatIdx] = destCat;
-        } else {
-          toSection.items.push({ category: recatTarget, monthly: txAmt, txs: 1, transactions: [recatTx.tx] });
+        // Add tx to target category (skip for non-spending categories like Refund/Internal Transfer)
+        const NON_SPENDING_CATS = new Set(['Refund', 'Internal Transfer']);
+        if (!NON_SPENDING_CATS.has(recatTarget)) {
+          const destCatIdx = toSection.items.findIndex((i: BudgetCategory) => i.category === recatTarget);
+          const txAmt = Math.abs(recatTx.tx.amount);
+          if (destCatIdx >= 0) {
+            const destCat = { ...toSection.items[destCatIdx] };
+            destCat.transactions = [...(destCat.transactions || []), recatTx.tx];
+            destCat.monthly += txAmt;
+            destCat.txs += 1;
+            toSection.items[destCatIdx] = destCat;
+          } else {
+            toSection.items.push({ category: recatTarget, monthly: txAmt, txs: 1, transactions: [recatTx.tx] });
+          }
         }
 
         fromSection.total = fromSection.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
@@ -572,14 +892,29 @@ export default function Home() {
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
+
+        // Track recategorised merchant so stale sync results are rejected
+        const matchDesc = recatTx.tx.merchant || recatTx.tx.description;
+        const normalizedKey = normalizeMerchant(matchDesc);
+        overriddenMerchants.current.add(normalizedKey);
+        setSavedOverrideKeys((prev) => new Set(prev).add(normalizedKey));
+
+        overridesSavedAt.current = Date.now();
+        AsyncStorage.setItem('overrides_saved_at', String(overridesSavedAt.current)).catch(() => {});
+        invalidateSyncCache();
+
+        // Persist optimistic state immediately so it survives page refreshes
+        persistAnalysis(updated);
       }
 
       setRecatTx(null);
       setRecatTarget('');
 
-      // Trigger background re-enrichment so score/moves reflect the correction
+      // Trigger a delayed background sync so the analyses row in Supabase
+      // gets updated with the correct category split from the enrichment pipeline.
+      // Delayed by 10s to give the enrichment engine time to ingest the new overrides.
       if (user) {
-        syncInBackground(user.id);
+        setTimeout(() => syncInBackground(user.id, true), 10_000);
       }
     } catch (err: any) {
       console.warn('[home] Recategorize failed:', err?.message);
@@ -588,6 +923,7 @@ export default function Home() {
   };
 
   const doRemoveIncomeSource = async (sourceName: string) => {
+    trackEvent('Income Source Removed');
     setRemovingSource(sourceName);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -624,6 +960,7 @@ export default function Home() {
   };
 
   const handleDeleteMove = (move: Move) => {
+    trackEvent('Move Deleted');
     const doDelete = async () => {
       if (!analysis) return;
       const updatedMoves = (analysis.all_moves || []).filter(m => m.action !== move.action);
@@ -651,47 +988,35 @@ export default function Home() {
       } catch {}
     };
 
-    if (Platform.OS === 'web') {
-      const ok = window.confirm(`Delete "${stripMd(move.action)}"?\n\nThis recommendation will be permanently removed.`);
-      if (ok) doDelete();
-    } else {
-      Alert.alert(
-        'Delete recommendation?',
-        `Remove "${stripMd(move.action)}" from your insights?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: doDelete },
-        ],
-      );
-    }
+    const ok = window.confirm(`Delete "${stripMd(move.action)}"?\n\nThis recommendation will be permanently removed.`);
+    if (ok) doDelete();
   };
 
   const handleRemoveIncomeSource = (sourceName: string) => {
-    if (Platform.OS === 'web') {
-      // Alert.alert may not work reliably on web — use confirm
-      const ok = window.confirm(
-        `Remove "${sourceName}"?\n\nThis will no longer be counted as income. This affects your surplus and recommendations.`
-      );
-      if (ok) doRemoveIncomeSource(sourceName);
-    } else {
-      Alert.alert(
-        'Remove income source?',
-        `"${sourceName}" will no longer be counted as income. This affects your surplus and recommendations.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Remove', style: 'destructive', onPress: () => doRemoveIncomeSource(sourceName) },
-        ],
-      );
-    }
+    const ok = window.confirm(
+      `Remove "${sourceName}"?\n\nThis will no longer be counted as income. This affects your surplus and recommendations.`
+    );
+    if (ok) doRemoveIncomeSource(sourceName);
   };
 
   useFocusEffect(
     useCallback(() => {
+      trackScreen('Home');
+      // Invalidate cached sync so returning from connect screen always fetches fresh data
+      invalidateSyncCache();
       loadData();
-      // Subscribe to sync completions from other screens
+      // Subscribe to sync completions for screen-specific reactive events.
+      // Shared data (weeklyCtx, planProgress, analysis) is updated by AppDataProvider.
       const unsub = onSyncComplete((result) => {
         if (!result) return;
-        if (result.weeklyContext) setWeeklyCtx(result.weeklyContext);
+        // Surface reactive events from syncs triggered by other screens
+        if (result.reactive?.events?.length) {
+          setReactiveEvents(result.reactive.events);
+          setReactiveEventIndex(0);
+          if (!result.weeklyContext?.incomeArrivedThisWeek) {
+            setTimeout(() => setShowReactiveModal(true), 800);
+          }
+        }
       });
       return () => unsub();
     }, [])
@@ -699,13 +1024,13 @@ export default function Home() {
 
   // Merge budget adjustments into an analysis object
   const mergeAdjustments = (base: Analysis, adjustments: any[]): Analysis => {
-    if (!adjustments.length) return base;
+    if (!base || !adjustments.length) return base;
 
     const updated = { ...base };
     const nonDisc = { ...((updated.non_discretionary as any) || { total: 0, items: [] }) };
     const disc = { ...((updated.discretionary as any) || { total: 0, items: [] }) };
-    nonDisc.items = [...(nonDisc.items || [])];
-    disc.items = [...(disc.items || [])];
+    nonDisc.items = [...(Array.isArray(nonDisc.items) ? nonDisc.items : [])];
+    disc.items = [...(Array.isArray(disc.items) ? disc.items : [])];
 
     for (const adj of adjustments) {
       const section = adj.is_essential ? nonDisc : disc;
@@ -742,13 +1067,51 @@ export default function Home() {
     return updated;
   };
 
+  // ── Background verification polling ──
+  // When an analysis is saved as 'draft', /api/verify runs Claude AI in the background.
+  // Poll every 15s (max 4 attempts) until the analysis is 'verified', then refresh.
+  const startVerifyPolling = (userId: string, adjustments: any[]) => {
+    if (verifyPollRef.current) clearTimeout(verifyPollRef.current);
+    let attempts = 0;
+    const poll = async () => {
+      attempts++;
+      if (attempts > 4) {
+        setVerificationStatus('verified'); // Stop showing indicator after max attempts
+        return;
+      }
+      try {
+        const { data: row } = await supabase
+          .from('analyses')
+          .select('verification_status, archetype, decision_score, monthly_income, monthly_spending, surplus, non_discretionary, discretionary, income_sources, top_move, all_moves, behavioral_patterns, goal_context')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (row?.verification_status === 'verified') {
+          setVerificationStatus('verified');
+          setAnalysis(mergeAdjustments(row, adjustments));
+          return;
+        }
+      } catch {}
+      verifyPollRef.current = setTimeout(poll, 15_000);
+    };
+    verifyPollRef.current = setTimeout(poll, 15_000);
+  };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (verifyPollRef.current) clearTimeout(verifyPollRef.current);
+    };
+  }, []);
+
   const loadData = async () => {
-    setLoading(true);
+    setLoadingLocal(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setLoading(false); return; }
-
-      setUserName(user.user_metadata?.full_name?.split(' ')[0] || '');
+      if (!user) { setLoadingLocal(false); return; }
+      userIdRef.current = user.id;
 
       // ── Record daily streak ──
       try {
@@ -787,85 +1150,81 @@ export default function Home() {
         }
       } catch {}
 
-      // Fetch budget adjustments + debt accounts
-      let adjustments: any[] = [];
+      // Refresh shared context data (analysis, debt, plans, progress, prevSnapshot).
+      // This single call replaces the 6+ independent Supabase queries that were here.
+      // The snapshot gives us immediate access to fresh data (React state may not be updated yet).
+      const snapshot = await appData.refresh();
+
+      // Load persisted transaction overrides so unresolvedGroups can exclude
+      // merchants the user has already categorised (survives app restarts).
       try {
-        const [adjRes, debtRes] = await Promise.all([
-          supabase
-            .from('budget_adjustments')
-            .select('description, category, monthly_amount, is_essential')
-            .eq('user_id', user.id),
-          supabase
-            .from('debt_accounts')
-            .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source')
-            .eq('user_id', user.id),
-        ]);
-        if (adjRes.data) adjustments = adjRes.data;
-        if (debtRes.data) setDebtAccounts(debtRes.data);
+        const { data: overrides } = await supabase
+          .from('transaction_overrides')
+          .select('match_description')
+          .eq('user_id', user.id);
+        if (overrides && overrides.length > 0) {
+          const keys = new Set(overrides.map((o: { match_description: string }) => normalizeMerchant(o.match_description)));
+          setSavedOverrideKeys(keys);
+        }
       } catch {}
 
-      // Fetch the latest persisted analysis from Supabase.
-      // Only fall back to in-memory result if Supabase has nothing.
-      // This eliminates the visual "flash" of showing stale in-memory data
-      // before Supabase data arrives.
-      const { data, error } = await supabase
-        .from('analyses')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // Use fresh budget adjustments for mergeAdjustments
+      const adjustments = snapshot.budgetAdjustments;
 
-      if (error) {
-        console.warn('[home] Failed to fetch analysis:', error.message);
-      }
-
+      // Apply mergeAdjustments to create the local analysis override.
+      // The shared context has the raw analysis; the Home screen merges budget adjustments.
+      const rawAnalysis = snapshot.analysis;
       const lastResult = getLastResult();
-      if (data) {
-        setAnalysis(mergeAdjustments(data, adjustments));
+      const recentOverride = overridesSavedAt.current && Date.now() - overridesSavedAt.current < 120_000;
+      if (rawAnalysis && !recentOverride) {
+        setAnalysis(mergeAdjustments(rawAnalysis, adjustments));
+        // Track verification status and start polling if not verified yet
+        const status = (rawAnalysis as any).verification_status || 'verified';
+        setVerificationStatus(status);
+        if (status === 'draft' || status === 'verifying') {
+          startVerifyPolling(user.id, adjustments);
+        }
       } else if (lastResult) {
         // Fallback: use in-memory result only if Supabase has nothing yet
         setAnalysis(mergeAdjustments(lastResult, adjustments));
+        setVerificationStatus('draft');
+        startVerifyPolling(user.id, adjustments);
       }
 
-      // Fetch previous month's snapshot for real income comparison
-      try {
-        const now = new Date();
-        const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-        const { data: prevData } = await supabase
-          .from('score_history')
-          .select('monthly_spending, monthly_income')
-          .eq('user_id', user.id)
-          .gte('created_at', prevMonth.toISOString())
-          .lte('created_at', prevMonthEnd.toISOString())
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        setPrevSnapshot(prevData ?? null);
-      } catch {
-        setPrevSnapshot(null);
+      // Check if user has a bank connection even if no analysis exists yet.
+      if (!rawAnalysis && !lastResult) {
+        try {
+          const { count } = await supabase
+            .from('bank_data')
+            .select('id', { count: 'exact', head: true })
+            .eq('user_id', user.id);
+          setHasBankConnection((count ?? 0) > 0);
+        } catch {
+          setHasBankConnection(false);
+        }
       }
 
-      // Trigger background sync if user has any analysis data
-      if (data || lastResult) {
-        syncInBackground(user.id);
-      }
+      // Trigger background sync if user has any data or a bank connection.
+      // Force-sync when data was previously stale (fallback) to retry TrueLayer.
+      const shouldForce = syncDataSource === 'fallback';
+      syncInBackground(user.id, shouldForce);
     } catch (err: any) {
       console.warn('[home] loadData error:', err?.message);
       setAnalysis(null);
     }
-    setLoading(false);
+    setLoadingLocal(false);
   };
 
   // Pull-to-refresh handler — force a fresh TrueLayer fetch
   const onRefresh = useCallback(async () => {
+    trackEvent('Home Refreshed');
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       setRefreshing(true);
       invalidateSyncCache();
       await syncInBackground(user.id, true);
+      hapticSuccess();
     } catch (err: any) {
       console.warn('[home] onRefresh error:', err?.message);
     }
@@ -874,31 +1233,66 @@ export default function Home() {
 
   // Background sync: refresh bank data via TrueLayer and re-run analysis
   const syncInBackground = async (userId: string, force: boolean = false) => {
+    // Skip sync when offline or app is backgrounded
+    if (!isOnline || !isActive) return;
     try {
       setSyncing(true);
+      setSyncError(null);
 
       const result = await requestSync(userId, force);
-      if (!result) { setSyncing(false); return; }
+      if (!result) {
+        setSyncing(false);
+        setSyncError('Sync returned no data — pull down to retry');
+        return;
+      }
 
-      // Surface connection issues to the user
-      if (result.connectionIssues?.length > 0) {
+      // Track data freshness
+      setSyncDataSource(result.dataSource);
+      if (result.latestTransactionDate) setLatestTxDate(result.latestTransactionDate);
+
+      // Surface connection issues to the user.
+      // Only show reconnect banners for genuine expiry / missing connections.
+      // Transient sync failures (sync_failed) should NOT show a scary
+      // "reconnect" banner — fall through to data freshness checks instead.
+      let nextWarning: typeof connectionWarning = null;
+      const hasRealConnectionIssue = result.connectionIssues?.some(
+        (i: string) => i === 'token_expired' || i === 'no_connection' || i === 'some_connections_expired'
+      );
+
+      if (hasRealConnectionIssue) {
         const banks = result.expiredBankNames ?? [];
         if (result.connectionIssues.includes('token_expired') || result.connectionIssues.includes('no_connection')) {
-          setConnectionWarning({ message: 'all_expired', banks });
+          nextWarning = { message: 'all_expired', banks };
         } else if (result.connectionIssues.includes('some_connections_expired')) {
-          setConnectionWarning({ message: 'some_expired', banks });
+          nextWarning = { message: 'some_expired', banks };
         }
       } else if (result.dataSource === 'fallback') {
-        setConnectionWarning({ message: 'fallback', banks: [] });
+        // Sync fell back to cached data. If data is >24h old, escalate to
+        // reconnect prompt — persistent failures likely mean a dead token.
+        if (result.latestTransactionDate) {
+          const ageMs = Date.now() - new Date(result.latestTransactionDate).getTime();
+          if (ageMs > 24 * 60 * 60 * 1000) {
+            nextWarning = { message: 'all_expired', banks: result.expiredBankNames ?? [] };
+          }
+        }
       } else if (result.expiringConnections?.length > 0) {
         // Proactive warning: connections approaching 90-day consent expiry
         const expiringBanks = result.expiringConnections.map(
           (c: { name: string; daysLeft: number }) => `${c.name} (${c.daysLeft}d left)`
         );
-        setConnectionWarning({ message: 'expiring', banks: expiringBanks });
-      } else {
-        // All connections synced OK — clear warning
-        setConnectionWarning(null);
+        nextWarning = { message: 'expiring', banks: expiringBanks };
+      }
+
+      setConnectionWarning(nextWarning);
+
+      // Warn if data is stale — but only when sync actually failed (fallback).
+      // When TrueLayer synced successfully, stale data just means the bank
+      // hasn't posted recent transactions — "pull down to retry" won't help.
+      if (result.dataSource === 'fallback' && result.latestTransactionDate) {
+        const txAge = Math.floor((Date.now() - new Date(result.latestTransactionDate).getTime()) / (1000 * 60 * 60 * 24));
+        if (txAge >= 2) {
+          setSyncError(`Transactions are ${txAge} days old — pull down to retry`);
+        }
       }
 
       // Update debt accounts: merge synced with any manual debts
@@ -909,11 +1303,35 @@ export default function Home() {
           .eq('user_id', userId);
         if (allDebt) setDebtAccounts(allDebt);
       } catch {
-        if (result.debtAccounts.length > 0) setDebtAccounts(result.debtAccounts);
+        if (result.debtAccounts?.length > 0) setDebtAccounts(result.debtAccounts);
       }
 
       // Update adaptive weekly context
       if (result.weeklyContext) setWeeklyCtx(result.weeklyContext);
+
+      // ── Handle reactive engine events ──
+      if (result.reactive) {
+        if (result.reactive.events.length > 0) {
+          setReactiveEvents(result.reactive.events);
+          setReactiveEventIndex(0);
+          // Show reactive modal after a short delay (don't compete with payday modal)
+          if (!result.weeklyContext?.incomeArrivedThisWeek) {
+            setTimeout(() => setShowReactiveModal(true), 800);
+          }
+        }
+        // Merge verified steps into local plan progress so checkboxes + progress bars update
+        if (result.reactive.verifiedSteps && Object.keys(result.reactive.verifiedSteps).length > 0) {
+          setPlanProgress((prev) => {
+            const updated = { ...prev };
+            for (const [key, steps] of Object.entries(result.reactive!.verifiedSteps)) {
+              if (updated[key]) {
+                updated[key] = { ...updated[key], completed_steps: steps };
+              }
+            }
+            return updated;
+          });
+        }
+      }
 
       // Re-fetch budget adjustments and apply for display
       let budgetAdjustments: any[] = [];
@@ -927,14 +1345,95 @@ export default function Home() {
 
       // Only update analysis if sync returned materially different data
       // to avoid a visual flash when the numbers haven't changed
+      if (!result.analysis) {
+        // Bank is connected but enrichment found no usable transactions yet.
+        // Schedule a retry — transactions may take time to settle from the bank.
+        if (result.connectionIssues?.includes('no_transactions_yet')) {
+          setHasBankConnection(true);
+          const retryCount = (syncRetryRef.current ?? 0);
+          if (retryCount < 5) {
+            syncRetryRef.current = retryCount + 1;
+            setRetriesExhausted(false);
+            const delayMs = Math.min(30_000 * Math.pow(1.5, retryCount), 120_000);
+            console.log(`[home] No transactions yet — retry ${retryCount + 1}/5 in ${Math.round(delayMs / 1000)}s`);
+            setTimeout(() => syncInBackground(userId, true), delayMs);
+          } else {
+            // All retries exhausted — show escape hatch
+            setRetriesExhausted(true);
+            console.warn('[home] All sync retries exhausted — showing action buttons');
+          }
+        }
+        setSyncing(false);
+        return;
+      }
+      // Reset retry counter on successful analysis
+      syncRetryRef.current = 0;
+      setRetriesExhausted(false);
       const fresh = mergeAdjustments(result.analysis, budgetAdjustments);
       setAnalysis((prev) => {
+        // Deterministic guard: reject sync results from syncs that started
+        // BEFORE the user's last override save. Those syncs fetched stale
+        // overrides and their enrichment result is incorrect.
+        if (overridesSavedAt.current && result.syncStartedAt < overridesSavedAt.current) {
+          return prev;
+        }
+
+        // Merchant-key guard: if we recently categorised merchants, check whether
+        // the incoming sync result still has them in "Other" with classifiedBy=default.
+        // If so, the enrichment engine hasn't ingested our overrides yet — reject.
+        if (overriddenMerchants.current.size > 0) {
+          const stillStale = new Set<string>();
+          for (const section of [fresh.discretionary, fresh.non_discretionary]) {
+            const items = (section as any)?.items;
+            if (!Array.isArray(items)) continue;
+            for (const item of items) {
+              if (item?.category !== 'Other') continue;
+              for (const tx of (item.transactions || [])) {
+                if (!tx) continue;
+                const key = normalizeMerchant(tx.merchant || tx.description || '');
+                if (overriddenMerchants.current.has(key)) {
+                  // Still in "Other" with default classification — stale result
+                  if (!tx.classifiedBy || tx.classifiedBy === 'default') {
+                    stillStale.add(key);
+                  }
+                }
+              }
+            }
+          }
+          if (stillStale.size > 0) {
+            console.log(`[home] Rejecting sync: ${stillStale.size} overridden merchants still in Other`);
+            return prev;
+          }
+          // All overridden merchants are correctly classified — clear the guard
+          overriddenMerchants.current = new Set();
+        }
+
+        // Clear the timestamp guard now that we've accepted a post-override sync
+        if (overridesSavedAt.current && result.syncStartedAt >= overridesSavedAt.current) {
+          overridesSavedAt.current = 0;
+          AsyncStorage.removeItem('overrides_saved_at').catch(() => {});
+        }
+
+        // Count unresolved items to detect reclassifications/overrides
+        const unresolvedCount = (a: Analysis | null) => {
+          if (!a) return 0;
+          let count = 0;
+          for (const section of [a.discretionary, a.non_discretionary]) {
+            const items = (section as any)?.items;
+            if (!Array.isArray(items)) continue;
+            const other = items.find((i: any) => i?.category === 'Other');
+            if (other) count += other.txs || 0;
+          }
+          count += ((a as any)?.person_transfers?.length || 0);
+          return count;
+        };
         if (
           prev &&
           prev.monthly_income === fresh.monthly_income &&
           prev.monthly_spending === fresh.monthly_spending &&
           prev.surplus === fresh.surplus &&
-          prev.decision_score === fresh.decision_score
+          prev.decision_score === fresh.decision_score &&
+          unresolvedCount(prev) === unresolvedCount(fresh)
         ) {
           return prev; // No material change — skip re-render
         }
@@ -944,22 +1443,329 @@ export default function Home() {
       setLastSynced(getLastSyncTime());
     } catch (err: any) {
       console.warn('[home] Background sync failed:', err?.message);
+      setSyncError('Sync failed — pull down to retry');
     }
     setSyncing(false);
   };
 
-  if (loading) {
-    return (
-      <View style={s.loadingContainer}>
-        <ActivityIndicator color={colors.accent} size="large" />
-      </View>
-    );
-  }
+  // ── Plan handlers (merged from plan page) ──
+  const effortOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  const effortColor = (e: string) => e === 'low' ? colors.lavender : e === 'medium' ? colors.dim : colors.green;
+  const effortLabel = (e: string) => e === 'low' ? 'Quick win' : e === 'medium' ? 'Some effort' : 'Big move';
+
+  const togglePlanStep = (key: string, stepIndex: number, moveAction: string, totalSteps?: number) => {
+    trackEvent('Plan Step Toggled', { action: moveAction, step: stepIndex });
+    setPlanProgress((prev) => {
+      const row = prev[key] || { move_key: key, move_action: moveAction, approved: true, completed_steps: [] };
+      const steps = [...row.completed_steps];
+      const idx = steps.indexOf(stepIndex);
+      if (idx >= 0) steps.splice(idx, 1); else steps.push(stepIndex);
+      const updated = { ...row, completed_steps: steps };
+      // Persist
+      const uid = userIdRef.current;
+      if (uid) {
+        supabase.from('plan_progress').upsert({
+          user_id: uid, move_key: key, move_action: moveAction,
+          approved: updated.approved, completed_steps: steps,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,move_key' }).then(() => {});
+      }
+      // Trigger celebration when all steps just completed
+      if (totalSteps && steps.length >= totalSteps && idx < 0) {
+        setTimeout(() => {
+          LayoutAnimation.configureNext(SMOOTH_ANIM);
+          setJustCompleted(key);
+        }, 300);
+        // Auto-clear celebration after a few seconds
+        setTimeout(() => setJustCompleted(null), 3500);
+      }
+      return { ...prev, [key]: updated };
+    });
+  };
+
+  const handleStartMove = async (index: number, move: Move) => {
+    trackEvent('Move Started', { action: move.action });
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const key = `move-${index}`;
+    if (planProgress[key]?.approved) return;
+    const sgs = hydrateSubGoals(move, debtAccounts);
+    const row = { move_key: key, move_action: move.action, approved: true, completed_steps: [] as number[], sub_goals: sgs, updated_at: new Date().toISOString() };
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
+    setPlanProgress((prev) => ({ ...prev, [key]: row }));
+    const upsertData: any = {
+      user_id: uid, move_key: key, move_action: move.action,
+      approved: true, completed_steps: [],
+      updated_at: new Date().toISOString(),
+    };
+    if (sgs && sgs.length > 0) upsertData.sub_goals = sgs;
+    await supabase.from('plan_progress').upsert(upsertData, { onConflict: 'user_id,move_key' });
+  };
+
+  const handleStopMove = async (index: number) => {
+    trackEvent('Move Stopped');
+    const uid = userIdRef.current;
+    if (!uid) return;
+    const key = `move-${index}`;
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
+    setPlanProgress((prev) => { const u = { ...prev }; delete u[key]; return u; });
+    await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', key);
+  };
+
+  /** Generate data-driven, surgical steps for user plans using real account data */
+  const generatePlanSteps = (plan: any): string[] => {
+    const action = (plan.action || '').toLowerCase();
+    const activeDebts = debtAccounts.filter((d: any) => (d.outstanding_balance || 0) > 0);
+
+    // ── Debt plans: one step per real debt account with name, balance, APR ──
+    if (action.includes('debt') || action.includes('credit') || action.includes('pay off')) {
+      if (activeDebts.length > 0) {
+        // Sort by interest rate descending (avalanche method)
+        const sorted = [...activeDebts].sort((a: any, b: any) => (b.interest_rate || 0) - (a.interest_rate || 0));
+        return sorted.map((d: any, i: number) => {
+          const name = d.account_name || 'Debt';
+          const balance = Math.round(d.outstanding_balance || 0);
+          const apr = d.interest_rate ? `${Math.round(d.interest_rate * 100)}% APR` : '';
+          const min = d.minimum_payment ? Math.round(d.minimum_payment) : 0;
+          const payment = i === 0 && plan.monthly_saving
+            ? `£${Math.round(plan.monthly_saving)}/mo`
+            : min > 0 ? `£${min}/mo minimum` : '';
+          const details = [apr, payment].filter(Boolean).join(' · ');
+          return `${i === 0 ? 'Pay down' : 'Then clear'} ${name} — £${balance.toLocaleString()}${details ? ` (${details})` : ''}`;
+        });
+      }
+      return [
+        'Connect your credit cards so Bocy can build a precise payoff plan',
+        'Bocy will track each debt by name, balance, and interest rate',
+      ];
+    }
+
+    // ── Buffer/emergency plans: real surplus amount + timeline ──
+    if (action.includes('emergency') || action.includes('buffer')) {
+      const steps: string[] = [];
+      const target = plan.target_amount ? Math.round(plan.target_amount) : 0;
+      const monthly = plan.monthly_saving ? Math.round(plan.monthly_saving) : 0;
+      const surplus = analysis?.surplus ? Math.round(analysis.surplus) : 0;
+      const transferAmt = monthly || surplus;
+      if (transferAmt > 0 && target > 0) {
+        const months = Math.ceil(target / transferAmt);
+        steps.push(`Transfer £${transferAmt}/mo on payday → reaches £${target.toLocaleString()} in ${months} months`);
+      } else if (target > 0) {
+        steps.push(`Target: £${target.toLocaleString()} emergency buffer`);
+      }
+      steps.push('Set up automatic standing order so it happens without thinking');
+      return steps;
+    }
+
+    // ── Savings/deposit plans: real amounts ──
+    if (action.includes('save') || action.includes('saving') || action.includes('deposit')) {
+      const steps: string[] = [];
+      const target = plan.target_amount ? Math.round(plan.target_amount) : 0;
+      const monthly = plan.monthly_saving ? Math.round(plan.monthly_saving) : 0;
+      const surplus = analysis?.surplus ? Math.round(analysis.surplus) : 0;
+      const transferAmt = monthly || surplus;
+      if (transferAmt > 0 && target > 0) {
+        const months = Math.ceil(target / transferAmt);
+        steps.push(`Transfer £${transferAmt}/mo → reaches £${target.toLocaleString()} in ${months} months`);
+      } else if (transferAmt > 0) {
+        steps.push(`Transfer £${transferAmt}/mo into savings on payday`);
+      }
+      steps.push('Automate it — set up a standing order so you don\'t have to think');
+      return steps;
+    }
+
+    // ── Subscription plans: real merchants from analysis ──
+    if (action.includes('subscript') || action.includes('cancel')) {
+      const subs = extractSubscriptionsFromAnalysis();
+      if (subs.length > 0) {
+        return subs.slice(0, 5).map((s) =>
+          `Cancel ${s.name} — £${Math.round(s.monthly * 100) / 100}/mo`
+        );
+      }
+      return ['Review active subscriptions this week', 'Cancel the ones you haven\'t used in 30 days'];
+    }
+
+    // ── Spending reduction: real category amounts ──
+    if (action.includes('reduce') || action.includes('cut') || action.includes('spending')) {
+      const categories = extractTopSpendingCategories();
+      if (categories.length > 0) {
+        return categories.slice(0, 3).map((c) => {
+          const target = Math.round(c.monthly * 0.7); // suggest 30% reduction
+          return `Reduce ${c.category} from £${Math.round(c.monthly)} to £${target}/mo`;
+        });
+      }
+    }
+
+    // ── Investment plans ──
+    if (action.includes('invest')) {
+      const monthly = plan.monthly_saving ? Math.round(plan.monthly_saving) : 0;
+      if (monthly > 0) {
+        return [
+          `Set up £${monthly}/mo automatic investment`,
+          'Start with a low-cost index fund — don\'t overthink it',
+        ];
+      }
+      return [
+        'Start with a small monthly amount you won\'t miss',
+        'Automate it and don\'t check daily',
+      ];
+    }
+
+    // ── Fallback: still actionable ──
+    return [
+      'Break this goal into a weekly action',
+      'Start with the smallest step this week',
+    ];
+  };
+
+  /** Extract subscription-like items from analysis for plan steps */
+  const extractSubscriptionsFromAnalysis = (): { name: string; monthly: number }[] => {
+    if (!analysis) return [];
+    const subs: { name: string; monthly: number }[] = [];
+    for (const section of [analysis.discretionary, analysis.non_discretionary]) {
+      const items = (section as any)?.items;
+      if (!Array.isArray(items)) continue;
+      const subCat = items.find((i: any) => i?.category === 'Subscriptions');
+      if (subCat?.transactions) {
+        for (const tx of subCat.transactions) {
+          const name = tx.merchant || tx.description;
+          const existing = subs.find((s) => s.name === name);
+          if (existing) existing.monthly += Math.abs(tx.amount);
+          else subs.push({ name, monthly: Math.abs(tx.amount) });
+        }
+      }
+    }
+    return subs.sort((a, b) => b.monthly - a.monthly);
+  };
+
+  /** Extract top discretionary spending categories from analysis */
+  const extractTopSpendingCategories = (): { category: string; monthly: number }[] => {
+    if (!analysis?.discretionary) return [];
+    const items = (analysis.discretionary as any)?.items;
+    if (!Array.isArray(items)) return [];
+    return items
+      .filter((i: any) => i.category !== 'Other' && i.category !== 'Subscriptions')
+      .sort((a: any, b: any) => b.monthly - a.monthly);
+  };
+
+  /** Generate sub-goals for user plans so debt/savings plans get progress bars */
+  const generatePlanSubGoals = (plan: any): MoveSubGoal[] | undefined => {
+    const action = (plan.action || '').toLowerCase();
+    const activeDebts = debtAccounts.filter((d: any) => (d.outstanding_balance || 0) > 0);
+
+    // Debt plans: one sub-goal per real debt account
+    if ((action.includes('debt') || action.includes('credit') || action.includes('pay off')) && activeDebts.length > 0) {
+      return activeDebts.map((d: any) => ({
+        type: 'debt_clear' as MoveSubGoalType,
+        target: d.account_name || 'Debt',
+        startValue: Math.round(d.outstanding_balance || 0),
+        targetValue: 0,
+        currentValue: Math.round(d.outstanding_balance || 0),
+      }));
+    }
+
+    // Buffer/savings plans: single sub-goal with target amount
+    if ((action.includes('emergency') || action.includes('buffer') || action.includes('save') || action.includes('saving') || action.includes('deposit')) && plan.target_amount) {
+      const target = Math.round(plan.target_amount);
+      return [{
+        type: (action.includes('buffer') || action.includes('emergency')) ? 'buffer_build' as MoveSubGoalType : 'savings_reach' as MoveSubGoalType,
+        target: action.includes('deposit') ? 'House deposit'
+          : action.includes('buffer') || action.includes('emergency') ? 'Emergency buffer'
+          : 'Savings goal',
+        startValue: 0,
+        targetValue: target,
+        currentValue: 0,
+      }];
+    }
+
+    // Subscription plans: one sub-goal per subscription
+    if (action.includes('subscript') || action.includes('cancel')) {
+      const subs = extractSubscriptionsFromAnalysis();
+      if (subs.length > 0) {
+        return subs.slice(0, 5).map((s) => ({
+          type: 'sub_cancel' as MoveSubGoalType,
+          target: s.name,
+          startValue: Math.round(s.monthly * 100) / 100,
+          targetValue: 0,
+        }));
+      }
+    }
+
+    return undefined;
+  };
+
+  const handleRemovePlan = async (planId: string) => {
+    trackEvent('Plan Deleted');
+    const uid = userIdRef.current;
+    if (!uid) return;
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
+    // Optimistic update removed — refresh shared context after mutation below
+    setExpandedPlan(null);
+
+    try {
+      // Use the API endpoint (service-role key) so RLS doesn't block the delete
+      const { data: { session: sess } } = await supabase.auth.getSession();
+      const res = await fetch('/api/plans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}) },
+        body: JSON.stringify({ action: 'delete', plan_id: planId }),
+      });
+      if (!res.ok) throw new Error('API delete failed');
+    } catch {
+      // Fallback: delete directly via Supabase client (works on native)
+      try {
+        const { error } = await supabase
+          .from('user_plans')
+          .update({ status: 'dismissed' })
+          .eq('id', planId)
+          .eq('user_id', uid);
+
+        if (error) {
+          await supabase.from('user_plans').delete().eq('id', planId).eq('user_id', uid);
+        }
+      } catch (err: any) {
+        console.warn('[home] Failed to delete plan:', err?.message);
+      }
+    }
+
+    // Clean up any progress for this plan
+    try {
+      await supabase.from('plan_progress').delete().eq('user_id', uid).eq('move_key', `plan-${planId}`);
+    } catch {}
+
+    // Refresh shared context so userPlans reflects the deletion
+    appData.refresh().catch(() => {});
+  };
+
+
+  /** Provider actions for a move */
+  const PROVIDER_ACTIONS: Record<string, { label: string; sub?: string; phone?: string; url?: string }[]> = {
+    debt: [
+      { label: 'Call StepChange', sub: 'Free debt help', phone: '0800 138 1111' },
+      { label: 'Visit StepChange', url: 'https://www.stepchange.org' },
+    ],
+    buffer: [{ label: 'Compare savings accounts', url: 'https://www.bocy.io/savings-comparison.html' }],
+    savings: [{ label: 'Compare savings rates', url: 'https://www.bocy.io/savings-comparison.html' }],
+    invest: [{ label: 'Compare ISAs', url: 'https://www.bocy.io/isa-comparison.html' }],
+  };
+
+  const getProviderActions = (move: Move) => {
+    const a = (move.action || '').toLowerCase();
+    const cat = move.category || '';
+    if (cat === 'debt' || a.includes('debt')) return PROVIDER_ACTIONS.debt;
+    if (cat === 'buffer' || a.includes('buffer') || a.includes('emergency')) return PROVIDER_ACTIONS.buffer;
+    if (cat === 'savings' || a.includes('saving')) return PROVIDER_ACTIONS.savings;
+    if (cat === 'invest' || a.includes('invest')) return PROVIDER_ACTIONS.invest;
+    return [];
+  };
 
   // ── Derived data ──
-  const moves = analysis?.all_moves ?? [];
+  const moves = Array.isArray(analysis?.all_moves) ? analysis.all_moves : [];
   const income = analysis?.monthly_income ?? 0;
-  const incomeSources = analysis?.income_sources ?? [];
+  const incomeSources = Array.isArray(analysis?.income_sources) ? analysis.income_sources : [];
+  const isVariableIncome = analysis?.is_variable_income ?? false;
+  const incomeFloor = analysis?.income_floor ?? income;
+  const incomeCV = analysis?.income_cv ?? 0;
 
   // Only show high + medium effort moves on dashboard; low effort → plan page only
   // Sort: high effort first, then medium
@@ -970,15 +1776,15 @@ export default function Home() {
   // Primary income source only
   const primaryIncome = incomeSources.find((s: IncomeSource) => s.isSalary)
     || (incomeSources.length > 0
-      ? incomeSources.reduce((a, b) => a.avgAmount > b.avgAmount ? a : b)
+      ? incomeSources.reduce((a, b) => (a?.avgAmount ?? 0) > (b?.avgAmount ?? 0) ? a : b)
       : null);
 
   const nonDisc = analysis?.non_discretionary as any;
   const disc = analysis?.discretionary as any;
   const nonDiscTotal = nonDisc?.total ?? 0;
   const discTotal = disc?.total ?? 0;
-  const nonDiscItems: BudgetCategory[] = nonDisc?.items ?? [];
-  const discItems: BudgetCategory[] = disc?.items ?? [];
+  const nonDiscItems: BudgetCategory[] = Array.isArray(nonDisc?.items) ? nonDisc.items : [];
+  const discItems: BudgetCategory[] = Array.isArray(disc?.items) ? disc.items : [];
   const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
 
   // Bar segment proportions
@@ -1010,12 +1816,13 @@ export default function Home() {
   // ── Period-aware budget calculations ──
   // Budget targets = analysis monthly averages (what you'd normally spend)
   // Actual = real transactions in the selected period
-  const txFilter = budgetPeriod === 'week' ? isCurrentWeek : isCurrentMonth;
-  const periodDivisor = budgetPeriod === 'week' ? 4.33 : 1;
+  const txFilter = budgetPeriod === 'year' ? isCurrentYear : budgetPeriod === 'week' ? isCurrentWeek : isCurrentMonth;
+  // periodDivisor converts monthly values: year = 1/12 (×12), month = 1, week = 4.33 (÷4.33)
+  const periodDivisor = budgetPeriod === 'year' ? (1 / 12) : budgetPeriod === 'week' ? 4.33 : 1;
 
   const computePeriodCategory = (item: BudgetCategory) => {
-    const txs = (item.transactions ?? []).filter(tx => txFilter(tx.date));
-    const total = txs.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+    const txs = (Array.isArray(item?.transactions) ? item.transactions : []).filter(tx => tx?.date && txFilter(tx.date));
+    const total = txs.reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
     return { txs, total, count: txs.length };
   };
 
@@ -1039,6 +1846,11 @@ export default function Home() {
   const periodDiscBudget = discTotal / periodDivisor;
   const periodIncome = income / periodDivisor;
   const periodTotalBudget = periodNonDiscBudget + periodDiscBudget;
+
+  // Period labels for display
+  const periodAdj = budgetPeriod === 'year' ? 'yearly' : budgetPeriod === 'week' ? 'weekly' : 'monthly';
+  const periodSuffix = budgetPeriod === 'year' ? '/yr' : budgetPeriod === 'week' ? '/wk' : '/mo';
+  const periodThisLabel = budgetPeriod === 'year' ? 'this year' : budgetPeriod === 'week' ? 'this week' : 'this month';
 
   // On-track status per section
   const essentialsOnTrack = periodNonDiscTotal <= periodNonDiscBudget * 1.05; // 5% tolerance
@@ -1092,11 +1904,11 @@ export default function Home() {
 
   const weekStart = getWeekStart();
   const allDiscTxs: TransactionDetail[] = discItems.flatMap(
-    (item: BudgetCategory) => item.transactions ?? []
+    (item: BudgetCategory) => Array.isArray(item?.transactions) ? item.transactions : []
   );
   const spentThisWeek = allDiscTxs
-    .filter((tx) => new Date(tx.date) >= weekStart)
-    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
+    .filter((tx) => tx?.date && new Date(tx.date) >= weekStart)
+    .reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
 
   // Apply custom limit if set (capped at calculated budget — user can lower, not inflate)
   const weeklyBudget = customWeeklyLimit !== null
@@ -1109,8 +1921,27 @@ export default function Home() {
     : 0;
   const weeklyHealthy = spentThisWeek <= weeklyBudget;
 
+  // ── Daily spending sparkline data (Mon–Today) ──
+  const dailySpending = useMemo(() => {
+    const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const ws = getWeekStart();
+    const result: { label: string; amount: number }[] = [];
+    const today = new Date();
+    for (let d = 0; d < 7; d++) {
+      const dayDate = new Date(ws.getTime() + d * 86400000);
+      if (dayDate > today) break;
+      const dayStr = dayDate.toISOString().split('T')[0];
+      const total = allDiscTxs
+        .filter((tx) => tx?.date?.startsWith(dayStr))
+        .reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
+      result.push({ label: dayLabels[d], amount: total });
+    }
+    return result;
+  }, [allDiscTxs]);
+
   // Save / reset custom weekly limit
   const saveCustomLimit = () => {
+    trackEvent('Weekly Limit Set');
     const val = parseFloat(limitInput);
     if (!isNaN(val) && val > 0) {
       setCustomWeeklyLimit(val);
@@ -1120,15 +1951,98 @@ export default function Home() {
     }
   };
   const resetCustomLimit = () => {
+    trackEvent('Weekly Limit Reset');
     setCustomWeeklyLimit(null);
     AsyncStorage.removeItem('custom_weekly_limit').catch(() => {});
     setShowLimitEditor(false);
   };
 
+  // ── Sorted moves for inline display ──
+  const sortedMoves: (Move & { _sortIdx: number })[] = moves
+    .map((m, i) => ({ ...m, _sortIdx: i }))
+    .sort((a, b) => (effortOrder[a.effort] ?? 2) - (effortOrder[b.effort] ?? 2));
+
+  /** Check if a move has all steps/sub-goals completed */
+  const isMoveCompleted = (move: Move & { _sortIdx: number }) => {
+    const key = `move-${move._sortIdx}`;
+    const prog = planProgress[key];
+    if (!prog?.approved) return false;
+    const sgs = prog.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
+    if (sgs.length > 0) return sgs.every((sg) => sg.completedAt);
+    const steps = move.steps || [];
+    if (steps.length > 0) return (prog.completed_steps || []).length >= steps.length;
+    return false;
+  };
+
+  const approvedMoves = sortedMoves.filter((m) => planProgress[`move-${m._sortIdx}`]?.approved);
+  const activePlanMoves = approvedMoves.filter((m) => !isMoveCompleted(m));
+  const completedPlanMoves = approvedMoves.filter((m) => isMoveCompleted(m));
+  const opportunityMoves = sortedMoves.filter((m) => !planProgress[`move-${m._sortIdx}`]?.approved);
+
+  /** Check if a user plan has all steps/sub-goals completed */
+  const isPlanCompleted = (plan: any) => {
+    const planKey = `plan-${plan.id}`;
+    const sgs = planProgress[planKey]?.sub_goals || generatePlanSubGoals(plan) || [];
+    if (sgs.length > 0) {
+      return sgs.every((sg: MoveSubGoal) => !!sg.completedAt);
+    }
+    const steps = generatePlanSteps(plan);
+    const done = planProgress[planKey]?.completed_steps || [];
+    return steps.length > 0 && done.length >= steps.length;
+  };
+  const activeUserPlans = userPlans.filter((p) => !isPlanCompleted(p));
+  const completedUserPlans = userPlans.filter((p) => isPlanCompleted(p));
+
+  const hasCompleted = completedPlanMoves.length > 0 || completedUserPlans.length > 0;
+  const hasActive = activePlanMoves.length > 0 || activeUserPlans.length > 0;
+
+  // ── Focus card type: what matters right now? ──
+  const isPayday = !!weeklyCtx?.incomeArrivedThisWeek && !incomeDismissed;
+  const focusType: 'payday' | 'budget' | 'move' = isPayday ? 'payday' : 'budget';
+
+  // ── Swipe-up to dismiss payday card ──
+  const paydayTranslateY = useRef(new Animated.Value(0)).current;
+  const paydayOpacity = useRef(new Animated.Value(1)).current;
+  const paydayPanResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 10 && g.dy < 0, // only swipe up
+    onPanResponderMove: (_, g) => {
+      if (g.dy < 0) {
+        paydayTranslateY.setValue(g.dy);
+        paydayOpacity.setValue(1 + g.dy / 200); // fade as you swipe
+      }
+    },
+    onPanResponderRelease: (_, g) => {
+      if (g.dy < -80) {
+        // Dismiss
+        Animated.parallel([
+          Animated.timing(paydayTranslateY, { toValue: -300, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: false }),
+          Animated.timing(paydayOpacity, { toValue: 0, duration: 250, useNativeDriver: false }),
+        ]).start(() => {
+          hapticMedium();
+          dismissIncome();
+        });
+      } else {
+        // Snap back
+        Animated.spring(paydayTranslateY, { toValue: 0, useNativeDriver: false }).start();
+        Animated.spring(paydayOpacity, { toValue: 1, useNativeDriver: false }).start();
+      }
+    },
+  }), []);
+
+  if (loading) {
+    return (
+      <View style={[s.loadingContainer, { padding: 24 }]}>
+        <DashboardSkeleton />
+      </View>
+    );
+  }
+
   return (
+    <View style={{ flex: 1, backgroundColor: colors.bg }} testID="home-screen">
     <ScrollView
       ref={dashScrollRef}
       style={s.container}
+      testID="dashboard-scroll"
       contentContainerStyle={[
         s.scroll,
         isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding },
@@ -1142,730 +2056,1197 @@ export default function Home() {
         />
       }
     >
-      {/* ── Header with Bocy ── */}
-      <View style={s.headerRow}>
-        <View style={s.headerLeft}>
-          <View style={s.bocyHeaderWrap}>
-            <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
-          </View>
-          <View>
-            <Text style={s.greeting}>
-              Hello, {userName || 'there'}
+      {/* ── Header ── */}
+      <View style={s.headerWrap}>
+        <View style={s.headerRow}>
+          <View style={s.headerLeft}>
+            <View style={s.bocyHeaderWrap} accessibilityLabel="Bocy mascot">
+              <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
+            </View>
+            <Text style={s.greeting} accessibilityRole="header">
+              Hi, {userName || 'there'}
             </Text>
-            {syncing ? (
-              <Text style={s.syncText}>Syncing latest transactions...</Text>
-            ) : lastSynced > 0 ? (
-              <Text style={s.syncText}>Updated {formatTimeAgo(lastSynced)}</Text>
-            ) : null}
           </View>
+          <TouchableOpacity
+            style={s.menuButton}
+            onPress={() => { trackEvent('Profile Opened'); router.push('/(main)/profile'); }}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile menu"
+          >
+            <View style={s.menuLine} />
+            <View style={[s.menuLine, s.menuLineShort]} />
+            <View style={s.menuLine} />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity
-          style={s.menuButton}
-          onPress={() => router.push('/(main)/profile')}
-        >
-          <View style={s.menuLine} />
-          <View style={[s.menuLine, s.menuLineShort]} />
-          <View style={s.menuLine} />
-        </TouchableOpacity>
+        {(syncing || lastSynced > 0 || syncError) && (
+          <Text style={[s.syncText, syncError && !syncing ? { color: colors.coral } : undefined]}>
+            {syncing ? 'Syncing...' : syncError ? syncError : syncDataSource === 'fallback' && latestTxDate
+              ? `Data from ${formatTxDateAge(latestTxDate)} (cached)`
+              : `Synced ${formatTimeAgo(lastSynced)}`}
+          </Text>
+        )}
+        {verificationStatus && verificationStatus !== 'verified' && (
+          <Text style={[s.syncText, { color: colors.accent }]}>
+            Refining your analysis...
+          </Text>
+        )}
       </View>
 
-      {/* ── Connection warning banner ── */}
+      {/* ── Offline banner ── */}
+      {!isOnline && (
+        <View style={[s.connectionBanner, { borderColor: colors.muted }]}>
+          <View style={s.connectionBannerBody}>
+            <Text style={[s.connectionBannerText, { color: colors.muted }]}>You're offline — data may be stale</Text>
+          </View>
+        </View>
+      )}
+
+      {/* ── Connection warning ── */}
       {connectionWarning && !connectionDismissed && (
         <View style={s.connectionBanner}>
-          <TouchableOpacity
-            style={s.connectionBannerBody}
-            onPress={() => router.push('/(main)/connect')}
-            activeOpacity={0.8}
-          >
+          <TouchableOpacity style={s.connectionBannerBody} onPress={() => router.push({ pathname: '/(main)/connect', params: { from: 'banner', banks: connectionWarning.banks.join(',') } })} activeOpacity={0.8}>
             <View style={{ flex: 1 }}>
-              {connectionWarning.message === 'expiring' ? (
-                connectionWarning.banks.map((bank, idx) => (
-                  <Text key={idx} style={s.connectionBannerText}>
-                    {bank} {'\u2014'} reconnect soon
-                  </Text>
-                ))
-              ) : connectionWarning.banks.length > 0 ? (
-                connectionWarning.banks.map((bank, idx) => (
-                  <Text key={idx} style={s.connectionBannerText}>
-                    Reconnect {bank}
-                  </Text>
-                ))
-              ) : connectionWarning.message === 'fallback' ? (
-                <Text style={s.connectionBannerText}>Using cached data {'\u2014'} pull to refresh</Text>
-              ) : (
-                <Text style={s.connectionBannerText}>A bank connection has expired {'\u2014'} tap to reconnect</Text>
-              )}
+              {connectionWarning.message === 'stale_data'
+                ? <Text style={s.connectionBannerText}>Transactions haven't updated in days — try reconnecting</Text>
+                : connectionWarning.banks.length > 1
+                ? <Text style={s.connectionBannerText}>Reconnect {connectionWarning.banks.length} bank accounts: {connectionWarning.banks.join(', ')}</Text>
+                : connectionWarning.banks.length === 1
+                ? <Text style={s.connectionBannerText}>Reconnect {connectionWarning.banks[0]}</Text>
+                : <Text style={s.connectionBannerText}>Bank connection needs attention</Text>}
             </View>
-            <Text style={s.connectionBannerAction}>{connectionWarning.message === 'expiring' ? 'Renew' : 'Fix'}</Text>
+            <Text style={s.connectionBannerAction}>Fix</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={s.bannerDismiss}
-            onPress={dismissConnection}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
+          <TouchableOpacity style={s.bannerDismiss} onPress={dismissConnection} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Text style={s.bannerDismissX}>{'\u2715'}</Text>
           </TouchableOpacity>
         </View>
       )}
 
       {!analysis ? (
-        /* ── Empty State ── */
         <View style={s.emptyState}>
           <View style={s.emptyBocyWrap}>
-            <BocyFace mood="neutral" size="lg" breathing />
+            <BocyFace mood={hasBankConnection ? 'thinking' : 'neutral'} size="lg" breathing />
           </View>
-          <Text style={s.emptyTitle}>Your #1 financial move awaits</Text>
-          <Text style={s.emptyDesc}>
-            Connect your bank account so Bocy can analyse your transactions and find the most impactful action you can take right now.
-          </Text>
-          <TouchableOpacity
-            style={s.ctaButton}
-            onPress={() => router.push('/(main)/connect')}
-          >
-            <Text style={s.ctaText}>Connect your bank</Text>
-          </TouchableOpacity>
+          {hasBankConnection ? (
+            retriesExhausted ? (
+              <>
+                <Text style={s.emptyTitle}>Transactions aren't available yet</Text>
+                <Text style={s.emptyDesc}>
+                  Your bank is connected but hasn't returned any transactions yet. This can happen with new connections — it usually resolves within a few hours.
+                </Text>
+                <TouchableOpacity
+                  style={s.ctaButton}
+                  onPress={() => {
+                    syncRetryRef.current = 0;
+                    setRetriesExhausted(false);
+                    supabase.auth.getUser().then(({ data: { user } }) => {
+                      if (user) syncInBackground(user.id, true);
+                    });
+                  }}
+                >
+                  <Text style={s.ctaText}>Try again</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[s.ctaButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm }]}
+                  onPress={() => router.push('/(main)/connect')}
+                >
+                  <Text style={[s.ctaText, { color: colors.text }]}>Upload a statement instead</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={s.emptyTitle}>Analysing your transactions</Text>
+                <Text style={s.emptyDesc}>
+                  Your bank is connected. Transactions can take a little while to appear — Bocy will have your plan ready as soon as they settle.
+                </Text>
+                <ActivityIndicator size="small" color={colors.accent} style={{ marginTop: spacing.md }} />
+              </>
+            )
+          ) : (
+            <>
+              <Text style={s.emptyTitle}>Your #1 financial move awaits</Text>
+              <Text style={s.emptyDesc}>
+                Connect your bank account so Bocy can analyse your transactions and find the most impactful action you can take right now.
+              </Text>
+              <TouchableOpacity style={s.ctaButton} onPress={() => router.push('/(main)/connect')}>
+                <Text style={s.ctaText}>Connect your bank</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       ) : (
         <>
-          {/* ── Unresolved transactions nudge ── */}
-          {unresolvedTxCount > 0 && (
+          {/* ── Unified review nudge ── */}
+          {unresolvedGroups.length > 0 && (
             <TouchableOpacity
               style={s.reviewBanner}
-              onPress={() => { setCatAssignments({}); setShowCatReview(true); }}
+              onPress={() => {
+                setCatAssignments({});
+                setShowReviewModal(true);
+                trackEvent('Review Modal Opened', { categories: unresolvedGroups.length });
+              }}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`${unresolvedGroups.length} items need your input. Tap to review.`}
             >
               <Text style={s.reviewBannerText}>
-                {unresolvedTxCount} transaction{unresolvedTxCount !== 1 ? 's' : ''} couldn't be categorised.{' '}
-                <Text style={s.reviewBannerLink}>Tell me what they are</Text>
+                {unresolvedGroups.length} item{unresolvedGroups.length !== 1 ? 's' : ''} need{unresolvedGroups.length === 1 ? 's' : ''} your input.{' '}
+                <Text style={s.reviewBannerLink}>Tap to review</Text>
               </Text>
             </TouchableOpacity>
           )}
 
-          {/* ── Income arrival alert ── */}
-          {weeklyCtx?.incomeArrivedThisWeek && weeklyCtx.recentIncomeEvents.length > 0 && !incomeDismissed && (
-            <AnimGlyph delay={0}>
-              <View style={s.incomeAlert}>
-                <View style={s.incomeAlertHeader}>
-                  <Text style={s.incomeAlertTitle}>Income received</Text>
-                  <TouchableOpacity
-                    onPress={dismissIncome}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Text style={s.incomeAlertDismiss}>✕</Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={s.incomeAlertText}>
-                  {weeklyCtx.recentIncomeEvents.map((e) =>
-                    `\u00a3${Math.round(e.amount).toLocaleString()} from ${e.source}`
-                  ).join(', ')}
-                  {' '}landed this week.
-                  {weeklyCtx.committedThisWeek > 0
-                    ? ` \u00a3${Math.round(weeklyCtx.committedThisWeek).toLocaleString()} already committed to bills & essentials.`
-                    : ''}
-                </Text>
-                <Text style={s.incomeAlertBudget}>
-                  Safe to spend: {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}/week{customWeeklyLimit !== null ? ' (your limit)' : ''}
-                </Text>
-              </View>
-            </AnimGlyph>
-          )}
-
           {/* ══════════════════════════════════════════════
-              HERO — YOUR #1 MOVE
+              FOCUS CARD — horizontal snapping pager
               ══════════════════════════════════════════════ */}
-          {dashboardMoves.length > 0 ? (() => {
-            const heroMove = dashboardMoves[0];
+          {(() => {
+            const CARD_GAP = 12;
+            const cardWidth = screenWidth - 48; // 24px padding each side
+            const snapInterval = cardWidth + CARD_GAP;
+            const hasMoveCard = dashboardMoves.length > 0;
+            const heroPageCount = hasMoveCard ? 2 : 1;
+            const HERO_MIN_HEIGHT = 280;
+            const scrollProgress = heroScrollX.interpolate({
+              inputRange: [0, snapInterval],
+              outputRange: [0, 1],
+              extrapolate: 'clamp',
+            });
+            const parallaxShift = heroScrollX.interpolate({
+              inputRange: [0, snapInterval],
+              outputRange: [0, 10],
+              extrapolate: 'clamp',
+            });
             return (
-              <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
-              <AnimGlyph delay={0}>
-                <Card
-                  variant="hero"
-                  accessibilityLabel={`Your number one move: ${heroMove.action}, saves ${heroMove.annualImpact} pounds per year`}
-                >
-                  <Text style={s.heroLabel}>Your #1 move</Text>
-
-                  <Text style={s.heroAction}>
-                    {stripMd(heroMove.action)}
-                  </Text>
-
-                  {/* Impact + effort */}
-                  <View style={s.heroMeta}>
-                    <Text style={s.heroImpact}>
-                      +{'\u00a3'}{(heroMove.annualImpact || 0).toLocaleString()}/yr
-                    </Text>
-                    {heroMove.effort && (
-                      <View style={s.effortPill}>
-                        <Text style={s.effortPillText}>
-                          {heroMove.effort}
-                        </Text>
-                      </View>
-                    )}
+          <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
+            <AnimGlyph delay={0}>
+              <Animated.ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                scrollEventThrottle={16}
+                onScroll={Animated.event(
+                  [{ nativeEvent: { contentOffset: { x: heroScrollX } } }],
+                  { useNativeDriver: false },
+                )}
+                onMomentumScrollEnd={(e) => {
+                  const page = Math.round(e.nativeEvent.contentOffset.x / snapInterval);
+                  if (page !== heroPage) hapticTick();
+                  setHeroPage(page);
+                }}
+                style={{ marginHorizontal: -24 }}
+                contentContainerStyle={{ paddingHorizontal: 24 }}
+                decelerationRate="fast"
+                snapToInterval={snapInterval}
+                snapToAlignment="start"
+              >
+                {/* ── Page 1: #1 Move (hero) ── */}
+                {hasMoveCard && (() => {
+                  const heroMove = dashboardMoves[0];
+                  const heroIdx = moves.indexOf(heroMove);
+                  const heroKey = `move-${heroIdx}`;
+                  const heroProgress = planProgress[heroKey];
+                  const heroActive = !!heroProgress?.approved;
+                  const heroSgs = heroProgress?.sub_goals || hydrateSubGoals(heroMove, debtAccounts) || [];
+                  const heroSteps = heroMove.steps || [];
+                  const heroHasSgs = heroSgs.length > 0;
+                  const heroDoneCount = heroHasSgs
+                    ? heroSgs.filter((sg: MoveSubGoal) => sg.completedAt).length
+                    : (heroProgress?.completed_steps || []).length;
+                  const heroTotal = heroHasSgs ? heroSgs.length : heroSteps.length;
+                  const heroFraction = heroTotal > 0 ? heroDoneCount / heroTotal : 0;
+                  const heroAllDone = heroTotal > 0 && heroDoneCount >= heroTotal;
+                  const daysSinceStart = heroProgress?.updated_at
+                    ? Math.max(1, Math.floor((Date.now() - new Date(heroProgress.updated_at).getTime()) / 86400000))
+                    : 1;
+                  const nextStep = heroSteps.find((_: string, idx: number) => !(heroProgress?.completed_steps || []).includes(idx));
+                  // Build a mathematical CTA from subGoals when available
+                  const nextSg = heroSgs.find((sg: MoveSubGoal) => !sg.completedAt);
+                  const heroCtaLabel = (() => {
+                    if (!heroActive) return 'Start this move';
+                    if (heroAllDone) return 'View completed move';
+                    if (nextSg) {
+                      const remaining = Math.round(nextSg.currentValue ?? nextSg.startValue);
+                      const payment = Math.round(heroMove.monthlyImpact || 0);
+                      const target = nextSg.target || 'debt';
+                      // e.g. "Next: pay £17 to Amex (£204 left)"
+                      return payment > 0
+                        ? `Next: pay \u00a3${payment} to ${target}`
+                        : `Next: clear ${target} (\u00a3${remaining} left)`;
+                    }
+                    return nextStep ? `Next: ${nextStep.length > 30 ? nextStep.slice(0, 30) + '\u2026' : nextStep}` : 'View progress';
+                  })();
+                  return (
+                  <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
+                    <Card variant={heroActive ? 'active' : 'highlight'} style={{ flex: 1 }}>
+                      <Animated.View style={{ transform: [{ translateX: parallaxShift }], flex: 1 }}>
+                        {heroActive ? (
+                          <>
+                            <CardTitle color={heroAllDone ? colors.green : colors.accent}>
+                              {heroAllDone ? 'MOVE COMPLETE \u2713' : `MOVE IN PROGRESS \u00B7 Day ${daysSinceStart}`}
+                            </CardTitle>
+                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                              {stripMd(heroMove.action)}
+                            </Text>
+                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.monthlyImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
+                              </View>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.annualImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
+                              </View>
+                            </View>
+                            {heroTotal > 0 && (
+                              <View style={{ marginTop: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                  <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                    <View style={{ width: `${Math.round(heroFraction * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: heroAllDone ? colors.green : colors.accent }} />
+                                  </View>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{heroDoneCount}/{heroTotal}</Text>
+                                </View>
+                              </View>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <CardTitle color={colors.green}>YOUR #1 MOVE</CardTitle>
+                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                              {stripMd(heroMove.action)}
+                            </Text>
+                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.monthlyImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
+                              </View>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.annualImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
+                              </View>
+                            </View>
+                            {heroMove.effort && (
+                              <View style={{ marginTop: 14 }}>
+                                <View style={{
+                                  alignSelf: 'flex-start',
+                                  paddingHorizontal: 10,
+                                  paddingVertical: 4,
+                                  borderRadius: 12,
+                                  backgroundColor: heroMove.effort === 'low' ? 'rgba(147,130,220,0.12)' : heroMove.effort === 'high' ? 'rgba(76,175,80,0.12)' : 'rgba(150,150,150,0.12)',
+                                }}>
+                                  <Text style={{
+                                    fontFamily: fonts.mono,
+                                    fontSize: 10,
+                                    letterSpacing: 0.5,
+                                    color: heroMove.effort === 'low' ? '#9382DC' : heroMove.effort === 'high' ? colors.green : colors.dim,
+                                  }}>
+                                    {heroMove.effort === 'low' ? 'Quick win' : heroMove.effort === 'high' ? 'Big move' : 'Some effort'}
+                                  </Text>
+                                </View>
+                              </View>
+                            )}
+                          </>
+                        )}
+                      </Animated.View>
+                      <TouchableOpacity
+                        style={[s.heroCta, { marginTop: 24 }]}
+                        onPress={() => {
+                          if (heroActive) {
+                            // Scroll to in-progress section
+                            const y = cardPositions.current.moves;
+                            if (y != null) dashScrollRef.current?.scrollTo({ y, animated: true });
+                          } else {
+                            handleStartMove(heroIdx, heroMove);
+                          }
+                        }}
+                      >
+                        <Text style={s.heroCtaText}>{heroCtaLabel}</Text>
+                      </TouchableOpacity>
+                    </Card>
                   </View>
+                  );
+                })()}
 
-                  {/* Strategy — the WHY */}
-                  {heroMove.strategy ? (
-                    <Text style={s.heroStrategy}>
-                      {stripMd(heroMove.strategy)}
-                    </Text>
-                  ) : null}
-
-                  {/* CTA */}
-                  <View style={s.heroActions}>
-                    <TouchableOpacity
-                      style={s.heroCta}
-                      onPress={() => router.push({ pathname: '/(main)/(tabs)/plan', params: { highlightAction: heroMove.action } })}
-                    >
-                      <Text style={s.heroCtaText}>Take action</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={s.heroSecondary}
-                      onPress={() => setVerifyMove(heroMove)}
-                    >
-                      <Text style={s.heroSecondaryText}>Details</Text>
-                    </TouchableOpacity>
+                {/* ── Horizontal connector dots between cards ── */}
+                {hasMoveCard && (
+                  <View style={{ width: CARD_GAP, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
+                    <HorizontalConnectorDots scrollProgress={scrollProgress} />
                   </View>
+                )}
 
-                  {/* More insights teaser */}
-                  {dashboardMoves.length > 1 && (
-                    <TouchableOpacity
-                      style={s.heroMore}
-                      onPress={() => router.push('/(main)/(tabs)/plan')}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={s.heroMoreText}>
-                        +{dashboardMoves.length - 1} more insight{dashboardMoves.length - 1 !== 1 ? 's' : ''} {'\u203A'}
+                {/* ── Page 2: Budget / Payday ── */}
+                <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
+          {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
+              <Animated.View
+                {...paydayPanResponder.panHandlers}
+                style={{ transform: [{ translateY: paydayTranslateY }], opacity: paydayOpacity, flex: 1 }}
+              >
+              <Card variant="hero" style={{ flex: 1 }}>
+                <Text style={s.heroLabel}>PAYDAY</Text>
+                <Text style={s.heroAction}>
+                  {weeklyCtx.recentIncomeEvents.map((e) =>
+                    `\u00a3${Math.round(e?.amount ?? 0).toLocaleString()}`
+                  ).join(' + ')}{' '}received
+                </Text>
+
+                <View style={{ marginTop: 24, gap: 14 }}>
+                  {(weeklyCtx.committedThisWeek ?? 0) > 0 && (
+                    <View style={s.focusSplitRow}>
+                      <Text style={s.focusSplitLabel}>Bills & essentials</Text>
+                      <Text style={[s.focusSplitValue, { color: colors.dim }]}>
+                        -{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek ?? 0).toLocaleString()}
                       </Text>
-                    </TouchableOpacity>
+                    </View>
                   )}
-                </Card>
-              </AnimGlyph>
-              </View>
-            );
-          })() : (
-            <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
-            <Card variant="hero">
-              <Text style={s.heroLabel}>Your #1 move</Text>
-              <Text style={s.noDataText}>
-                No actionable insights yet. Connect your bank so Bocy can find your most impactful financial move.
-              </Text>
-            </Card>
-            </View>
-          )}
+                  {moves.length > 0 && moves[0].monthlyImpact > 0 && (
+                    <View style={s.focusSplitRow}>
+                      <Text style={s.focusSplitLabel}>{stripMd(moves[0].action)}</Text>
+                      <Text style={[s.focusSplitValue, { color: colors.text2 }]}>
+                        {'\u00a3'}{Math.round(moves[0].monthlyImpact / 4.33).toLocaleString()}/wk
+                      </Text>
+                    </View>
+                  )}
+                  <View style={[s.focusSplitRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 14 }]}>
+                    <Text style={[s.focusSplitLabel, { fontFamily: fonts.semibold, color: colors.text }]}>Safe to spend</Text>
+                    <Text style={[s.focusSplitValue, { fontFamily: fonts.mono, fontSize: 20, color: weeklyHealthy ? colors.text : colors.coral }]}>
+                      {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}/wk
+                    </Text>
+                  </View>
+                </View>
 
-          {/* ══════════════════════════════════════════════
-              CARD — SAFE TO SPEND (compact)
-              ══════════════════════════════════════════════ */}
-          <View onLayout={(e) => { cardPositions.current.safeToSpend = e.nativeEvent.layout.y; }}>
-          <Card>
-            <AnimGlyph delay={100}>
-              <View style={s.cardTitleRow}>
-                <Text style={s.cardTitle}>Safe to spend</Text>
                 <TouchableOpacity
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  style={[s.heroCta, { marginTop: 28 }]}
                   onPress={() => {
-                    LayoutAnimation.configureNext(SMOOTH_ANIM);
-                    setBreakdownExpanded(!breakdownExpanded);
+                    dismissIncome();
+                    router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: 'I just got paid. Walk me through what to do.' } });
                   }}
                 >
-                  <Text style={s.infoIcon}>{breakdownExpanded ? '\u2715' : 'i'}</Text>
+                  <Text style={s.heroCtaText}>Ask Bocy about this</Text>
                 </TouchableOpacity>
-              </View>
-            </AnimGlyph>
-            <Text style={s.cardSubtitle}>Your weekly lifestyle allowance</Text>
-
-            {/* Big remaining number */}
-            <AnimGlyph delay={150}>
-              <View style={s.safeToSpendHero}>
-                <Text style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }]}>
-                  {'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}
-                </Text>
-                <Text style={s.safeToSpendLabel}>left this week</Text>
-              </View>
-            </AnimGlyph>
-
-            {/* Progress bar with breathing animation */}
-            <View style={s.safeToSpendBar}>
-              <BreathingBar
-                color={weeklyHealthy ? colors.green : colors.coral}
-                width={`${weeklyUsedPct}%`}
-                style={s.safeToSpendBarFill}
-              />
-            </View>
-
-            {/* Spent vs budget row */}
-            <View style={s.safeToSpendRow}>
-              <View>
-                <Text style={s.safeToSpendMeta}>
-                  {'\u00a3'}{Math.round(spentThisWeek).toLocaleString()} spent
-                </Text>
-              </View>
-              <View>
-                <Text style={s.safeToSpendMeta}>
-                  {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()} budget
-                  {customWeeklyLimit !== null ? ' (custom)' : ''}
-                </Text>
-              </View>
-            </View>
-
-            {/* ── Detailed breakdown (expandable) ── */}
-            {breakdownExpanded && (
-              <View style={s.breakdownSection}>
-                <Text style={s.breakdownTitle}>How this is calculated</Text>
-
-                <View style={s.breakdownRow}>
-                  <Text style={s.breakdownLabel}>Monthly income</Text>
-                  <Text style={s.breakdownValue}>{'\u00a3'}{Math.round(income).toLocaleString()}</Text>
-                </View>
-                <View style={s.breakdownRow}>
-                  <Text style={s.breakdownLabel}>Essentials</Text>
-                  <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}</Text>
-                </View>
-                <View style={s.breakdownRow}>
-                  <Text style={s.breakdownLabel}>Lifestyle spending</Text>
-                  <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(discTotal).toLocaleString()}</Text>
-                </View>
-                <View style={[s.breakdownRow, s.breakdownDivider]}>
-                  <Text style={[s.breakdownLabel, s.breakdownBold]}>Unallocated</Text>
-                  <Text style={[s.breakdownValue, s.breakdownBold]}>{'\u00a3'}{Math.round(leftToDecide).toLocaleString()}/mo</Text>
-                </View>
-                <View style={s.breakdownRow}>
-                  <Text style={s.breakdownLabel}>{'\u00f7'} 4.33 weeks</Text>
-                  <Text style={s.breakdownValue}>{'\u00a3'}{Math.round(staticWeeklyBudget).toLocaleString()}/wk</Text>
-                </View>
-
-                {weeklyCtx?.incomeArrivedThisWeek && (
-                  <>
-                    <View style={s.breakdownAdaptive}>
-                      <Text style={s.breakdownAdaptiveLabel}>Adaptive adjustment</Text>
-                      {weeklyCtx.recentIncomeEvents.map((e, i) => (
-                        <View key={i} style={s.breakdownRow}>
-                          <Text style={s.breakdownLabel}>Income: {e.source}</Text>
-                          <Text style={[s.breakdownValue, { color: colors.green }]}>+{'\u00a3'}{Math.round(e.amount).toLocaleString()}</Text>
+              </Card>
+              </Animated.View>
+          ) : (
+              <Card variant="hero" style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                      <Text style={[s.heroLabel, { marginBottom: 0 }]}>THIS WEEK</Text>
+                      <TouchableOpacity
+                        onPress={() => setShowWeeklyInfo(true)}
+                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="How is this calculated?"
+                      >
+                        <View style={s.infoIconSmall}>
+                          <Text style={s.infoIconSmallText}>?</Text>
                         </View>
-                      ))}
-                      {weeklyCtx.committedThisWeek > 0 && (
-                        <View style={s.breakdownRow}>
-                          <Text style={s.breakdownLabel}>Committed payments</Text>
-                          <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek).toLocaleString()}</Text>
-                        </View>
-                      )}
-                      <View style={s.breakdownRow}>
-                        <Text style={[s.breakdownLabel, s.breakdownBold]}>Adaptive budget</Text>
-                        <Text style={[s.breakdownValue, s.breakdownBold]}>{'\u00a3'}{Math.round(weeklyCtx.adaptiveBudget).toLocaleString()}/wk</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <AnimatedNumber
+                      value={weeklyRemaining}
+                      prefix={'\u00a3'}
+                      style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 38 }]}
+                    />
+                    <Text style={s.safeToSpendLabel}>left to spend</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <AnimatedNumber
+                      value={spentThisWeek}
+                      prefix={'\u00a3'}
+                      suffix=" spent"
+                      style={s.safeToSpendMeta}
+                    />
+                    <TouchableOpacity
+                      onPress={() => { setLimitInput(customWeeklyLimit ? String(customWeeklyLimit) : String(Math.round(calculatedWeeklyBudget))); setShowLimitEditor(true); }}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel="Set custom weekly spending limit"
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                        <Text style={[s.safeToSpendMeta, { textDecorationLine: 'underline', textDecorationStyle: 'dotted' }]}>
+                          of {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}
+                        </Text>
+                        <Text style={{ fontSize: 8, color: colors.dim }}>{'\u270E'}</Text>
                       </View>
-                    </View>
-                  </>
-                )}
-
-                <View style={[s.breakdownRow, s.breakdownDivider]}>
-                  <Text style={s.breakdownLabel}>Spent this week</Text>
-                  <Text style={[s.breakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(spentThisWeek).toLocaleString()}</Text>
-                </View>
-                <View style={s.breakdownRow}>
-                  <Text style={[s.breakdownLabel, s.breakdownBold]}>Safe to spend</Text>
-                  <Text style={[s.breakdownValue, s.breakdownBold, !weeklyHealthy && { color: colors.coral }]}>{'\u00a3'}{Math.round(weeklyRemaining).toLocaleString()}</Text>
-                </View>
-
-                {customWeeklyLimit !== null && (
-                  <View style={s.breakdownRow}>
-                    <Text style={[s.breakdownLabel, { color: colors.text2 }]}>Your custom limit</Text>
-                    <Text style={[s.breakdownValue, { color: colors.text2 }]}>{'\u00a3'}{Math.round(customWeeklyLimit).toLocaleString()}/wk</Text>
-                  </View>
-                )}
-
-                {/* Adjust button */}
-                <View style={s.breakdownActions}>
-                  <TouchableOpacity
-                    style={s.adjustBtn}
-                    onPress={() => {
-                      setLimitInput(String(Math.round(weeklyBudget)));
-                      setShowLimitEditor(true);
-                    }}
-                  >
-                    <Text style={s.adjustBtnText}>
-                      {customWeeklyLimit !== null ? 'Change limit' : 'Set my own limit'}
-                    </Text>
-                  </TouchableOpacity>
-                  {customWeeklyLimit !== null && (
-                    <TouchableOpacity style={s.resetBtn} onPress={resetCustomLimit}>
-                      <Text style={s.resetBtnText}>Reset</Text>
                     </TouchableOpacity>
-                  )}
+                  </View>
                 </View>
 
-                {/* Inline limit editor */}
-                {showLimitEditor && (
-                  <View style={s.limitEditor}>
-                    <Text style={s.limitEditorLabel}>Weekly spending limit</Text>
-                    <View style={s.limitEditorRow}>
-                      <Text style={s.limitEditorCurrency}>{'\u00a3'}</Text>
-                      <TextInput
-                        style={s.limitEditorInput}
-                        keyboardType="numeric"
-                        value={limitInput}
-                        onChangeText={setLimitInput}
-                        placeholder={String(Math.round(calculatedWeeklyBudget))}
-                        placeholderTextColor={colors.muted}
-                        autoFocus
-                      />
-                      <TouchableOpacity style={s.limitEditorSave} onPress={saveCustomLimit}>
-                        <Text style={s.limitEditorSaveText}>Save</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={s.limitEditorCancel} onPress={() => setShowLimitEditor(false)}>
-                        <Text style={s.limitEditorCancelText}>Cancel</Text>
-                      </TouchableOpacity>
-                    </View>
-                    <Text style={s.limitEditorHint}>
-                      Max: {'\u00a3'}{Math.round(calculatedWeeklyBudget).toLocaleString()}/wk (based on your unallocated income)
+                <View style={[s.safeToSpendBar, { marginTop: 4 }]}>
+                  <BreathingBar
+                    color={weeklyHealthy ? colors.accent : colors.coral}
+                    width={`${weeklyUsedPct}%`}
+                    style={s.safeToSpendBarFill}
+                  />
+                </View>
+
+                {/* Data freshness indicator */}
+                {latestTxDate && (
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: (() => {
+                    const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
+                    return txAge >= 2 ? colors.coral : colors.muted;
+                  })(), letterSpacing: 0.5, marginTop: 10 }}>
+                    {(() => {
+                      const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
+                      if (txAge === 0) return 'Transactions up to date';
+                      if (txAge === 1) return 'Latest transaction: yesterday';
+                      return `Latest transaction: ${txAge} days ago`;
+                    })()}
+                    {syncDataSource === 'fallback' ? ' (using cached data)' : ''}
+                  </Text>
+                )}
+
+                {/* Daily spending sparkline */}
+                {dailySpending.length > 1 && (
+                  <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 10 }}>
+                      DAILY SPENDING
                     </Text>
+                    <WeeklySparkline days={dailySpending} height={40} />
                   </View>
                 )}
+              </Card>
+          )}
+                </View>
+              </Animated.ScrollView>
+            </AnimGlyph>
+
+            {/* Animated pagination dots */}
+            {heroPageCount > 1 && (
+              <View style={s.dotSeparator}>
+                {Array.from({ length: heroPageCount }).map((_, i) => {
+                  const dotWidth = heroScrollX.interpolate({
+                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
+                    outputRange: [3, 12, 3],
+                    extrapolate: 'clamp',
+                  });
+                  const dotBg = heroScrollX.interpolate({
+                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
+                    outputRange: [colors.border, colors.accent, colors.border],
+                    extrapolate: 'clamp',
+                  });
+                  return (
+                    <Animated.View
+                      key={i}
+                      style={[
+                        s.dot,
+                        { width: dotWidth, backgroundColor: dotBg, borderRadius: 2 },
+                      ]}
+                    />
+                  );
+                })}
               </View>
             )}
-          </Card>
+          </View>
+            );
+          })()}
+
+          {/* ══════════════════════════════════════════════
+              YOUR INSIGHTS — inline from Plan page
+              ══════════════════════════════════════════════ */}
+          {(hasActive || hasCompleted || opportunityMoves.length > 0) && (
+            <View onLayout={(e) => { cardPositions.current.moves = e.nativeEvent.layout.y; }}>
+              {/* Active moves */}
+              {hasActive && (
+                <>
+                  <View style={s.moveSectionHeader}>
+                    <Text style={s.moveSectionLabel}>IN PROGRESS</Text>
+                  </View>
+                  {activeUserPlans.map((plan) => {
+                    const isPlanExpanded = expandedPlan === plan.id;
+                    const planKey = `plan-${plan.id}`;
+                    const planSteps = generatePlanSteps(plan);
+                    const planSgs = planProgress[planKey]?.sub_goals || generatePlanSubGoals(plan) || [];
+                    const hasPlanSgs = planSgs.length > 0;
+                    const doneSteps = planProgress[planKey]?.completed_steps || [];
+                    const sgDoneCount = hasPlanSgs ? planSgs.filter((sg: MoveSubGoal) => sg.completedAt).length : 0;
+                    const stepProgress = hasPlanSgs
+                      ? (planSgs.length > 0 ? sgDoneCount / planSgs.length : 0)
+                      : (planSteps.length > 0 ? doneSteps.length / planSteps.length : 0);
+                    const progressTotal = hasPlanSgs ? planSgs.length : planSteps.length;
+                    const progressDone = hasPlanSgs ? sgDoneCount : doneSteps.length;
+                    const nextStepIdx = planSteps.findIndex((_: string, idx: number) => !doneSteps.includes(idx));
+                    return (
+                      <Card key={plan.id} variant="active" style={{ marginBottom: spacing.md }}>
+                        <TouchableOpacity onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setExpandedPlan(isPlanExpanded ? null : plan.id); }} activeOpacity={0.8}>
+                          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                            <View style={[s.moveBadge, { backgroundColor: colors.accent, borderColor: colors.accent }]}>
+                              <Text style={[s.moveBadgeText, { color: colors.bg }]}>{'\u2713'}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.moveAction}>{stripMd(plan.action)}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}>
+                                {plan.monthly_saving != null && (
+                                  <Text style={s.moveImpactText}>{'\u00a3'}{plan.monthly_saving}/mo</Text>
+                                )}
+                                <Text style={{ fontSize: 10, color: colors.muted }}>{isPlanExpanded ? '\u25B2' : '\u25BC'}</Text>
+                              </View>
+                              {!isPlanExpanded && progressTotal > 0 && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                                  <View style={{ flex: 1, height: 2, borderRadius: 1, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                    <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 1, backgroundColor: colors.accent }} />
+                                  </View>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{progressDone}/{progressTotal}</Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                        {isPlanExpanded && (
+                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border }}>
+                            <View style={{ position: 'absolute', top: 8, right: 0 }}>
+                              <ExpandDots count={5} size={2.5} />
+                            </View>
+                            {/* Progress bar */}
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                              <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: colors.accent }} />
+                              </View>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{progressDone}/{progressTotal} done</Text>
+                            </View>
+                            {/* Sub-goals with progress bars (when available) or step checklist */}
+                            {hasPlanSgs ? planSgs.map((sg: MoveSubGoal, j: number) => {
+                              const isDone = !!sg.completedAt;
+                              const current = sg.currentValue ?? sg.startValue;
+                              const pct = sg.type === 'sub_cancel'
+                                ? (isDone ? 100 : 0)
+                                : sg.type === 'spending_reduce'
+                                  ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / Math.max(1, sg.startValue - sg.targetValue)) * 100)))
+                                  : sg.type === 'debt_clear'
+                                    ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / Math.max(1, sg.startValue)) * 100)))
+                                    : Math.min(100, Math.max(0, Math.round((current / Math.max(1, sg.targetValue)) * 100)));
+                              return (
+                                <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                  <View style={[s.checkbox, isDone && s.checkboxDone]}>
+                                    {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
+                                  </View>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={[s.checklistText, isDone && s.checklistTextDone]}>{sg.target}</Text>
+                                    {!isDone && (
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                        <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                          <View style={{ width: `${pct}%`, height: '100%', borderRadius: 2, backgroundColor: colors.accent }} />
+                                        </View>
+                                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>
+                                          {sg.type === 'sub_cancel'
+                                            ? `\u00a3${sg.startValue}/mo`
+                                            : sg.type === 'debt_clear'
+                                              ? `\u00a3${current} left`
+                                              : sg.type === 'spending_reduce'
+                                                ? `\u00a3${current} \u2192 \u00a3${sg.targetValue}`
+                                                : `\u00a3${current}/\u00a3${sg.targetValue}`
+                                          }
+                                        </Text>
+                                      </View>
+                                    )}
+                                    {isDone && <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green, marginTop: 2 }}>{'\u2713'} Completed</Text>}
+                                  </View>
+                                </View>
+                              );
+                            }) : planSteps.map((step: string, j: number) => {
+                              const isDone = doneSteps.includes(j);
+                              const isNext = j === nextStepIdx;
+                              return (
+                                <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(planKey, j, plan.action, planSteps.length)} activeOpacity={0.7}>
+                                  <View style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: isDone ? colors.accent : colors.dim, backgroundColor: isDone ? colors.accent : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                                    {isDone && <Text style={{ color: colors.bg, fontSize: 12, fontWeight: '700' }}>{'\u2713'}</Text>}
+                                  </View>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: isDone ? colors.muted : colors.text, textDecorationLine: isDone ? 'line-through' : 'none', lineHeight: 20 }}>{stripMd(step)}</Text>
+                                    {isNext && !isDone && <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent, marginTop: 2 }}>Do this next</Text>}
+                                  </View>
+                                </TouchableOpacity>
+                              );
+                            })}
+                            {/* Ask Bocy button */}
+                            <TouchableOpacity style={{ marginTop: 16, paddingVertical: 10, alignItems: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.accent }} onPress={() => { trackEvent('Ask Bocy From Move'); router.push('/(main)/(tabs)/chat'); }} activeOpacity={0.7}>
+                              <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.accent }}>Ask Bocy about this</Text>
+                            </TouchableOpacity>
+                            {/* Delete plan button */}
+                            <TouchableOpacity
+                              style={{ marginTop: 10, paddingVertical: 8, alignItems: 'center', minHeight: 44, justifyContent: 'center' }}
+                              onPress={() => {
+                                if (window.confirm(`Delete plan?\n\nRemove "${stripMd(plan.action)}" from your plans?`)) {
+                                  handleRemovePlan(plan.id);
+                                }
+                              }}
+                              activeOpacity={0.7}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Delete plan: ${stripMd(plan.action)}`}
+                            >
+                              <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted }}>Delete plan</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </Card>
+                    );
+                  })}
+                  {activePlanMoves.map((move, seqIdx) => {
+                    const i = move._sortIdx;
+                    const isExpanded = expandedMove === i;
+                    const moveKey = `move-${i}`;
+                    const steps = move.steps || [];
+                    const doneSteps = planProgress[moveKey]?.completed_steps || [];
+                    const moveSgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
+                    const hasSgs = moveSgs.length > 0;
+                    const sgDoneCount = hasSgs ? moveSgs.filter((sg) => sg.completedAt).length : 0;
+                    const stepProgress = hasSgs
+                      ? (moveSgs.length > 0 ? sgDoneCount / moveSgs.length : 0)
+                      : (steps.length > 0 ? doneSteps.length / steps.length : 0);
+                    const progressTotal = hasSgs ? moveSgs.length : steps.length;
+                    const progressDone = hasSgs ? sgDoneCount : doneSteps.length;
+                    const nextStepIdx = steps.findIndex((_: string, idx: number) => !doneSteps.includes(idx));
+                    return (
+                      <Card key={`active-${i}`} variant="active" style={{ marginBottom: spacing.md }}>
+                        <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
+                          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                            <View style={[s.moveBadge, { backgroundColor: colors.accent, borderColor: colors.accent }]}>
+                              <Text style={[s.moveBadgeText, { color: colors.bg }]}>{'\u2713'}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.moveAction}>{stripMd(move.action)}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}>
+                                <Text style={s.moveImpactText}>{'\u00a3'}{move.monthlyImpact}/mo</Text>
+                                <Text style={{ fontSize: 10, color: colors.muted }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                              </View>
+                              {!isExpanded && progressTotal > 0 && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                                  <View style={{ flex: 1, height: 2, borderRadius: 1, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                    <View style={{ width: `${Math.round(stepProgress * 100)}%`, height: '100%', borderRadius: 1, backgroundColor: colors.accent }} />
+                                  </View>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{progressDone}/{progressTotal}</Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                        {isExpanded && (
+                          <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border }}>
+                            <View style={{ position: 'absolute', top: 8, right: 0 }}>
+                              <ExpandDots count={5} size={2.5} />
+                            </View>
+                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
+                            {move.proof && (
+                              <View style={{ backgroundColor: colors.mintDim, borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.dim, textTransform: 'uppercase', marginBottom: 6 }}>THE MATH</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2, lineHeight: 18 }}>{move.proof}</Text>
+                              </View>
+                            )}
+                            {(() => {
+                              // Show sub-goal progress bars when available, otherwise legacy steps
+                              const sgs: MoveSubGoal[] = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
+                              if (sgs.length > 0) {
+                                const doneSgs = sgs.filter((sg) => sg.completedAt);
+                                const sgProgress = sgs.length > 0 ? doneSgs.length / sgs.length : 0;
+                                return (
+                                  <>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                      <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                        <View style={{ width: `${Math.round(sgProgress * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: colors.accent }} />
+                                      </View>
+                                      <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{doneSgs.length}/{sgs.length} done</Text>
+                                    </View>
+                                    {sgs.map((sg, j) => {
+                                      const isDone = !!sg.completedAt;
+                                      const current = sg.currentValue ?? sg.startValue;
+                                      const pct = sg.type === 'sub_cancel'
+                                        ? (isDone ? 100 : 0)
+                                        : sg.type === 'spending_reduce'
+                                          ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / (sg.startValue - sg.targetValue)) * 100)))
+                                          : sg.type === 'debt_clear'
+                                            ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / sg.startValue) * 100)))
+                                            : Math.min(100, Math.max(0, Math.round((current / sg.targetValue) * 100)));
+                                      return (
+                                        <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                          <View style={[s.checkbox, isDone && s.checkboxDone]}>
+                                            {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
+                                          </View>
+                                          <View style={{ flex: 1 }}>
+                                            <Text style={[s.checklistText, isDone && s.checklistTextDone]}>{sg.target}</Text>
+                                            {!isDone && (
+                                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                                <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                                  <View style={{ width: `${pct}%`, height: '100%', borderRadius: 2, backgroundColor: colors.accent }} />
+                                                </View>
+                                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>
+                                                  {sg.type === 'sub_cancel'
+                                                    ? `\u00a3${sg.startValue}/mo`
+                                                    : sg.type === 'debt_clear'
+                                                      ? `\u00a3${current} left`
+                                                      : sg.type === 'spending_reduce'
+                                                        ? `\u00a3${current} \u2192 \u00a3${sg.targetValue}`
+                                                        : `\u00a3${current}/\u00a3${sg.targetValue}`
+                                                  }
+                                                </Text>
+                                              </View>
+                                            )}
+                                            {isDone && <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green, marginTop: 2 }}>{'\u2713'} Completed</Text>}
+                                          </View>
+                                        </View>
+                                      );
+                                    })}
+                                  </>
+                                );
+                              }
+                              return steps.map((step: string, j: number) => {
+                                const isDone = doneSteps.includes(j);
+                                return (
+                                  <TouchableOpacity key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }} onPress={() => togglePlanStep(moveKey, j, move.action, steps.length)} activeOpacity={0.7}>
+                                    <View style={[s.checkbox, isDone && s.checkboxDone]}>
+                                      {isDone && <Text style={s.checkmark}>{'\u2713'}</Text>}
+                                    </View>
+                                    <Text style={[s.checklistText, isDone && s.checklistTextDone]}>{stripMd(step)}</Text>
+                                  </TouchableOpacity>
+                                );
+                              });
+                            })()}
+                            <TouchableOpacity style={[s.heroCta, { marginTop: 16, paddingVertical: 12 }]} onPress={() => { trackEvent('Ask Bocy From Move'); router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } }); }}>
+                              <Text style={s.heroCtaText}>Ask Bocy about this</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={{ marginTop: 12, alignItems: 'center', paddingVertical: 8 }} onPress={() => handleStopMove(i)}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.coral }}>Remove from plan</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </Card>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Celebration banner — shown briefly when a move is just completed */}
+              {justCompleted && (
+                <Card variant="highlight" style={{ marginBottom: spacing.md, alignItems: 'center', paddingVertical: 20 }}>
+                  <Text style={{ fontFamily: fonts.medium, fontSize: 16, color: colors.accent, marginBottom: 4 }}>Move completed!</Text>
+                  <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.muted }}>Nice work — keep the momentum going.</Text>
+                </Card>
+              )}
+
+              {/* Completed moves */}
+              {hasCompleted && (
+                <>
+                  <View style={s.moveSectionHeader}>
+                    <Text style={s.moveSectionLabel}>DONE</Text>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent, letterSpacing: 0.3 }}>
+                      {completedPlanMoves.length + completedUserPlans.length} completed
+                    </Text>
+                  </View>
+                  {completedUserPlans.map((plan) => {
+                    const planKey = `plan-${plan.id}`;
+                    const planSteps = generatePlanSteps(plan);
+                    return (
+                      <Card key={plan.id} style={{ marginBottom: spacing.md, opacity: 0.75 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                          <View style={[s.moveBadge, { backgroundColor: colors.accent, borderColor: colors.accent }]}>
+                            <Text style={[s.moveBadgeText, { color: colors.bg }]}>{'\u2713'}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[s.moveAction, { textDecorationLine: 'line-through', color: colors.muted }]}>{stripMd(plan.action)}</Text>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent, marginTop: 4 }}>{'\u2713'} {planSteps.length}/{planSteps.length} steps done</Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity
+                          style={{ marginTop: 12, alignItems: 'center', paddingVertical: 8 }}
+                          onPress={() => {
+                            const title = 'Remove completed plan?';
+                            const msg = `Remove "${stripMd(plan.action)}" from your list?`;
+                            if (window.confirm(`${title}\n\n${msg}`)) handleRemovePlan(plan.id);
+                          }}
+                        >
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.muted }}>Remove</Text>
+                        </TouchableOpacity>
+                      </Card>
+                    );
+                  })}
+                  {completedPlanMoves.map((move) => {
+                    const i = move._sortIdx;
+                    const moveKey = `move-${i}`;
+                    const sgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
+                    const steps = move.steps || [];
+                    const totalItems = sgs.length > 0 ? sgs.length : steps.length;
+                    return (
+                      <Card key={`done-${i}`} style={{ marginBottom: spacing.md, opacity: 0.75 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                          <View style={[s.moveBadge, { backgroundColor: colors.accent, borderColor: colors.accent }]}>
+                            <Text style={[s.moveBadgeText, { color: colors.bg }]}>{'\u2713'}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[s.moveAction, { textDecorationLine: 'line-through', color: colors.muted }]}>{stripMd(move.action)}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent }}>{'\u2713'} {totalItems > 0 ? `${totalItems}/${totalItems} done` : 'Completed'}</Text>
+                              {move.monthlyImpact != null && (
+                                <Text style={[s.moveImpactText, { color: colors.muted }]}>{'\u00a3'}{move.monthlyImpact}/mo saved</Text>
+                              )}
+                            </View>
+                          </View>
+                        </View>
+                        <TouchableOpacity style={{ marginTop: 12, alignItems: 'center', paddingVertical: 8 }} onPress={() => handleStopMove(i)}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.muted }}>Remove</Text>
+                        </TouchableOpacity>
+                      </Card>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Opportunity moves */}
+              {opportunityMoves.length > 0 && (
+                <>
+                  <View style={s.moveSectionHeader}>
+                    <Text style={s.moveSectionLabel}>YOUR INSIGHTS</Text>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green, letterSpacing: 0.3 }}>
+                      {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo potential
+                    </Text>
+                  </View>
+                  {(showAllMoves ? opportunityMoves : opportunityMoves.slice(0, 2)).map((move, seqIdx) => {
+                    const i = move._sortIdx;
+                    const isExpanded = expandedMove === i;
+                    const moveKey = `move-${i}`;
+                    const providerActions = getProviderActions(move);
+                    return (
+                      <Card key={`opp-${i}`} variant="default" style={{ marginBottom: spacing.md }}>
+                        <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
+                          <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                            <View style={[s.moveBadge, seqIdx === 0 && { borderColor: colors.green }]}>
+                              <Text style={[s.moveBadgeText, seqIdx === 0 && { color: colors.green }]}>{seqIdx + 1}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={s.moveAction}>{stripMd(move.action)}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}>
+                                <Text style={s.moveImpactText}>{'\u00a3'}{move.monthlyImpact}/mo</Text>
+                                <View style={[s.effortPill, { backgroundColor: `${effortColor(move.effort)}15` }]}>
+                                  <Text style={[s.effortPillText, { color: effortColor(move.effort) }]}>{effortLabel(move.effort)}</Text>
+                                </View>
+                                <Text style={{ fontSize: 10, color: colors.muted, marginLeft: 'auto' }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                              </View>
+                              {!isExpanded && move.merchants && move.merchants.length > 0 && (
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                                  {move.merchants.slice(0, 3).map((m: string, j: number) => (
+                                    <View key={j} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 100, paddingVertical: 2, paddingHorizontal: 8 }}>
+                                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.text2 }}>{m}</Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+
+                        {!isExpanded && (
+                          <TouchableOpacity style={[s.heroCta, { marginTop: 12, paddingVertical: 10 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
+                            <Text style={[s.heroCtaText, { fontSize: 13 }]}>Start this move</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        {isExpanded && (
+                          <View style={{ marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderTopColor: colors.border }}>
+                            <View style={{ position: 'absolute', top: 12, right: 0 }}>
+                              <ExpandDots count={5} size={2.5} />
+                            </View>
+                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 24, marginBottom: 20 }}>{stripMd(move.strategy)}</Text>}
+                            {move.proof && (
+                              <View style={{ backgroundColor: colors.mintDim, borderRadius: 10, padding: 14, marginBottom: 20 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.dim, textTransform: 'uppercase', marginBottom: 6 }}>THE MATH</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2, lineHeight: 18 }}>{move.proof}</Text>
+                              </View>
+                            )}
+
+                            <TouchableOpacity style={[s.heroCta, { marginBottom: 20, paddingVertical: 12 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
+                              <Text style={s.heroCtaText}>Start this move</Text>
+                            </TouchableOpacity>
+
+                            {move.merchants && move.merchants.length > 0 && (
+                              <View style={{ marginBottom: 20 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 12 }}>WHERE YOUR MONEY GOES</Text>
+                                {move.merchants.map((m: string, j: number) => (
+                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 }}>
+                                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: colors.accent }} />
+                                    <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2 }}>{m}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+
+                            {(move.steps || []).length > 0 && (
+                              <View style={{ marginBottom: 20 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 12 }}>STEPS</Text>
+                                {(move.steps || []).map((step: string, j: number) => (
+                                  <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.dim, width: 24, textAlign: 'center' }}>{j + 1}</Text>
+                                    <Text style={{ flex: 1, fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 24 }}>{stripMd(step)}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+
+                            {move.effect && (
+                              <View style={{ marginBottom: 20 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.text2, textTransform: 'uppercase', marginBottom: 10 }}>OUTCOME</Text>
+                                <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 24 }}>{stripMd(move.effect)}</Text>
+                              </View>
+                            )}
+
+                            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                              <View style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, alignItems: 'center' }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.green, letterSpacing: -0.5 }}>{'\u00a3'}{move.monthlyImpact || 0}</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, marginTop: 6, letterSpacing: 1, textTransform: 'uppercase' }}>per month</Text>
+                              </View>
+                              <View style={{ flex: 1, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, alignItems: 'center' }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 18, color: colors.green, letterSpacing: -0.5 }}>{'\u00a3'}{move.annualImpact || 0}</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, marginTop: 6, letterSpacing: 1, textTransform: 'uppercase' }}>per year</Text>
+                              </View>
+                            </View>
+
+                            {providerActions.length > 0 && (
+                              <View style={{ gap: 8, marginBottom: 12 }}>
+                                {providerActions.map((pa, j) => (
+                                  <TouchableOpacity key={j} style={{ borderWidth: 1, borderColor: colors.accentDim, borderRadius: 100, paddingVertical: 12, alignItems: 'center' }} onPress={() => pa.url ? Linking.openURL(pa.url) : pa.phone ? Linking.openURL(`tel:${pa.phone}`) : null}>
+                                    <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.text }}>{pa.label}</Text>
+                                    {pa.sub && <Text style={{ fontFamily: fonts.regular, fontSize: 10, color: colors.dim, marginTop: 2 }}>{pa.sub}</Text>}
+                                  </TouchableOpacity>
+                                ))}
+                              </View>
+                            )}
+
+                            <TouchableOpacity style={{ borderWidth: 1, borderColor: colors.accentDim, borderRadius: 100, paddingVertical: 12, alignItems: 'center', marginBottom: 8 }} onPress={() => { trackEvent('Ask Bocy From Move'); router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } }); }}>
+                              <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.text }}>Ask Bocy about this</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={{ alignItems: 'center', paddingVertical: 8, minHeight: 44, justifyContent: 'center' }}
+                              onPress={() => handleDeleteMove(move)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Delete recommendation: ${stripMd(move.action)}`}
+                            >
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.coral }}>Delete</Text>
+                            </TouchableOpacity>
+                          </View>
+                        )}
+                      </Card>
+                    );
+                  })}
+
+                  {/* View more button for progressive disclosure */}
+                  {!showAllMoves && opportunityMoves.length > 2 && (
+                    <TouchableOpacity
+                      style={s.viewMoreBtn}
+                      onPress={() => { trackEvent('Show All Moves Toggled'); LayoutAnimation.configureNext(SMOOTH_ANIM); setShowAllMoves(true); }}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`View ${opportunityMoves.length - 2} more moves`}
+                    >
+                      <Text style={s.viewMoreText}>View {opportunityMoves.length - 2} more moves</Text>
+                      <Text style={s.viewMoreArrow}>{'\u25BC'}</Text>
+                    </TouchableOpacity>
+                  )}
+
+                </>
+              )}
+            </View>
+          )}
+
+          {/* Dot separator */}
+          <View style={s.dotSeparator}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <View key={i} style={[s.dot, { backgroundColor: colors.border }]} />
+            ))}
           </View>
 
           {/* ══════════════════════════════════════════════
-              CARD — YOUR BUDGET REALITY (summary only)
+              SPENDING DETAILS — merged Budget + Transactions, collapsed by default
               ══════════════════════════════════════════════ */}
-          <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; }}>
-          <Card>
-            {/* Info icon for budget card */}
-            <View style={s.cardTitleRow}>
-              <View style={{ flex: 1 }} />
-              <TouchableOpacity hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }} onPress={() => setInfoCard(infoCard === 'budget' ? null : 'budget')}>
-                <Text style={s.infoIcon}>i</Text>
-              </TouchableOpacity>
-            </View>
-            {infoCard === 'budget' && (
-              <View style={s.infoBox}>
-                <Text style={s.infoBoxText}>
-                  Spending tracked against your typical budget. Essentials and Lifestyle budgets are based on your average spending patterns. The remaining amount shows what's earmarked for your goals.
-                </Text>
-              </View>
-            )}
-
-            {/* Header */}
-            <View style={s.budgetHeaderRow}>
-              <Text style={s.cardTitle}>Your budget reality</Text>
-            </View>
-
-            {/* Period toggle */}
-            <View style={s.periodToggleRow}>
-              <TouchableOpacity
-                style={[s.periodBtn, budgetPeriod === 'month' && { backgroundColor: colors.accent }]}
-                onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod('month'); }}
-              >
-                <Text style={[s.periodBtnText, budgetPeriod === 'month' && { color: colors.bg }]}>This month</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[s.periodBtn, budgetPeriod === 'week' && { backgroundColor: colors.accent }]}
-                onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setBudgetPeriod('week'); }}
-              >
-                <Text style={[s.periodBtnText, budgetPeriod === 'week' && { color: colors.bg }]}>This week</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Overall spend vs income */}
-            <View style={s.periodTotalRow}>
-              <Text style={[s.periodTotalAmount, { color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
-                {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
-                <Text style={s.periodTotalOf}> of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}</Text>
-              </Text>
-              <Text style={s.periodTotalLabel}>
-                {overallPctUsed > 100
-                  ? `Over budget by \u00a3${Math.round(periodSpendTotal - periodIncome).toLocaleString()}`
-                  : `${overallPctUsed}% of ${budgetPeriod === 'week' ? 'weekly' : 'monthly'} income spent`}
-              </Text>
-            </View>
-
-            {/* Overall progress bar */}
-            <View style={s.progressTrack}>
-              <View style={[
-                s.progressFill,
-                {
-                  width: `${Math.min(100, overallPctUsed)}%`,
-                  backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.green,
-                },
-              ]} />
-            </View>
-
-            {/* Essentials section */}
-            <View style={s.sectionBlock}>
-              <View style={s.sectionHeaderRow}>
-                <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
-                <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.green : colors.coral }]}>
-                  {essentialsOnTrack ? '\u2713 On track' : '\u26A0 Over budget'}
-                </Text>
-              </View>
-              <View style={s.sectionAmountRow}>
-                <Text style={[s.sectionSpent, { color: colors.text }]}>
-                  {'\u00a3'}{Math.round(periodNonDiscTotal).toLocaleString()}
-                </Text>
-                <Text style={s.sectionBudget}>of {'\u00a3'}{Math.round(periodNonDiscBudget).toLocaleString()} budget</Text>
-              </View>
-              <View style={s.progressTrackSmall}>
-                <View style={[
-                  s.progressFillSmall,
-                  {
-                    width: `${Math.min(100, essentialsPctUsed)}%`,
-                    backgroundColor: essentialsOnTrack ? colors.text2 : colors.coral,
-                  },
-                ]} />
-              </View>
-            </View>
-
-            {/* Lifestyle section */}
-            <View style={s.sectionBlock}>
-              <View style={s.sectionHeaderRow}>
-                <Text style={[s.sectionLabel, { color: colors.text2 }]}>Lifestyle</Text>
-                <Text style={[s.sectionStatus, { color: lifestyleOnTrack ? colors.green : colors.coral }]}>
-                  {lifestyleOnTrack ? '\u2713 On track' : '\u26A0 Over budget'}
-                </Text>
-              </View>
-              <View style={s.sectionAmountRow}>
-                <Text style={[s.sectionSpent, { color: colors.text2 }]}>
-                  {'\u00a3'}{Math.round(periodDiscTotal).toLocaleString()}
-                </Text>
-                <Text style={s.sectionBudget}>of {'\u00a3'}{Math.round(periodDiscBudget).toLocaleString()} budget</Text>
-              </View>
-              <View style={s.progressTrackSmall}>
-                <View style={[
-                  s.progressFillSmall,
-                  {
-                    width: `${Math.min(100, lifestylePctUsed)}%`,
-                    backgroundColor: lifestyleOnTrack ? colors.dim : colors.coral,
-                  },
-                ]} />
-              </View>
-            </View>
-
-            {/* Remaining breakdown — prioritized by your plan */}
-            <View style={[s.sectionBlock, { borderBottomWidth: 0 }]}>
-              <View style={s.sectionHeaderRow}>
-                <Text style={[s.sectionLabel, { color: colors.text2 }]}>Remaining</Text>
-                <Text style={[s.sectionSpent, { color: periodRemaining > 0 ? colors.green : colors.coral }]}>
-                  {'\u00a3'}{Math.round(periodRemaining).toLocaleString()}
-                </Text>
-              </View>
-              {isPro ? (<>
-                {moveAllocations.length > 0 && (
-                  <View style={s.allocationList}>
-                    <Text style={s.allocationHeading}>Based on your plan</Text>
-                    {moveAllocations.map((alloc, idx) => (
-                      <View key={idx} style={s.allocationItem}>
-                        <View style={s.allocationItemTop}>
-                          <Text style={s.allocationRank}>#{alloc.priority}</Text>
-                          <Text style={s.allocationAmount}>{'\u00a3'}{Math.round(alloc.amount).toLocaleString()}{budgetPeriod === 'week' ? '/wk' : '/mo'}</Text>
-                        </View>
-                        <Text style={s.allocationLabel}>{alloc.label}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-                <View style={s.allocationUnallocated}>
-                  <Text style={s.allocationUnallocatedLabel}>Unallocated</Text>
-                  <Text style={[s.allocationUnallocatedAmount, { color: freeToSpend > 0 ? colors.text : colors.muted }]}>
-                    {'\u00a3'}{Math.round(freeToSpend).toLocaleString()}
-                  </Text>
-                </View>
-                {moveAllocations.length === 0 && periodRemaining > 0 && (
-                  <Text style={s.allocationHint}>Check your Plan tab to see where this could go.</Text>
-                )}
-              </>) : (
-                <TouchableOpacity onPress={() => setShowPaywall(true)} style={s.allocationUpgrade}>
-                  <Text style={s.allocationUpgradeText}>Upgrade to see where your remaining money should go based on your plan</Text>
-                  <Text style={[s.allocationUpgradeBtn, { color: colors.accent }]}>See my plan {'\u2192'}</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-          </Card>
-
-          {/* ── Transactions card ── */}
-          <Card style={{ marginTop: spacing.md }}>
+          <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; cardPositions.current.transactions = e.nativeEvent.layout.y; }}>
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={() => {
                 LayoutAnimation.configureNext(SMOOTH_ANIM);
-                setTxCardExpanded(prev => !prev);
+                const opening = !budgetExpanded;
+                setBudgetExpanded(opening);
+                setTxCardExpanded(opening);
               }}
-              style={s.txCardHeader}
+              style={[s.collapsedSectionBtn, !budgetExpanded && {
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 16,
+                backgroundColor: colors.mintDim,
+                paddingHorizontal: 20,
+              }]}
             >
-              <Text style={s.txCardTitle}>Transactions</Text>
-              <Text style={s.txCardChevron}>{txCardExpanded ? '\u25B2' : '\u25BC'}</Text>
+              <Text style={s.moveSectionLabel}>SPENDING DETAILS</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: overallPctUsed > 100 ? colors.coral : colors.dim, letterSpacing: 0.3 }}>
+                  {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()} / {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.dim }}>{budgetExpanded ? '\u25B4' : '\u25BE'}</Text>
+              </View>
             </TouchableOpacity>
 
-            {txCardExpanded && (<>
-            {/* Essentials breakdown */}
-            <View style={s.breakdownHeaderRow}>
-              <Text style={s.breakdownHeader}>ESSENTIALS</Text>
-              <TouchableOpacity
-                style={s.addItemBtn}
-                onPress={() => {
-                  LayoutAnimation.configureNext(SMOOTH_ANIM);
-                  setAddItemEssential(true);
-                  setAddItemError('');
-                  setShowAddItem(true);
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
-                <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
-              </TouchableOpacity>
-            </View>
-            {periodNonDiscData.filter(d => d.count > 0).length === 0 && (
-              <Text style={s.noDataText}>No essential spending {budgetPeriod === 'week' ? 'this week' : 'this month'}.</Text>
-            )}
-            {periodNonDiscData.filter(d => d.count > 0).map((item, i: number) => {
-              const key = `nd-${item.category}`;
-              const isExpanded = expandedCategories.has(key);
-              const catOnTrack = item.total <= item.budget * 1.05;
-              const visibleItems = periodNonDiscData.filter(d => d.count > 0);
-              return (
-                <View key={i}>
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => toggleCategory(key)}
-                    style={[s.dataRow, i === visibleItems.length - 1 && !isExpanded && s.dataRowLast]}
-                  >
-                    <View style={s.dataRowLeft}>
-                      <Text style={[s.catArrow, { color: colors.text }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
-                      <View style={s.catInfo}>
-                        <Text style={s.dataLabel}>{item.category}</Text>
-                        <Text style={s.dataMeta}>
-                          {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={s.dataRowRight}>
-                      <Text style={[s.dataValue, { color: catOnTrack ? colors.text : colors.coral }]}>
-                        {'\u00a3'}{Math.round(item.total).toLocaleString()}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  {isExpanded && item.txs.length > 0 && (
-                    <View style={s.txDropdown}>
-                      {item.txs.map((tx, j) => (
-                        <TouchableOpacity
-                          key={j}
-                          style={[s.txRow, j === item.txs.length - 1 && s.txRowLast]}
-                          onLongPress={() => {
-                            setRecatTx({ tx, catKey: item.category, section: 'essential' });
-                            setRecatTarget('');
-                            setRecatEssential(true);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <View style={s.txLeft}>
-                            <Text style={s.txMerchant}>{tx.merchant}</Text>
-                            <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                          </View>
-                          <View style={s.txRightCol}>
-                            <Text style={[s.txAmount, { color: colors.text2 }]}>
-                              {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
-                            </Text>
-                            <Text style={s.txRecatHint}>Hold to move</Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                  {isExpanded && item.txs.length === 0 && (
-                    <View style={s.txDropdown}>
-                      <Text style={s.txEmpty}>No transactions {budgetPeriod === 'week' ? 'this week' : 'this month'}</Text>
-                    </View>
-                  )}
+            {budgetExpanded && (
+              <Card style={{ marginBottom: spacing.md, overflow: 'visible' as const }}>
+                <View style={{ position: 'absolute', top: 16, right: 20, zIndex: 1 }}>
+                  <ExpandDots count={6} size={3} />
                 </View>
-              );
-            })}
 
-            {/* Lifestyle breakdown */}
-            <View style={[s.breakdownHeaderRow, { marginTop: 28 }]}>
-              <Text style={s.breakdownHeader}>LIFESTYLE</Text>
-              <TouchableOpacity
-                style={s.addItemBtn}
-                onPress={() => {
-                  LayoutAnimation.configureNext(SMOOTH_ANIM);
-                  setAddItemEssential(false);
-                  setAddItemError('');
-                  setShowAddItem(true);
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Text style={[s.addItemLabel, { color: colors.accent }]}>Add item</Text>
-                <Text style={[s.addItemIcon, { color: colors.accent, borderColor: colors.accent }]}>+</Text>
-              </TouchableOpacity>
-            </View>
-            {periodDiscData.filter(d => d.count > 0).length === 0 && (
-              <Text style={s.noDataText}>No lifestyle spending {budgetPeriod === 'week' ? 'this week' : 'this month'}.</Text>
-            )}
-            {periodDiscData.filter(d => d.count > 0).map((item, i: number) => {
-              const key = `d-${item.category}`;
-              const isExpanded = expandedCategories.has(key);
-              const catOnTrack = item.total <= item.budget * 1.05;
-              const visibleItems = periodDiscData.filter(d => d.count > 0);
-              return (
-                <View key={i}>
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    onPress={() => toggleCategory(key)}
-                    style={[s.dataRow, i === visibleItems.length - 1 && !isExpanded && s.dataRowLast]}
-                  >
-                    <View style={s.dataRowLeft}>
-                      <Text style={[s.catArrow, { color: colors.dim }]}>{isExpanded ? '\u25BC' : '\u25B6'}</Text>
-                      <View style={s.catInfo}>
-                        <Text style={s.dataLabel}>{item.category}</Text>
-                        <Text style={s.dataMeta}>
-                          {item.count} txn{item.count !== 1 ? 's' : ''} · {'\u00a3'}{Math.round(item.total)} of {'\u00a3'}{Math.round(item.budget)}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={s.dataRowRight}>
-                      <Text style={[s.dataValue, { color: catOnTrack ? colors.dim : colors.coral }]}>
-                        {'\u00a3'}{Math.round(item.total).toLocaleString()}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  {isExpanded && item.txs.length > 0 && (
-                    <View style={s.txDropdown}>
-                      {item.txs.map((tx, j) => (
-                        <TouchableOpacity
-                          key={j}
-                          style={[s.txRow, j === item.txs.length - 1 && s.txRowLast]}
-                          onLongPress={() => {
-                            setRecatTx({ tx, catKey: item.category, section: 'lifestyle' });
-                            setRecatTarget('');
-                            setRecatEssential(false);
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <View style={s.txLeft}>
-                            <Text style={s.txMerchant}>{tx.merchant}</Text>
-                            <Text style={s.txDate}>{formatDate(tx.date)}</Text>
-                          </View>
-                          <View style={s.txRightCol}>
-                            <Text style={[s.txAmount, { color: colors.dim }]}>
-                              {'\u00a3'}{Math.abs(tx.amount).toFixed(2)}
-                            </Text>
-                            <Text style={s.txRecatHint}>Hold to move</Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  )}
-                  {isExpanded && item.txs.length === 0 && (
-                    <View style={s.txDropdown}>
-                      <Text style={s.txEmpty}>No transactions {budgetPeriod === 'week' ? 'this week' : 'this month'}</Text>
-                    </View>
-                  )}
+                {/* Period toggle — at top so thumb doesn't block the connector animation below */}
+                <View style={[s.periodToggleRow, { marginBottom: 20, marginTop: 0 }]}>
+                  {(['year', 'month', 'week'] as const).map((p) => (
+                    <TouchableOpacity key={p} style={[s.periodBtn, budgetPeriod === p && { backgroundColor: colors.accent }]} onPress={() => {
+                      trackEvent('Budget Period Changed', { period: p });
+                      LayoutAnimation.configureNext(SMOOTH_ANIM);
+                      setBudgetPeriod(p);
+                    }}>
+                      <Text style={[s.periodBtnText, budgetPeriod === p && { color: colors.bg }]}>{p === 'year' ? 'Annual' : p === 'month' ? 'Monthly' : 'Weekly'}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              );
-            })}
 
-            <Text style={s.cardFooter}>Tap any category to expand · Hold a transaction to re-categorize</Text>
-            </>)}
-          </Card>
+                {/* Big centered spend number */}
+                <View style={s.periodTotalRow}>
+                  <Text style={[s.periodTotalAmount, { fontSize: 32, color: overallPctUsed > 100 ? colors.coral : colors.text }]}>
+                    {'\u00a3'}{Math.round(periodSpendTotal).toLocaleString()}
+                  </Text>
+                  <Text style={s.periodTotalOf}>
+                    of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
+                  </Text>
+                </View>
+
+                {/* Overall progress bar with percentage label */}
+                <View style={s.sectionHeaderRow}>
+                  <View style={{ flex: 1 }} />
+                  <Text style={[s.sectionStatus, { color: overallPctUsed > 100 ? colors.coral : colors.muted, marginBottom: 6 }]}>
+                    {overallPctUsed}%
+                  </Text>
+                </View>
+                <View style={[s.progressTrack, { marginTop: 0 }]}>
+                  <View style={[
+                    s.progressFill,
+                    {
+                      width: `${Math.min(100, overallPctUsed)}%`,
+                      backgroundColor: overallPctUsed > 100 ? colors.coral : overallPctUsed > 85 ? colors.amber : colors.accent,
+                    },
+                  ]} />
+                </View>
+
+                <View style={s.sectionBlockNoRule}>
+                  <View style={s.sectionHeaderRow}>
+                    <Text style={[s.sectionLabel, { color: colors.text }]}>Essentials</Text>
+                    <Text style={[s.sectionStatus, { color: essentialsOnTrack ? colors.green : colors.coral }]}>
+                      {'\u00a3'}{Math.round(periodNonDiscTotal).toLocaleString()} of {'\u00a3'}{Math.round(periodNonDiscBudget).toLocaleString()}
+                    </Text>
+                  </View>
+                  <View style={s.progressTrackSmall}>
+                    <View style={[
+                      s.progressFillSmall,
+                      {
+                        width: `${Math.min(100, essentialsPctUsed)}%`,
+                        backgroundColor: essentialsOnTrack ? colors.text2 : colors.coral,
+                      },
+                    ]} />
+                  </View>
+                </View>
+
+                <View style={s.sectionBlockNoRule}>
+                  <View style={s.sectionHeaderRow}>
+                    <Text style={[s.sectionLabel, { color: colors.text2 }]}>Lifestyle</Text>
+                    <Text style={[s.sectionStatus, { color: lifestyleOnTrack ? colors.dim : colors.coral }]}>
+                      {'\u00a3'}{Math.round(periodDiscTotal).toLocaleString()} of {'\u00a3'}{Math.round(periodDiscBudget).toLocaleString()}
+                    </Text>
+                  </View>
+                  <View style={s.progressTrackSmall}>
+                    <View style={[
+                      s.progressFillSmall,
+                      {
+                        width: `${Math.min(100, lifestylePctUsed)}%`,
+                        backgroundColor: lifestyleOnTrack ? colors.dim : colors.coral,
+                      },
+                    ]} />
+                  </View>
+                </View>
+
+                <View style={s.sectionBlockNoRule}>
+                  <View style={s.sectionHeaderRow}>
+                    <Text style={[s.sectionLabel, { color: colors.text2 }]}>Remaining</Text>
+                    <Text style={[s.sectionStatus, { color: periodRemaining > 0 ? colors.green : colors.coral }]}>
+                      {'\u00a3'}{Math.round(periodRemaining).toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Category breakdown bars */}
+                {(() => {
+                  const topCats = [...periodDiscData, ...periodNonDiscData]
+                    .filter((d) => d.count > 0)
+                    .sort((a, b) => b.total - a.total)
+                    .slice(0, 5)
+                    .map((d) => ({ label: d.category, spent: d.total, budget: d.budget }));
+                  return topCats.length > 0 ? (
+                    <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
+                        TOP CATEGORIES
+                      </Text>
+                      <CategoryBars items={topCats} />
+                    </View>
+                  ) : null;
+                })()}
+
+                {/* ── Transactions (inline within Spending Details) ── */}
+                <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
+                    TRANSACTIONS
+                  </Text>
+                  {[
+                    ...periodNonDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'essential' as const, colorKey: 'text' as const })),
+                    ...periodDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'lifestyle' as const, colorKey: 'dim' as const })),
+                  ].map((item, i) => {
+                    const key = `${item.section === 'essential' ? 'nd' : 'd'}-${item.category}`;
+                    const isExp = expandedCategories.has(key);
+                    const accentColor = item.colorKey === 'text' ? colors.text : colors.dim;
+                    return (
+                      <View key={`${item.section}-${item.category}-${i}`}>
+                        <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
+                          <View style={s.dataRowLeft}>
+                            <Text style={[s.catArrow, { color: accentColor }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
+                            <Text style={s.dataLabel}>{item.category}</Text>
+                          </View>
+                          <Text style={[s.dataValue, { color: accentColor }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
+                        </TouchableOpacity>
+                        {isExp && (
+                          <>
+                            <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
+                              <ExpandDots count={4} size={2} />
+                            </View>
+                            {item.txs.map((tx: any, j: number) => (
+                              <TouchableOpacity key={`${key}-tx-${j}`} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: item.section }); setRecatTarget(''); setRecatEssential(item.section === 'essential'); }} activeOpacity={0.7}>
+                                <View style={s.txLeft}>
+                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
+                                  <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                                </View>
+                                <Text style={[s.txAmount, { color: item.colorKey === 'text' ? colors.text2 : colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </>
+                        )}
+                      </View>
+                    );
+                  })}
+                  <Text style={s.cardFooter}>Hold a transaction to re-categorise</Text>
+                </View>
+              </Card>
+            )}
           </View>
 
           {/* Add budget item modal */}
@@ -2000,9 +3381,9 @@ export default function Home() {
                       <View style={s.verifyActions}>
                         <TouchableOpacity
                           style={s.moveApproveBtn}
-                          onPress={() => { setVerifyMove(null); router.push('/(main)/(tabs)/plan'); }}
+                          onPress={() => setVerifyMove(null)}
                         >
-                          <Text style={s.moveApproveBtnText}>Continue to plan</Text>
+                          <Text style={s.moveApproveBtnText}>Done</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={s.moveVerifyBtn}
@@ -2089,96 +3470,366 @@ export default function Home() {
             </Pressable>
           </Modal>
 
-          {/* ── Categorise uncategorised transactions modal ── */}
-          <Modal visible={showCatReview} transparent animationType="fade">
-            <View style={s.catReviewOverlay}>
-              <View style={s.catReviewContainer}>
+          {/* ── Unified review modal ── */}
+          <Modal visible={reviewModalVisible} transparent animationType="none" onRequestClose={dismissReviewModal}>
+            <Animated.View style={[s.catReviewOverlay, { opacity: reviewModalFade }]}>
+              <Pressable style={s.catReviewOverlayInner} onPress={dismissReviewModal}>
+              <Animated.View style={[s.catReviewContainer, { transform: [{ translateY: reviewModalSlide }] }]} onStartShouldSetResponder={() => true}>
+                {/* Header */}
                 <View style={s.catReviewHeader}>
                   <View style={{ flex: 1 }}>
-                    <Text style={s.modalTitle}>Categorise transactions</Text>
+                    <Text style={s.modalTitle}>Review items</Text>
                     <Text style={s.catReviewSubtitle}>
                       {aiSuggesting
-                        ? 'Bocy is suggesting categories...'
-                        : Object.keys(catAssignments).length > 0
-                          ? 'Review suggestions, adjust any, then accept'
-                          : 'Tap a category for each merchant'}
+                        ? 'Bocy is analysing your transactions...'
+                        : 'Help us get your numbers right'}
                     </Text>
                   </View>
-                  <TouchableOpacity onPress={() => setShowCatReview(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                  <TouchableOpacity
+                    onPress={dismissReviewModal}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close review modal"
+                    style={s.catReviewCloseBtn}
+                  >
                     <Text style={s.catReviewClose}>{'\u2715'}</Text>
                   </TouchableOpacity>
                 </View>
 
+                {/* Progress indicator */}
+                {(() => {
+                  const totalItems = unresolvedGroups.length;
+                  const reviewedItems = Object.keys(catAssignments).length;
+                  const progress = totalItems > 0 ? reviewedItems / totalItems : 0;
+                  return totalItems > 0 ? (
+                    <View style={s.reviewProgressBar}>
+                      <Text style={s.reviewProgressText}>
+                        {reviewedItems} of {totalItems} reviewed
+                      </Text>
+                      <View style={s.reviewProgressTrack}>
+                        <View style={[s.reviewProgressFill, { width: `${Math.round(progress * 100)}%` }]} />
+                      </View>
+                    </View>
+                  ) : null;
+                })()}
+
+                {/* AI suggesting bar */}
                 {aiSuggesting && (
                   <View style={s.aiSuggestBar}>
-                    <ActivityIndicator color={colors.green} size="small" />
+                    <ActivityIndicator color={colors.accent} size="small" />
                     <Text style={s.aiSuggestText}>Analysing merchants...</Text>
                   </View>
                 )}
 
+
                 <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
-                  {unresolvedGroups.map((group) => {
-                    const assigned = catAssignments[group.key];
-                    return (
-                      <View key={group.key} style={[s.catReviewRow, assigned && s.catReviewRowDone]}>
-                        <View style={s.catReviewRowHeader}>
-                          <Text style={s.catReviewMerchant} numberOfLines={1}>
-                            {assigned ? '\u2713 ' : ''}{group.label}
-                          </Text>
-                          <Text style={s.catReviewAmount}>
-                            {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
-                          </Text>
-                        </View>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                          {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
-                            <TouchableOpacity
-                              key={cat}
-                              style={[s.categoryChip, assigned?.category === cat && s.categoryChipActive]}
-                              onPress={() => {
-                                setCatAssignments((prev) => ({
-                                  ...prev,
-                                  [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat) },
-                                }));
-                              }}
-                            >
-                              <Text style={[
-                                s.categoryChipText,
-                                assigned?.category === cat && s.categoryChipTextActive,
-                              ]}>{cat}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      </View>
-                    );
-                  })}
+                  {/* ── UNCATEGORISED section ── */}
+                  {unresolvedGroups.length > 0 && (
+                    <>
+                      <Text style={s.reviewSectionHeader}>
+                        UNCATEGORISED ({unresolvedGroups.length})
+                      </Text>
+                      {unresolvedGroups.map((group) => {
+                        const assigned = catAssignments[group.key];
+                        const isAiSuggested = assigned?.aiSuggested === true;
+                        return (
+                          <View
+                            key={group.key}
+                            style={[
+                              s.catReviewRow,
+                              assigned && s.catReviewRowDone,
+                              isAiSuggested && s.catReviewRowAi,
+                            ]}
+                            accessibilityLabel={`${group.label}, ${group.txs.length} transactions, ${assigned ? `categorised as ${assigned.category}` : 'not yet categorised'}${isAiSuggested ? ', AI suggested' : ''}`}
+                          >
+                            <View style={s.catReviewRowHeader}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={s.catReviewMerchant} numberOfLines={1}>
+                                  {assigned ? '\u2713 ' : ''}{group.label}
+                                </Text>
+                                {isAiSuggested && (
+                                  <Text style={s.aiSuggestedLabel}>Bocy suggested</Text>
+                                )}
+                              </View>
+                              <Text style={s.catReviewAmount}>
+                                {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
+                              </Text>
+                            </View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                              {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
+                                <TouchableOpacity
+                                  key={cat}
+                                  style={[s.categoryChip, assigned?.category === cat && s.categoryChipActive]}
+                                  onPress={() => {
+                                    hapticLight();
+                                    setCatAssignments((prev) => ({
+                                      ...prev,
+                                      [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat), aiSuggested: false },
+                                    }));
+                                  }}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`${cat}${assigned?.category === cat ? ', selected' : ''}`}
+                                  accessibilityState={{ selected: assigned?.category === cat }}
+                                >
+                                  <Text style={[
+                                    s.categoryChipText,
+                                    assigned?.category === cat && s.categoryChipTextActive,
+                                  ]}>{cat}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </ScrollView>
+                          </View>
+                        );
+                      })}
+                    </>
+                  )}
+
                 </ScrollView>
 
                 {/* Done button */}
-                <TouchableOpacity
-                  style={[s.catReviewDone, Object.keys(catAssignments).length === 0 && s.modalSaveDisabled]}
-                  onPress={saveCatReview}
-                  disabled={savingCatReview || Object.keys(catAssignments).length === 0}
-                >
-                  {savingCatReview ? (
-                    <ActivityIndicator color={colors.bg} size="small" />
-                  ) : (
-                    <Text style={s.catReviewDoneText}>
-                      Done{Object.keys(catAssignments).length > 0
-                        ? ` (${Object.keys(catAssignments).length} categorised)`
-                        : ''}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </View>
+                {(() => {
+                  const totalReviewed = Object.keys(catAssignments).length;
+                  return (
+                    <TouchableOpacity
+                      style={[s.catReviewDone]}
+                      onPress={totalReviewed === 0 ? () => setShowReviewModal(false) : saveReview}
+                      disabled={savingReview}
+                      accessibilityRole="button"
+                      accessibilityLabel={totalReviewed > 0 ? `Save ${totalReviewed} reviewed items` : 'Close review'}
+                      accessibilityState={{ disabled: savingReview }}
+                    >
+                      {savingReview ? (
+                        saveSuccess ? (
+                          <Text style={s.catReviewDoneText}>{'\u2713'} Saved!</Text>
+                        ) : (
+                          <ActivityIndicator color={colors.bg} size="small" />
+                        )
+                      ) : (
+                        <Text style={s.catReviewDoneText}>
+                          Done{totalReviewed > 0 ? ` (${totalReviewed} reviewed)` : ''}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })()}
+              </Animated.View>
+              </Pressable>
+            </Animated.View>
           </Modal>
 
         </>
       )}
 
-      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="moves" />
-      {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} scrollRef={dashScrollRef} cardPositions={cardPositions} router={router} />}
+      {/* ── Income arrival insight modal ── */}
+      {weeklyCtx?.incomeArrivedThisWeek && Array.isArray(weeklyCtx?.recentIncomeEvents) && weeklyCtx.recentIncomeEvents.length > 0 && (
+        <InsightModal
+          visible={showInsightModal}
+          onDismiss={() => { setShowInsightModal(false); dismissIncome(); }}
+          onAction={(prefill) => router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: prefill || 'I just got paid. Walk me through what to do first.' } })}
+          type="payday"
+          tag="PAYDAY"
+          title="Income received"
+          body={
+            weeklyCtx.recentIncomeEvents.map((e) =>
+              `\u00a3${Math.round(e?.amount ?? 0).toLocaleString()} from ${e?.source ?? 'unknown'}`
+            ).join(', ') +
+            ' landed this week.' +
+            ((weeklyCtx.committedThisWeek ?? 0) > 0
+              ? ` \u00a3${Math.round(weeklyCtx.committedThisWeek).toLocaleString()} already committed to bills.`
+              : '') +
+            ' Want me to walk you through where it should go?'
+          }
+          actionLabel="Ask Bocy"
+          actionPrefill="I just got paid. Walk me through what to do first."
+          fingerprint={incomeFingerprint ? `income:${incomeFingerprint}` : undefined}
+        />
+      )}
+
+      {/* ── Reactive engine insight modal (debt payments, achievements, plan verification) ── */}
+      {reactiveEvents.length > 0 && reactiveEventIndex < reactiveEvents.length && (
+        <InsightModal
+          visible={showReactiveModal && !showInsightModal}
+          onDismiss={() => {
+            if (reactiveEventIndex < reactiveEvents.length - 1) {
+              setReactiveEventIndex((i) => i + 1);
+            } else {
+              setShowReactiveModal(false);
+            }
+          }}
+          onAction={(prefill) => {
+            setShowReactiveModal(false);
+            router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: prefill || 'What should I focus on next?' } });
+          }}
+          type={reactiveEvents[reactiveEventIndex].insightType}
+          tag={reactiveEvents[reactiveEventIndex].tag}
+          title={reactiveEvents[reactiveEventIndex].title}
+          body={reactiveEvents[reactiveEventIndex].body}
+          actionLabel={reactiveEvents[reactiveEventIndex].actionLabel || 'Ask Bocy'}
+          actionPrefill={reactiveEvents[reactiveEventIndex].actionPrefill}
+          fingerprint={reactiveEvents[reactiveEventIndex].fingerprint}
+        />
+      )}
+
+      {/* ── Weekly info explainability modal ── */}
+      <Modal visible={showWeeklyInfo} transparent animationType="fade" onRequestClose={() => setShowWeeklyInfo(false)}>
+        <Pressable style={s.modalOverlay} onPress={() => setShowWeeklyInfo(false)}>
+          <Pressable style={s.modalContent} onPress={() => {}}>
+            <Text style={s.modalTag}>HOW IT WORKS</Text>
+            <Text style={s.modalTitle}>Your weekly budget</Text>
+
+            <View style={s.modalDotSep}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <View key={i} style={[s.modalDot, { backgroundColor: colors.border }]} />
+              ))}
+            </View>
+
+            <Text style={s.modalBody}>
+              This is how much you can freely spend this week without touching your essentials or goals. It updates automatically every Monday.
+            </Text>
+
+            <View style={s.modalBreakdown}>
+              <View style={s.modalBreakdownRow}>
+                <Text style={s.modalBreakdownLabel}>Monthly income</Text>
+                <Text style={s.modalBreakdownValue}>{'\u00a3'}{Math.round(income).toLocaleString()}</Text>
+              </View>
+              <View style={s.modalBreakdownRow}>
+                <Text style={s.modalBreakdownLabel}>Essentials</Text>
+                <Text style={[s.modalBreakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(nonDiscTotal).toLocaleString()}</Text>
+              </View>
+              <View style={s.modalBreakdownRow}>
+                <Text style={s.modalBreakdownLabel}>Lifestyle budget</Text>
+                <Text style={[s.modalBreakdownValue, { color: colors.coral }]}>-{'\u00a3'}{Math.round(discTotal).toLocaleString()}</Text>
+              </View>
+              <View style={[s.modalBreakdownRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, marginTop: 4 }]}>
+                <Text style={[s.modalBreakdownLabel, { fontFamily: fonts.semibold, color: colors.text }]}>Unallocated monthly</Text>
+                <Text style={[s.modalBreakdownValue, { fontFamily: fonts.semibold, color: colors.text }]}>{'\u00a3'}{Math.round(leftToDecide).toLocaleString()}</Text>
+              </View>
+              <View style={s.modalBreakdownRow}>
+                <Text style={s.modalBreakdownLabel}>{'\u00f7'} 4.33 weeks</Text>
+                <Text style={[s.modalBreakdownValue, { color: colors.green }]}>{'\u00a3'}{Math.round(calculatedWeeklyBudget).toLocaleString()}/wk</Text>
+              </View>
+              {customWeeklyLimit !== null && (
+                <View style={s.modalBreakdownRow}>
+                  <Text style={[s.modalBreakdownLabel, { color: colors.accent }]}>Your custom limit</Text>
+                  <Text style={[s.modalBreakdownValue, { color: colors.accent }]}>{'\u00a3'}{Math.round(customWeeklyLimit).toLocaleString()}/wk</Text>
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={s.modalCloseBtn}
+              onPress={() => setShowWeeklyInfo(false)}
+              activeOpacity={0.8}
+            >
+              <Text style={s.modalCloseBtnText}>Got it</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Custom weekly limit editor modal ── */}
+      <Modal visible={showLimitEditor} transparent animationType="fade" onRequestClose={() => setShowLimitEditor(false)}>
+        <Pressable style={s.modalOverlay} onPress={() => setShowLimitEditor(false)}>
+          <Pressable style={s.modalContent} onPress={() => {}}>
+            <Text style={s.modalTag}>SET YOUR LIMIT</Text>
+            <Text style={s.modalTitle}>Weekly spending target</Text>
+
+            <Text style={[s.modalBody, { marginBottom: spacing.lg }]}>
+              Set what you want to spend per week after essentials are covered. This can't exceed your calculated budget of {'\u00a3'}{Math.round(calculatedWeeklyBudget).toLocaleString()}/wk.
+            </Text>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: spacing.lg }}>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 24, color: colors.text }}>{'\u00a3'}</Text>
+              <TextInput
+                style={s.limitEditorInput}
+                value={limitInput}
+                onChangeText={setLimitInput}
+                keyboardType="numeric"
+                placeholder={String(Math.round(calculatedWeeklyBudget))}
+                placeholderTextColor={colors.muted}
+                autoFocus
+                selectTextOnFocus
+              />
+              <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.dim }}>/wk</Text>
+            </View>
+
+            <TouchableOpacity
+              style={s.modalCloseBtn}
+              onPress={saveCustomLimit}
+              activeOpacity={0.8}
+            >
+              <Text style={s.modalCloseBtnText}>Set limit</Text>
+            </TouchableOpacity>
+
+            {customWeeklyLimit !== null && (
+              <TouchableOpacity
+                style={s.modalResetBtn}
+                onPress={resetCustomLimit}
+                activeOpacity={0.7}
+              >
+                <Text style={s.modalResetBtnText}>Reset to auto ({'\u00a3'}{Math.round(calculatedWeeklyBudget)}/wk)</Text>
+              </TouchableOpacity>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </ScrollView>
+
+    {/* ── Install App Modal (post-onboarding) ── */}
+    <Modal visible={showInstallModal} transparent animationType="fade" onRequestClose={() => { setShowInstallModal(false); AsyncStorage.setItem('install_modal_shown', '1').catch(() => {}); }}>
+      <Pressable style={s.modalOverlay} onPress={() => { setShowInstallModal(false); AsyncStorage.setItem('install_modal_shown', '1').catch(() => {}); }}>
+        <Pressable style={[s.modalContent, { maxWidth: 380 }]} onPress={(e) => e.stopPropagation()}>
+          <Text style={[s.modalTitle, { textAlign: 'center' }]}>Add Bocy to your phone</Text>
+          <Text style={[s.modalBody, { textAlign: 'center', marginTop: 8 }]}>
+            Install on your home screen for instant access — no app store needed.
+          </Text>
+          {typeof window !== 'undefined' && /iP(hone|od|ad)/.test(navigator?.userAgent || '') && /WebKit/.test(navigator?.userAgent || '') && !/CriOS|FxiOS/.test(navigator?.userAgent || '') ? (
+            <View style={{ marginTop: 16, gap: 12 }}>
+              <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 }}>
+                1. Tap the <Text style={{ fontFamily: fonts.semibold, color: colors.text }}>Share</Text> button in Safari's toolbar
+              </Text>
+              <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 }}>
+                2. Scroll down and tap <Text style={{ fontFamily: fonts.semibold, color: colors.text }}>Add to Home Screen</Text>
+              </Text>
+              <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22 }}>
+                3. Tap <Text style={{ fontFamily: fonts.semibold, color: colors.text }}>Add</Text>
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={{ backgroundColor: colors.accent, paddingVertical: 14, borderRadius: radius.md, alignItems: 'center', marginTop: 20 }}
+              onPress={async () => {
+                // Try the native install prompt (Chrome/Edge)
+                if (typeof window !== 'undefined' && (window as any).__pwaInstallPrompt) {
+                  try {
+                    (window as any).__pwaInstallPrompt.prompt();
+                    const result = await (window as any).__pwaInstallPrompt.userChoice;
+                    if (result.outcome === 'accepted') {
+                      trackEvent('App Installed', { source: 'modal' });
+                    }
+                  } catch {}
+                  (window as any).__pwaInstallPrompt = null;
+                }
+                setShowInstallModal(false);
+                AsyncStorage.setItem('install_modal_shown', '1').catch(() => {});
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 15, color: colors.bg }}>Install app</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={{ alignItems: 'center', paddingVertical: 12, marginTop: 8 }}
+            onPress={() => { setShowInstallModal(false); AsyncStorage.setItem('install_modal_shown', '1').catch(() => {}); }}
+          >
+            <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.dim }}>Maybe later</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+
+    {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} scrollRef={dashScrollRef} cardPositions={cardPositions} router={router} />}
+    </View>
   );
 }
 
@@ -2192,7 +3843,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   scroll: {
     padding: 24,
     paddingTop: 68,
-    paddingBottom: 80,
+    paddingBottom: 120,
   },
   loadingContainer: {
     flex: 1,
@@ -2202,66 +3853,67 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
 
   // ── Header ──
+  headerWrap: {
+    marginBottom: 40,
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 40,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
   },
   bocyHeaderWrap: {
-    width: 32,
-    height: 32,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   greeting: {
-    fontFamily: fonts.mono,
-    fontSize: 22,
+    fontFamily: fonts.medium,
+    fontSize: 18,
     color: c.text,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    letterSpacing: -0.2,
   },
   menuButton: {
     padding: 10,
-    gap: 4,
+    gap: 5,
     minWidth: 44,
     minHeight: 44,
     justifyContent: 'center',
     alignItems: 'flex-end',
   },
   menuLine: {
-    width: 20,
+    width: 18,
     height: 1.5,
     backgroundColor: c.text,
     borderRadius: 1,
   },
   menuLineShort: {
-    width: 12,
+    width: 10,
     backgroundColor: c.dim,
   },
   syncText: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    color: c.dim,
+    fontSize: 9,
+    color: c.muted,
     marginTop: 6,
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
+    marginLeft: 40,
   },
 
   // ── Connection warning banner ──
   connectionBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: spacing.md,
     marginBottom: spacing.lg,
-    paddingVertical: 10,
-    paddingLeft: 14,
-    paddingRight: 6,
+    paddingVertical: 12,
+    paddingLeft: 16,
+    paddingRight: 8,
     backgroundColor: c.amberDim,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -2296,21 +3948,162 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     opacity: 0.6,
   },
 
+  // ── Focus card split rows ──
+  focusSplitRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  focusSplitLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.dim,
+    flex: 1,
+  },
+  focusSplitValue: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    letterSpacing: -0.3,
+  },
+
+  // ── Dot separator ──
+  dotSeparator: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  dot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+  },
+
+  // ── Moves section ──
+  moveSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginTop: 36,
+    marginBottom: 18,
+  },
+  moveSectionLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 3,
+    color: c.muted,
+    textTransform: 'uppercase',
+  },
+  moveAction: {
+    fontFamily: fonts.medium,
+    fontSize: 15,
+    color: c.text,
+    lineHeight: 24,
+  },
+  moveImpactText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.text2,
+    letterSpacing: 0.3,
+    marginTop: 2,
+  },
+  moveBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: c.border,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+    marginTop: 2,
+  },
+  moveBadgeText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.muted,
+  },
+  viewMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.lg,
+    borderStyle: 'dashed',
+  },
+  viewMoreText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  viewMoreArrow: {
+    fontSize: 9,
+    color: c.muted,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: c.accentDim,
+    marginRight: spacing.sm,
+    marginTop: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxDone: {
+    backgroundColor: c.accent,
+    borderColor: c.accent,
+  },
+  checkmark: {
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    color: c.bg,
+  },
+  checklistText: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+    lineHeight: 22,
+  },
+  checklistTextDone: {
+    textDecorationLine: 'line-through',
+    color: c.muted,
+  },
+
+  // ── Collapsed section button ──
+  collapsedSectionBtn: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 22,
+    marginTop: 8,
+  },
+
   // ── Empty State ──
   emptyState: {
-    marginTop: spacing.xxl,
+    marginTop: 64,
     alignItems: 'center',
   },
   emptyBocyWrap: {
-    marginBottom: spacing.lg,
+    marginBottom: 32,
   },
   emptyTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 18,
+    fontFamily: fonts.medium,
+    fontSize: 17,
     color: c.text,
     textAlign: 'center',
     marginBottom: spacing.sm,
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
   },
   emptyDesc: {
     fontFamily: fonts.regular,
@@ -2318,12 +4111,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.dim,
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: spacing.xl,
-    paddingHorizontal: spacing.md,
+    marginBottom: 40,
+    paddingHorizontal: spacing.lg,
   },
   ctaButton: {
     backgroundColor: c.accent,
-    paddingVertical: 16,
+    paddingVertical: 15,
     paddingHorizontal: spacing.xl,
     borderRadius: 100,
     alignItems: 'center',
@@ -2331,25 +4124,25 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   ctaText: {
     fontFamily: fonts.semibold,
-    fontSize: 15,
+    fontSize: 14,
     color: c.bg,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
 
   cardTitle: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    color: c.text2,
-    letterSpacing: 1.5,
+    fontSize: 11,
+    color: c.muted,
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   cardSubtitle: {
     fontFamily: fonts.regular,
-    fontSize: 14,
+    fontSize: 13,
     color: c.dim,
-    lineHeight: 22,
-    marginBottom: 28,
+    lineHeight: 20,
+    marginBottom: 24,
   },
   noDataText: {
     fontFamily: fonts.regular,
@@ -2384,7 +4177,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginTop: 10,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: c.mintDim,
+    borderColor: c.border,
   },
   infoBoxText: {
     fontFamily: fonts.regular,
@@ -2420,54 +4213,57 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   heroLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.green,
-    letterSpacing: 2,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 3,
     textTransform: 'uppercase',
     marginBottom: 16,
   },
   heroAction: {
     fontFamily: fonts.semibold,
-    fontSize: 22,
+    fontSize: 20,
     color: c.text,
     lineHeight: 30,
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
   },
   heroMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginTop: 12,
+    marginTop: 14,
   },
   heroImpact: {
     fontFamily: fonts.mono,
-    fontSize: 18,
-    color: c.green,
+    fontSize: 16,
+    color: c.text,
   },
   heroStrategy: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: c.dim,
     lineHeight: 20,
-    marginTop: 16,
+    marginTop: 18,
   },
   heroActions: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 24,
+    marginTop: 28,
   },
   heroCta: {
-    flex: 2,
     backgroundColor: c.accent,
-    paddingVertical: 14,
+    paddingVertical: 15,
+    paddingHorizontal: spacing.xl,
     borderRadius: 100,
     alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
   },
   heroCtaText: {
     fontFamily: fonts.semibold,
-    fontSize: 15,
+    fontSize: 14,
     color: c.bg,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
+    textAlign: 'center',
   },
   heroSecondary: {
     flex: 1,
@@ -2480,29 +4276,29 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   heroSecondaryText: {
     fontFamily: fonts.semibold,
-    fontSize: 14,
+    fontSize: 13,
     color: c.dim,
   },
   heroMore: {
     alignItems: 'center',
     paddingTop: 20,
-    marginTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
+    marginTop: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
   },
   heroMoreText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: c.green,
-    letterSpacing: 0.5,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
 
   // ── Card 1: Move items (kept for modals) ──
   moveItemFull: {
     paddingVertical: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
   },
   moveTitle: {
     fontFamily: fonts.medium,
@@ -2518,8 +4314,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   moveImpact: {
     fontFamily: fonts.mono,
-    fontSize: 14,
-    color: c.green,
+    fontSize: 13,
+    color: c.text2,
+    letterSpacing: 0.3,
   },
   effortPill: {
     borderRadius: 100,
@@ -2596,40 +4393,40 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     marginTop: 4,
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
   },
   viewAllText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: c.text,
-    letterSpacing: 0.5,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
 
   // ── Card 2: Income ──
   bigNumberWrap: {
     alignItems: 'center',
-    paddingVertical: 24,
-    paddingBottom: 32,
+    paddingVertical: 28,
+    paddingBottom: 36,
   },
   bigNumber: {
     fontFamily: fonts.mono,
-    fontSize: 52,
+    fontSize: 48,
     color: c.text,
     letterSpacing: -2,
   },
   bigNumberLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: c.muted,
-    marginTop: 8,
-    letterSpacing: 1,
+    marginTop: 10,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
   divider: {
-    height: 1,
-    backgroundColor: c.mintDim,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: c.border,
     marginBottom: 4,
   },
   sourceCard: {
@@ -2724,33 +4521,33 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   // ── Card 3: Safe to Spend ──
   safeToSpendHero: {
     alignItems: 'center',
-    paddingVertical: 24,
-    paddingBottom: 28,
+    paddingVertical: 32,
+    paddingBottom: 36,
   },
   safeToSpendAmount: {
     fontFamily: fonts.mono,
-    fontSize: 48,
+    fontSize: 44,
     color: c.text,
     letterSpacing: -2,
   },
   safeToSpendLabel: {
     fontFamily: fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
     color: c.muted,
-    marginTop: 8,
-    letterSpacing: 1,
+    marginTop: 10,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
   safeToSpendBar: {
-    height: 4,
-    borderRadius: 2,
+    height: 3,
+    borderRadius: 1.5,
     backgroundColor: c.mintDim,
     overflow: 'hidden',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   safeToSpendBarFill: {
     height: '100%',
-    borderRadius: 2,
+    borderRadius: 1.5,
   },
   safeToSpendRow: {
     flexDirection: 'row',
@@ -2758,23 +4555,23 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   safeToSpendMeta: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: c.text2,
+    fontSize: 11,
+    color: c.dim,
     letterSpacing: 0.3,
   },
 
   // ── Breakdown section ──
   breakdownSection: {
-    marginTop: 20,
-    paddingTop: 20,
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
+    marginTop: 24,
+    paddingTop: 24,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
   },
   breakdownTitle: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.dim,
-    letterSpacing: 1,
+    fontSize: 10,
+    color: c.muted,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
     marginBottom: 14,
   },
@@ -2800,23 +4597,25 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.text,
   },
   breakdownDivider: {
-    borderTopWidth: 1,
-    borderTopColor: c.mintDim,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
     marginTop: 6,
     paddingTop: 10,
   },
   breakdownAdaptive: {
-    backgroundColor: c.greenDim,
+    backgroundColor: c.mintDim,
     borderRadius: 10,
     padding: 12,
     marginTop: 10,
     marginBottom: 6,
+    borderWidth: 1,
+    borderColor: c.border,
   },
   breakdownAdaptiveLabel: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: c.green,
-    letterSpacing: 0.8,
+    color: c.text2,
+    letterSpacing: 1,
     textTransform: 'uppercase',
     marginBottom: 8,
   },
@@ -2876,16 +4675,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 18,
     color: c.text,
   },
-  limitEditorInput: {
-    flex: 1,
-    fontFamily: fonts.mono,
-    fontSize: 18,
-    color: c.text,
-    borderBottomWidth: 1,
-    borderBottomColor: c.accent,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-  },
   limitEditorSave: {
     backgroundColor: c.accent,
     paddingVertical: 8,
@@ -2919,19 +4708,19 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 24,
   },
   expandHint: {
     fontFamily: fonts.regular,
-    fontSize: 12,
+    fontSize: 11,
     color: c.muted,
     marginTop: 2,
   },
   expandToggle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: c.mintDim,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -2939,16 +4728,17 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   expandToggleText: {
     fontFamily: fonts.mono,
-    fontSize: 10,
-    color: c.dim,
+    fontSize: 9,
+    color: c.muted,
   },
   periodToggleRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 24,
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 28,
   },
   periodBtn: {
-    paddingVertical: 8,
+    paddingVertical: 7,
     paddingHorizontal: 16,
     borderRadius: 100,
     borderWidth: 1,
@@ -2956,55 +4746,61 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   periodBtnText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
+    fontSize: 10,
     color: c.muted,
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
   },
   periodTotalRow: {
+    alignItems: 'center',
     marginBottom: 8,
   },
   periodTotalAmount: {
     fontFamily: fonts.mono,
-    fontSize: 28,
+    fontSize: 26,
     letterSpacing: -0.5,
+    textAlign: 'center',
   },
   periodTotalOf: {
     fontFamily: fonts.regular,
-    fontSize: 16,
+    fontSize: 15,
     color: c.dim,
   },
   periodTotalLabel: {
     fontFamily: fonts.regular,
-    fontSize: 13,
-    color: c.dim,
-    marginTop: 4,
+    fontSize: 12,
+    color: c.muted,
+    marginTop: 6,
+    textAlign: 'center',
   },
   progressTrack: {
-    height: 6,
-    borderRadius: 3,
+    height: 3,
+    borderRadius: 1.5,
     backgroundColor: c.mintDim,
     overflow: 'hidden',
     marginTop: 16,
     marginBottom: 28,
   },
   progressFill: {
-    height: 6,
-    borderRadius: 3,
+    height: 3,
+    borderRadius: 1.5,
   },
   sectionBlock: {
+    paddingVertical: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
+  },
+  sectionBlockNoRule: {
     paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6,
+    marginBottom: 10,
   },
   sectionLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 15,
+    fontFamily: fonts.medium,
+    fontSize: 14,
   },
   sectionStatus: {
     fontFamily: fonts.mono,
@@ -3014,31 +4810,31 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   sectionAmountRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: 6,
-    marginBottom: 10,
+    gap: 8,
+    marginBottom: 12,
   },
   sectionSpent: {
     fontFamily: fonts.mono,
-    fontSize: 18,
+    fontSize: 16,
   },
   sectionBudget: {
     fontFamily: fonts.regular,
-    fontSize: 13,
+    fontSize: 12,
     color: c.dim,
   },
   progressTrackSmall: {
-    height: 4,
-    borderRadius: 2,
+    height: 2,
+    borderRadius: 1,
     backgroundColor: c.mintDim,
     overflow: 'hidden',
   },
   progressFillSmall: {
-    height: 4,
-    borderRadius: 2,
+    height: 2,
+    borderRadius: 1,
   },
   allocationList: {
-    marginTop: 10,
-    gap: 8,
+    marginTop: 12,
+    gap: 10,
   },
   allocationHeading: {
     fontFamily: fonts.mono,
@@ -3088,8 +4884,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
-    paddingTop: 10,
+    marginTop: 14,
+    paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: c.border,
   },
@@ -3117,6 +4913,13 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 13,
     marginTop: 6,
   },
+  variableIncomeFootnote: {
+    fontFamily: fonts.regular,
+    fontSize: 11,
+    color: c.muted,
+    marginTop: 16,
+    textAlign: 'center',
+  },
   txCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -3135,8 +4938,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   budgetBar: {
     flexDirection: 'row',
-    height: 4,
-    borderRadius: 2,
+    height: 3,
+    borderRadius: 1.5,
     overflow: 'hidden',
     marginTop: 8,
     marginBottom: 32,
@@ -3158,18 +4961,18 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   summaryAmount: {
     fontFamily: fonts.mono,
-    fontSize: 20,
+    fontSize: 18,
   },
   summaryLabel: {
     fontFamily: fonts.regular,
-    fontSize: 12,
-    color: c.text2,
+    fontSize: 11,
+    color: c.dim,
     marginTop: 8,
   },
   summaryPct: {
     fontFamily: fonts.mono,
-    fontSize: 11,
-    color: c.dim,
+    fontSize: 10,
+    color: c.muted,
     marginTop: 4,
     letterSpacing: 0.5,
   },
@@ -3215,10 +5018,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 14,
-    minHeight: 48,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
+    paddingVertical: 16,
+    minHeight: 52,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
   },
   dataRowLast: {
     borderBottomWidth: 0,
@@ -3226,7 +5029,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   dataRowLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
   catArrow: {
     fontFamily: fonts.mono,
@@ -3272,16 +5075,16 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
   },
   txRowLast: {
     borderBottomWidth: 0,
   },
   txLeft: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 16,
   },
   txMerchant: {
     fontFamily: fonts.regular,
@@ -3339,9 +5142,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   viewTransactionsText: {
     fontFamily: fonts.mono,
-    fontSize: 12,
-    color: c.accent,
-    letterSpacing: 0.5,
+    fontSize: 11,
+    color: c.text2,
+    letterSpacing: 1,
     textTransform: 'uppercase',
   },
 
@@ -3361,12 +5164,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   subsLinkText: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: c.green,
+    color: c.text,
   },
   subsLinkArrow: {
     fontFamily: fonts.regular,
     fontSize: 18,
-    color: c.green,
+    color: c.text2,
   },
 
   // ── Card 5: Debt accounts ──
@@ -3394,8 +5197,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: c.mintDim,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: c.border,
   },
   debtRowLast: {
     borderBottomWidth: 0,
@@ -3702,9 +5505,9 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Income arrival alert ──
   incomeAlert: {
-    backgroundColor: c.greenDim,
+    backgroundColor: c.mintDim,
     borderWidth: 1,
-    borderColor: 'rgba(0,212,170,0.25)',
+    borderColor: c.border,
     borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.md,
@@ -3718,13 +5521,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   incomeAlertTitle: {
     fontFamily: fonts.semibold,
     fontSize: 14,
-    color: c.green,
+    color: c.text,
   },
   incomeAlertDismiss: {
     fontFamily: fonts.medium,
     fontSize: 14,
-    color: c.green,
-    opacity: 0.5,
+    color: c.muted,
     paddingLeft: 8,
   },
   incomeAlertText: {
@@ -3736,7 +5538,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   incomeAlertBudget: {
     fontFamily: fonts.semibold,
     fontSize: 13,
-    color: c.green,
+    color: c.text,
     marginTop: 6,
   },
 
@@ -3744,7 +5546,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   catReviewOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
+  },
+  catReviewOverlayInner: {
+    flex: 1,
+    justifyContent: 'center' as const,
     padding: spacing.md,
   },
   catReviewContainer: {
@@ -3773,11 +5578,16 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.dim,
     marginTop: 4,
   },
+  catReviewCloseBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   catReviewClose: {
     fontFamily: fonts.medium,
     fontSize: 18,
     color: c.muted,
-    padding: 4,
   },
   catReviewList: {
     padding: spacing.md,
@@ -3791,8 +5601,20 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginBottom: spacing.sm,
   },
   catReviewRowDone: {
-    borderColor: c.green + '40',
-    backgroundColor: c.greenDim,
+    borderColor: c.accentDim,
+    backgroundColor: c.mintDim,
+  },
+  catReviewRowAi: {
+    borderColor: c.green,
+    borderLeftWidth: 3,
+  },
+  aiSuggestedLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: c.green,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase' as const,
+    marginTop: 2,
   },
   catReviewRowHeader: {
     flexDirection: 'row',
@@ -3817,7 +5639,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginLeft: spacing.sm,
   },
   catReviewDone: {
-    backgroundColor: c.green,
+    backgroundColor: c.accent,
     margin: spacing.md,
     marginTop: 0,
     paddingVertical: 14,
@@ -3839,12 +5661,163 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: c.border,
-    backgroundColor: c.greenDim,
+    backgroundColor: c.mintDim,
   },
   aiSuggestText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: c.green,
+    color: c.text2,
     letterSpacing: 0.3,
+  },
+  acceptAllBtn: {
+    backgroundColor: c.accent,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    alignItems: 'center' as const,
+  },
+  acceptAllBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 14,
+    color: c.bg,
+  },
+  reviewSectionHeader: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2,
+    color: c.dim,
+    textTransform: 'uppercase' as const,
+    marginBottom: spacing.sm,
+  },
+  reviewProgressBar: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: c.border,
+  },
+  reviewProgressText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.dim,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  reviewProgressTrack: {
+    height: 3,
+    backgroundColor: c.border,
+    borderRadius: 2,
+    overflow: 'hidden' as const,
+  },
+  reviewProgressFill: {
+    height: '100%' as const,
+    backgroundColor: c.accent,
+    borderRadius: 2,
+  },
+
+  // ── Info icon (small) on hero card ──
+  infoIconSmall: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: c.dim,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  infoIconSmallText: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: c.dim,
+    marginTop: -1,
+  },
+
+  // ── Weekly info / limit modals ──
+  modalTag: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.muted,
+    letterSpacing: 3,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+  },
+  modalDotSep: {
+    flexDirection: 'row',
+    gap: 6,
+    marginVertical: spacing.md,
+  },
+  modalDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+  },
+  modalBody: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: c.text2,
+    lineHeight: 22,
+    marginBottom: spacing.lg,
+  },
+  modalBreakdown: {
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    gap: 10,
+  },
+  modalBreakdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalBreakdownLabel: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.text2,
+  },
+  modalBreakdownValue: {
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: c.text2,
+    letterSpacing: 0.3,
+  },
+  modalCloseBtn: {
+    backgroundColor: c.accent,
+    paddingVertical: 14,
+    borderRadius: 100,
+    alignItems: 'center',
+  },
+  modalCloseBtnText: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: c.bg,
+    letterSpacing: 0.2,
+  },
+  modalResetBtn: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginTop: spacing.sm,
+  },
+  modalResetBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.dim,
+    letterSpacing: 0.3,
+  },
+  limitEditorInput: {
+    flex: 1,
+    fontFamily: fonts.mono,
+    fontSize: 28,
+    color: c.text,
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    letterSpacing: -0.5,
   },
 });

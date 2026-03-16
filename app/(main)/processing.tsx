@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { View, Text, Animated, StyleSheet, Easing, TouchableOpacity } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useNavigation } from 'expo-router';
+import { CommonActions } from '@react-navigation/native';
 import { supabase } from '@/lib/supabase';
-import EnrichmentEngine from '@/lib/enrichment-engine';
-import { rankMoves, determineFlowchartPosition, calcGoalTrajectory } from '@/lib/move-engine';
-import type { RankedMove } from '@/lib/move-engine';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { SpendingRing } from '@/components/Charts';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyHero } from '@/components/Bocy';
 import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
@@ -14,13 +14,10 @@ const STEPS = [
   'Scanning transactions',
   'Mapping income stability',
   'Enriching transactions',
-  'Verifying transactions',
   'Detecting optimisation opportunities',
   'Ranking highest impact actions',
-  'Refining your action plan',
+  'Saving your analysis',
 ];
-
-const CLASSIFY_BATCH_SIZE = 25; // Send to Claude in batches of 25
 
 // Global holder so dashboard can pick it up without re-fetching
 let _lastResult: Analysis | null = null;
@@ -99,17 +96,34 @@ const DotMatrix = () => {
 
 function ProcessingInner() {
   const router = useRouter();
-  const { csvData } = useLocalSearchParams<{ csvData: string }>();
+  const navigation = useNavigation();
+  const { csvData, source } = useLocalSearchParams<{ csvData: string; source?: string }>();
+
+  // Reset the (main) stack to only contain (tabs), clearing onboarding history
+  const goToDashboard = () => {
+    navigation.dispatch(
+      CommonActions.reset({
+        index: 0,
+        routes: [{ name: '(tabs)' }],
+      }),
+    );
+  };
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState('');
   const [enrichProgress, setEnrichProgress] = useState('');
   const [insight, setInsight] = useState('');
+  const [slowWarning, setSlowWarning] = useState(false);
   const fadeAnims = useRef(STEPS.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(STEPS.map(() => new Animated.Value(20))).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    trackScreen('Processing');
     runAnalysis();
+
+    // Show a reassurance message if analysis takes > 45s
+    const slowTimer = setTimeout(() => setSlowWarning(true), 45_000);
+    return () => clearTimeout(slowTimer);
   }, []);
 
   useEffect(() => {
@@ -140,13 +154,48 @@ function ProcessingInner() {
 
   const runAnalysis = async () => {
     try {
-      if (!csvData || csvData.trim().length < 10) {
-        setError('No transaction data found. Please go back and upload a bank statement.');
+      // ── Resolve CSV data ──
+      // For bank connections: read from bank_data table (populated by the callback).
+      // Falls back to URL param if DB fetch fails.
+      let csv = csvData;
+      if (source === 'bank') {
+        try {
+          const { data: { user: bankUser } } = await supabase.auth.getUser();
+          if (bankUser) {
+            const { data: bankRows } = await supabase
+              .from('bank_data')
+              .select('csv_data')
+              .eq('user_id', bankUser.id)
+              .order('created_at', { ascending: false });
+            if (bankRows && bankRows.length > 0) {
+              const allLines: string[] = [];
+              for (const row of bankRows) {
+                if (!row.csv_data) continue;
+                const lines = row.csv_data.split('\n').slice(1).filter((l: string) => l.trim());
+                allLines.push(...lines);
+              }
+              if (allLines.length > 0) {
+                csv = ['Date,Description,Amount', ...allLines].join('\n');
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[processing] Failed to fetch bank_data from DB, using URL param:', e);
+        }
+      }
+
+      if (!csv || csv.trim().length < 10) {
+        setError(source === 'bank'
+          ? 'Your bank returned no transactions yet. This can happen with new accounts \u2014 try again in a few hours.'
+          : 'No transaction data found. Please go back and upload a bank statement.');
         return;
       }
 
-      // ── Layer 1: Enrichment Engine ──
-      // CSV → categorise, profile, raw moves
+      // ── Layer 1: Enrichment Engine (lazy-loaded to reduce initial bundle) ──
+      const [{ default: EnrichmentEngine }, { rankMoves, determineFlowchartPosition, calcGoalTrajectory }] = await Promise.all([
+        import('@/lib/enrichment-engine'),
+        import('@/lib/move-engine'),
+      ]);
       setCurrentStep(0);
       await delay(400);
 
@@ -159,7 +208,7 @@ function ProcessingInner() {
           const [overrideRes, adjustmentRes] = await Promise.all([
             supabase
               .from('transaction_overrides')
-              .select('match_description, category, is_essential')
+              .select('match_description, category, is_essential, direction')
               .eq('user_id', authUser.id),
             supabase
               .from('budget_adjustments')
@@ -169,7 +218,9 @@ function ProcessingInner() {
           if (overrideRes.data) overrides = overrideRes.data;
           if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[processing] Failed to load overrides:', e);
+      }
 
       // Fetch identity + debt accounts for personalised analysis
       let identityData: any = null;
@@ -179,18 +230,24 @@ function ProcessingInner() {
         if (idUser) {
           const [idRes, debtRes] = await Promise.all([
             supabase.from('user_identity').select('*').eq('user_id', idUser.id).maybeSingle(),
-            supabase.from('debt_accounts').select('account_name, account_type, outstanding_balance, credit_limit').eq('user_id', idUser.id),
+            supabase.from('debt_accounts').select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment').eq('user_id', idUser.id),
           ]);
           if (idRes.data) identityData = idRes.data;
           if (debtRes.data) debtAccountsData = debtRes.data;
         }
-      } catch {}
+      } catch (e) {
+        console.warn('[processing] Failed to load identity/debt data:', e);
+      }
 
       setCurrentStep(1);
-      let result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
+      let result = EnrichmentEngine.enrich(csv, overrides, debtAccountsData, identityData);
 
       if (result.enrichedTransactions.length === 0) {
-        setError('No transactions found in your data. Check the file format — it should have Date, Description, and Amount columns.');
+        if (source === 'bank') {
+          setError('Your bank is connected but hasn\u2019t returned any usable transactions yet. This can happen with new connections \u2014 try again in a few hours.');
+          return;
+        }
+        setError('No transactions found in your data. Check the file format \u2014 it should have Date, Description, and Amount columns.');
         return;
       }
       await delay(400);
@@ -200,85 +257,11 @@ function ProcessingInner() {
       setEnrichProgress(`${result.enrichedTransactions.length} transactions enriched`);
       await delay(400);
 
-      // ── Layer 2: Claude AI Verification ──
-      // Batch low-confidence transactions to Claude in chunks of CLASSIFY_BATCH_SIZE
-      // so nothing falls off during enrichment.
+      // ── Claude AI classification is now deferred to /api/verify (background) ──
+      // The processing screen saves a "draft" analysis and fires /api/verify
+      // which runs Claude classify + refinement server-side without blocking the user.
+
       setCurrentStep(3);
-      try {
-        const unclassified = result.enrichedTransactions
-          .map((tx, i) => ({ tx, originalIndex: i }))
-          .filter(({ tx }) =>
-            tx.confidence === 'low'
-            && !tx.isIncome
-            && !tx.isTransfer
-            && !tx.isRefund
-            && !tx.isSavings
-          );
-
-        if (unclassified.length > 0) {
-          const updated = [...result.enrichedTransactions];
-          const totalBatches = Math.ceil(unclassified.length / CLASSIFY_BATCH_SIZE);
-
-          for (let batchIdx = 0; batchIdx < totalBatches; batchIdx++) {
-            const batchStart = batchIdx * CLASSIFY_BATCH_SIZE;
-            const batch = unclassified.slice(batchStart, batchStart + CLASSIFY_BATCH_SIZE);
-
-            setEnrichProgress(`Verifying batch ${batchIdx + 1} of ${totalBatches} (${batch.length} transactions)`);
-
-            try {
-              const classifyRes = await fetch('/api/claude', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  action: 'classify',
-                  transactions: batch.map(({ tx }) => ({
-                    description: tx.description,
-                    amount: tx.amount,
-                  })),
-                }),
-              });
-              const classifyData = await classifyRes.json();
-
-              if (classifyData.success && Array.isArray(classifyData.classifications)) {
-                classifyData.classifications.forEach((c: any, i: number) => {
-                  const entry = batch[i];
-                  if (!entry || c.category === 'Other') return;
-
-                  const tx = { ...updated[entry.originalIndex] };
-                  tx.merchant = c.merchant || tx.merchant;
-                  tx.category = c.category;
-                  tx.isEssential = c.isEssential;
-                  tx.isSubscription = c.isSubscription || tx.isSubscription;
-                  tx.isDebt = c.isDebt || tx.isDebt;
-                  tx.isBNPL = c.isBNPL || tx.isBNPL;
-                  tx.isIncome = c.isIncome || tx.isIncome;
-                  tx.confidence = c.confidence || 'medium';
-                  tx.classifiedBy = 'claude_ai';
-                  updated[entry.originalIndex] = tx;
-                });
-              }
-            } catch (batchErr: any) {
-              console.warn(`[processing] Batch ${batchIdx + 1} classify failed:`, batchErr?.message);
-              // Continue with remaining batches
-            }
-
-            await delay(200);
-          }
-
-          // Rebuild profile with all improved data
-          result = EnrichmentEngine.rebuild(updated, debtAccountsData, identityData);
-          setEnrichProgress(`${unclassified.length} transactions verified`);
-        }
-      } catch (classifyErr: any) {
-        console.warn('[processing] Claude classify failed, falling back to rule-based enrichment:', classifyErr?.message || classifyErr);
-        const lowConfCount = result.enrichedTransactions.filter((t) => t.confidence === 'low' && !t.isIncome && !t.isTransfer).length;
-        if (lowConfCount > 0) {
-          console.warn(`[processing] ${lowConfCount} transactions stuck as "Other" — Claude AI fallback unavailable`);
-        }
-      }
-      await delay(400);
-
-      setCurrentStep(4);
       setEnrichProgress('');
       await delay(400);
 
@@ -304,78 +287,16 @@ function ProcessingInner() {
 
       // ── Layer 2: Move Engine ──
       // UKPF flowchart priority + goal-aware ranking + trajectories
-      setCurrentStep(5);
-      const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
+      setCurrentStep(4);
+      determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
       const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
       const topRanked = rankedMoves[0] || null;
       const goalTrajectory = topRanked ? topRanked.trajectory : null;
       await delay(400);
 
-      // ── Layer 3: Claude Refinement ──
-      // Takes top 3 ranked moves + raw data → rewrites into BOCY-style language
-      setCurrentStep(6);
-      const top3 = rankedMoves.slice(0, 3);
-      let refinedMoves = top3 as RankedMove[];
-
-      try {
-        const res = await fetch('/api/claude', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'enrich',
-            moves: top3.map((m) => ({
-              action: m.action,
-              category: m.category,
-              monthlyImpact: m.monthlyImpact,
-              annualImpact: m.annualImpact,
-              effort: m.effort,
-              merchants: m.merchants,
-              strategy: m.strategy,
-              steps: m.steps,
-              effect: m.effect,
-              trajectory: m.trajectory,
-            })),
-            context: {
-              monthly_income: result.profile.monthly.income,
-              monthly_spending: result.profile.monthly.spending,
-              surplus: result.profile.monthly.surplus,
-              goals: goals ? {
-                one_year_goal: goals.one_year_goal,
-                target_amount: goals.target_amount,
-              } : null,
-              ukpf_priority: ukpf.priority,
-              ukpf_label: ukpf.label,
-            },
-          }),
-        });
-        const data = await res.json();
-        if (data.success && Array.isArray(data.moves)) {
-          // Merge Claude's refined text + cleaned merchants with our ranked data
-          refinedMoves = top3.map((original, i) => {
-            const refined = data.moves[i];
-            if (!refined) return original;
-            return {
-              ...original,
-              action: refined.action || original.action,
-              strategy: refined.strategy || original.strategy,
-              steps: refined.steps || original.steps,
-              effect: refined.effect || original.effect,
-              timeline: refined.timeline || original.timeline,
-              merchants: (refined.merchants && refined.merchants.length > 0) ? refined.merchants : original.merchants,
-            };
-          });
-        }
-      } catch {
-        // Graceful fallback — use pre-refined moves from Layer 2
-      }
-
-      // Combine: refined top 3 + remaining unrefined moves
-      const allMoves = [
-        ...refinedMoves,
-        ...rankedMoves.slice(3),
-      ];
-
-      await delay(300);
+      // Claude refinement is now deferred to /api/verify (background).
+      // Use unrefined moves for the draft — they'll be upgraded once verified.
+      const allMoves = [...rankedMoves];
 
       // ── Merge manual budget adjustments ──
       const nonDiscSection = { ...result.profile.budgetReality.nonDiscretionary };
@@ -413,7 +334,8 @@ function ProcessingInner() {
 
       const totalManualSpend = budgetAdjustments.reduce((s: number, a: any) => s + a.monthly_amount, 0);
 
-      // ── Save to Supabase ──
+      // ── Save to Supabase (as draft — background verification will upgrade) ──
+      setCurrentStep(5);
       const topMove = allMoves[0] || null;
       const analysis: Analysis = {
         user_id: user?.id ?? undefined,
@@ -433,7 +355,7 @@ function ProcessingInner() {
 
       if (user?.id) {
         try {
-          const { error: insertError } = await supabase.from('analyses').insert({
+          const insertPayload = {
             user_id: user.id,
             archetype: analysis.archetype,
             decision_score: analysis.decision_score,
@@ -447,9 +369,40 @@ function ProcessingInner() {
             all_moves: analysis.all_moves,
             behavioral_patterns: analysis.behavioral_patterns,
             goal_context: analysis.goal_context,
-          });
+            verification_status: 'draft',
+          };
+          let { error: insertError } = await supabase.from('analyses').insert(insertPayload);
           if (insertError) {
-            console.warn('[processing] Supabase insert failed:', insertError.message);
+            console.warn('[processing] Supabase insert failed, retrying:', insertError.message);
+            await delay(1000);
+            const retry = await supabase.from('analyses').insert(insertPayload);
+            insertError = retry.error;
+          }
+          if (insertError) {
+            throw new Error(`Could not save your analysis. Please try again. (${insertError.message})`);
+          }
+
+          // Mark onboarding complete so cold starts skip DB reconstruction
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('bocy_onboarding_done', 'true');
+          }
+
+          // ── Fire-and-forget: trigger background verification ──
+          // Claude AI classify + refinement runs server-side without blocking the user.
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.access_token) {
+              fetch('/api/verify', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify({ user_id: user.id }),
+              }).catch((e: any) => console.warn('[processing] Background verify fire failed:', e?.message));
+            }
+          } catch (verifyErr: any) {
+            console.warn('[processing] Background verify trigger failed:', verifyErr?.message);
           }
 
           // ── Save score snapshot for historical tracking ──
@@ -544,17 +497,19 @@ function ProcessingInner() {
           }
 
           // ── Auto-create notification preferences if first analysis ──
+          // Google OAuth users may have email in user_metadata instead of
+          // the top-level field, so check both locations.
           try {
             const { data: { user: authUser } } = await supabase.auth.getUser();
-            if (authUser?.email) {
+            const userEmail = authUser?.email
+              || authUser?.user_metadata?.email
+              || authUser?.identities?.[0]?.identity_data?.email;
+            if (userEmail) {
               await supabase.from('notification_preferences').upsert({
                 user_id: user.id,
-                email: authUser.email,
+                email: userEmail,
                 weekly_digest: true,
-                milestone_alerts: true,
                 checkin_prompts: true,
-                score_updates: true,
-                achievement_alerts: true,
               }, { onConflict: 'user_id' });
             }
           } catch (prefErr: any) {
@@ -608,11 +563,21 @@ function ProcessingInner() {
         ).length,
       } as any;
 
+      trackEvent('Analysis Completed', {
+        transaction_count: result.enrichedTransactions.length,
+        monthly_income: Math.round(result.profile.monthly.income),
+        monthly_spending: Math.round(result.profile.monthly.spending),
+        surplus: Math.round(result.profile.monthly.surplus),
+        move_count: allMoves.length,
+        archetype: result.archetype.key,
+      });
+
       // Show personalised first insight — user navigates manually
       const firstInsight = buildFirstInsight(identityData, result.profile, topMove);
       setInsight(firstInsight || 'Your personalised action plan is ready.');
       // User will tap the button to navigate
     } catch (err: any) {
+      trackEvent('Analysis Failed', { error: err.message });
       setError(err.message || 'Analysis failed. Please try again.');
     }
   };
@@ -622,6 +587,26 @@ function ProcessingInner() {
       <View style={styles.container}>
         <Text style={styles.errorIcon}>!</Text>
         <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity
+          style={styles.insightButton}
+          onPress={goToDashboard}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.insightButtonText}>Go to dashboard</Text>
+        </TouchableOpacity>
+        {source === 'bank' && (
+          <TouchableOpacity
+            style={[styles.insightButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm }]}
+            onPress={() => {
+              setError('');
+              setCurrentStep(0);
+              runAnalysis();
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.insightButtonText, { color: colors.text }]}>Try again</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   }
@@ -632,29 +617,24 @@ function ProcessingInner() {
         <View style={styles.insightHero}>
           <BocyHero mood="celebrating" animate />
         </View>
+
+        {/* Completion ring */}
+        <View style={{ alignItems: 'center', marginBottom: spacing.lg }}>
+          <SpendingRing
+            progress={1}
+            remaining={STEPS.length}
+            budget={STEPS.length}
+            color={colors.green}
+            size={120}
+          />
+        </View>
+
         <Text style={styles.insightTitle}>Your plan is ready</Text>
         <Text style={styles.insightText}>{insight}</Text>
 
-        {/* Key numbers at a glance */}
-        <View style={styles.insightStats}>
-          <View style={styles.insightStat}>
-            <Text style={styles.insightStatValue}>
-              {STEPS.length}
-            </Text>
-            <Text style={styles.insightStatLabel}>layers analysed</Text>
-          </View>
-          <View style={styles.insightStatDivider} />
-          <View style={styles.insightStat}>
-            <Text style={[styles.insightStatValue, { color: colors.green }]}>
-              {'\u2713'}
-            </Text>
-            <Text style={styles.insightStatLabel}>plan built</Text>
-          </View>
-        </View>
-
         <TouchableOpacity
           style={styles.insightButton}
-          onPress={() => router.replace('/(main)/(tabs)')}
+          onPress={goToDashboard}
           activeOpacity={0.8}
         >
           <Text style={styles.insightButtonText}>Go to dashboard</Text>
@@ -712,6 +692,12 @@ function ProcessingInner() {
           </Animated.View>
         ))}
       </View>
+
+      {slowWarning && (
+        <Text style={styles.slowWarning}>
+          This is taking longer than usual. Large transaction histories need extra time — hang tight.
+        </Text>
+      )}
     </View>
   );
 }
@@ -828,6 +814,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.green,
     marginTop: 2,
+  },
+  slowWarning: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: colors.muted,
+    textAlign: 'center' as const,
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.lg,
   },
   insightHero: {
     alignItems: 'center',

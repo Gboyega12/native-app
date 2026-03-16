@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView,
-  Platform, ScrollView, ActivityIndicator, Alert,
+  ScrollView, ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyHero } from '@/components/Bocy';
 
@@ -15,6 +16,9 @@ export default function Welcome() {
   const [lastName, setLastName] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Track page view on mount
+  useEffect(() => { trackScreen('Welcome'); }, []);
+
   const handleContinue = async () => {
     if (!firstName.trim()) return;
     setLoading(true);
@@ -22,10 +26,11 @@ export default function Welcome() {
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
       const { error } = await supabase.auth.updateUser({ data: { full_name: fullName } });
       if (error) throw error;
+      trackEvent('Onboarding Name Saved');
       router.replace('/(main)/education');
     } catch {
       setLoading(false);
-      Alert.alert('Error', 'Could not save your name. Please try again.');
+      window.alert('Could not save your name. Please try again.');
     }
   };
 
@@ -37,19 +42,26 @@ export default function Welcome() {
             <BocyHero mood="happy" animate />
           </View>
 
-          <Text style={styles.title}>Meet Bocy</Text>
+          <Text style={styles.tagline}>MEET BOCY</Text>
+          <Text style={styles.title}>Your personal{'\n'}finance companion</Text>
           <Text style={styles.subtitle}>
-            Your personal finance companion.{'\n'}
             Always watching, always working for you.
           </Text>
 
-          <View style={styles.benefits}>
-            <BenefitItem text="Finds the smartest move you can make right now" />
-            <BenefitItem text="Builds a plan ranked by real impact" />
-            <BenefitItem text="Guides you through each step" />
+          {/* Dot separator */}
+          <View style={styles.dotSeparator}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <View key={i} style={styles.dot} />
+            ))}
           </View>
 
-          <TouchableOpacity style={styles.button} onPress={() => setStep(1)}>
+          <View style={styles.benefits}>
+            <BenefitItem num="01" text="Finds the smartest move you can make right now" />
+            <BenefitItem num="02" text="Builds a plan ranked by real impact" />
+            <BenefitItem num="03" text="Guides you through each step" />
+          </View>
+
+          <TouchableOpacity style={styles.button} onPress={() => { trackEvent('Onboarding Get Started'); setStep(1); }} activeOpacity={0.8}>
             <Text style={styles.buttonText}>Get started</Text>
           </TouchableOpacity>
         </View>
@@ -60,14 +72,14 @@ export default function Welcome() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={undefined}
     >
       <ScrollView
         contentContainerStyle={styles.centerContent}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>What's your name?</Text>
-        <Text style={styles.subtitle}>So Bocy knows what to call you</Text>
+        <Text style={styles.tagline}>YOUR NAME</Text>
+        <Text style={styles.title}>What should{'\n'}Bocy call you?</Text>
 
         <View style={styles.form}>
           <TextInput
@@ -92,6 +104,7 @@ export default function Welcome() {
           style={[styles.button, (!firstName.trim() || loading) && styles.buttonDisabled]}
           onPress={handleContinue}
           disabled={!firstName.trim() || loading}
+          activeOpacity={0.8}
         >
           {loading ? (
             <ActivityIndicator color={colors.bg} />
@@ -104,10 +117,10 @@ export default function Welcome() {
   );
 }
 
-function BenefitItem({ text }: { text: string }) {
+function BenefitItem({ num, text }: { num: string; text: string }) {
   return (
     <View style={styles.benefitRow}>
-      <View style={styles.benefitDot} />
+      <Text style={styles.benefitNum}>{num}</Text>
       <Text style={styles.benefitText}>{text}</Text>
     </View>
   );
@@ -121,21 +134,33 @@ const styles = StyleSheet.create({
   centerContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: spacing.xl,
+    padding: spacing.xl + 4,
+    paddingBottom: spacing.xxl + spacing.lg,
     maxWidth: 560,
     alignSelf: 'center' as const,
     width: '100%',
   },
   heroWrap: {
     alignItems: 'center',
-    marginBottom: spacing.xl,
+    marginBottom: spacing.xl + spacing.sm,
+  },
+  tagline: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.muted,
+    letterSpacing: 3,
+    textTransform: 'uppercase',
+    textAlign: 'center',
+    marginBottom: spacing.sm,
   },
   title: {
     fontFamily: fonts.heading,
-    fontSize: 26,
+    fontSize: 28,
     color: colors.text,
     textAlign: 'center',
-    marginBottom: spacing.sm,
+    lineHeight: 36,
+    marginBottom: spacing.md,
+    letterSpacing: -0.3,
   },
   subtitle: {
     fontFamily: fonts.regular,
@@ -143,7 +168,19 @@ const styles = StyleSheet.create({
     color: colors.dim,
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: spacing.xl,
+  },
+  dotSeparator: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: spacing.lg,
+  },
+  dot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: colors.border,
   },
   benefits: {
     marginBottom: spacing.xxl,
@@ -151,15 +188,16 @@ const styles = StyleSheet.create({
   benefitRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
+    paddingLeft: spacing.xs,
   },
-  benefitDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.green,
-    marginRight: spacing.sm + 4,
-    marginTop: 8,
+  benefitNum: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.green,
+    letterSpacing: 1,
+    width: 32,
+    marginTop: 3,
   },
   benefitText: {
     fontFamily: fonts.regular,
@@ -170,30 +208,32 @@ const styles = StyleSheet.create({
   },
   form: {
     marginBottom: spacing.xl,
+    gap: spacing.md,
   },
   input: {
     fontFamily: fonts.regular,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.lg,
     fontSize: 16,
     color: colors.text,
-    marginBottom: spacing.md,
   },
   button: {
     backgroundColor: colors.accent,
-    paddingVertical: 14,
-    borderRadius: radius.md,
+    paddingVertical: 16,
+    borderRadius: 100,
     alignItems: 'center',
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   buttonText: {
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
+    letterSpacing: 0.2,
   },
 });

@@ -59,6 +59,10 @@ CREATE POLICY "Users can read own analyses"
 CREATE POLICY "Users can insert own analyses"
   ON analyses FOR INSERT WITH CHECK ((select auth.uid()) = user_id);
 
+CREATE POLICY "Users can update own analyses"
+  ON analyses FOR UPDATE USING ((select auth.uid()) = user_id)
+  WITH CHECK ((select auth.uid()) = user_id);
+
 
 -- ============================================================
 -- Table: bank_data
@@ -73,6 +77,8 @@ CREATE TABLE bank_data (
   source TEXT NOT NULL DEFAULT 'truelayer',
   refresh_token TEXT,
   card_balances JSONB,
+  provider_name TEXT,
+  account_type TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
@@ -285,3 +291,52 @@ CREATE POLICY "Users can delete own budget adjustments"
 
 -- No additional ALL policy needed.
 -- Server-side writes (chat tool) use the service role client (which bypasses RLS).
+
+
+-- ============================================================
+-- Migration: add direction column to transaction_overrides
+-- Allows overrides to match only credits or debits (e.g. inbound
+-- from partner = household contribution, outbound = rent).
+-- ============================================================
+ALTER TABLE transaction_overrides
+  ADD COLUMN IF NOT EXISTS direction TEXT CHECK (direction IN ('credit', 'debit'));
+
+
+-- ============================================================
+-- Migration: add person_transfers column to analyses
+-- Stores person-to-person transfers for UI display (excluded
+-- from income/spending totals but visible for categorisation).
+-- ============================================================
+ALTER TABLE analyses
+  ADD COLUMN IF NOT EXISTS person_transfers JSONB DEFAULT '[]';
+
+
+-- ============================================================
+-- Migration: add account_balances column to bank_data
+-- Stores current/savings account balances from TrueLayer for
+-- surplus and idle cash analysis (separate from card_balances
+-- which tracks debt exposure).
+-- ============================================================
+ALTER TABLE bank_data
+  ADD COLUMN IF NOT EXISTS account_balances JSONB;
+
+
+-- ============================================================
+-- Migration: add verification_status to analyses
+-- Tracks whether Claude AI verification has run on this analysis.
+-- 'draft' = rule-based only, 'verifying' = in progress, 'verified' = complete.
+-- Default 'verified' so existing rows are unaffected.
+-- ============================================================
+ALTER TABLE analyses
+  ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT 'verified',
+  ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+
+
+-- ============================================================
+-- Migration: add last_successful_sync_date to bank_data
+-- Tracks the date of the last successful transaction fetch so
+-- incremental syncs can pick up from where they left off,
+-- preventing permanent data gaps when syncs fail.
+-- ============================================================
+ALTER TABLE bank_data
+  ADD COLUMN IF NOT EXISTS last_successful_sync_date DATE;

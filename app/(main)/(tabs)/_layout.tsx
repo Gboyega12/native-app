@@ -3,72 +3,74 @@ import { Ionicons } from '@expo/vector-icons';
 import { fonts } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
+import { useSubscription } from '@/lib/subscription';
+import Paywall from '@/components/Paywall';
 
 export default function TabsLayout() {
   const { colors } = useTheme();
   const { isTablet, maxContentWidth } = useResponsive();
+  const { isActive, loading } = useSubscription();
+
+  // Show full-screen paywall when trial expired and no subscription
+  const showGate = !loading && !isActive;
 
   return (
-    <Tabs
-      screenOptions={{
-        sceneStyle: { backgroundColor: colors.bg },
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: colors.bg,
-          borderTopColor: colors.border,
-          borderTopWidth: 1,
-          elevation: 0,
-          paddingTop: 4,
-          height: 64,
-          // Center the tab items on wide screens
-          ...(isTablet && {
-            maxWidth: maxContentWidth,
-            alignSelf: 'center' as const,
-            width: '100%',
-            borderLeftWidth: 1,
-            borderRightWidth: 1,
-            borderLeftColor: colors.border,
-            borderRightColor: colors.border,
-          }),
-        },
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.muted,
-        tabBarLabelStyle: {
-          fontFamily: fonts.mono,
-          fontSize: isTablet ? 11 : 10,
-          letterSpacing: 0.8,
-          textTransform: 'uppercase',
-        },
-        tabBarIconStyle: isTablet ? { marginBottom: 2 } : undefined,
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" size={size} color={color} />
-          ),
+    <>
+      <Tabs
+        screenOptions={{
+          sceneStyle: { backgroundColor: colors.bg },
+          headerShown: false,
+          tabBarStyle: {
+            backgroundColor: colors.bg,
+            borderTopColor: colors.border,
+            borderTopWidth: 1,
+            elevation: 0,
+            paddingTop: 4,
+            height: 64,
+            // Center the tab items on wide screens
+            ...(isTablet && {
+              maxWidth: maxContentWidth,
+              alignSelf: 'center' as const,
+              width: '100%',
+              borderLeftWidth: 1,
+              borderRightWidth: 1,
+              borderLeftColor: colors.border,
+              borderRightColor: colors.border,
+            }),
+          },
+          tabBarActiveTintColor: colors.accent,
+          tabBarInactiveTintColor: colors.muted,
+          tabBarLabelStyle: {
+            fontFamily: fonts.mono,
+            fontSize: isTablet ? 11 : 10,
+            letterSpacing: 0.8,
+            textTransform: 'uppercase',
+          },
+          tabBarIconStyle: isTablet ? { marginBottom: 2 } : undefined,
         }}
-      />
-      <Tabs.Screen
-        name="plan"
-        options={{
-          title: 'Plan',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="list-outline" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="chat"
-        options={{
-          title: 'Chat',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubble-outline" size={size} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: 'Home',
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="home-outline" size={size} color={color} />
+            ),
+          }}
+        />
+<Tabs.Screen
+          name="chat"
+          options={{
+            title: 'Chat',
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="chatbubble-outline" size={size} color={color} />
+            ),
+          }}
+        />
+      </Tabs>
+
+      {/* Full-screen paywall gate — blocks app when trial expired */}
+      <Paywall visible={showGate} onClose={() => {}} />
+    </>
   );
 }

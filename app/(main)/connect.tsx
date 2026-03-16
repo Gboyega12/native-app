@@ -1,18 +1,20 @@
 import { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform,
+  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
   Linking,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import * as DocumentPicker from 'expo-document-picker';
 import { getTrueLayerAuthUrl } from '@/lib/truelayer';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
+import SkeletonLine from '@/components/Skeleton';
+import { invalidateSyncCache } from '@/lib/sync-coordinator';
 
 // ── Session storage helpers (web only) ──
 function saveConnectState(csv: string, count: number) {
-  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+  if (typeof sessionStorage !== 'undefined') {
     try {
       sessionStorage.setItem('bocy_connect_csv', csv);
       sessionStorage.setItem('bocy_connect_count', String(count));
@@ -21,7 +23,7 @@ function saveConnectState(csv: string, count: number) {
 }
 
 function restoreConnectState(): { csv: string; count: number } | null {
-  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+  if (typeof sessionStorage !== 'undefined') {
     try {
       const csv = sessionStorage.getItem('bocy_connect_csv');
       const count = sessionStorage.getItem('bocy_connect_count');
@@ -34,7 +36,7 @@ function restoreConnectState(): { csv: string; count: number } | null {
 }
 
 function clearConnectState() {
-  if (Platform.OS === 'web' && typeof sessionStorage !== 'undefined') {
+  if (typeof sessionStorage !== 'undefined') {
     try {
       sessionStorage.removeItem('bocy_connect_csv');
       sessionStorage.removeItem('bocy_connect_count');
@@ -49,6 +51,7 @@ export default function Connect() {
     code?: string; state?: string;
     from?: string;
     csvData?: string;
+    banks?: string; // comma-separated list of expired bank names for multi-reconnect flow
   }>();
 
   // Detect if we're returning from a TrueLayer redirect
@@ -63,7 +66,19 @@ export default function Connect() {
   const [accumulatedCSV, setAccumulatedCSV] = useState(params.csvData || '');
   const [connectedCount, setConnectedCount] = useState(params.csvData ? 1 : 0);
 
-  const isFromProfile = params.from === 'profile';
+  const isFromProfile = params.from === 'profile' || params.from === 'banner';
+
+  // Multi-bank reconnection: track which banks need reconnecting
+  const [pendingBanks, setPendingBanks] = useState<string[]>(() => {
+    if (params.banks) return params.banks.split(',').filter(Boolean);
+    return [];
+  });
+  const [reconnectedCount, setReconnectedCount] = useState(0);
+  const totalBanksToReconnect = pendingBanks.length + reconnectedCount;
+  const isMultiReconnect = totalBanksToReconnect > 1;
+
+  // Track page view on mount
+  useEffect(() => { trackScreen('Connect', { from: isFromProfile ? 'profile' : 'onboarding', banks: totalBanksToReconnect }); }, []);
 
   // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
@@ -208,7 +223,25 @@ export default function Connect() {
 
       if (isFromProfile) {
         clearConnectState();
-        router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
+        // Invalidate sync cache so dashboard picks up the new bank data
+        invalidateSyncCache();
+
+        // Multi-bank reconnection: if more banks need reconnecting, continue the flow
+        if (params.from === 'banner' && pendingBanks.length > 1) {
+          const remaining = pendingBanks.slice(1);
+          setPendingBanks(remaining);
+          setReconnectedCount((c) => c + 1);
+          setErrorMsg('');
+          setStatusMsg('');
+          // Stay on connect page for the next bank
+          return;
+        }
+
+        if (params.from === 'banner') {
+          router.replace('/(main)/(tabs)');
+        } else {
+          router.replace({ pathname: '/(main)/profile', params: { connected: 'true' } as any });
+        }
         return;
       }
 
@@ -223,12 +256,15 @@ export default function Connect() {
   };
 
   const handleConnectionSuccess = (csvData: string, _label: string) => {
+    trackEvent('Bank Connect Success', { method: _label });
     // Onboarding: single account connect → proceed straight to analysis
     clearConnectState();
-    router.push({ pathname: '/(main)/processing', params: { csvData } });
+    const source = _label === 'Bank account' ? 'bank' : 'csv';
+    router.push({ pathname: '/(main)/processing', params: { csvData, source } });
   };
 
   const handleTrueLayer = async () => {
+    trackEvent('Bank Connect Started', { method: 'open_banking' });
     setLoading(true);
     setErrorMsg('');
     setStatusMsg('Connecting to your bank...');
@@ -240,35 +276,7 @@ export default function Connect() {
       const connectionId = `conn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
       const authUrl = getTrueLayerAuthUrl(connectionId);
 
-      if (Platform.OS === 'web') {
-        window.location.href = authUrl;
-        return;
-      }
-
-      const returnUrl = 'bocy://callback';
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, returnUrl);
-
-      if (result.type === 'success' && result.url) {
-        const url = new URL(result.url);
-        const connId = url.searchParams.get('connection_id');
-        const status = url.searchParams.get('status');
-        if (status === 'success' && connId) {
-          await fetchBankData(connId);
-          return;
-        }
-        const code = url.searchParams.get('code');
-        const state = url.searchParams.get('state');
-        if (code && state) {
-          await exchangeTrueLayerCode(code, state);
-          return;
-        }
-      }
-
-      setLoading(false);
-      setStatusMsg('');
-      if (result.type !== 'cancel') {
-        setErrorMsg('Could not connect to your bank. Please try again.');
-      }
+      window.location.href = authUrl;
     } catch (err: any) {
       setLoading(false);
       setStatusMsg('');
@@ -277,12 +285,11 @@ export default function Connect() {
   };
 
   const handleCSVUpload = async () => {
+    trackEvent('Bank Connect Started', { method: 'csv_upload' });
     setLoadingCSV(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: Platform.OS === 'web'
-          ? ['text/csv', 'text/plain', '.csv']
-          : ['text/csv', 'text/comma-separated-values', 'application/csv'],
+        type: ['text/csv', 'text/plain', '.csv'],
         copyToCacheDirectory: true,
       });
 
@@ -293,7 +300,7 @@ export default function Connect() {
 
       const file = result.assets[0];
       let csvText: string;
-      const webFile = Platform.OS === 'web' && (file as any).file;
+      const webFile = (file as any).file;
       if (webFile) {
         csvText = await webFile.text();
       } else {
@@ -302,7 +309,7 @@ export default function Connect() {
       }
 
       if (!csvText.trim() || csvText.trim().split('\n').length < 2) {
-        Alert.alert('Invalid file', 'The CSV file appears to be empty or malformed.');
+        window.alert('The CSV file appears to be empty or malformed.');
         setLoadingCSV(false);
         return;
       }
@@ -317,17 +324,16 @@ export default function Connect() {
       handleConnectionSuccess(csvText, 'CSV statement');
     } catch (err) {
       setLoadingCSV(false);
-      Alert.alert('Error', 'Could not read the file. Please check the format and try again.');
+      window.alert('Could not read the file. Please check the format and try again.');
     }
   };
 
   const handlePDFUpload = async () => {
+    trackEvent('Bank Connect Started', { method: 'pdf_upload' });
     setLoadingPDF(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: Platform.OS === 'web'
-          ? ['application/pdf', '.pdf']
-          : ['application/pdf'],
+        type: ['application/pdf', '.pdf'],
         copyToCacheDirectory: true,
       });
 
@@ -339,7 +345,7 @@ export default function Connect() {
       const file = result.assets[0];
       const base64 = await fileToBase64(file);
       if (!base64) {
-        Alert.alert('Error', 'Could not read the PDF file.');
+        window.alert('Could not read the PDF file.');
         setLoadingPDF(false);
         return;
       }
@@ -352,7 +358,7 @@ export default function Connect() {
       const data = await res.json();
 
       if (!data.success || !data.csv_data) {
-        Alert.alert('Could not parse statement', data.error || 'Please try a CSV export instead.');
+        window.alert(data.error || 'Could not parse statement. Please try a CSV export instead.');
         setLoadingPDF(false);
         return;
       }
@@ -367,17 +373,25 @@ export default function Connect() {
       handleConnectionSuccess(data.csv_data, 'PDF statement');
     } catch (err) {
       setLoadingPDF(false);
-      Alert.alert('Error', 'Could not process the PDF. Please try a CSV export instead.');
+      window.alert('Could not process the PDF. Please try a CSV export instead.');
     }
   };
 
   const anyLoading = loading || loadingCSV || loadingPDF;
 
-  // Show full-screen loading when returning from TrueLayer redirect
+  // Show skeleton + status when returning from TrueLayer redirect
   if (redirectLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator color={colors.accent} size="large" />
+        {!errorMsg && (
+          <View style={{ width: '100%', maxWidth: 320, gap: 16, marginBottom: spacing.xl }}>
+            <SkeletonLine width="60%" height={12} delay={0} />
+            <SkeletonLine width="100%" height={40} delay={100} />
+            <SkeletonLine width="80%" height={12} delay={200} />
+            <SkeletonLine width="100%" height={6} delay={300} style={{ borderRadius: 3 }} />
+            <SkeletonLine width="50%" height={10} delay={400} />
+          </View>
+        )}
         <Text style={styles.loadingText}>{statusMsg || 'Connecting your account...'}</Text>
         <Text style={styles.loadingHint}>This may take a few seconds</Text>
         {errorMsg ? (
@@ -397,12 +411,33 @@ export default function Connect() {
 
   // Profile flow — simple add connection UI
   if (isFromProfile) {
+    const currentBank = pendingBanks[0] || null;
+
     return (
       <View style={styles.container}>
         <View style={styles.content}>
-          <Text style={styles.title}>Add a connection</Text>
+          <TouchableOpacity
+            onPress={() => router.canGoBack() ? router.back() : router.replace(params.from === 'banner' ? '/(main)/(tabs)' : '/(main)/profile')}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            style={styles.backButton}
+          >
+            <Text style={styles.backButtonText}>{'\u2190'}</Text>
+          </TouchableOpacity>
+
+          {/* Multi-bank reconnection progress */}
+          {isMultiReconnect && (
+            <Text style={styles.stepLabel}>
+              RECONNECTING {reconnectedCount + 1} OF {totalBanksToReconnect}
+            </Text>
+          )}
+
+          <Text style={styles.title}>
+            {currentBank ? `Reconnect ${currentBank}` : 'Add a connection'}
+          </Text>
           <Text style={styles.subtitle}>
-            Connect a bank account for transactions or a credit card for balance tracking.
+            {currentBank
+              ? `Your ${currentBank} connection has expired. Tap below to re-authorise access.${pendingBanks.length > 1 ? ` ${pendingBanks.length - 1} more account${pendingBanks.length - 1 > 1 ? 's' : ''} to reconnect after this.` : ''}`
+              : 'Connect a bank account for transactions or a credit card for balance tracking.'}
           </Text>
 
           <TouchableOpacity
@@ -463,6 +498,22 @@ export default function Connect() {
 
           {statusMsg ? <Text style={styles.statusText}>{statusMsg}</Text> : null}
           {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
+
+          {/* Multi-bank: skip remaining banks */}
+          {isMultiReconnect && pendingBanks.length > 0 && !anyLoading && (
+            <TouchableOpacity
+              style={styles.skipButton}
+              onPress={() => {
+                clearConnectState();
+                invalidateSyncCache();
+                router.replace('/(main)/(tabs)');
+              }}
+            >
+              <Text style={styles.skipButtonText}>
+                {reconnectedCount > 0 ? 'Done for now' : 'Skip — I\'ll do this later'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -470,7 +521,7 @@ export default function Connect() {
 
   // ── Onboarding flow ──
   return (
-    <View style={styles.container}>
+    <View style={styles.container} testID="connect-screen">
       <View style={styles.content}>
         <Text style={styles.stepLabel}>STEP 1 OF 3</Text>
 
@@ -548,12 +599,10 @@ async function fileToBase64(
   file: DocumentPicker.DocumentPickerAsset,
 ): Promise<string | null> {
   try {
-    if (Platform.OS === 'web') {
-      const webFile = (file as any).file as File | undefined;
-      if (webFile) {
-        const buffer = await webFile.arrayBuffer();
-        return arrayBufferToBase64(buffer);
-      }
+    const webFile = (file as any).file as File | undefined;
+    if (webFile) {
+      const buffer = await webFile.arrayBuffer();
+      return arrayBufferToBase64(buffer);
     }
     const response = await fetch(file.uri);
     const blob = await response.blob();
@@ -629,6 +678,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bg,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    marginBottom: spacing.md,
+  },
+  backButtonText: {
+    fontFamily: fonts.regular,
+    fontSize: 22,
+    color: colors.accent,
   },
   content: {
     flex: 1,
@@ -815,5 +873,16 @@ const styles = StyleSheet.create({
     color: '#ff6b6b',
     textAlign: 'center',
     marginTop: spacing.md,
+  },
+  skipButton: {
+    marginTop: spacing.xl,
+    alignItems: 'center' as const,
+    paddingVertical: 10,
+  },
+  skipButtonText: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.dim,
+    textDecorationLine: 'underline' as const,
   },
 });

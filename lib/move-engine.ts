@@ -1,14 +1,14 @@
-import type { Goals, Move, GoalTrajectory, FlowchartPosition, FinancialProfile, UserIdentity } from './types';
-import type { LiquidityTier } from './liquidity-engine';
-import { MAX_TRAJECTORY_MONTHS } from './constants';
+import type { Goals, Move, GoalTrajectory, FlowchartPosition, FinancialProfile, UserIdentity } from './types.js';
+import type { LiquidityTier } from './liquidity-engine.js';
+import { MAX_TRAJECTORY_MONTHS } from './constants.js';
 import {
   estimateVolatility,
   simulateGoalTimeline,
   simulateBufferNeed,
   calcMoveConsistency,
   type VolatilityProfile,
-} from './monte-carlo';
-import { calcMoveMarginalUtility } from './liquidity-engine';
+} from './monte-carlo.js';
+import { calcMoveMarginalUtility, calcOpportunityCostMultiplier } from './liquidity-engine.js';
 
 const GOAL_LABELS: Record<string, string> = {
   clear_debt: 'Clear all debt',
@@ -44,7 +44,8 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null, de
   const debtPayments = profile.monthly.debtPayments;
   const situation = goals?.current_situation || '';
 
-  // Check if debt is "good debt" (low utilization, rewards-focused)
+  // "Good debt" = credit utilization ≤30%. Users who carry cards for rewards/credit-building
+  // but pay them off shouldn't be funnelled into debt-priority levels.
   const debts = debtAccounts || [];
   const totalLimit = debts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
   const totalBalance = debts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
@@ -62,22 +63,26 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null, de
   }
 
   // Level 2: No buffer — build a 1-month emergency fund
+  // <5% savings rate signals no meaningful buffer exists
   if (savingsRate < 5) {
     return { level: 2, label: 'Build a buffer', priority: 'buffer' };
   }
 
   // Level 4: High-interest debt (credit cards, BNPL) — pay it off
-  // Skip this level if user has good debt (low utilization, paying on time for rewards)
-  if (debtCount >= 1 && !isGoodDebt && (situation === 'in_debt' || debtPayments > 100)) {
+  // Skip this level if user has good debt (low utilization, paying on time for rewards).
+  // £50/month threshold filters out trivial minimum payments on small balances.
+  if (debtCount >= 1 && !isGoodDebt && (situation === 'in_debt' || debtPayments > 50)) {
     return { level: 4, label: 'Clear high-interest debt', priority: 'debt' };
   }
 
   // Level 5: Buffer exists but not a full emergency fund (3 months)
+  // 15% savings rate ≈ building toward 3-month buffer within a year
   if (savingsRate < 15) {
     return { level: 5, label: 'Full emergency fund', priority: 'buffer' };
   }
 
   // Level 7: Short-term goals — save for specific targets
+  // 25% savings rate is the transition point to long-term wealth building
   if (savingsRate < 25) {
     return { level: 7, label: 'Short-term goals', priority: 'savings' };
   }
@@ -141,15 +146,21 @@ export function rankMoves(
   }
 
   const scored: RankedMove[] = decisionStack.map((move, idx) => {
-    // Base score: annual impact normalised
+    // Base score: annual impact normalised to ~1.0 scale for a £100/yr move.
+    // All subsequent multipliers are relative to this baseline.
     let score = move.annualImpact / 100;
 
-    // Effort multiplier — easy wins score higher
-    if (move.effort === 'low') score *= 1.3;
-    else if (move.effort === 'high') score *= 0.8;
+    // Effort multiplier — mild nudge toward easy wins (±5-10%), not a hard filter.
+    // Kept small because Monte Carlo consistency scoring already penalises
+    // moves the user is unlikely to follow through on.
+    if (move.effort === 'low') score *= 1.1;
+    else if (move.effort === 'high') score *= 0.95;
 
-    // Liquidity-adjusted marginal utility — CRRA diminishing returns
-    // with liquidity tier discounts and variance-adjusted reference points
+    // CRRA (Constant Relative Risk Aversion) marginal utility.
+    // Why CRRA: cutting £50/month from a £200 grocery budget is harder than cutting
+    // £50/month from a £800 entertainment budget. CRRA captures this via category-specific
+    // γ (gamma) parameters — higher γ = steeper diminishing returns.
+    // Also discounts illiquid moves (e.g. pension contributions) when buffer is thin.
     const { multiplier: marginal, liquidityTier } = calcMoveMarginalUtility(
       move,
       profile as FinancialProfile,
@@ -160,28 +171,84 @@ export function rankMoves(
     );
     score *= marginal;
 
-    // UKPF tiebreaker — small boost for matching the user's flowchart priority
+    // Opportunity cost: compares the return on this move against the best alternative.
+    // E.g. paying off 5% debt when you could invest at 7% gets a multiplier <1.
+    const opportunityCost = calcOpportunityCostMultiplier(move, profile as FinancialProfile, debtAccounts);
+    score *= opportunityCost;
+
+    // UKPF priority — cost-of-inaction boost.
+    // Instead of a flat multiplier, we compute the *cost of doing nothing* in the
+    // user's priority area and use that as the boost. This makes debt moves rank
+    // higher when APR is 25% vs 5%, rather than treating all debt equally.
     const moveCategory = move.category || 'spending';
     if (moveCategory === ukpf.priority) {
-      score *= 1.15;
+      const annualIncome = Math.max(1, (profile.monthly?.income || 0) * 12);
+      let ukpfBoost = 1.0;
+      if (ukpf.priority === 'debt' && moveCategory === 'debt') {
+        // Boost = 1 + (monthly interest burn / monthly income).
+        // E.g. £3k debt at 22% APR on £2k income → boost = 1 + (55/2000) ≈ 1.03
+        // 0.079 (7.9%) fallback = typical UK personal loan rate when no APR data available
+        const highestAPR = (debtAccounts || []).reduce((max: number, d: any) => Math.max(max, d.interest_rate || 0), 0.079);
+        const totalDebtBalance = (debtAccounts || []).reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+        const monthlyInterestCost = totalDebtBalance * highestAPR / 12;
+        const monthlyIncome = Math.max(1, profile.monthly?.income || 0);
+        ukpfBoost = 1 + (monthlyInterestCost / monthlyIncome);
+      } else if (ukpf.priority === 'buffer' && moveCategory === 'buffer') {
+        // Boost based on expected value of emergency events.
+        // 0.083 ≈ 1/12, i.e. ~1 emergency per year as default assumption.
+        const emergencyProb = vol?.emergencyRate || 0.083;
+        const emergencyCost = vol?.emergencyCost || (profile.monthly?.spending || 500) * 0.6;
+        ukpfBoost = 1 + (emergencyProb * 12 * emergencyCost / annualIncome);
+      } else {
+        ukpfBoost = 1.15;
+      }
+      // Clamp to [1.0, 1.5] — prevent any single factor from dominating the ranking
+      score *= Math.min(1.5, Math.max(1.0, ukpfBoost));
     }
 
-    // Goal alignment boost
-    if (goals?.one_year_goal === 'clear_debt' && moveCategory === 'debt') score *= 1.3;
-    if (goals?.one_year_goal === 'emergency_fund' && moveCategory === 'buffer') score *= 1.3;
-    if (goals?.one_year_goal === 'reduce_spending' && moveCategory === 'spending') score *= 1.3;
-    if (goals?.one_year_goal === 'save_target' && moveCategory === 'savings') score *= 1.3;
-    if (goals?.one_year_goal === 'invest' && moveCategory === 'invest') score *= 1.3;
+    // Goal alignment — months-shaved ratio (replaces flat ×1.3)
+    const goalCategory = goals?.one_year_goal === 'clear_debt' ? 'debt'
+      : goals?.one_year_goal === 'emergency_fund' ? 'buffer'
+      : goals?.one_year_goal === 'reduce_spending' ? 'spending'
+      : goals?.one_year_goal === 'save_target' ? 'savings'
+      : goals?.one_year_goal === 'invest' ? 'invest'
+      : null;
+    if (goalCategory && moveCategory === goalCategory) {
+      // Goal alignment boost = how much faster this move gets you to the goal,
+      // expressed as a ratio of months-saved to current-timeline.
+      // Capped at +50% to prevent small-surplus users from getting extreme boosts.
+      const goalTarget = GOAL_DEFAULTS[goals!.one_year_goal] || 5000;
+      const currentMonths = profile.monthly?.surplus > 0 ? goalTarget / profile.monthly.surplus : 24;
+      const monthsSaved = move.monthlyImpact > 0 ? goalTarget / move.monthlyImpact : 0;
+      const goalBoost = currentMonths > 0 ? 1 + Math.min(0.5, monthsSaved / currentMonths) : 1.0;
+      score *= goalBoost;
+    }
+
+    // Cap the multiplicative stack to prevent extreme distortion.
+    // Without this, a low-effort debt move aligned with goal + UKPF priority
+    // could stack 1.1 × 1.5 × 1.5 × CRRA × consistency = 20x+.
+    // 8x keeps the ranking meaningful without letting one move dominate.
+    const baseScore = move.annualImpact / 100;
+    if (baseScore > 0) {
+      const maxMultiplier = 8;
+      score = Math.min(score, baseScore * maxMultiplier);
+    }
 
     // Monte Carlo consistency — reward reliable moves
     let riskAdjustedImpact: number | undefined;
     let consistencyScore: number | undefined;
     if (vol) {
-      const mc = calcMoveConsistency(move, vol, 456 + idx);
+      // Per-category coefficient of variation (CV) from actual transaction data.
+      // Spending categories with high variance (e.g. dining out) get lower consistency
+      // scores than stable ones (e.g. subscriptions), penalising unreliable savings.
+      const spendingCV = move.spendingCV;
+      const mc = calcMoveConsistency(move, vol, 456 + idx, moveCategory === 'spending' ? spendingCV : undefined);
       riskAdjustedImpact = mc.expectedMonthly;
       consistencyScore = mc.consistencyScore;
-      // Blend: 70% marginal-utility score + 30% consistency-adjusted score
-      score = score * 0.7 + (mc.expectedMonthly / 100) * mc.consistencyScore * 0.3 * 100;
+      // 70/30 blend: mostly trust the utility-adjusted score, but let Monte Carlo
+      // consistency pull down moves the user historically struggles to sustain.
+      const consistencyNormalized = (mc.expectedMonthly / Math.max(1, move.monthlyImpact)) * mc.consistencyScore;
+      score = score * 0.7 + score * consistencyNormalized * 0.3;
     }
 
     // Calculate trajectory for this move (with Monte Carlo if profile available)
@@ -201,6 +268,22 @@ export function rankMoves(
 
   // Sort by UKPF-weighted score (now includes consistency)
   scored.sort((a, b) => b.ukpfScore - a.ukpfScore);
+
+  // ── Category diversity enforcement ──
+  // Prevent "cancel 5 subscriptions" dominating the top 5.
+  // Users need to see a mix of move types to feel the recommendations are balanced.
+  // Promotes the best move from a different category into position 5.
+  if (scored.length >= 5) {
+    const top5Categories = new Set(scored.slice(0, 5).map(m => m.category || 'spending'));
+    if (top5Categories.size < 2) {
+      const dominantCat = scored[0].category || 'spending';
+      const altIdx = scored.findIndex((m, i) => i >= 5 && (m.category || 'spending') !== dominantCat);
+      if (altIdx > 0) {
+        const [alt] = scored.splice(altIdx, 1);
+        scored.splice(4, 0, alt); // Insert at position 5
+      }
+    }
+  }
 
   // Assign ranks
   scored.forEach((m, i) => { m.rank = i + 1; });
@@ -236,6 +319,9 @@ export function calcGoalTrajectory(
   const moveSaving = move?.monthlyImpact || 0;
 
   // ── Deterministic baseline (backward-compatible) ──
+  // Simple linear projection: target ÷ monthly surplus = months to goal.
+  // -1 signals "unreachable at current pace" (surplus ≤ 0).
+  // Capped at MAX_TRAJECTORY_MONTHS to avoid showing "247 months" for distant goals.
   const rawCurrentMonths = surplus > 0 ? Math.ceil(targetAmount / surplus) : Infinity;
   const rawNewMonths = (surplus + moveSaving) > 0 ? Math.ceil(targetAmount / (surplus + moveSaving)) : Infinity;
 
@@ -247,7 +333,7 @@ export function calcGoalTrajectory(
   if (currentMonths < 0) {
     insight = `At current pace, you won't reach your goal. This move adds \u00a3${moveSaving}/month to get you moving.`;
   } else if (monthsSaved > 0) {
-    insight = `This move cuts ${monthsSaved} months off your timeline \u2014 from ${currentMonths} to ${newMonths} months.`;
+    insight = `This move cuts ${monthsSaved} months off your timeline, from ${currentMonths} to ${newMonths} months.`;
   } else {
     insight = `You're on track (${currentMonths} months). This move accelerates it.`;
   }
@@ -262,7 +348,9 @@ export function calcGoalTrajectory(
   };
 
   // ── Monte Carlo confidence bands (Phase 1) ──
-  // Only run if we have enough profile data for variance estimation.
+  // Runs 1,000 simulations of the user's monthly surplus with real variance
+  // from their transaction history. Produces p10/p50/p90 month estimates and
+  // a 12-month hit rate (% of simulations that reach the goal within 1 year).
   if (targetAmount > 0 && profile.budgetReality) {
     const vol = estimateVolatility(profile as FinancialProfile, identity);
     const confidence = simulateGoalTimeline(
@@ -273,13 +361,15 @@ export function calcGoalTrajectory(
     );
     result.confidence = confidence;
 
-    // Phase 3b: personalized buffer recommendation for emergency_fund goals
+    // For emergency fund goals, use variance-adjusted buffer sizing instead of
+    // the static "3 months expenses" rule. Volatile incomes need larger buffers.
     if (oneYear === 'emergency_fund' || oneYear === 'buffer') {
       result.bufferRecommendation = simulateBufferNeed(profile as FinancialProfile, vol);
     }
 
-    // Enrich insight with probability
+    // Enrich insight with probability language instead of deterministic projections
     if (confidence.p50 > 0 && confidence.p50 < 120) {
+      // Spread > 3 months = meaningful uncertainty worth communicating
       const spread = confidence.p90 - confidence.p10;
       if (spread > 3) {
         insight = `Most likely ${confidence.p50} months (${confidence.p10}\u2013${confidence.p90} range). `;
@@ -287,7 +377,7 @@ export function calcGoalTrajectory(
           insight += `${confidence.hitRate12m}% chance within 12 months.`;
         }
       } else {
-        insight = `On track — ${confidence.p50} months with high certainty.`;
+        insight = `On track, ${confidence.p50} months with high certainty.`;
       }
       result.insight = insight;
     }

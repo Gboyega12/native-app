@@ -5,16 +5,17 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Animated, Platform,
+  View, Text, TouchableOpacity, StyleSheet, Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyFace } from '@/components/Bocy';
 
 // Cache the beforeinstallprompt event globally so it survives re-renders
 let deferredPrompt: any = null;
 
-if (Platform.OS === 'web' && typeof window !== 'undefined') {
+if (typeof window !== 'undefined') {
   window.addEventListener('beforeinstallprompt', (e: Event) => {
     e.preventDefault();
     deferredPrompt = e;
@@ -23,14 +24,14 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
 
 /** Detect iOS Safari for manual A2HS instructions. */
 function isIOSSafari(): boolean {
-  if (Platform.OS !== 'web' || typeof navigator === 'undefined') return false;
+  if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;
   return /iP(hone|od|ad)/.test(ua) && /WebKit/.test(ua) && !/CriOS|FxiOS/.test(ua);
 }
 
 /** Check if already running as installed PWA. */
 function isStandalone(): boolean {
-  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  if (typeof window === 'undefined') return false;
   return (
     (window.matchMedia?.('(display-mode: standalone)')?.matches) ||
     (window.navigator as any)?.standalone === true
@@ -42,21 +43,23 @@ export default function InstallApp() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [installed, setInstalled] = useState(false);
   const [promptAvailable, setPromptAvailable] = useState(!!deferredPrompt);
+  const [showHint, setShowHint] = useState(false);
   const iosSafari = isIOSSafari();
   const alreadyInstalled = isStandalone();
 
   // On native or already-installed PWA, skip straight to connect
   useEffect(() => {
-    if (Platform.OS !== 'web' || alreadyInstalled) {
+    if (alreadyInstalled) {
       router.replace('/(main)/connect');
       return;
     }
+    trackScreen('Install App');
     Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
   }, []);
 
   // Listen for late-arriving beforeinstallprompt
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
+    if (typeof window === 'undefined') return;
     const handler = (e: Event) => {
       e.preventDefault();
       deferredPrompt = e;
@@ -72,6 +75,7 @@ export default function InstallApp() {
       deferredPrompt.prompt();
       const result = await deferredPrompt.userChoice;
       if (result.outcome === 'accepted') {
+        trackEvent('App Installed');
         setInstalled(true);
         // Brief pause to show success, then continue
         setTimeout(() => router.push('/(main)/connect'), 1200);
@@ -83,7 +87,21 @@ export default function InstallApp() {
     setPromptAvailable(false);
   }, [router]);
 
+  const handleOpenShareSheet = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ url: window.location.href });
+      } catch {
+        // User cancelled or share failed — show fallback hint
+        setShowHint(true);
+      }
+    } else {
+      setShowHint(true);
+    }
+  }, []);
+
   const handleSkip = () => {
+    trackEvent('App Install Skipped');
     router.push('/(main)/connect');
   };
 
@@ -120,13 +138,21 @@ export default function InstallApp() {
         {/* iOS Safari: manual instructions */}
         {iosSafari && !promptAvailable && (
           <View style={styles.instructionsCard}>
-            <View style={styles.stepRow}>
+            <TouchableOpacity style={styles.stepRow} onPress={handleOpenShareSheet} activeOpacity={0.6}>
               <View style={styles.stepNum}><Text style={styles.stepNumText}>1</Text></View>
               <Text style={styles.stepText}>
-                Tap the <Text style={styles.bold}>Share</Text> button{' '}
-                <Text style={styles.mono}>[{'\u2191'}]</Text> at the bottom of Safari
+                Tap here to open the <Text style={styles.bold}>Share</Text> menu{' '}
+                <Text style={styles.mono}>[{'\u2191'}]</Text>
               </Text>
-            </View>
+            </TouchableOpacity>
+            {showHint && (
+              <View style={styles.hintRow}>
+                <Text style={styles.hintText}>
+                  Look for the <Text style={styles.bold}>Share</Text> button{' '}
+                  <Text style={styles.mono}>[{'\u2191'}]</Text> in Safari's toolbar below {'\u2193'}
+                </Text>
+              </View>
+            )}
             <View style={styles.stepRow}>
               <View style={styles.stepNum}><Text style={styles.stepNumText}>2</Text></View>
               <Text style={styles.stepText}>
@@ -256,6 +282,19 @@ const styles = StyleSheet.create({
   mono: {
     fontFamily: fonts.mono,
     fontSize: 16,
+  },
+  hintRow: {
+    backgroundColor: colors.accent + '15',
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  hintText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: colors.accent,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   fallbackText: {
     fontFamily: fonts.regular,

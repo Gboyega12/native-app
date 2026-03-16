@@ -1,32 +1,301 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView,
-  KeyboardAvoidingView, Platform, Animated, Easing, Alert, ActivityIndicator,
+  View, Text, TextInput, TouchableOpacity, Pressable, StyleSheet, ScrollView,
+  KeyboardAvoidingView, Animated, Easing, ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 import { requestSync, onSyncComplete, invalidateSyncCache } from '@/lib/sync-coordinator';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
-import { useSubscription } from '@/lib/subscription';
-import Paywall from '@/components/Paywall';
 import Markdown from '@/lib/markdown';
-import { BocyFace, getBocyMood } from '@/components/Bocy';
+import { BocyFace, getBocyMood, type BocyMood } from '@/components/Bocy';
+import { hapticLight, hapticSuccess } from '@/lib/haptics';
 import Card from '@/components/Card';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals, FinancialProfile, UserIdentity } from '@/lib/types';
 import { solveBudgetAllocation } from '@/lib/budget-solver';
 import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo';
+import { useVoiceConversation, type VoiceState } from '@/lib/use-voice-conversation';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
 
-/** Free users can send this many messages before the paywall gate kicks in */
-const FREE_MESSAGE_LIMIT = 2;
+/** Fingerprint for a payday context — changes each pay event so dismissal resets next payday */
+const paydayFingerprint = (pc: any): string => {
+  const events = (pc?.incomeEvents || []).map((e: any) => `${e.source}:${e.amount}:${e.date}`).join('|');
+  return events || 'payday';
+};
+
+
+/** Word-count threshold — messages longer than this get split into chunks */
+const CHUNK_WORD_THRESHOLD = 12;
+/** Hard cap on chat bubbles per assistant message — keeps replies conversational */
+const MAX_BUBBLES = 2;
+
+/** Determine Bocy's mood from the latest chat message content */
+function getChatMood(lastMsg: string | undefined, baseMood: BocyMood, isLoading: boolean): BocyMood {
+  if (isLoading) return 'thinking';
+  if (!lastMsg) return baseMood;
+  const lower = lastMsg.toLowerCase();
+  if (/payday|well done|great|nice|saved|congrat|milestone|achieved/.test(lower)) return 'celebrating';
+  if (/overspend|debt|behind|warning|careful|risk|problem/.test(lower)) return 'alert';
+  if (/plan|let me|here's|break|walk you|split/.test(lower)) return 'happy';
+  return baseMood;
+}
+
+/**
+ * Split a long assistant message into multiple chat-sized chunks.
+ * Splits on paragraph breaks first, then on sentences for any chunk
+ * still over the threshold. This makes AI responses feel like real texts.
+ */
+function splitIntoBubbles(text: string): string[] {
+  if (!text || !text.trim()) return [];
+
+  // GIF markdown pattern — must be kept as its own bubble
+  const GIF_RX = /^!\[.*?\]\(https?:\/\/[^\s)]+\)\s*$/;
+
+  // Split by double newlines (paragraphs) first
+  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+
+  const chunks: string[] = [];
+  for (const para of paragraphs) {
+    // If a paragraph contains a GIF line, split it so the GIF is its own bubble
+    const lines = para.split('\n');
+    const hasGif = lines.some((l) => GIF_RX.test(l.trim()));
+    if (hasGif) {
+      let textBuffer: string[] = [];
+      for (const line of lines) {
+        if (GIF_RX.test(line.trim())) {
+          if (textBuffer.length > 0) {
+            chunks.push(textBuffer.join('\n'));
+            textBuffer = [];
+          }
+          chunks.push(line.trim());
+        } else {
+          textBuffer.push(line);
+        }
+      }
+      if (textBuffer.length > 0) chunks.push(textBuffer.join('\n'));
+      continue;
+    }
+
+    const wordCount = para.split(/\s+/).length;
+    if (wordCount <= CHUNK_WORD_THRESHOLD) {
+      chunks.push(para);
+    } else {
+      // Split long paragraphs on sentence boundaries
+      const sentences = para.match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g) || [para];
+      let current = '';
+      for (const sentence of sentences) {
+        const combined = current ? current + ' ' + sentence.trim() : sentence.trim();
+        if (combined.split(/\s+/).length > CHUNK_WORD_THRESHOLD && current) {
+          chunks.push(current.trim());
+          current = sentence.trim();
+        } else {
+          current = combined;
+        }
+      }
+      if (current.trim()) chunks.push(current.trim());
+    }
+  }
+
+  // Hard cap: never more than MAX_BUBBLES to keep replies conversational
+  const result = chunks.length > 0 ? chunks : [text];
+  return result.slice(0, MAX_BUBBLES);
+}
+
+/**
+ * Speak text aloud using ElevenLabs TTS (via /api/tts proxy).
+ * Falls back to Web Speech Synthesis if ElevenLabs is unavailable.
+ * Returns a cancel function. Only works on web.
+ */
+function speakText(text: string, onEnd?: () => void, authToken?: string | null): (() => void) {
+  if (typeof window === 'undefined') {
+    onEnd?.();
+    return () => {};
+  }
+
+  let cancelled = false;
+  let audio: HTMLAudioElement | null = null;
+
+  // Try ElevenLabs first, fall back to Web Speech API
+  if (authToken) {
+    const clean = text.replace(/[*_~`#>\[\]()]/g, '').replace(/\n+/g, '. ');
+
+    fetch('/api/tts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ text: clean }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`TTS ${res.status}: ${body}`);
+        }
+        return res.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        audio = new Audio(url);
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          onEnd?.();
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          onEnd?.();
+        };
+        audio.play();
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn('[TTS] ElevenLabs unavailable, falling back to Web Speech API:', err?.message);
+        speakWithWebSpeech(text, onEnd);
+      });
+  } else {
+    console.warn('[TTS] No auth token — using Web Speech API fallback');
+    speakWithWebSpeech(text, onEnd);
+  }
+
+  return () => {
+    cancelled = true;
+    if (audio) {
+      audio.pause();
+      audio.src = '';
+    }
+    window.speechSynthesis?.cancel();
+    onEnd?.();
+  };
+}
+
+/** Fallback: Web Speech Synthesis API (robotic but works without API key) */
+function speakWithWebSpeech(text: string, onEnd?: () => void) {
+  if (!window.speechSynthesis) {
+    onEnd?.();
+    return;
+  }
+  const clean = text.replace(/[*_~`#>\[\]()]/g, '').replace(/\n+/g, '. ');
+  const utterance = new SpeechSynthesisUtterance(clean);
+  utterance.lang = 'en-GB';
+  utterance.rate = 1.0;
+  utterance.pitch = 1.0;
+  utterance.onend = () => onEnd?.();
+  utterance.onerror = () => onEnd?.();
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
+}
+
+// ── Dot-matrix ring (Nothing Phone glyph aesthetic) ──
+// Renders dots positioned in a circle. Used for the voice orb outer ring
+// and the expanding animated rings when listening.
+
+function DotRing({
+  size,
+  count = 20,
+  dotSize = 2.5,
+  color,
+  animated,
+  animValue,
+}: {
+  size: number;
+  count?: number;
+  dotSize?: number;
+  color: string;
+  animated?: boolean;
+  animValue?: Animated.Value;
+}) {
+  const r = size / 2;
+  const dots = useMemo(
+    () =>
+      Array.from({ length: count }).map((_, i) => {
+        const angle = (i / count) * 2 * Math.PI - Math.PI / 2;
+        return {
+          x: r + Math.cos(angle) * (r - dotSize) - dotSize / 2,
+          y: r + Math.sin(angle) * (r - dotSize) - dotSize / 2,
+        };
+      }),
+    [size, count, dotSize],
+  );
+
+  const containerStyle: any = {
+    width: size,
+    height: size,
+    position: 'absolute' as const,
+    left: '50%',
+    top: '50%',
+    marginLeft: -size / 2,
+    marginTop: -size / 2,
+  };
+  if (animated && animValue) {
+    containerStyle.opacity = animValue.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
+    containerStyle.transform = [{ scale: animValue.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] }) }];
+  }
+
+  const Container = animated ? Animated.View : View;
+  return (
+    <Container style={containerStyle}>
+      {dots.map((d, i) => (
+        <View
+          key={i}
+          style={{
+            position: 'absolute',
+            left: d.x,
+            top: d.y,
+            width: dotSize,
+            height: dotSize,
+            borderRadius: dotSize / 2,
+            backgroundColor: color,
+          }}
+        />
+      ))}
+    </Container>
+  );
+}
+
+// ── Dot-matrix microphone glyph ──
+// A tiny mic icon built from dots — Nothing Phone LED dot style.
+
+const MIC_GLYPH: number[][] = [
+  [0, 1, 0],
+  [1, 1, 1],
+  [1, 1, 1],
+  [0, 1, 0],
+  [0, 1, 0],
+  [1, 1, 1],
+];
+
+function DotMic({ dotSize = 3.5, gap = 2, color }: { dotSize?: number; gap?: number; color: string }) {
+  return (
+    <View style={{ alignItems: 'center' }}>
+      {MIC_GLYPH.map((row, r) => (
+        <View key={r} style={{ flexDirection: 'row', gap }}>
+          {row.map((v, c) => (
+            <View
+              key={c}
+              style={{
+                width: dotSize,
+                height: dotSize,
+                borderRadius: dotSize / 2,
+                backgroundColor: v ? color : 'transparent',
+              }}
+            />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
 
 // ── Suggested questions (contextual) ──
 
-function getContextualQuestions(analysis: Analysis | null, goals: Goals | null, paydayActive?: boolean): string[] {
+function getContextualQuestions(analysis: Analysis | null, goals: Goals | null, paydayActive?: boolean, paydayContext?: any): string[] {
   if (!analysis) {
     return [
       'What can Bocy help me with?',
@@ -34,51 +303,99 @@ function getContextualQuestions(analysis: Analysis | null, goals: Goals | null, 
     ];
   }
 
-  // Payday mode: prioritise allocation-focused questions
-  if (paydayActive) {
-    const questions: string[] = [];
-    questions.push('I just got paid. Walk me through what to do first.');
-    questions.push('How much can I safely spend this week?');
+  const moves = analysis.all_moves || [];
+  const income = analysis.monthly_income ?? 0;
+  const spending = analysis.monthly_spending ?? 0;
+  const surplus = analysis.surplus ?? 0;
+  const topMove = moves[0];
 
-    const moves = analysis.all_moves || [];
-    if (moves.length > 0) {
-      questions.push('Am I on track with my plan?');
+  // Payday mode: hyper-specific allocation questions
+  if (paydayActive) {
+    const incomeEvents = paydayContext?.incomeEvents || [];
+    const questions: string[] = [];
+
+    if (incomeEvents.length > 0) {
+      const payAmount = incomeEvents.reduce((s: number, e: any) => s + (e?.amount ?? 0), 0);
+      const paySource = incomeEvents[0]?.source || 'your employer';
+      questions.push(`Split my \u00a3${Math.round(payAmount).toLocaleString()} from ${paySource} for me.`);
+
+      const committed = paydayContext?.committedThisWeek ?? 0;
+      if (committed > 0) {
+        questions.push(`\u00a3${Math.round(committed).toLocaleString()} is committed to bills \u2014 what's left?`);
+      } else {
+        questions.push('How much should I set aside for bills this week?');
+      }
     } else {
-      questions.push('Help me set up a budget for this pay period.');
+      questions.push('I just got paid. Walk me through what to do.');
+      questions.push('How much can I safely spend this week?');
+    }
+
+    if (topMove) {
+      const action = (topMove.action || '').replace(/\*\*/g, '');
+      questions.push(`Can I put more towards "${action.length > 40 ? action.slice(0, 37) + '...' : action}"?`);
     }
 
     if (goals?.one_year_goal) {
       const goalName = goals.one_year_goal.replace(/_/g, ' ');
-      questions.push(`How does this pay cycle move me closer to ${goalName}?`);
+      questions.push(`How does this pay move me closer to ${goalName}?`);
     } else {
-      questions.push('What should I do with any leftover money?');
+      questions.push('What should I do with the leftover?');
     }
 
     return questions;
   }
 
+  // Default mode: specific, data-driven starters
   const questions: string[] = [];
-  questions.push('What happens if I follow my full action plan?');
 
-  const patterns = analysis.behavioral_patterns || [];
-  if (patterns.some((p: string) => p.toLowerCase().includes('debt'))) {
-    questions.push('Should I focus on debt or savings first?');
-  } else {
-    questions.push('How can I optimise my savings rate?');
+  // #1: Top move — specific action with real amount
+  if (topMove) {
+    const action = (topMove.action || '').replace(/\*\*/g, '');
+    const impact = topMove.annualImpact || (topMove.monthlyImpact || 0) * 12;
+    if (impact > 0) {
+      questions.push(`How do I save \u00a3${Math.round(impact).toLocaleString()}/yr by "${action.length > 30 ? action.slice(0, 27) + '...' : action}"?`);
+    } else {
+      questions.push(`Walk me through: ${action.length > 45 ? action.slice(0, 42) + '...' : action}`);
+    }
   }
 
-  const moves = analysis.all_moves || [];
-  if (moves.some((m: { action?: string }) => m.action?.toLowerCase().includes('subscription'))) {
-    questions.push('Which subscriptions should I cut first?');
+  // #2: Spending insight — specific category or subscription
+  const subMove = moves.find((m: any) => m.action?.toLowerCase().includes('subscription'));
+  if (subMove?.merchants?.length) {
+    const count = subMove.merchants.length;
+    const names = subMove.merchants.slice(0, 2).join(' and ');
+    questions.push(`Do I actually need ${names}${count > 2 ? ` and ${count - 2} more` : ''}?`);
+  } else if (surplus < 0) {
+    questions.push(`I'm \u00a3${Math.round(Math.abs(surplus)).toLocaleString()}/mo over budget \u2014 where do I cut?`);
+  } else if (spending > 0) {
+    questions.push(`I spend \u00a3${Math.round(spending).toLocaleString()}/mo \u2014 is that reasonable?`);
   } else {
     questions.push('Where are my biggest spending leaks?');
   }
 
-  if (goals?.one_year_goal) {
+  // #3: Goal-specific or debt-specific
+  const patterns = analysis.behavioral_patterns || [];
+  if (patterns.some((p: string) => p.toLowerCase().includes('debt'))) {
+    questions.push('Should I clear debt or build savings first?');
+  } else if (goals?.one_year_goal) {
     const goalName = goals.one_year_goal.replace(/_/g, ' ');
-    questions.push(`How fast can I reach my ${goalName} goal?`);
+    const target = goals.target_amount;
+    if (target) {
+      questions.push(`How fast can I hit \u00a3${Math.round(target).toLocaleString()} for ${goalName}?`);
+    } else {
+      questions.push(`Am I on track for ${goalName}?`);
+    }
   } else {
-    questions.push('What financial goal should I set first?');
+    questions.push('What should my first financial goal be?');
+  }
+
+  // #4: Actionable nudge
+  if (moves.length > 1) {
+    questions.push(`If I follow all ${moves.length} moves, what happens?`);
+  } else if (surplus > 100) {
+    questions.push(`I have \u00a3${Math.round(surplus).toLocaleString()}/mo spare \u2014 invest or save?`);
+  } else {
+    questions.push('How can I make my money work harder?');
   }
 
   return questions;
@@ -120,6 +437,58 @@ function TypingIndicator() {
         ))}
       </View>
     </View>
+  );
+}
+
+// ── Typewriter text reveal ──
+// Progressively reveals text character-by-character for AI messages.
+// Falls back to instant display once the animation completes.
+
+function TypewriterText({ text, style, delay = 0, charsPerTick = 2, onComplete }: {
+  text: string;
+  style?: any;
+  delay?: number;
+  charsPerTick?: number;
+  onComplete?: () => void;
+}) {
+  const [visibleLen, setVisibleLen] = useState(0);
+  const [done, setDone] = useState(false);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // If the chunk is a GIF image, render it immediately (no typewriter for images)
+  const isGif = /^!\[.*?\]\(https?:\/\/[^\s)]+\)\s*$/.test(text.trim());
+
+  useEffect(() => {
+    if (isGif) { setDone(true); onComplete?.(); return; }
+    const timer = setTimeout(() => {
+      tickRef.current = setInterval(() => {
+        setVisibleLen((prev) => {
+          const next = prev + charsPerTick;
+          if (next >= text.length) {
+            if (tickRef.current) clearInterval(tickRef.current);
+            setDone(true);
+            onComplete?.();
+            return text.length;
+          }
+          return next;
+        });
+      }, 16); // ~60fps
+    }, delay);
+
+    return () => {
+      clearTimeout(timer);
+      if (tickRef.current) clearInterval(tickRef.current);
+    };
+  }, [text]);
+
+  if (done) return <Markdown>{text}</Markdown>;
+
+  // During reveal, show plain text (Markdown parsing mid-stream is unreliable)
+  return (
+    <Text style={style}>
+      {text.slice(0, visibleLen)}
+      <Text style={{ opacity: 0.4 }}>|</Text>
+    </Text>
   );
 }
 
@@ -166,17 +535,197 @@ function PulseButton({ children, trigger }: { children: React.ReactNode; trigger
   return <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>;
 }
 
+// ── Voice Orb (hero mic button with dot-matrix ring animation) ──
+// Nothing Phone glyph aesthetic: dots arranged in circles, breathing, geometric.
+
+function VoiceOrb({
+  listening,
+  onPress,
+  disabled,
+}: {
+  listening: boolean;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
+  const scale = useRef(new Animated.Value(1)).current;
+  const ring1 = useRef(new Animated.Value(0)).current;
+  const ring2 = useRef(new Animated.Value(0)).current;
+  const dotPulse = useRef(new Animated.Value(0)).current;
+  const idlePulse = useRef(new Animated.Value(0)).current;
+
+  // Slow stoic idle pulse — draws the eye without being aggressive
+  useEffect(() => {
+    if (listening) {
+      idlePulse.stopAnimation();
+      idlePulse.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(idlePulse, { toValue: 1, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(idlePulse, { toValue: 0, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [listening]);
+
+  useEffect(() => {
+    if (listening) {
+      // Breathing scale
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(scale, { toValue: 1.04, duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+      ).start();
+      // Inner dot pulse
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(dotPulse, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(dotPulse, { toValue: 0, duration: 600, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+      ).start();
+      // Expanding dot ring 1
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(ring1, { toValue: 1, duration: 2000, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(ring1, { toValue: 0, duration: 0, useNativeDriver: true }),
+        ]),
+      ).start();
+      // Expanding dot ring 2 (offset)
+      setTimeout(() => {
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(ring2, { toValue: 1, duration: 2000, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+            Animated.timing(ring2, { toValue: 0, duration: 0, useNativeDriver: true }),
+          ]),
+        ).start();
+      }, 1000);
+    } else {
+      [scale, ring1, ring2, dotPulse].forEach((a) => a.stopAnimation());
+      scale.setValue(1);
+      ring1.setValue(0);
+      ring2.setValue(0);
+      dotPulse.setValue(0);
+    }
+  }, [listening]);
+
+  const handlePressIn = () => {
+    Animated.timing(scale, { toValue: 0.92, duration: 100, useNativeDriver: true }).start();
+  };
+  const handlePressOut = () => {
+    Animated.timing(scale, { toValue: 1, duration: 150, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  };
+
+  const activeColor = listening ? colors.green : colors.accent;
+
+  const idleScale = listening ? 1 : idlePulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] });
+  const idleGlow = listening ? 1 : idlePulse.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
+
+  return (
+    <View style={s.voiceOrbContainer}>
+      {/* Expanding dot-matrix rings (visible when listening) */}
+      {listening && (
+        <>
+          <DotRing size={100} count={20} dotSize={2.5} color={colors.green} animated animValue={ring1} />
+          <DotRing size={90} count={18} dotSize={2} color={colors.green} animated animValue={ring2} />
+        </>
+      )}
+      {/* Static outer dot ring — breathes when idle, sits tight against orb */}
+      <Animated.View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, transform: [{ scale: idleScale as any }], opacity: idleGlow as any }}>
+        <DotRing size={82} count={24} dotSize={listening ? 3 : 2.5} color={activeColor} />
+      </Animated.View>
+      <Animated.View style={{ transform: [{ scale }, ...(listening ? [] : [{ scale: idleScale as any }])] }}>
+        <Pressable
+          style={[s.voiceOrb, listening && s.voiceOrbListening]}
+          onPress={disabled ? undefined : onPress}
+          onPressIn={disabled ? undefined : handlePressIn}
+          onPressOut={disabled ? undefined : handlePressOut}
+          accessibilityRole="button"
+          accessibilityLabel={listening ? 'Stop listening' : 'Start voice input'}
+        >
+          {listening ? (
+            <Animated.View style={{ opacity: dotPulse.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }}>
+              <View style={s.voiceOrbStop} />
+            </Animated.View>
+          ) : (
+            <DotMic dotSize={4} gap={2.5} color={colors.bg} />
+          )}
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
+
+// ── Voice Waveform Visualiser ──
+// Pulsing dots that breathe during active listening. Nothing Phone dot-matrix feel.
+
+const WAVE_DOT_COUNT = 7;
+
+function VoiceWaveform({ active }: { active: boolean }) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
+  const dots = useRef(
+    Array.from({ length: WAVE_DOT_COUNT }, () => new Animated.Value(0.4)),
+  ).current;
+
+  useEffect(() => {
+    if (active) {
+      const animations = dots.map((dot, i) =>
+        Animated.loop(
+          Animated.sequence([
+            Animated.delay(i * 80),
+            Animated.timing(dot, { toValue: 1, duration: 250 + Math.random() * 200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+            Animated.timing(dot, { toValue: 0.4, duration: 250 + Math.random() * 200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          ]),
+        ),
+      );
+      animations.forEach((a) => a.start());
+      return () => animations.forEach((a) => a.stop());
+    } else {
+      dots.forEach((dot) => {
+        dot.stopAnimation();
+        dot.setValue(0.4);
+      });
+    }
+  }, [active]);
+
+  if (!active) return null;
+
+  return (
+    <View style={s.waveformRow}>
+      {dots.map((dot, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            s.waveformDot,
+            {
+              transform: [{ scale: dot.interpolate({ inputRange: [0.4, 1], outputRange: [0.5, 1.4] }) }],
+              opacity: dot,
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
+
 // ── Inline action cards ──
 
 function PlanCard({
   action,
   onApprove,
   onDismiss,
+  onDelete,
   saving,
 }: {
   action: ChatAction;
   onApprove: () => void;
   onDismiss: () => void;
+  onDelete: () => void;
   saving?: boolean;
 }) {
   const { colors } = useTheme();
@@ -184,6 +733,7 @@ function PlanCard({
   const d = action.data;
   const isApproved = action.status === 'approved';
   const isDismissed = action.status === 'dismissed';
+  const isDeleted = action.status === 'deleted';
 
   return (
     <Card
@@ -192,7 +742,7 @@ function PlanCard({
       noShadow
       style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
     >
-      <Text style={s.actionCardLabel}>{isApproved ? 'PLAN ADDED' : 'PLAN SUGGESTED'}</Text>
+      <Text style={s.actionCardLabel}>{isApproved ? 'PLAN ADDED' : isDeleted ? 'PLAN REMOVED' : 'PLAN SUGGESTED'}</Text>
       <Text style={s.actionCardTitle}>{stripMd(d.action)}</Text>
       <View style={s.actionCardStats}>
         {d.target_amount != null && (
@@ -215,11 +765,20 @@ function PlanCard({
         )}
       </View>
       {isApproved ? (
-        <View style={s.approvedBanner}>
-          <Text style={s.approvedBannerText}>{'\u2713'} Added to your plan</Text>
-        </View>
+        <>
+          <View style={s.approvedBanner}>
+            <Text style={s.approvedBannerText}>{'\u2713'} Added to your plan</Text>
+          </View>
+          <TouchableOpacity style={s.removeLink} onPress={onDelete} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Remove this plan">
+            <Text style={s.removeLinkText}>Remove</Text>
+          </TouchableOpacity>
+        </>
       ) : isDismissed ? (
-        <View style={s.dismissedBanner}>
+        <View style={s.dismissedBanner} accessibilityLabel="Plan removed">
+          <Text style={s.dismissedBannerText}>Removed from plan</Text>
+        </View>
+      ) : isDeleted ? (
+        <View style={s.dismissedBanner} accessibilityLabel="Plan removed">
           <Text style={s.dismissedBannerText}>Removed from plan</Text>
         </View>
       ) : (
@@ -229,6 +788,9 @@ function PlanCard({
             onPress={onApprove}
             activeOpacity={0.8}
             disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Add this plan to your active plans"
+            accessibilityState={{ disabled: saving }}
           >
             {saving ? (
               <ActivityIndicator size="small" color={colors.bg} />
@@ -236,7 +798,7 @@ function PlanCard({
               <Text style={s.approveBtnText}>Add to plan</Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity style={s.dismissBtn} onPress={onDismiss} activeOpacity={0.8}>
+          <TouchableOpacity style={s.dismissBtn} onPress={onDismiss} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Dismiss this plan suggestion">
             <Text style={s.dismissBtnText}>Dismiss</Text>
           </TouchableOpacity>
         </View>
@@ -245,18 +807,19 @@ function PlanCard({
   );
 }
 
-function BudgetItemCard({ action }: { action: ChatAction }) {
+function BudgetItemCard({ action, onDelete }: { action: ChatAction; onDelete: () => void }) {
   const { colors } = useTheme();
   const s = useMemo(() => createStyles(colors), [colors]);
   const d = action.data;
+  const isDeleted = action.status === 'deleted';
   return (
     <Card
       variant="action"
-      borderColor={colors.accent}
+      borderColor={isDeleted ? undefined : colors.accent}
       noShadow
       style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
     >
-      <Text style={s.actionCardLabel}>BUDGET UPDATED</Text>
+      <Text style={s.actionCardLabel}>{isDeleted ? 'BUDGET ITEM REMOVED' : 'BUDGET UPDATED'}</Text>
       <Text style={s.actionCardTitle}>{d.description}</Text>
       <View style={s.actionCardStats}>
         <View style={s.actionStat}>
@@ -274,9 +837,20 @@ function BudgetItemCard({ action }: { action: ChatAction }) {
           </View>
         )}
       </View>
-      <View style={s.approvedBanner}>
-        <Text style={s.approvedBannerText}>{'\u2713'} Added to your budget</Text>
-      </View>
+      {isDeleted ? (
+        <View style={s.dismissedBanner}>
+          <Text style={s.dismissedBannerText}>Removed from budget</Text>
+        </View>
+      ) : (
+        <>
+          <View style={s.approvedBanner}>
+            <Text style={s.approvedBannerText}>{'\u2713'} Added to your budget</Text>
+          </View>
+          <TouchableOpacity style={s.removeLink} onPress={onDelete} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Remove this budget item">
+            <Text style={s.removeLinkText}>Remove</Text>
+          </TouchableOpacity>
+        </>
+      )}
     </Card>
   );
 }
@@ -391,11 +965,9 @@ function GoalUpdateCard({
 export default function Chat() {
   const router = useRouter();
   const { prefill } = useLocalSearchParams<{ prefill?: string }>();
-  const { isPro } = useSubscription();
   const { colors } = useTheme();
   const { maxContentWidth, isTablet } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const [showPaywall, setShowPaywall] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [inputHeight, setInputHeight] = useState(40);
@@ -404,12 +976,75 @@ export default function Chat() {
   const [context, setContext] = useState<ChatContext>({});
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [goals, setGoals] = useState<Goals | null>(null);
+  const [paydayDismissed, setPaydayDismissed] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [savingPlan, setSavingPlan] = useState<string | null>(null); // "msgIdx-actionIdx"
   const scrollRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
   const [listening, setListening] = useState(false);
+  const [showTextInput, setShowTextInput] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const autoSendRef = useRef(false);
+  const [speakingMsgIdx, setSpeakingMsgIdx] = useState<number | null>(null);
+  const stopSpeechRef = useRef<(() => void) | null>(null);
+  // Set when voice input triggers a message; cleared after TTS speaks the response
+  const pendingVoiceResponseRef = useRef(false);
+
+  // ── Full speech-to-speech conversation hook ──
+  const {
+    voiceState,
+    toggleListening: toggleVoiceConversation,
+    speak: speakResponse,
+    stopSpeaking,
+    isSupported: voiceConversationSupported,
+    errorMessage: voiceError,
+    amplitude: voiceAmplitude,
+    conversationActive,
+  } = useVoiceConversation({
+    onTranscript: (text) => {
+      // Voice mode: transcribed text goes straight to chat
+      pendingVoiceResponseRef.current = true;
+      // Flash the transcribed text briefly so user sees they were heard
+      setInput(text);
+      sendMessage(text, 'voice');
+    },
+    onStateChange: (state) => {
+      // Sync listening state with existing UI
+      setListening(state === 'listening');
+    },
+    autoPlayResponse: true,
+  });
+
+  // speakResponse ref — so sendMessage can call it without stale closures
+  const speakResponseRef = useRef(speakResponse);
+  speakResponseRef.current = speakResponse;
+
+  // ── TTS support check (ElevenLabs uses Audio API; Web Speech API is fallback) ──
+  const ttsSupported = typeof window !== 'undefined' &&
+    (typeof Audio !== 'undefined' || !!window.speechSynthesis);
+
+  const handleSpeak = async (msgIndex: number, text: string) => {
+    trackEvent('TTS Played');
+    // If already speaking this message, stop
+    if (speakingMsgIdx === msgIndex) {
+      stopSpeechRef.current?.();
+      stopSpeechRef.current = null;
+      setSpeakingMsgIdx(null);
+      stopSpeaking();
+      return;
+    }
+    // Stop any current speech
+    stopSpeechRef.current?.();
+    stopSpeaking();
+
+    // Get auth token for ElevenLabs TTS proxy
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token || null;
+
+    setSpeakingMsgIdx(msgIndex);
+    const cancel = speakText(text, () => setSpeakingMsgIdx(null), token);
+    stopSpeechRef.current = cancel;
+  };
 
   // ── Pre-fill input from plan page navigation ──
   useEffect(() => {
@@ -419,18 +1054,26 @@ export default function Chat() {
     }
   }, [prefill]);
 
-  // ── Voice input via Web Speech API ──
-  const voiceSupported = Platform.OS === 'web' && typeof window !== 'undefined' &&
+  // ── Voice input — uses full speech-to-speech hook (cross-platform) ──
+  // Falls back to Web Speech API on browsers where expo-av isn't available.
+  const webSpeechAvailable = typeof window !== 'undefined' &&
     (!!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition);
+  const voiceSupported = voiceConversationSupported || webSpeechAvailable;
 
   const toggleVoice = () => {
+    trackEvent('Voice Toggled');
+    // Prefer cross-platform speech-to-speech hook
+    if (voiceConversationSupported) {
+      toggleVoiceConversation();
+      return;
+    }
+
+    // Fallback: Web Speech API (browser only, for quick text dictation)
     if (listening) {
       recognitionRef.current?.stop();
       setListening(false);
       return;
     }
-
-    if (Platform.OS !== 'web') return;
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
@@ -463,9 +1106,13 @@ export default function Chat() {
 
     recognition.onend = () => {
       setListening(false);
-      // Clean up any interim markers
-      setInput((prev) => prev.replace(/\u200B/g, ''));
-      setTimeout(() => inputRef.current?.focus(), 100);
+      setInput((prev) => {
+        const cleaned = prev.replace(/\u200B/g, '').trim();
+        if (cleaned) {
+          autoSendRef.current = true;
+        }
+        return cleaned;
+      });
     };
 
     recognition.onerror = () => {
@@ -476,14 +1123,32 @@ export default function Chat() {
     recognition.start();
   };
 
+  // ── Auto-send after Web Speech API recognition completes (fallback path) ──
+  useEffect(() => {
+    if (autoSendRef.current && input.trim() && !listening) {
+      autoSendRef.current = false;
+      sendMessage(input, 'voice');
+    }
+  }, [input, listening]);
+
+  /** Human-readable voice state label for UI */
+  const voiceStateLabel: string | null =
+    voiceState === 'processing' ? 'Transcribing\u2026'
+    : voiceState === 'thinking' ? 'Thinking\u2026'
+    : voiceState === 'speaking' ? 'Speaking\u2026'
+    : voiceState === 'listening' && conversationActive ? 'Listening\u2026'
+    : voiceError ? voiceError
+    : null;
+
   // ── Load context + persisted messages on focus ──
   // Also subscribe to sync completions from other screens so chat stays fresh.
 
   useFocusEffect(
     useCallback(() => {
+      trackScreen('Chat');
       loadContext();
       const unsub = onSyncComplete((result) => {
-        if (!result) return;
+        if (!result?.analysis) return;
         setAnalysis(result.analysis);
       });
       return () => unsub();
@@ -539,6 +1204,22 @@ export default function Chat() {
         action: m.action,
         monthlyImpact: m.monthlyImpact,
         effort: m.effort,
+      })),
+      income_sources: a?.income_sources?.map((s: any) => ({
+        source: s.source,
+        frequency: s.frequency,
+        avgAmount: s.avgAmount,
+        monthly: s.monthly,
+        isSalary: s.isSalary,
+      })),
+      essential_gaps: a?.essential_gaps,
+      verified_bills: a?.verified_bills?.map((b: any) => ({
+        category: b.category,
+        merchant: b.merchant,
+        monthlyAmount: b.monthlyAmount,
+        frequency: b.frequency,
+        lastPayment: b.lastPayment,
+        lastPaymentDate: b.lastPaymentDate,
       })),
       spending_by_category: buildSpendingBreakdown(a),
       behavioral_patterns: a?.behavioral_patterns,
@@ -694,7 +1375,7 @@ export default function Chat() {
     try {
       // Force-sync to ensure chat always has the freshest transaction data
       const syncResult = await requestSync(user.id, true);
-      if (syncResult) {
+      if (syncResult?.analysis) {
         // Update analysis with fresh sync data
         const freshA = syncResult.analysis;
         setAnalysis(freshA);
@@ -714,12 +1395,19 @@ export default function Chat() {
         ctx.monthly_income = freshA.monthly_income;
         ctx.monthly_spending = freshA.monthly_spending;
         ctx.surplus = freshA.surplus;
+        ctx.is_variable_income = freshA.is_variable_income;
+        ctx.income_floor = freshA.income_floor;
+        ctx.income_cv = freshA.income_cv;
         ctx.archetype = freshA.archetype;
         ctx.decision_score = freshA.decision_score;
-        ctx.all_moves = freshA.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string }) => ({
+        ctx.all_moves = freshA.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string; category?: string; strategy?: string; proof?: string; effect?: string }) => ({
           action: m.action,
           monthlyImpact: m.monthlyImpact,
           effort: m.effort,
+          category: m.category,
+          strategy: m.strategy,
+          proof: m.proof,
+          effect: m.effect,
         }));
         ctx.top_move = freshA.top_move ? { action: freshA.top_move.action, monthlyImpact: freshA.top_move.monthlyImpact } : undefined;
         ctx.behavioral_patterns = freshA.behavioral_patterns;
@@ -835,6 +1523,17 @@ export default function Chat() {
 
     setContext(ctx);
 
+    // ── Check if payday check-in was already dismissed ──
+    let isPaydayDismissed = false;
+    if (ctx.payday_context?.incomeArrivedThisWeek) {
+      const fp = paydayFingerprint(ctx.payday_context);
+      const dismissed = await AsyncStorage.getItem('dismiss:chat:payday').catch(() => null);
+      if (dismissed === fp) {
+        isPaydayDismissed = true;
+        setPaydayDismissed(true);
+      }
+    }
+
     // ── Load persisted messages ──
     let chatData: { messages: any[] } | null = null;
     try {
@@ -848,8 +1547,8 @@ export default function Chat() {
 
     if (chatData?.messages?.length) {
       setMessages(chatData.messages);
-    } else if (ctx.payday_context?.incomeArrivedThisWeek && ctx.payday_context.incomeEvents.length > 0) {
-      // No existing messages + income arrived = auto-send a payday nudge
+    } else if (ctx.payday_context?.incomeArrivedThisWeek && ctx.payday_context.incomeEvents.length > 0 && !isPaydayDismissed) {
+      // No existing messages + income arrived + not dismissed = auto-send a payday nudge
       const pc = ctx.payday_context;
       const totalIncome = pc.incomeEvents.reduce((s: number, e: any) => s + e.amount, 0);
       const nudgeMsg: ChatMessage = {
@@ -880,6 +1579,7 @@ export default function Chat() {
   // ── Handle plan approval (via server API) ──
 
   const handleApprovePlan = async (msgIndex: number, actionIndex: number) => {
+    trackEvent('Plan Approved From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'plan_proposed') return;
@@ -890,13 +1590,13 @@ export default function Chat() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          Alert.alert('Not signed in', 'Please sign in to save plans.');
+          window.alert('Please sign in to save plans.');
           return;
         }
         uid = user.id;
         setUserId(uid);
       } catch {
-        Alert.alert('Error', 'Could not verify sign-in. Please try again.');
+        window.alert('Could not verify sign-in. Please try again.');
         return;
       }
     }
@@ -909,10 +1609,11 @@ export default function Chat() {
 
       if (planId) {
         // Server already created the plan as 'proposed' — approve it
+        const { data: { session: sess } } = await supabase.auth.getSession();
         const res = await fetch('/api/plans', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'approve', plan_id: planId, user_id: uid }),
+          headers: { 'Content-Type': 'application/json', ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}) },
+          body: JSON.stringify({ action: 'approve', plan_id: planId }),
         });
         const data = await res.json();
 
@@ -929,7 +1630,7 @@ export default function Chat() {
           }, { onConflict: 'id' });
 
           if (insertErr) {
-            Alert.alert('Could not save plan', insertErr.message);
+            window.alert(`Could not save plan: ${insertErr.message}`);
             setSavingPlan(null);
             return;
           }
@@ -946,7 +1647,7 @@ export default function Chat() {
         });
 
         if (insertErr) {
-          Alert.alert('Could not save plan', insertErr.message);
+          window.alert(`Could not save plan: ${insertErr.message}`);
           setSavingPlan(null);
           return;
         }
@@ -960,7 +1661,7 @@ export default function Chat() {
       setMessages(updated);
       persistMessages(updated);
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Something went wrong.');
+      window.alert(err?.message || 'Something went wrong.');
     }
 
     setSavingPlan(null);
@@ -969,6 +1670,7 @@ export default function Chat() {
   // ── Handle plan dismissal (via server API) ──
 
   const handleDismissPlan = async (msgIndex: number, actionIndex: number) => {
+    trackEvent('Plan Dismissed From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action) return;
@@ -987,10 +1689,11 @@ export default function Chat() {
     // Dismiss server-side if we have a plan ID
     if (planId && uid) {
       try {
+        const { data: { session: dismissSess } } = await supabase.auth.getSession();
         await fetch('/api/plans', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'dismiss', plan_id: planId, user_id: uid }),
+          headers: { 'Content-Type': 'application/json', ...(dismissSess?.access_token ? { Authorization: `Bearer ${dismissSess.access_token}` } : {}) },
+          body: JSON.stringify({ action: 'dismiss', plan_id: planId }),
         });
       } catch {
         // Non-critical — still update UI
@@ -1005,9 +1708,112 @@ export default function Chat() {
     persistMessages(updated);
   };
 
+  // ── Handle plan deletion (remove an already-approved plan) ──
+
+  const handleDeletePlan = (msgIndex: number, actionIndex: number) => {
+    trackEvent('Plan Deleted From Chat');
+    const msg = messages[msgIndex];
+    const action = msg?.actions?.[actionIndex];
+    if (!action || action.type !== 'plan_proposed' || action.status !== 'approved') return;
+
+    const doDelete = async () => {
+      const planId = action.data.id;
+      let uid = userId;
+      if (!uid) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          uid = user?.id || null;
+        } catch {
+          uid = null;
+        }
+      }
+
+      if (planId && uid) {
+        try {
+          const { data: { session: delSess } } = await supabase.auth.getSession();
+          const res = await fetch('/api/plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(delSess?.access_token ? { Authorization: `Bearer ${delSess.access_token}` } : {}) },
+            body: JSON.stringify({ action: 'delete', plan_id: planId }),
+          });
+          if (!res.ok) throw new Error('API delete failed');
+        } catch {
+          // Fallback: delete directly via Supabase client (works on native)
+          try {
+            await supabase.from('user_plans').delete().eq('id', planId).eq('user_id', uid);
+          } catch {
+            // Non-critical — still update UI
+          }
+        }
+      }
+
+      const updated = [...messages];
+      const updatedActions = [...(updated[msgIndex].actions || [])];
+      updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'deleted' };
+      updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+      setMessages(updated);
+      persistMessages(updated);
+    };
+
+    const ok = window.confirm('Remove this plan?\n\nIt will be removed from your active plans.');
+    if (ok) doDelete();
+  };
+
+  // ── Handle budget item deletion ──
+
+  const handleDeleteBudgetItem = (msgIndex: number, actionIndex: number) => {
+    trackEvent('Budget Item Deleted From Chat');
+    const msg = messages[msgIndex];
+    const action = msg?.actions?.[actionIndex];
+    if (!action || action.type !== 'budget_item_saved') return;
+
+    const doDelete = async () => {
+      const itemId = action.data.id;
+      let uid = userId;
+      if (!uid) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          uid = user?.id || null;
+        } catch {
+          uid = null;
+        }
+      }
+
+      if (itemId && uid) {
+        try {
+          const { data: { session: budgetSess } } = await supabase.auth.getSession();
+          await fetch('/api/plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(budgetSess?.access_token ? { Authorization: `Bearer ${budgetSess.access_token}` } : {}) },
+            body: JSON.stringify({ action: 'delete_budget_item', budget_item_id: itemId }),
+          });
+        } catch {
+          // Non-critical — still update UI
+        }
+
+        // Invalidate sync cache and re-sync so the budget reflects the deletion
+        invalidateSyncCache();
+        requestSync(uid, true).then((syncResult) => {
+          if (syncResult?.analysis) setAnalysis(syncResult.analysis);
+        }).catch(() => {});
+      }
+
+      const updated = [...messages];
+      const updatedActions = [...(updated[msgIndex].actions || [])];
+      updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'deleted' };
+      updated[msgIndex] = { ...updated[msgIndex], actions: updatedActions };
+      setMessages(updated);
+      persistMessages(updated);
+    };
+
+    const ok = window.confirm('Remove this budget item?\n\nIt will be removed from your budget.');
+    if (ok) doDelete();
+  };
+
   // ── Handle goal update acceptance ──
 
   const handleAcceptGoalUpdate = async (msgIndex: number, actionIndex: number) => {
+    trackEvent('Goals Updated From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'goal_update_proposed') return;
@@ -1017,13 +1823,13 @@ export default function Chat() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          Alert.alert('Not signed in', 'Please sign in to update goals.');
+          window.alert('Please sign in to update goals.');
           return;
         }
         uid = user.id;
         setUserId(uid);
       } catch {
-        Alert.alert('Error', 'Could not verify sign-in. Please try again.');
+        window.alert('Could not verify sign-in. Please try again.');
         return;
       }
     }
@@ -1032,11 +1838,11 @@ export default function Chat() {
     setSavingPlan(key);
 
     try {
+      const { data: { session: goalSess } } = await supabase.auth.getSession();
       const res = await fetch('/api/goals/update', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(goalSess?.access_token ? { Authorization: `Bearer ${goalSess.access_token}` } : {}) },
         body: JSON.stringify({
-          user_id: uid,
           current_situation: action.data.new_situation,
           one_year_goal: action.data.new_one_year_goal,
           two_year_goal: action.data.new_two_year_goal,
@@ -1046,7 +1852,7 @@ export default function Chat() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        Alert.alert('Could not update goals', data.error || 'Unknown error');
+        window.alert(data.error || 'Could not update goals.');
         setSavingPlan(null);
         return;
       }
@@ -1066,13 +1872,14 @@ export default function Chat() {
       setMessages(updated);
       persistMessages(updated);
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Something went wrong.');
+      window.alert(err?.message || 'Something went wrong.');
     }
 
     setSavingPlan(null);
   };
 
   const handleKeepGoals = (msgIndex: number, actionIndex: number) => {
+    trackEvent('Goals Kept From Chat');
     const updated = [...messages];
     const updatedActions = [...(updated[msgIndex].actions || [])];
     updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'dismissed' };
@@ -1083,14 +1890,10 @@ export default function Chat() {
 
   // ── Send message (with streaming + fallback) ──
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, _source: 'text' | 'voice' | 'suggestion' = 'text') => {
     if (!text.trim() || loading) return;
-
-    // Gate free users after they've used their teaser messages
-    if (!isPro && messages.filter((m) => m.role === 'user').length >= FREE_MESSAGE_LIMIT) {
-      setShowPaywall(true);
-      return;
-    }
+    hapticLight();
+    trackEvent('Chat Message Sent', { source: _source });
 
     const userMsg: ChatMessage = { role: 'user', content: text.trim() };
     const newMessages = [...messages, userMsg];
@@ -1100,26 +1903,56 @@ export default function Chat() {
     setLoading(true);
     setError(null);
 
+    // Dismiss the payday banner permanently for this pay event
+    if (hasPaydayContext && !paydayDismissed) {
+      setPaydayDismissed(true);
+      const fp = paydayFingerprint(context.payday_context);
+      AsyncStorage.setItem('dismiss:chat:payday', fp).catch(() => {});
+    }
+
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
+    let responseText = '';
+    let hadError = false;
     try {
       // ── Try streaming first ──
-      const streamSuccess = await tryStream(newMessages);
-      if (!streamSuccess) {
+      responseText = await tryStream(newMessages);
+      if (!responseText) {
         // ── Fall back to standard request ──
-        await standardRequest(newMessages);
+        responseText = await standardRequest(newMessages);
       }
     } catch {
+      hadError = true;
       setError('Connection error. Please check your internet and try again.');
-      const errorMsg: ChatMessage = { role: 'assistant', content: 'Sorry, something went wrong.' };
-      setMessages([...newMessages, errorMsg]);
+    }
+
+    // If both paths failed to produce a response, show an error message
+    if (!responseText && !hadError) {
+      const fallbackMsg: ChatMessage = { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' };
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        // Replace empty assistant bubble if one exists
+        if (last?.role === 'assistant' && !last.content?.trim()) {
+          return [...prev.slice(0, -1), fallbackMsg];
+        }
+        if (last?.role === 'user') {
+          return [...prev, fallbackMsg];
+        }
+        return prev;
+      });
     }
 
     setLoading(false);
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+
+    // ── Voice response: speak the AI's reply if triggered by voice input ──
+    if (pendingVoiceResponseRef.current && responseText) {
+      pendingVoiceResponseRef.current = false;
+      speakResponseRef.current(responseText);
+    }
   };
 
-  const tryStream = async (newMessages: ChatMessage[]): Promise<boolean> => {
+  const tryStream = async (newMessages: ChatMessage[]): Promise<string> => {
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -1127,7 +1960,7 @@ export default function Chat() {
         body: JSON.stringify({ messages: newMessages, context, stream: true, user_id: userId }),
       });
 
-      if (!res.ok || !res.body) return false;
+      if (!res.ok || !res.body) return '';
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -1152,12 +1985,21 @@ export default function Chat() {
             const event = JSON.parse(raw);
             if (event.error) {
               setError(event.error);
-              return false;
+              // If we already have partial text, keep it rather than discarding
+              if (fullText) break;
+              return '';
             }
             if (event.t) {
               fullText += event.t;
-              const streamMsg: ChatMessage = { role: 'assistant', content: fullText };
-              setMessages([...newMessages, streamMsg]);
+              const streamContent = fullText;
+              setMessages((prev) => {
+                // Replace the last assistant message if streaming, otherwise append
+                const last = prev[prev.length - 1];
+                if (last?.role === 'assistant' && prev.length === newMessages.length + 1) {
+                  return [...prev.slice(0, -1), { ...last, content: streamContent }];
+                }
+                return [...prev, { role: 'assistant', content: streamContent }];
+              });
               scrollRef.current?.scrollToEnd({ animated: false });
             }
             // Collect action events from tool execution
@@ -1174,26 +2016,44 @@ export default function Chat() {
         }
       }
 
+      // Process remaining buffer (stream may not end with newline)
+      if (buffer.startsWith('data: ')) {
+        const raw = buffer.slice(6).trim();
+        if (raw && raw !== '[DONE]') {
+          try {
+            const event = JSON.parse(raw);
+            if (event.t) fullText += event.t;
+            if (event.action) {
+              collectedActions.push({
+                type: event.action.type,
+                data: event.action.data,
+                status: (event.action.type === 'goal_update_proposed' || event.action.type === 'plan_proposed') ? 'pending' : undefined,
+              });
+            }
+          } catch {}
+        }
+      }
+
       if (fullText || collectedActions.length > 0) {
         const assistantMsg: ChatMessage = {
           role: 'assistant',
-          content: fullText || '',
+          content: fullText || (collectedActions.length > 0 ? 'Done.' : ''),
           actions: collectedActions.length > 0 ? collectedActions : undefined,
         };
         const final: ChatMessage[] = [...newMessages, assistantMsg];
         setMessages(final);
         persistMessages(final);
-        return true;
+        return fullText || assistantMsg.content;
       }
 
-      return false;
+      return '';
     } catch {
       // Streaming not supported (e.g. React Native on device) — fall back
-      return false;
+      return '';
     }
   };
 
-  const standardRequest = async (newMessages: ChatMessage[]) => {
+  const standardRequest = async (newMessages: ChatMessage[]): Promise<string> => {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1219,16 +2079,19 @@ export default function Chat() {
       const final: ChatMessage[] = [...newMessages, assistantMsg];
       setMessages(final);
       persistMessages(final);
+      return data.text;
     } else {
       setError(data.error || 'Failed to get response');
       const errorMsg: ChatMessage = { role: 'assistant', content: 'Sorry, I couldn\'t process that. Please try again.' };
       setMessages([...newMessages, errorMsg]);
+      return '';
     }
   };
 
   // ── Retry last failed message ──
 
   const retryLastMessage = () => {
+    trackEvent('Chat Message Retried');
     setError(null);
     // Remove the failed assistant message, re-send the last user message
     const withoutLastAssistant = messages.slice(0, -1);
@@ -1242,6 +2105,11 @@ export default function Chat() {
   // ── Clear conversation ──
 
   const clearChat = async () => {
+    trackEvent('Chat Cleared');
+    stopSpeechRef.current?.();
+    stopSpeaking();
+    setSpeakingMsgIdx(null);
+    pendingVoiceResponseRef.current = false;
     setMessages([]);
     setError(null);
     try {
@@ -1254,35 +2122,38 @@ export default function Chat() {
     }
   };
 
-  const paydayActive = !!context.payday_context?.incomeArrivedThisWeek;
-  const suggestedQuestions = getContextualQuestions(analysis, goals, paydayActive);
+  const hasPaydayContext = !!context.payday_context?.incomeArrivedThisWeek;
+  // Only show the payday banner when the user hasn't engaged yet and hasn't dismissed it
+  const hasUserMessage = messages.some((m) => m.role === 'user');
+  const paydayActive = hasPaydayContext && !hasUserMessage && !paydayDismissed;
+  const suggestedQuestions = getContextualQuestions(analysis, goals, paydayActive, context.payday_context);
 
-  // ── Free tier: count user messages for gate ──
-  const userMessageCount = messages.filter((m) => m.role === 'user').length;
-  const freeGateReached = !isPro && userMessageCount >= FREE_MESSAGE_LIMIT;
-  const freeMessagesRemaining = isPro ? Infinity : Math.max(0, FREE_MESSAGE_LIMIT - userMessageCount);
+  const isEmptyState = messages.length === 0 || (messages.length === 1 && messages[0].role === 'assistant' && paydayActive);
 
   return (
     <KeyboardAvoidingView
       style={s.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={undefined}
       keyboardVerticalOffset={90}
+      testID="chat-screen"
     >
-      {/* ── Header ── */}
-      {messages.length > 0 && (
-        <View style={[s.header, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-          <View style={s.headerLeftChat}>
-            <View style={s.chatBocyWrap}>
-              <BocyFace mood={getBocyMood(analysis)} size="sm" breathing />
-            </View>
-            <Text style={s.headerTitle}>Bocy</Text>
-            {loading && <ActivityIndicator size="small" color={colors.dim} style={{ marginLeft: 6 }} />}
+      {/* ── Header (always visible to prevent layout shift) ── */}
+      <View style={[s.header, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
+        <View style={s.headerLeftChat}>
+          <View style={s.chatBocyWrap}>
+            <BocyFace mood={getChatMood(messages[messages.length - 1]?.role === 'assistant' ? messages[messages.length - 1]?.content : undefined, getBocyMood(analysis), loading)} size="sm" breathing />
           </View>
+          <Text style={s.headerTitle}>Bocy</Text>
+          {loading && <ActivityIndicator size="small" color={colors.dim} style={{ marginLeft: 6 }} />}
+        </View>
+        {messages.length > 0 ? (
           <TouchableOpacity onPress={clearChat} style={s.clearButton} activeOpacity={0.7}>
             <Text style={s.clearText}>New chat</Text>
           </TouchableOpacity>
-        </View>
-      )}
+        ) : (
+          <View />
+        )}
+      </View>
 
       {/* ── Messages ── */}
       <ScrollView
@@ -1290,41 +2161,144 @@ export default function Chat() {
         style={s.messages}
         contentContainerStyle={[
           s.messagesContent,
+          isEmptyState && s.messagesContentEmpty,
           isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' },
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Show suggestions when empty OR when only the payday auto-nudge is present */}
-        {(messages.length === 0 || (messages.length === 1 && messages[0].role === 'assistant' && paydayActive)) && (
-          <View style={s.suggestedContainer}>
-            {messages.length === 0 && (
-              <>
-                <View style={s.chatBocyHero}>
-                  <BocyFace mood={getBocyMood(analysis)} size="lg" breathing />
+        {/* ── Voice-first empty state ── */}
+        {isEmptyState && (
+          <View style={s.voiceHeroContainer}>
+            {/* Payday auto-nudge message if present */}
+            {messages.length === 1 && messages[0].role === 'assistant' && (
+              <FadeInView>
+                <View style={[s.bubble, s.assistantBubble, { marginBottom: spacing.lg, alignSelf: 'center', maxWidth: '90%' }]}>
+                  <Markdown>{messages[0].content}</Markdown>
                 </View>
-                <Text style={s.suggestedTitle}>{paydayActive ? 'Payday check-in' : 'Hey, what\u2019s up?'}</Text>
-                <Text style={s.suggestedSubtitle}>{paydayActive ? 'Let\u2019s make your money work' : 'I\u2019ve got your numbers. Let\u2019s talk money.'}</Text>
-              </>
+              </FadeInView>
             )}
-            <View style={[s.suggestedGrid, isTablet && { flexDirection: 'row' as const, flexWrap: 'wrap' as const, gap: 12 }]}>
-              {suggestedQuestions.map((q, i) => (
+
+            {/* Center content: orb + hint */}
+            <View style={s.voiceHeroCenter}>
+              <View style={s.voiceHeroTop}>
+                {(paydayActive || listening || voiceState !== 'idle') && (
+                  <Text style={s.voiceHeroTitle}>
+                    {paydayActive ? 'Payday check-in'
+                      : voiceState === 'processing' ? 'Processing\u2026'
+                      : voiceState === 'thinking' ? 'Thinking\u2026'
+                      : voiceState === 'speaking' ? 'Bocy is speaking'
+                      : 'Listening\u2026'}
+                  </Text>
+                )}
+                <Text style={s.voiceHeroSubtitle}>
+                  {voiceStateLabel
+                    ? voiceStateLabel
+                    : listening
+                      ? 'Speak naturally. I\u2019ll send when you\u2019re done.'
+                      : paydayActive
+                        ? 'Tap to speak, or pick a question below'
+                        : 'Tap the mic \u2022 ask anything'}
+                </Text>
+              </View>
+
+              {/* Voice Orb — the hero CTA */}
+              <VoiceOrb
+                listening={listening || voiceState === 'processing' || voiceState === 'thinking' || voiceState === 'speaking'}
+                onPress={voiceSupported ? toggleVoice : () => { trackEvent('Text Input Toggled'); setShowTextInput(true); setTimeout(() => inputRef.current?.focus(), 100); }}
+                disabled={loading && voiceState === 'idle'}
+              />
+
+              {/* Waveform visualiser + live transcript */}
+              <VoiceWaveform active={listening} />
+              {listening && input.trim() !== '' && (
+                <FadeInView>
+                  <Text style={s.liveTranscript}>{input.replace(/\u200B/g, '')}</Text>
+                </FadeInView>
+              )}
+
+              {/* Type-instead toggle */}
+              {!listening && (
                 <TouchableOpacity
-                  key={i}
-                  style={[s.suggestedButton, isTablet && { flexBasis: '48%' as any, flexGrow: 1 }]}
-                  onPress={() => sendMessage(q)}
+                  style={s.typeToggle}
+                  onPress={() => { trackEvent('Text Input Toggled'); setShowTextInput(!showTextInput); if (!showTextInput) setTimeout(() => inputRef.current?.focus(), 100); }}
                   activeOpacity={0.7}
                 >
-                  <Text style={s.suggestedText}>{q}</Text>
+                  <Text style={s.typeToggleText}>{showTextInput ? 'Hide keyboard' : 'Type instead'}</Text>
                 </TouchableOpacity>
-              ))}
+              )}
+
+              {/* Inline text input (secondary, shown on demand) */}
+              {showTextInput && !listening && (
+                <FadeInView>
+                  <View style={s.inlineInputRow}>
+                    <TextInput
+                      ref={inputRef}
+                      style={[s.inlineInput, { height: Math.max(40, Math.min(inputHeight, 100)) }]}
+                      placeholder="Type your question..."
+                      placeholderTextColor={colors.muted}
+                      value={input}
+                      onChangeText={setInput}
+                      onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+                      onSubmitEditing={() => sendMessage(input)}
+                      returnKeyType="send"
+                      multiline
+                      maxLength={1000}
+                      blurOnSubmit
+                      testID="chat-message-input"
+                      accessibilityLabel="Type your question"
+                    />
+                    {input.trim() ? (
+                      <TouchableOpacity
+                        style={[s.inlineSendBtn, loading && { opacity: 0.3 }]}
+                        onPress={() => sendMessage(input)}
+                        disabled={loading}
+                        activeOpacity={0.7}
+                        testID="chat-send-button"
+                        accessibilityRole="button"
+                        accessibilityLabel="Send message"
+                      >
+                        <Text style={s.inlineSendIcon}>{'\u2191'}</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </FadeInView>
+              )}
             </View>
+
+            {/* ── Horizontal suggestion pills (pinned at bottom) ── */}
+            {!listening && (
+              <View style={s.suggestedContainer}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={s.suggestedScroll}
+                >
+                  {suggestedQuestions.map((q, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={s.suggestedChip}
+                      onPress={() => { trackEvent('Suggested Question Tapped', { question: q }); sendMessage(q, 'suggestion'); }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={s.suggestedChipText}>{q}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
           </View>
         )}
 
-        {messages.map((msg, i) => {
+        {/* ── Conversation messages ── */}
+        {!isEmptyState && messages.map((msg, i) => {
           const isAssistant = msg.role === 'assistant';
           const isLast = i === messages.length - 1;
           const showLabel = isAssistant && (i === 0 || messages[i - 1]?.role !== 'assistant');
+
+          // Split long assistant messages into multiple bubbles (like real texts)
+          const bubbleChunks = isAssistant && !loading
+            ? splitIntoBubbles(msg.content)
+            : (msg.content ? [msg.content] : []);
 
           const bubble = (
             <View key={i}>
@@ -1334,18 +2308,41 @@ export default function Chat() {
                   <Text style={s.bocyLabel}>bocy</Text>
                 </View>
               )}
-              <View
-                style={[
-                  s.bubble,
-                  msg.role === 'user' ? s.userBubble : s.assistantBubble,
-                ]}
-              >
-                {msg.role === 'user' ? (
+
+              {msg.role === 'user' ? (
+                <View style={[s.bubble, s.userBubble]}>
                   <Text style={[s.bubbleText, s.userText]}>{msg.content}</Text>
-                ) : (
-                  <Markdown>{msg.content}</Markdown>
-                )}
-              </View>
+                </View>
+              ) : (
+                <>
+                  {bubbleChunks.map((chunk, ci) => {
+                    const useTypewriter = isLast && !loading;
+                    const isGifChunk = /^!\[.*?\]\(https?:\/\/[^\s)]+\)\s*$/.test(chunk.trim());
+                    return (
+                      <FadeInView key={`${i}-chunk-${ci}`} delay={ci * 300}>
+                        <View style={[s.bubble, s.assistantBubble, ci > 0 && { marginTop: 4 }, isGifChunk && s.gifBubble]}>
+                          {useTypewriter
+                            ? <TypewriterText text={chunk} style={s.bubbleText} delay={ci * 300} />
+                            : <Markdown>{chunk}</Markdown>
+                          }
+                        </View>
+                      </FadeInView>
+                    );
+                  })}
+                  {/* Voice response button */}
+                  {ttsSupported && msg.content && !loading && (
+                    <TouchableOpacity
+                      style={s.ttsButton}
+                      onPress={() => handleSpeak(i, msg.content)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[s.ttsButtonText, speakingMsgIdx === i && s.ttsButtonActive]}>
+                        {speakingMsgIdx === i ? '\u25A0 Stop' : '\u266A Listen'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
 
               {/* Render action cards below assistant messages */}
               {msg.actions?.map((action, j) => (
@@ -1355,6 +2352,7 @@ export default function Chat() {
                       action={action}
                       onApprove={() => handleApprovePlan(i, j)}
                       onDismiss={() => handleDismissPlan(i, j)}
+                      onDelete={() => handleDeletePlan(i, j)}
                       saving={savingPlan === `${i}-${j}`}
                     />
                   ) : action.type === 'plan_error' ? (
@@ -1368,7 +2366,7 @@ export default function Chat() {
                   ) : action.type === 'override_saved' ? (
                     <OverrideCard action={action} />
                   ) : action.type === 'budget_item_saved' ? (
-                    <BudgetItemCard action={action} />
+                    <BudgetItemCard action={action} onDelete={() => handleDeleteBudgetItem(i, j)} />
                   ) : action.type === 'goal_update_proposed' ? (
                     <GoalUpdateCard
                       action={action}
@@ -1399,14 +2397,14 @@ export default function Chat() {
         )}
 
         {/* Follow-up suggestion chips after last assistant response */}
-        {!loading && !error && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
+        {!isEmptyState && !loading && !error && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
           <View style={s.followUpContainer}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.followUpScroll}>
               {suggestedQuestions.slice(0, 3).map((q, qi) => (
                 <TouchableOpacity
                   key={qi}
                   style={s.followUpChip}
-                  onPress={() => sendMessage(q)}
+                  onPress={() => { trackEvent('Suggested Question Tapped', { question: q }); sendMessage(q, 'suggestion'); }}
                   activeOpacity={0.7}
                 >
                   <Text style={s.followUpChipText}>{q}</Text>
@@ -1417,74 +2415,78 @@ export default function Chat() {
         )}
       </ScrollView>
 
-      {/* ── Input / Gate ── */}
-      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} feature="chat" />
-      {freeGateReached ? (
-        <View style={[s.gateRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-          <Text style={s.gateText}>You've used your {FREE_MESSAGE_LIMIT} free messages</Text>
-          <TouchableOpacity
-            style={s.gateBtn}
-            onPress={() => setShowPaywall(true)}
-            activeOpacity={0.8}
-          >
-            <Text style={s.gateBtnText}>Unlock unlimited chat</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
+      {/* ── Input (only shown in conversation mode, not empty state) ── */}
+      {!isEmptyState && (
         <>
-          {!isPro && userMessageCount > 0 && (
-            <View style={[s.freeBadgeRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-              <Text style={s.freeBadgeText}>
-                {freeMessagesRemaining} of {FREE_MESSAGE_LIMIT} free {freeMessagesRemaining === 1 ? 'message' : 'messages'} left
-              </Text>
-            </View>
-          )}
-          <View style={[s.inputRow, !isPro && userMessageCount > 0 && { borderTopWidth: 0 }, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
-            <TextInput
-              ref={inputRef}
-              style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
-              placeholder={listening ? 'Listening...' : 'Ask me anything...'}
-              placeholderTextColor={listening ? colors.green : colors.muted}
-              value={input}
-              onChangeText={setInput}
-              onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
-              onSubmitEditing={() => sendMessage(input)}
-              returnKeyType="send"
-              multiline
-              maxLength={1000}
-              blurOnSubmit
-            />
-            <PulseButton trigger={input.trim() ? 'send' : listening ? 'listening' : 'voice'}>
-              {input.trim() ? (
-                <TouchableOpacity
-                  style={[s.actionButton, loading && s.actionButtonDisabled]}
-                  onPress={() => sendMessage(input)}
-                  disabled={loading}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.actionButtonIcon}>{'\u2191'}</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  style={[s.actionButton, listening && s.actionButtonListening]}
-                  onPress={voiceSupported ? toggleVoice : undefined}
-                  activeOpacity={0.7}
-                  disabled={!voiceSupported}
-                >
-                  <View style={s.glyphRing}>
-                    {listening ? (
+              {/* Voice-first input bar: mic button prominent, text secondary */}
+              <View style={[s.voiceInputRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
+                <TextInput
+                  ref={inputRef}
+                  style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
+                  placeholder={
+                    listening ? 'Listening...'
+                    : voiceState === 'processing' ? 'Transcribing...'
+                    : voiceState === 'thinking' ? 'Thinking...'
+                    : voiceState === 'speaking' ? 'Speaking...'
+                    : 'Type or tap mic...'
+                  }
+                  placeholderTextColor={
+                    listening || voiceState === 'speaking' ? colors.green
+                    : voiceState === 'processing' || voiceState === 'thinking' ? colors.accent
+                    : colors.muted
+                  }
+                  value={input}
+                  onChangeText={setInput}
+                  onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+                  onSubmitEditing={() => sendMessage(input)}
+                  returnKeyType="send"
+                  multiline
+                  maxLength={1000}
+                  blurOnSubmit
+                  testID="chat-conversation-input"
+                  accessibilityLabel="Type or tap mic"
+                />
+                {/* Waveform in input bar when listening */}
+                {listening && <VoiceWaveform active={listening} />}
+                <PulseButton trigger={input.trim() ? 'send' : listening ? 'listening' : voiceState === 'speaking' ? 'listening' : 'voice'}>
+                  {input.trim() ? (
+                    <TouchableOpacity
+                      style={[s.actionButton, loading && s.actionButtonDisabled]}
+                      onPress={() => sendMessage(input)}
+                      disabled={loading}
+                      activeOpacity={0.7}
+                      testID="chat-conversation-send-button"
+                      accessibilityRole="button"
+                      accessibilityLabel="Send message"
+                    >
+                      <Text style={s.actionButtonIcon}>{'\u2191'}</Text>
+                    </TouchableOpacity>
+                  ) : voiceState === 'speaking' ? (
+                    <TouchableOpacity
+                      style={[s.voiceInputOrb, s.voiceInputOrbListening]}
+                      onPress={stopSpeaking}
+                      activeOpacity={0.7}
+                    >
                       <View style={s.glyphStop} />
-                    ) : (
-                      <View style={s.glyphMic}>
-                        <View style={s.glyphMicHead} />
-                        <View style={s.glyphMicStem} />
-                      </View>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              )}
-            </PulseButton>
-          </View>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[s.voiceInputOrb, listening && s.voiceInputOrbListening]}
+                      onPress={voiceSupported ? toggleVoice : undefined}
+                      activeOpacity={0.7}
+                      disabled={!voiceSupported || voiceState === 'processing' || voiceState === 'thinking'}
+                    >
+                      {listening ? (
+                        <View style={s.glyphStop} />
+                      ) : voiceState === 'processing' || voiceState === 'thinking' ? (
+                        <ActivityIndicator size="small" color={colors.bg} />
+                      ) : (
+                        <DotMic dotSize={2.5} gap={1.5} color={colors.bg} />
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </PulseButton>
+              </View>
         </>
       )}
     </KeyboardAvoidingView>
@@ -1596,6 +2598,7 @@ function analysisToProfile(a: Analysis): FinancialProfile | null {
       discretionary: a.discretionary ?? { total: 0, items: [] },
     },
     incomeSources: a.income_sources ?? [],
+    transfers: [],
     subscriptions: [],
     metrics: {
       savingsRate: a.monthly_income > 0 ? ((a.surplus ?? 0) / a.monthly_income) * 100 : 0,
@@ -1624,7 +2627,10 @@ function buildHouseholdCashflow(
   if (!a || !identity || !a.monthly_income) return null;
   // Only add household cashflow for non-single households or users with upcoming events
   const household = identity.household || 'single';
-  const hasEvents = identity.upcoming_events?.some((e: string) => e !== 'none');
+  const hasEvents = identity.upcoming_events?.some((e: any) => {
+    const evtType = typeof e === 'string' ? e : e?.type || '';
+    return evtType !== 'none';
+  });
   const hasDeps = identity.dependents?.some((d: string) => d !== 'none');
   if (household === 'single' && !hasEvents && !hasDeps) return null;
 
@@ -1650,30 +2656,31 @@ function buildHouseholdCashflow(
 }
 
 // ── Styles ──
+// Nothing Phone OS aesthetic: dot-matrix glyphs, monochrome, geometric minimalism.
 
 const createStyles = (c: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: c.bg,
   },
+  // ── Header — clean, borderless, floating ──
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.lg,
     paddingTop: spacing.xxl + spacing.sm,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: c.border,
+    paddingBottom: 12,
+    borderBottomWidth: 0,
   },
   headerLeftChat: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   chatBocyWrap: {
-    width: 26,
-    height: 26,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1681,70 +2688,202 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     marginBottom: spacing.md,
   },
   headerTitle: {
-    fontFamily: fonts.semibold,
-    fontSize: 16,
-    color: c.text,
+    fontFamily: fonts.mono,
+    fontSize: 13,
+    color: c.dim,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   clearButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: 5,
+    paddingHorizontal: 14,
     borderRadius: 100,
-    backgroundColor: c.accentDim,
+    borderWidth: 1,
+    borderColor: c.border,
+    backgroundColor: 'transparent',
   },
   clearText: {
-    fontFamily: fonts.medium,
-    fontSize: 12,
-    color: c.text2,
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.dim,
+    letterSpacing: 0.5,
   },
   messages: {
     flex: 1,
   },
   messagesContent: {
-    padding: spacing.lg,
-    paddingTop: spacing.xxl + spacing.lg,
-    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
   },
-  suggestedContainer: {
-    marginTop: spacing.xxl,
+  messagesContentEmpty: {
+    flexGrow: 1,
+  },
+  // ── Voice-first hero (empty state) — flex layout for bottom pinning ──
+  voiceHeroContainer: {
+    flex: 1,
     alignItems: 'center',
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'flex-end',
   },
-  suggestedTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 24,
+  voiceHeroCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  voiceHeroTop: {
+    alignItems: 'center',
+    marginBottom: spacing.xl + spacing.sm,
+  },
+  voiceHeroTitle: {
+    fontFamily: fonts.mono,
+    fontSize: 22,
+    color: c.text,
+    textAlign: 'center',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  voiceHeroSubtitle: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: c.muted,
+    marginTop: 10,
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 260,
+    letterSpacing: 0.3,
+  },
+  // ── Voice Orb — dot-matrix ring with inner glyph ──
+  voiceOrbContainer: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
+  voiceOrb: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: c.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  voiceOrbListening: {
+    backgroundColor: c.green,
+  },
+  voiceOrbStop: {
+    width: 18,
+    height: 18,
+    borderRadius: 3,
+    backgroundColor: c.bg,
+  },
+  // ── Waveform visualiser — pulsing dots ──
+  waveformRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    height: 28,
+    marginBottom: spacing.sm,
+  },
+  waveformDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: c.green,
+  },
+  // ── Live transcript ──
+  liveTranscript: {
+    fontFamily: fonts.regular,
+    fontSize: 15,
+    color: c.text2,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    lineHeight: 22,
+  },
+  // ── Type-instead toggle ──
+  typeToggle: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  typeToggleText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.muted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  // ── Inline text input (empty state) ──
+  inlineInputRow: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 10,
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  inlineInput: {
+    flex: 1,
+    fontFamily: fonts.regular,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 24,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.md,
+    fontSize: 15,
     color: c.text,
   },
-  suggestedSubtitle: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
-    color: c.dim,
-    marginBottom: spacing.lg,
-    marginTop: 8,
+  inlineSendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: c.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  suggestedGrid: {
+  inlineSendIcon: {
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    color: c.bg,
+    marginTop: -1,
+  },
+  // ── Horizontal suggestion pills (pinned at bottom of empty state) ──
+  suggestedContainer: {
     width: '100%',
-    gap: spacing.md,
+    paddingBottom: spacing.lg,
+    paddingTop: spacing.md,
   },
-  suggestedButton: {
-    backgroundColor: c.surface,
+  suggestedScroll: {
+    gap: 10,
+    paddingHorizontal: spacing.sm,
+  },
+  suggestedChip: {
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 100,
-    paddingVertical: 14,
-    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    backgroundColor: 'transparent',
   },
-  suggestedText: {
-    fontFamily: fonts.medium,
-    fontSize: 13,
+  suggestedChipText: {
+    fontFamily: fonts.mono,
+    fontSize: 12,
     color: c.text2,
-    textAlign: 'center',
+    letterSpacing: 0.3,
   },
+  // ── Chat bubbles — sleek, minimal ──
   bubble: {
     maxWidth: '80%',
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 20,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   userBubble: {
     backgroundColor: c.accent,
@@ -1752,8 +2891,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderBottomRightRadius: 4,
   },
   assistantBubble: {
-    backgroundColor: c.surface,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
     borderColor: c.border,
     alignSelf: 'flex-start',
     borderBottomLeftRadius: 4,
@@ -1761,10 +2900,17 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderTopRightRadius: 18,
     borderBottomRightRadius: 18,
   },
+  gifBubble: {
+    width: '80%',
+    maxWidth: '80%',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+    overflow: 'hidden' as const,
+  },
   bubbleText: {
     fontFamily: fonts.regular,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 15,
+    lineHeight: 23,
   },
   userText: {
     color: c.bg,
@@ -1773,21 +2919,21 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   dotsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     paddingVertical: 2,
     paddingHorizontal: 2,
   },
   dot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: c.green,
   },
   // ── Action cards ──
   actionCardWrapper: {
     alignSelf: 'flex-start',
     maxWidth: '85%',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   errorCardText: {
     fontFamily: fonts.medium,
@@ -1796,11 +2942,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     lineHeight: 20,
   },
   actionCardLabel: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.mono,
     fontSize: 10,
-    letterSpacing: 1,
-    color: c.accent,
+    letterSpacing: 1.5,
+    color: c.dim,
     marginBottom: spacing.xs,
+    textTransform: 'uppercase',
   },
   actionCardTitle: {
     fontFamily: fonts.semibold,
@@ -1823,10 +2970,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.accent,
   },
   actionStatLabel: {
-    fontFamily: fonts.regular,
-    fontSize: 11,
-    color: c.dim,
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.muted,
     marginTop: 2,
+    letterSpacing: 0.5,
   },
   actionCardButtons: {
     flexDirection: 'row',
@@ -1884,6 +3032,17 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 13,
     color: c.muted,
   },
+  removeLink: {
+    paddingTop: 8,
+    alignItems: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  removeLinkText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: c.coral,
+  },
   viewPlanBanner: {
     backgroundColor: c.accentDim,
     borderRadius: radius.sm,
@@ -1918,11 +3077,12 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   // ── Goal update card ──
   goalUpdateLabel: {
-    fontFamily: fonts.semibold,
+    fontFamily: fonts.mono,
     fontSize: 10,
-    letterSpacing: 1,
+    letterSpacing: 1.5,
     color: c.sky,
     marginBottom: spacing.xs,
+    textTransform: 'uppercase',
   },
   goalUpdateReason: {
     fontFamily: fonts.medium,
@@ -1972,8 +3132,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     color: c.coral,
     marginTop: spacing.xs,
   },
-  // ── Input row ──
-  inputRow: {
+  // ── Voice-first input bar (conversation mode) — sleek, borderless ──
+  voiceInputRow: {
     flexDirection: 'row',
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -1986,20 +3146,20 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   input: {
     flex: 1,
     fontFamily: fonts.regular,
-    backgroundColor: c.surface,
+    backgroundColor: 'transparent',
     borderWidth: 1,
     borderColor: c.border,
-    borderRadius: 22,
+    borderRadius: 24,
     paddingVertical: 10,
     paddingHorizontal: spacing.md,
-    fontSize: 14,
+    fontSize: 15,
     color: c.text,
   },
   // ── Unified action button (glyph style) ──
   actionButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: c.accent,
     justifyContent: 'center',
     alignItems: 'center',
@@ -2012,37 +3172,23 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   actionButtonIcon: {
     fontFamily: fonts.semibold,
-    fontSize: 20,
+    fontSize: 18,
     color: c.bg,
     marginTop: -1,
   },
-  // ── Glyph mic icon (Nothing Phone style) ──
-  glyphRing: {
-    width: 22,
-    height: 22,
+  // ── Voice input orb (conversation-mode mic button — dot glyph) ──
+  voiceInputOrb: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: c.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  glyphMic: {
-    alignItems: 'center',
+  voiceInputOrbListening: {
+    backgroundColor: c.green,
   },
-  glyphMicHead: {
-    width: 8,
-    height: 10,
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: c.bg,
-  },
-  glyphMicStem: {
-    width: 12,
-    height: 6,
-    borderBottomLeftRadius: 6,
-    borderBottomRightRadius: 6,
-    borderWidth: 1.5,
-    borderTopWidth: 0,
-    borderColor: c.bg,
-    marginTop: -1,
-  },
+  // ── Glyph stop icon ──
   glyphStop: {
     width: 10,
     height: 10,
@@ -2050,7 +3196,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     backgroundColor: c.bg,
   },
 
-  // ── Free tier gate (replaces input after limit reached) ──
+  // ── Free tier gate ──
   gateRow: {
     padding: spacing.md,
     paddingBottom: spacing.lg,
@@ -2098,23 +3244,45 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     marginBottom: 6,
-    marginTop: 14,
+    marginTop: 16,
   },
   bocyLabelDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: c.green,
   },
   bocyLabel: {
     fontFamily: fonts.mono,
     fontSize: 10,
-    color: c.dim,
-    letterSpacing: 1,
+    color: c.muted,
+    letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
 
-  // ── Follow-up suggestion chips ──
+  // ── TTS (voice response) button ──
+  ttsButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginTop: 4,
+    marginBottom: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: c.border,
+    backgroundColor: 'transparent',
+  },
+  ttsButtonText: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: c.muted,
+    letterSpacing: 0.5,
+  },
+  ttsButtonActive: {
+    color: c.green,
+  },
+
+  // ── Follow-up suggestion chips (horizontal, inline after messages) ──
   followUpContainer: {
     marginTop: spacing.md,
     marginBottom: spacing.sm,
@@ -2124,16 +3292,17 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 4,
   },
   followUpChip: {
-    backgroundColor: c.surface,
     borderWidth: 1,
     borderColor: c.border,
     borderRadius: 100,
     paddingVertical: 10,
     paddingHorizontal: 16,
+    backgroundColor: 'transparent',
   },
   followUpChipText: {
-    fontFamily: fonts.medium,
+    fontFamily: fonts.mono,
     fontSize: 12,
     color: c.text2,
+    letterSpacing: 0.2,
   },
 });

@@ -1,19 +1,18 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, Animated,
-  Alert, ActivityIndicator, LayoutAnimation, Platform, UIManager,
+  ActivityIndicator, LayoutAnimation,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen, setUserProperty } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { AnimGlyph } from '@/components/Card';
+import { hapticLight } from '@/lib/haptics';
 import type {
   WorkSetup, HouseholdType, HousingStatus, FinancialExperience,
-  RiskAppetite, Priority, UpcomingEvent, Dependent,
+  RiskAppetite, Priority, UpcomingEvent, UpcomingEventType, Dependent,
 } from '@/lib/types';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 const CARD_GAP = 10;
 
@@ -149,6 +148,7 @@ export default function Identity() {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const scrollRef = useRef<ScrollView>(null);
 
   // State for each screen's selection
   const [workSetup, setWorkSetup] = useState<string>('');
@@ -157,8 +157,12 @@ export default function Identity() {
   const [experience, setExperience] = useState<string>('');
   const [priorities, setPriorities] = useState<string[]>([]);
   const [events, setEvents] = useState<string[]>([]);
+  const [eventTimelines, setEventTimelines] = useState<Record<string, number | null>>({});
   const [risk, setRisk] = useState<string>('');
   const [dependents, setDependents] = useState<string[]>([]);
+
+  // Track page view on mount
+  useEffect(() => { trackScreen('Identity'); }, []);
 
   const selections = [workSetup, household, housing, experience, priorities, events, risk, dependents];
   const setters = [setWorkSetup, setHousehold, setHousing, setExperience, setPriorities, setEvents, setRisk, setDependents];
@@ -178,11 +182,16 @@ export default function Identity() {
   })();
 
   const handleSelect = (key: string) => {
+    // Animate layout when toggling timeline-eligible events
+    if (step === 5 && ['baby', 'moving', 'wedding'].includes(key)) {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    }
     if (isMulti) {
       const arr = currentValue as string[];
       const setter = setters[step] as React.Dispatch<React.SetStateAction<string[]>>;
       if (key === 'none') {
         // "None" clears other selections
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setter(['none']);
         return;
       }
@@ -220,6 +229,8 @@ export default function Identity() {
       saveAndContinue();
       return;
     }
+    const screenLabels = ['work_setup', 'household', 'housing', 'experience', 'priorities', 'events', 'risk', 'dependents'];
+    trackEvent('Identity Step Completed', { step: screenLabels[step], step_number: step + 1 });
     animateStep(step + 1);
   };
 
@@ -250,7 +261,10 @@ export default function Identity() {
           financial_experience: experience,
           risk_appetite: risk,
           priorities,
-          upcoming_events: events.filter((e) => e !== 'none'),
+          upcoming_events: events.filter((e) => e !== 'none').map((e) => {
+            const months = eventTimelines[e];
+            return months != null ? { type: e, months_away: months } : e;
+          }),
           dependents: dependents.filter((d) => d !== 'none'),
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
@@ -291,10 +305,22 @@ export default function Identity() {
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
       }
-      router.push('/(main)/install-app');
+      trackEvent('Identity Completed', {
+        work_setup: workSetup,
+        household,
+        housing,
+        financial_experience: experience,
+        risk_appetite: risk,
+      });
+      setUserProperty('work_setup', workSetup);
+      setUserProperty('household', household);
+      setUserProperty('housing', housing);
+      setUserProperty('financial_experience', experience);
+      setUserProperty('risk_appetite', risk);
+      router.push('/(main)/connect');
     } catch (err: any) {
       console.warn('[identity] Save failed:', err?.message);
-      Alert.alert('Error', 'Could not save. Please try again.');
+      window.alert('Could not save. Please try again.');
       setSaving(false);
     }
   };
@@ -360,7 +386,7 @@ export default function Identity() {
   // ── Card selection screen ──
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Progress */}
         <View style={styles.progressRow}>
           {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
@@ -382,35 +408,95 @@ export default function Identity() {
 
           {/* Cards grid */}
           <View style={styles.grid}>
-            {currentScreen!.options.map((opt) => {
+            {currentScreen!.options.map((opt, optIdx) => {
               const sel = isSelected(opt.key);
               return (
-                <TouchableOpacity
-                  key={opt.key}
-                  style={[styles.card, sel && styles.cardSelected]}
-                  onPress={() => handleSelect(opt.key)}
-                  activeOpacity={0.7}
-                >
-                  {/* Checkbox for multi-select screens */}
-                  {isMulti && (
-                    <View style={[styles.checkbox, sel && styles.checkboxSelected]}>
-                      {sel && <Text style={styles.checkboxMark}>{'\u2713'}</Text>}
+                <AnimGlyph key={opt.key} delay={optIdx * 50}>
+                  <TouchableOpacity
+                    style={[styles.card, sel && styles.cardSelected]}
+                    onPress={() => { hapticLight(); handleSelect(opt.key); }}
+                    activeOpacity={0.7}
+                  >
+                    {/* Checkbox for multi-select screens */}
+                    {isMulti && (
+                      <View style={[styles.checkbox, sel && styles.checkboxSelected]}>
+                        {sel && <Text style={styles.checkboxMark}>{'\u2713'}</Text>}
+                      </View>
+                    )}
+                    <View style={[styles.cardIcon, sel && styles.cardIconSelected]}>
+                      <Text style={[styles.cardIconText, sel && styles.cardIconTextSelected]}>
+                        {opt.icon}
+                      </Text>
                     </View>
-                  )}
-                  <View style={[styles.cardIcon, sel && styles.cardIconSelected]}>
-                    <Text style={[styles.cardIconText, sel && styles.cardIconTextSelected]}>
-                      {opt.icon}
+                    <Text style={[styles.cardLabel, sel && styles.cardLabelSelected]}>
+                      {opt.label}
                     </Text>
-                  </View>
-                  <Text style={[styles.cardLabel, sel && styles.cardLabelSelected]}>
-                    {opt.label}
-                  </Text>
-                  <Text style={styles.cardDesc}>{opt.desc}</Text>
-                  {!isMulti && sel && <View style={styles.checkBadge}><Text style={styles.checkMark}>{'\u2713'}</Text></View>}
-                </TouchableOpacity>
+                    <Text style={styles.cardDesc}>{opt.desc}</Text>
+                    {!isMulti && sel && <View style={styles.checkBadge}><Text style={styles.checkMark}>{'\u2713'}</Text></View>}
+                  </TouchableOpacity>
+                </AnimGlyph>
               );
             })}
           </View>
+
+          {/* Timeline picker: show for events that benefit from a timeline */}
+          {step === 5 && (() => {
+            const TIMELINE_EVENTS = ['baby', 'moving', 'wedding'];
+            const TIMELINE_OPTIONS = [
+              { label: '1\u20132 months', value: 1.5 },
+              { label: '3\u20135 months', value: 4 },
+              { label: '6\u20139 months', value: 7.5 },
+              { label: 'Not sure', value: null },
+            ];
+            const selectedTimeline = events.filter((e) => e !== 'none' && TIMELINE_EVENTS.includes(e));
+            if (selectedTimeline.length === 0) return null;
+            return (
+              <View
+                style={styles.timelineSection}
+                onLayout={() => {
+                  // Auto-scroll so the follow-up question is visible
+                  setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150);
+                }}
+              >
+                <View style={styles.timelineDivider} />
+                {selectedTimeline.map((eventKey) => (
+                  <View key={eventKey} style={{ marginBottom: 12 }}>
+                    <Text style={styles.timelineLabel}>
+                      {eventKey === 'baby' ? 'Baby' : eventKey === 'moving' ? 'Moving' : 'Wedding'} — roughly when?
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                      {TIMELINE_OPTIONS.map((opt) => {
+                        const current = eventTimelines[eventKey];
+                        const isSel = current === opt.value;
+                        return (
+                          <TouchableOpacity
+                            key={opt.label}
+                            onPress={() => {
+                              hapticLight();
+                              setEventTimelines((prev) => ({ ...prev, [eventKey]: opt.value }));
+                            }}
+                            style={{
+                              paddingHorizontal: 14, paddingVertical: 8,
+                              borderRadius: radius.sm,
+                              backgroundColor: isSel ? colors.accent : colors.card,
+                              borderWidth: 1,
+                              borderColor: isSel ? colors.accent : colors.border,
+                            }}
+                          >
+                            <Text style={{
+                              fontFamily: fonts.medium, fontSize: 13,
+                              color: isSel ? colors.bg : colors.muted,
+                            }}>{opt.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
+
         </Animated.View>
       </ScrollView>
 
@@ -444,20 +530,20 @@ function findLabel(screenIdx: number, key: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: spacing.xl, paddingTop: spacing.xxl + spacing.md, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
-  summaryScroll: { padding: spacing.xl, paddingTop: spacing.xxl + spacing.md, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
+  scroll: { padding: spacing.xl + 4, paddingTop: spacing.xxl + spacing.lg, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
+  summaryScroll: { padding: spacing.xl + 4, paddingTop: spacing.xxl + spacing.lg, paddingBottom: spacing.lg, maxWidth: 640, alignSelf: 'center' as const, width: '100%' },
 
   // ── Progress ──
   progressRow: {
     flexDirection: 'row',
     gap: 4,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xl,
     justifyContent: 'center',
   },
   progressDot: {
     width: 24,
-    height: 4,
-    borderRadius: 2,
+    height: 3,
+    borderRadius: 1.5,
     backgroundColor: colors.muted,
   },
   progressDotActive: {
@@ -465,29 +551,31 @@ const styles = StyleSheet.create({
   },
 
   // ── Back ──
-  backBtn: { marginBottom: spacing.md },
-  backText: { fontFamily: fonts.medium, fontSize: 14, color: colors.accent },
+  backBtn: { marginBottom: spacing.lg },
+  backText: { fontFamily: fonts.mono, fontSize: 12, color: colors.accent, letterSpacing: 0.5 },
 
   // ── Question ──
   question: {
     fontFamily: fonts.heading,
-    fontSize: 22,
+    fontSize: 24,
     color: colors.text,
     marginBottom: spacing.xs,
+    lineHeight: 32,
+    letterSpacing: -0.3,
   },
   hint: {
     fontFamily: fonts.regular,
     fontSize: 13,
     color: colors.dim,
-    marginBottom: spacing.xl,
-    lineHeight: 19,
+    marginBottom: spacing.xl + spacing.sm,
+    lineHeight: 20,
   },
 
   // ── Card grid ──
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: CARD_GAP,
+    gap: CARD_GAP + 2,
   },
   card: {
     flexBasis: '48%',
@@ -495,10 +583,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1.5,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    borderRadius: radius.lg,
+    padding: spacing.md + 2,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
+    paddingBottom: spacing.md + 2,
     position: 'relative',
   },
   cardSelected: {
@@ -508,11 +596,11 @@ const styles = StyleSheet.create({
   cardIcon: {
     width: 36,
     height: 36,
-    borderRadius: 10,
+    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.04)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.sm + 2,
   },
   cardIconSelected: {
     backgroundColor: colors.accent,
@@ -529,7 +617,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 14,
     color: colors.text,
-    marginBottom: 3,
+    marginBottom: 4,
   },
   cardLabelSelected: {
     color: colors.accent,
@@ -538,7 +626,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 11,
     color: colors.dim,
-    lineHeight: 15,
+    lineHeight: 16,
   },
   checkbox: {
     position: 'absolute',
@@ -546,7 +634,7 @@ const styles = StyleSheet.create({
     right: 10,
     width: 20,
     height: 20,
-    borderRadius: 4,
+    borderRadius: 6,
     borderWidth: 1.5,
     borderColor: colors.muted,
     justifyContent: 'center',
@@ -580,37 +668,56 @@ const styles = StyleSheet.create({
     color: colors.bg,
   },
 
+  // ── Timeline follow-up ──
+  timelineSection: {
+    marginTop: spacing.xl,
+    paddingTop: spacing.md,
+  },
+  timelineDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginBottom: spacing.lg,
+  },
+  timelineLabel: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: colors.text,
+    marginBottom: 10,
+  },
+
   // ── Summary ──
   summaryTitle: {
     fontFamily: fonts.heading,
-    fontSize: 24,
+    fontSize: 26,
     color: colors.text,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
+    letterSpacing: -0.3,
   },
   summarySubtitle: {
     fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
-    marginBottom: spacing.xl,
-    lineHeight: 20,
+    marginBottom: spacing.xl + spacing.sm,
+    lineHeight: 22,
   },
   summaryCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.sm + 2,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   summaryLabel: {
-    fontFamily: fonts.semibold,
-    fontSize: 12,
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.dim,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
     width: 90,
   },
   summaryValue: {
@@ -623,14 +730,14 @@ const styles = StyleSheet.create({
 
   // ── Bottom area ──
   bottomArea: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xxl,
-    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.xl + 4,
+    paddingBottom: spacing.xxl + spacing.sm,
+    paddingTop: spacing.md,
   },
   button: {
     backgroundColor: colors.accent,
     paddingVertical: 16,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
   },
   buttonDisabled: {
@@ -640,15 +747,18 @@ const styles = StyleSheet.create({
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
+    letterSpacing: 0.2,
   },
   skipBtn: {
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     marginBottom: spacing.xs,
   },
   skipText: {
-    fontFamily: fonts.medium,
-    fontSize: 14,
+    fontFamily: fonts.mono,
+    fontSize: 12,
     color: colors.dim,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
 });

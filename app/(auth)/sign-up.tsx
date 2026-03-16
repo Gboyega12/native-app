@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView,
-  Platform, ScrollView, ActivityIndicator,
+  ScrollView, ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function SignUp() {
@@ -16,6 +17,9 @@ export default function SignUp() {
   const [error, setError] = useState('');
   const [verificationSent, setVerificationSent] = useState(false);
   const [resending, setResending] = useState(false);
+
+  // Track page view on mount
+  useEffect(() => { trackScreen('Sign Up'); }, []);
 
   const handleSignUp = async () => {
     if (!email.trim() || !password.trim()) {
@@ -38,8 +42,10 @@ export default function SignUp() {
     setLoading(false);
     if (authError) {
       setError(authError.message);
+      trackEvent('Sign Up Failed', { method: 'email' });
     } else {
       setVerificationSent(true);
+      trackEvent('Sign Up', { method: 'email' });
     }
   };
 
@@ -49,14 +55,15 @@ export default function SignUp() {
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: Platform.OS === 'web'
-          ? window.location.origin
-          : 'https://app.bocy.io/',
+        redirectTo: window.location.origin,
       },
     });
     if (oauthError) {
       setError(oauthError.message);
       setGoogleLoading(false);
+      trackEvent('Sign Up Failed', { method: 'google' });
+    } else {
+      trackEvent('Sign Up', { method: 'google' });
     }
   };
 
@@ -86,6 +93,9 @@ export default function SignUp() {
             style={styles.secondaryButton}
             onPress={handleResend}
             disabled={resending}
+            testID="sign-up-resend-button"
+            accessibilityRole="button"
+            accessibilityLabel="Resend verification email"
           >
             <Text style={styles.secondaryButtonText}>
               {resending ? 'Sending...' : 'Resend email'}
@@ -102,7 +112,8 @@ export default function SignUp() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={undefined}
+      testID="sign-up-screen"
     >
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -118,6 +129,9 @@ export default function SignUp() {
             style={[styles.googleButton, googleLoading && styles.buttonDisabled]}
             onPress={handleGoogleSignUp}
             disabled={loading || googleLoading}
+            testID="sign-up-google-button"
+            accessibilityRole="button"
+            accessibilityLabel="Continue with Google"
           >
             {googleLoading ? (
               <ActivityIndicator color={colors.text} />
@@ -144,6 +158,8 @@ export default function SignUp() {
             autoCorrect={false}
             value={email}
             onChangeText={setEmail}
+            testID="sign-up-email-input"
+            accessibilityLabel="Email address"
           />
           <TextInput
             style={styles.input}
@@ -152,6 +168,8 @@ export default function SignUp() {
             secureTextEntry
             value={password}
             onChangeText={setPassword}
+            testID="sign-up-password-input"
+            accessibilityLabel="Password"
           />
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -160,6 +178,9 @@ export default function SignUp() {
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleSignUp}
             disabled={loading || googleLoading}
+            testID="sign-up-submit-button"
+            accessibilityRole="button"
+            accessibilityLabel="Sign up"
           >
             {loading ? (
               <ActivityIndicator color={colors.bg} />
@@ -169,7 +190,7 @@ export default function SignUp() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity onPress={() => router.replace('/(auth)/sign-in')}>
+        <TouchableOpacity onPress={() => router.replace('/(auth)/sign-in')} testID="sign-up-sign-in-link" accessibilityRole="button" accessibilityLabel="Go to sign in">
           <Text style={styles.link}>
             Already have an account? <Text style={styles.linkAccent}>Sign in</Text>
           </Text>
@@ -187,7 +208,7 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: spacing.xl,
+    padding: spacing.xl + 4,
     maxWidth: 480,
     alignSelf: 'center' as const,
     width: '100%',
@@ -196,11 +217,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: spacing.xl,
+    padding: spacing.xl + 4,
   },
   header: {
     alignItems: 'center',
-    marginBottom: spacing.xxl,
+    marginBottom: spacing.xxl + spacing.md,
   },
   checkmark: {
     fontFamily: fonts.heading,
@@ -210,22 +231,25 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: fonts.heading,
-    fontSize: 24,
+    fontSize: 26,
     color: colors.text,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
+    letterSpacing: -0.3,
   },
   subtitle: {
-    fontFamily: fonts.regular,
-    fontSize: 14,
+    fontFamily: fonts.mono,
+    fontSize: 11,
     color: colors.dim,
-    marginTop: spacing.xs,
+    marginTop: spacing.sm,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
   },
   message: {
     fontFamily: fonts.regular,
     fontSize: 14,
     color: colors.dim,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 24,
     marginBottom: spacing.xl,
   },
   form: {
@@ -236,8 +260,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.lg,
     fontSize: 16,
     color: colors.text,
     marginBottom: spacing.md,
@@ -251,34 +276,37 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: colors.accent,
-    paddingVertical: 14,
-    borderRadius: radius.md,
+    paddingVertical: 16,
+    borderRadius: 100,
     alignItems: 'center',
     marginTop: spacing.sm,
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   buttonText: {
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
+    letterSpacing: 0.2,
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: spacing.lg,
+    marginVertical: spacing.lg + spacing.xs,
   },
   dividerLine: {
     flex: 1,
-    height: 1,
+    height: StyleSheet.hairlineWidth,
     backgroundColor: colors.border,
   },
   dividerText: {
-    fontFamily: fonts.regular,
-    fontSize: 13,
+    fontFamily: fonts.mono,
+    fontSize: 11,
     color: colors.muted,
-    marginHorizontal: spacing.md,
+    marginHorizontal: spacing.lg,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   googleButton: {
     flexDirection: 'row',
@@ -287,8 +315,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingVertical: 14,
+    borderRadius: 100,
+    paddingVertical: 16,
   },
   googleIcon: {
     fontFamily: fonts.heading,
@@ -304,9 +332,9 @@ const styles = StyleSheet.create({
   secondaryButton: {
     borderWidth: 1,
     borderColor: colors.border,
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: spacing.xl,
-    borderRadius: radius.md,
+    borderRadius: 100,
     marginBottom: spacing.lg,
   },
   secondaryButtonText: {

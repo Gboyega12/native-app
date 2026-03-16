@@ -9,7 +9,7 @@
 //
 // This is the seam where a tree model / SLM can slot in later.
 
-import type { MerchantMatch } from './merchant-db';
+import type { MerchantMatch } from './merchant-db.js';
 
 export interface ClassificationResult {
   category: string;

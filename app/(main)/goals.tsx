@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, Alert,
+  View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { AnimGlyph, BreathingBar } from '@/components/Card';
+import { hapticLight } from '@/lib/haptics';
 
 const SITUATIONS = [
   { key: 'in_debt', label: 'In debt' },
@@ -42,8 +45,12 @@ export default function Goals() {
   const [targetAmount, setTargetAmount] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Track page view on mount
+  useEffect(() => { trackScreen('Goals'); }, []);
+
   const handleNext = async () => {
     if (step < 2) {
+      trackEvent('Goals Step Completed', { step: step + 1 });
       setStep(step + 1);
       return;
     }
@@ -63,10 +70,11 @@ export default function Goals() {
         }, { onConflict: 'user_id' });
         if (error) console.warn('[goals] upsert failed:', error.message);
       }
+      trackEvent('Goals Completed', { situation, one_year_goal: oneYearGoal, two_year_goal: twoYearGoal });
       router.push({ pathname: '/(main)/processing', params: { csvData } });
     } catch {
       setLoading(false);
-      Alert.alert('Error', 'Could not save your goals. Please try again.');
+      window.alert('Could not save your goals. Please try again.');
     }
   };
 
@@ -78,12 +86,13 @@ export default function Goals() {
       return (
         <>
           <Text style={styles.question}>How would you describe your current financial situation?</Text>
-          {SITUATIONS.map((item) => (
+          {SITUATIONS.map((item, i) => (
             <OptionButton
               key={item.key}
               label={item.label}
               selected={situation === item.key}
               onPress={() => setSituation(item.key)}
+              index={i}
             />
           ))}
         </>
@@ -93,12 +102,13 @@ export default function Goals() {
       return (
         <>
           <Text style={styles.question}>What's your main goal for the next 12 months?</Text>
-          {ONE_YEAR_GOALS.map((item) => (
+          {ONE_YEAR_GOALS.map((item, i) => (
             <OptionButton
               key={item.key}
               label={item.label}
               selected={oneYearGoal === item.key}
               onPress={() => setOneYearGoal(item.key)}
+              index={i}
             />
           ))}
         </>
@@ -107,12 +117,13 @@ export default function Goals() {
     return (
       <>
         <Text style={styles.question}>Where do you want to be in 2 years?</Text>
-        {TWO_YEAR_GOALS.map((item) => (
+        {TWO_YEAR_GOALS.map((item, i) => (
           <OptionButton
             key={item.key}
             label={item.label}
             selected={twoYearGoal === item.key}
             onPress={() => setTwoYearGoal(item.key)}
+            index={i}
           />
         ))}
         <TextInput
@@ -131,6 +142,14 @@ export default function Goals() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.progress}>Step {step + 1} of 3</Text>
+        {/* Step progress bar */}
+        <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginBottom: spacing.xl }}>
+          <BreathingBar
+            color={colors.accent}
+            width={`${Math.round(((step + 1) / 3) * 100)}%`}
+            style={{ height: '100%', borderRadius: 1.5 }}
+          />
+        </View>
         {renderStep()}
 
         <TouchableOpacity
@@ -151,14 +170,16 @@ export default function Goals() {
   );
 }
 
-function OptionButton({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+function OptionButton({ label, selected, onPress, index = 0 }: { label: string; selected: boolean; onPress: () => void; index?: number }) {
   return (
-    <TouchableOpacity
-      style={[styles.option, selected && styles.optionSelected]}
-      onPress={onPress}
-    >
-      <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{label}</Text>
-    </TouchableOpacity>
+    <AnimGlyph delay={index * 50}>
+      <TouchableOpacity
+        style={[styles.option, selected && styles.optionSelected]}
+        onPress={() => { hapticLight(); onPress(); }}
+      >
+        <Text style={[styles.optionText, selected && styles.optionTextSelected]}>{label}</Text>
+      </TouchableOpacity>
+    </AnimGlyph>
   );
 }
 
@@ -170,34 +191,35 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: spacing.xl,
+    padding: spacing.xl + 4,
     maxWidth: 560,
     alignSelf: 'center' as const,
     width: '100%',
   },
   progress: {
-    fontFamily: fonts.semibold,
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 10,
     color: colors.accent,
-    letterSpacing: 1.5,
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xl,
   },
   question: {
     fontFamily: fonts.heading,
-    fontSize: 18,
+    fontSize: 20,
     color: colors.text,
-    lineHeight: 26,
-    marginBottom: spacing.xl,
+    lineHeight: 28,
+    marginBottom: spacing.xl + spacing.sm,
+    letterSpacing: -0.3,
   },
   option: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingVertical: 14,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+    borderRadius: radius.lg,
+    paddingVertical: 16,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.sm + 2,
   },
   optionSelected: {
     borderColor: colors.accent,
@@ -217,25 +239,27 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md + 2,
+    paddingHorizontal: spacing.lg,
     fontSize: 16,
     color: colors.text,
-    marginTop: spacing.md,
+    marginTop: spacing.lg,
   },
   button: {
     backgroundColor: colors.accent,
-    paddingVertical: 14,
-    borderRadius: radius.md,
+    paddingVertical: 16,
+    borderRadius: 100,
     alignItems: 'center',
-    marginTop: spacing.xl,
+    marginTop: spacing.xl + spacing.sm,
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   buttonText: {
     fontFamily: fonts.semibold,
     fontSize: 16,
     color: colors.bg,
+    letterSpacing: 0.2,
   },
 });

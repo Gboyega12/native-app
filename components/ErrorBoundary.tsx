@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, fonts, spacing, radius } from '@/theme';
+import { captureException } from '@/lib/sentry';
 
 interface Props {
   children: ReactNode;
@@ -24,6 +25,7 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught:', error, errorInfo);
+    captureException(error, { componentStack: errorInfo.componentStack ?? undefined });
   }
 
   handleRetry = () => {
@@ -32,14 +34,19 @@ export default class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      const errorMsg = this.state.error?.message || 'Unknown error';
+      const errorName = this.state.error?.name || 'Error';
       return (
-        <View style={styles.container}>
+        <View style={styles.container} testID="error-boundary-fallback" accessibilityRole="alert">
           <Text style={styles.emoji}>!</Text>
-          <Text style={styles.title}>Something went wrong</Text>
+          <Text style={styles.title} accessibilityRole="header">Something went wrong</Text>
           <Text style={styles.message}>
             {this.props.fallbackMessage || 'An unexpected error occurred. Please try again.'}
           </Text>
-          <TouchableOpacity style={styles.button} onPress={this.handleRetry}>
+          <Text style={styles.errorDetail}>
+            {errorName}: {errorMsg}
+          </Text>
+          <TouchableOpacity style={styles.button} onPress={this.handleRetry} testID="error-boundary-retry" accessibilityRole="button" accessibilityLabel="Retry after error">
             <Text style={styles.buttonText}>Try again</Text>
           </TouchableOpacity>
         </View>
@@ -76,6 +83,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: spacing.xl,
     lineHeight: 20,
+  },
+  errorDetail: {
+    fontSize: 11,
+    color: colors.muted,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+    lineHeight: 16,
+    fontFamily: fonts.mono,
+    maxWidth: 320,
   },
   button: {
     backgroundColor: colors.accent,

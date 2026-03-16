@@ -6,7 +6,10 @@
 import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
-import type { Analysis, Goals, EnrichedTransaction } from '@/lib/types';
+import { runReactiveEngine, type ReactiveResult } from '@/lib/reactive-engine';
+import type { Analysis, Goals, EnrichedTransaction, FinancialProfile, UserIdentity, DebtAccount, BudgetAdjustment, BudgetSection, Move } from '@/lib/types';
+import type { TransactionOverride } from '@/lib/enrichment-engine';
+import { DEFAULT_APR, defaultMinimumPayment } from '@/lib/constants';
 
 export interface IncomeEvent {
   source: string;
@@ -31,10 +34,10 @@ export interface WeeklyContext {
 }
 
 export interface SyncResult {
-  /** The raw analysis (before budget-adjustment merge). */
-  analysis: Analysis;
+  /** The raw analysis (before budget-adjustment merge). Null when bank is connected but enrichment found no usable transactions yet. */
+  analysis: Analysis | null;
   /** Debt accounts synced from TrueLayer card balances. */
-  debtAccounts: any[];
+  debtAccounts: DebtAccount[];
   /** Real-time weekly budget context for adaptive spending guidance. */
   weeklyContext: WeeklyContext;
   /** Where the transaction data came from. */
@@ -47,22 +50,60 @@ export interface SyncResult {
   expiredBankNames: string[];
   /** Connections approaching 90-day consent expiry (within 14 days). */
   expiringConnections: { name: string; daysLeft: number }[];
+  /** Reactive engine results: events, next move suggestion, achievements. */
+  reactive: ReactiveResult | null;
+  /** Epoch ms when this sync started — used to reject stale results after override saves. */
+  syncStartedAt: number;
 }
 
 /**
  * Deduplicate CSV lines that appear across multiple bank_data rows.
  * Uses date + amount + normalised description as a composite key.
- * Two transactions with the same date, amount, and description are
- * treated as the same transaction regardless of which account they came from.
+ *
+ * Count-based: if the same key appears N times in one row and M times
+ * in another, we keep max(N, M) — not N+M — so cross-account duplicates
+ * are merged while legitimate same-day/same-amount transactions within
+ * one account are preserved.
  */
-function deduplicateCSVLines(csvLines: string[]): string[] {
+function deduplicateCSVLines(csvLines: string[], perRowLines?: string[][]): string[] {
+  const normalise = (l: string) => l.trim().toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ');
+
+  // If per-row breakdown is provided, use count-based dedup
+  if (perRowLines && perRowLines.length > 0) {
+    const rowMaps = perRowLines.map((lines) => {
+      const counts = new Map<string, number>();
+      const ref = new Map<string, string>();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const key = normalise(trimmed);
+        counts.set(key, (counts.get(key) || 0) + 1);
+        if (!ref.has(key)) ref.set(key, trimmed);
+      }
+      return { counts, ref };
+    });
+    const allKeys = new Set<string>();
+    for (const { counts } of rowMaps) for (const k of counts.keys()) allKeys.add(k);
+    const unique: string[] = [];
+    for (const k of allKeys) {
+      let best = 0;
+      let line = '';
+      for (const { counts, ref } of rowMaps) {
+        const c = counts.get(k) || 0;
+        if (c > best) { best = c; line = ref.get(k) || line; }
+      }
+      for (let i = 0; i < best; i++) unique.push(line);
+    }
+    return unique;
+  }
+
+  // Fallback: simple Set-based dedup (single source)
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const line of csvLines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    // Normalise: lowercase, collapse whitespace, strip quotes
-    const key = trimmed.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ');
+    const key = normalise(trimmed);
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(trimmed);
@@ -153,19 +194,25 @@ async function reconcileDebtPayments(
  * Returns `null` if there's no CSV data to process.
  */
 export async function syncBankData(userId: string): Promise<SyncResult | null> {
+  const syncStartedAt = Date.now();
   // ── 1. Fetch fresh CSV ──
   let csvData: string | null = null;
   let dataSource: 'truelayer' | 'fallback' = 'truelayer';
   const connectionIssues: string[] = [];
   const expiredBankNames: string[] = [];
+  let syncFailedNoConnection = false;
   const expiringConnections: { name: string; daysLeft: number }[] = [];
 
   try {
     const syncController = new AbortController();
-    const syncTimeout = setTimeout(() => syncController.abort(), 15_000);
+    const syncTimeout = setTimeout(() => syncController.abort(), 45_000);
+    const { data: { session } } = await supabase.auth.getSession();
     const res = await fetch('/api/truelayer/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
       body: JSON.stringify({ user_id: userId }),
       signal: syncController.signal,
     });
@@ -189,10 +236,18 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         }
       }
     } else if (data.reason === 'sync_failed') {
-      // Transient failure (all connections still within 90-day consent window).
-      // Don't flag as a connection issue — fall through to cached data silently.
+      // Transient failure — DON'T push to connectionIssues here.
+      // The fallback path below will load cached CSV, and the caller
+      // will see dataSource='fallback' which triggers appropriate
+      // freshness checks (stale_data vs fallback) instead of a scary
+      // "reconnect your bank" banner for a transient TrueLayer outage.
+      console.warn('[sync] All connections failed (transient, within 90-day window) — will use fallback data');
     } else if (data.reason === 'no_connection') {
-      connectionIssues.push('no_connection');
+      // Don't push immediately — wait to see if we have cached CSV.
+      // The token may be dead but the data is still in bank_data.
+      // We'll check after the fallback query below.
+      syncFailedNoConnection = true;
+      console.warn('[sync] No active TrueLayer connections found — will check for cached data');
     }
     // Extract connections approaching 90-day consent expiry
     if (data.expiring_connections?.length > 0) {
@@ -203,7 +258,10 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         });
       }
     }
-  } catch {}
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] TrueLayer sync request failed:', message);
+  }
 
   // If connections have issues but we still don't have bank names, query DB as fallback
   if (connectionIssues.length > 0 && expiredBankNames.length === 0) {
@@ -218,7 +276,10 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
           if (row.provider_name) expiredBankNames.push(row.provider_name);
         }
       }
-    } catch {}
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn('[sync] Failed to fetch bank names:', message);
+    }
   }
 
   // Fallback to existing CSV from all bank_data rows
@@ -231,29 +292,41 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
       if (bankRows && bankRows.length > 0) {
+        const perRowLines: string[][] = [];
         const rawLines: string[] = [];
         for (const row of bankRows) {
           if (!row.csv_data) continue;
-          const lines = row.csv_data.split('\n');
-          rawLines.push(...lines.slice(1).filter((l: string) => l.trim()));
+          const lines = row.csv_data.split('\n').slice(1).filter((l: string) => l.trim());
+          perRowLines.push(lines);
+          rawLines.push(...lines);
         }
-        // Deduplicate transactions that appear in multiple connected accounts
-        const uniqueLines = deduplicateCSVLines(rawLines);
+        // Deduplicate across accounts while preserving legitimate duplicates within each
+        const uniqueLines = deduplicateCSVLines(rawLines, perRowLines);
         csvData = ['Date,Description,Amount', ...uniqueLines].join('\n');
       }
-    } catch {}
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn('[sync] Failed to read fallback CSV:', message);
+    }
+  }
+
+  // Deferred no_connection check: only flag as a real issue if there's
+  // genuinely no cached data. If we loaded fallback CSV, the user has data —
+  // the refresh token is just dead. Treat as stale data, not "no connection".
+  if (syncFailedNoConnection && !csvData) {
+    connectionIssues.push('no_connection');
   }
 
   if (!csvData) return null;
 
   // ── 2. Fetch user config ──
-  let overrides: any[] = [];
-  let budgetAdjustments: any[] = [];
+  let overrides: TransactionOverride[] = [];
+  let budgetAdjustments: BudgetAdjustment[] = [];
   try {
     const [overrideRes, adjustmentRes] = await Promise.all([
       supabase
         .from('transaction_overrides')
-        .select('match_description, category, is_essential')
+        .select('match_description, category, is_essential, direction')
         .eq('user_id', userId),
       supabase
         .from('budget_adjustments')
@@ -262,15 +335,65 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     ]);
     if (overrideRes.data) overrides = overrideRes.data;
     if (adjustmentRes.data) budgetAdjustments = adjustmentRes.data;
-  } catch {}
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to fetch user config:', message);
+  }
 
-  let debtAccountsData: any[] = [];
-  let identityData: any = null;
+  // ── 2b. Sync debt accounts from card balances BEFORE enrichment ──
+  // This must happen before we query debt_accounts so the enrichment engine
+  // and move ranking have access to connected credit card data on the first sync.
+  const syncedDebt: DebtAccount[] = [];
+  try {
+    const { data: bankRows } = await supabase
+      .from('bank_data')
+      .select('card_balances, provider_name')
+      .eq('user_id', userId)
+      .not('card_balances', 'is', null);
+
+    if (bankRows && bankRows.length > 0) {
+      for (const row of bankRows) {
+        if (!Array.isArray(row.card_balances)) continue;
+        for (const card of row.card_balances) {
+          const cardName = card.name || row.provider_name || 'Card';
+          const acctType = card.type || 'credit_card';
+          const defaultApr = DEFAULT_APR[acctType] ?? DEFAULT_APR.credit_card;
+          const defaultMin = defaultMinimumPayment(acctType, card.balance || 0);
+          const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
+            user_id: userId,
+            account_name: cardName,
+            account_type: acctType,
+            outstanding_balance: card.balance,
+            credit_limit: card.limit,
+            interest_rate: defaultApr,
+            minimum_payment: defaultMin,
+            is_default_apr: true,
+            source: 'truelayer',
+            last_updated: new Date().toISOString(),
+          }, { onConflict: 'user_id,account_name' });
+          if (!upsertErr) {
+            syncedDebt.push({
+              account_name: cardName,
+              account_type: card.type || 'credit_card',
+              outstanding_balance: card.balance,
+              credit_limit: card.limit,
+            });
+          }
+        }
+      }
+    }
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to sync debt accounts from card balances:', message);
+  }
+
+  let debtAccountsData: DebtAccount[] = [];
+  let identityData: UserIdentity | null = null;
   try {
     const [debtRes, idRes] = await Promise.all([
       supabase
         .from('debt_accounts')
-        .select('account_name, account_type, outstanding_balance, credit_limit')
+        .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, is_default_apr')
         .eq('user_id', userId),
       supabase
         .from('user_identity')
@@ -280,11 +403,32 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     ]);
     if (debtRes.data) debtAccountsData = debtRes.data;
     if (idRes.data) identityData = idRes.data;
-  } catch {}
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to fetch debt/identity data:', message);
+  }
 
   // ── 3. Enrich ──
   const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
-  if (result.enrichedTransactions.length === 0) return null;
+  if (result.enrichedTransactions.length === 0) {
+    // Bank is connected but all transactions were filtered out (pending, £0, etc.).
+    // Return a partial result so the caller knows the bank IS connected — don't
+    // return null which makes the dashboard think there's no connection at all.
+    console.warn('[sync] Enrichment returned 0 transactions — bank connected but no usable data yet');
+    connectionIssues.push('no_transactions_yet');
+    return {
+      analysis: null,
+      debtAccounts: [],
+      weeklyContext: { adaptiveBudget: 0, staticBudget: 0, committedThisWeek: 0, discretionaryThisWeek: 0, incomeArrivedThisWeek: false, recentIncomeEvents: [] },
+      dataSource,
+      latestTransactionDate: null,
+      connectionIssues,
+      expiredBankNames,
+      expiringConnections,
+      reactive: null,
+      syncStartedAt,
+    };
+  }
 
   // ── 3b. Reconcile debt payments ──
   // Match BNPL/debt payments in transactions against manual debt accounts
@@ -297,7 +441,22 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .select('account_name, account_type, outstanding_balance, credit_limit')
       .eq('user_id', userId);
     if (freshDebt) debtAccountsData = freshDebt;
-  } catch {}
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Debt reconciliation failed:', message);
+  }
+
+  // ── 3c. Compute essential gap deduction for conservative surplus ──
+  // When essential costs are missing from transactions (rent via partner,
+  // variable bills, etc.), use the midpoint of typical ranges as a
+  // conservative deduction so the CRRA engine doesn't overvalue savings/invest.
+  if (result.essentialGaps && result.essentialGaps.length > 0) {
+    const gapDeduction = result.essentialGaps.reduce((sum, gap) => {
+      // Use midpoint of typical range as conservative estimate
+      return sum + (gap.typicalRange.low + gap.typicalRange.high) / 2;
+    }, 0);
+    (result.profile as FinancialProfile & { essentialGapDeduction?: number }).essentialGapDeduction = Math.round(gapDeduction);
+  }
 
   // ── 4. Rank moves ──
   let goals: Goals | null = null;
@@ -308,7 +467,10 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .eq('user_id', userId)
       .maybeSingle();
     goals = goalsData;
-  } catch {}
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to fetch goals:', message);
+  }
 
   const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
   const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
@@ -322,12 +484,15 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       .eq('user_id', userId)
       .like('move_key', 'dismissed-%');
     if (progressRows && progressRows.length > 0) {
-      const dismissedActions = new Set(progressRows.map((r: any) => r.move_action));
+      const dismissedActions = new Set(progressRows.map((r: { move_action: string }) => r.move_action));
       for (let i = allMoves.length - 1; i >= 0; i--) {
         if (dismissedActions.has(allMoves[i].action)) allMoves.splice(i, 1);
       }
     }
-  } catch {}
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to filter dismissed moves:', message);
+  }
 
   const topMove = allMoves[0] || null;
 
@@ -342,10 +507,16 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     non_discretionary: result.profile.budgetReality.nonDiscretionary,
     discretionary: result.profile.budgetReality.discretionary,
     income_sources: result.profile.incomeSources,
-    top_move: topMove || ({} as any),
+    top_move: topMove || ({} as Move),
     all_moves: allMoves,
     behavioral_patterns: result.behavioralPatterns,
     goal_context: topMove?.trajectory || null,
+    income_floor: result.profile.monthly.incomeFloor,
+    is_variable_income: result.profile.monthly.isVariableIncome,
+    income_cv: result.profile.monthly.incomeCV,
+    essential_gaps: result.essentialGaps,
+    verified_bills: result.verifiedBills,
+    person_transfers: result.profile.transfers,
   };
 
   // ── 6. Upsert to Supabase ──
@@ -362,6 +533,12 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     all_moves: rawAnalysis.all_moves,
     behavioral_patterns: rawAnalysis.behavioral_patterns,
     goal_context: rawAnalysis.goal_context,
+    income_floor: rawAnalysis.income_floor,
+    is_variable_income: rawAnalysis.is_variable_income,
+    income_cv: rawAnalysis.income_cv,
+    person_transfers: rawAnalysis.person_transfers,
+    essential_gaps: rawAnalysis.essential_gaps,
+    verified_bills: rawAnalysis.verified_bills,
   };
 
   try {
@@ -378,8 +555,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     } else {
       await supabase.from('analyses').insert({ user_id: userId, ...fields });
     }
-  } catch (e: any) {
-    console.warn('[sync] Failed to upsert analysis:', e?.message);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to upsert analysis:', message);
   }
 
   // ── 7. Score snapshot ──
@@ -397,7 +575,10 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       debt_account_count: result.profile.metrics.debtAccountCount || 0,
       archetype: rawAnalysis.archetype,
     });
-  } catch {}
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Failed to insert score snapshot:', message);
+  }
 
   // ── 8. Compute latest transaction date for freshness tracking ──
   let latestTransactionDate: string | null = null;
@@ -410,40 +591,24 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   // ── 9. Income arrival detection + adaptive weekly context ──
   const weeklyContext = buildWeeklyContext(result, rawAnalysis);
 
-  // ── 10. Sync debt accounts from card balances ──
-  const syncedDebt: any[] = [];
-  try {
-    const { data: bankRows } = await supabase
-      .from('bank_data')
-      .select('card_balances')
-      .eq('user_id', userId)
-      .not('card_balances', 'is', null);
+  // ── 10. (Moved earlier — card balance sync now happens before enrichment) ──
 
-    if (bankRows && bankRows.length > 0) {
-      for (const row of bankRows) {
-        if (!Array.isArray(row.card_balances)) continue;
-        for (const card of row.card_balances) {
-          const { error: upsertErr } = await supabase.from('debt_accounts').upsert({
-            user_id: userId,
-            account_name: card.name || 'Card',
-            account_type: card.type || 'credit_card',
-            outstanding_balance: card.balance,
-            credit_limit: card.limit,
-            source: 'truelayer',
-            last_updated: new Date().toISOString(),
-          }, { onConflict: 'user_id,account_name' });
-          if (!upsertErr) {
-            syncedDebt.push({
-              account_name: card.name || 'Card',
-              account_type: card.type || 'credit_card',
-              outstanding_balance: card.balance,
-              credit_limit: card.limit,
-            });
-          }
-        }
-      }
-    }
-  } catch {}
+  // ── 11. Reactive engine — close the feedback loop ──
+  let reactive: ReactiveResult | null = null;
+  try {
+    reactive = await runReactiveEngine(
+      userId,
+      rawAnalysis,
+      result.enrichedTransactions,
+      result.profile as FinancialProfile,
+      goals,
+      identityData,
+      debtAccountsData,
+    );
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Reactive engine failed:', message);
+  }
 
   return {
     analysis: rawAnalysis,
@@ -454,6 +619,8 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     connectionIssues,
     expiredBankNames,
     expiringConnections,
+    reactive,
+    syncStartedAt,
   };
 }
 
@@ -487,10 +654,21 @@ function buildWeeklyContext(
   // Find transactions that landed this week
   const thisWeekTxs = txs.filter((t) => new Date(t.date) >= weekStart);
 
-  // Detect income arrivals this week
-  const incomeThisWeek = thisWeekTxs.filter((t) => t.isIncome && t.amount > 0);
+  // Detect income arrivals this week — only from recognised income sources, not transfers
   const incomeSources = profile.incomeSources || [];
   const primarySource = incomeSources.find((s) => s.isSalary) || incomeSources[0] || null;
+
+  // Filter: must be flagged isIncome, positive amount, NOT a transfer,
+  // and must match a known income source (by name or amount pattern)
+  const incomeThisWeek = thisWeekTxs.filter((t) => {
+    if (!t.isIncome || t.amount <= 0 || t.isTransfer) return false;
+    // Must match a recognised income source
+    const txLabel = (t.merchant || t.description || '').toLowerCase();
+    return incomeSources.some((s) =>
+      txLabel.includes(s.source.toLowerCase()) ||
+      (s.isSalary && t.amount >= s.avgAmount * 0.7)
+    );
+  });
 
   const recentIncomeEvents: IncomeEvent[] = incomeThisWeek.map((t) => ({
     source: t.merchant || t.description,
@@ -513,10 +691,13 @@ function buildWeeklyContext(
     .filter((t) => t.amount < 0 && !t.isEssential && !t.isDebt && !t.isTransfer && !t.isSavings && !t.isRefund)
     .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
-  // Static weekly budget
-  const income = analysis.monthly_income || 0;
-  const nonDiscTotal = (analysis.non_discretionary as any)?.total || 0;
-  const discTotal = (analysis.discretionary as any)?.total || 0;
+  // Static weekly budget — for variable earners, use the conservative floor
+  const rawIncome = analysis.monthly_income || 0;
+  const income = analysis.is_variable_income && analysis.income_floor
+    ? analysis.income_floor
+    : rawIncome;
+  const nonDiscTotal = (analysis.non_discretionary as BudgetSection)?.total || 0;
+  const discTotal = (analysis.discretionary as BudgetSection)?.total || 0;
   const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
   const staticBudget = leftToDecide / 4.33;
 

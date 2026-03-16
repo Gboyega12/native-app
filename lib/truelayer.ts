@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 // TrueLayer sandbox vs live – default to sandbox for development
 const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 'true';
 const AUTH_URL = IS_SANDBOX
@@ -20,8 +18,7 @@ const PROVIDERS = IS_SANDBOX ? ['uk-ob-all', 'uk-mock-payments-sandbox'] : ['uk-
  */
 export function getTrueLayerAuthUrl(connectionId: string): string {
   // Encode web origin in state so the server can redirect back to the app.
-  // Use Platform.OS check — window exists in React Native but window.location does not.
-  const state = Platform.OS === 'web' && typeof window !== 'undefined'
+  const state = typeof window !== 'undefined'
     ? `${connectionId}|${window.location.origin}`
     : connectionId;
 

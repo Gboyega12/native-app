@@ -1,0 +1,288 @@
+// ── Weekly Digest Cron Job ──
+// Runs every Monday at 12 noon (via Vercel Cron).
+// Sends a personalized email digest to each user with:
+//   - Top recommended move + annual £ impact (hero section)
+//   - Move progress
+//   - Surplus + change
+//   - Top spending category
+//   - New achievements
+//   - Streak count
+//
+// Skips users who have disabled weekly_digest in notification_preferences.
+
+import { createClient } from '@supabase/supabase-js';
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const appUrl = process.env.APP_URL || 'https://app.bocy.io';
+
+interface DigestData {
+  name: string;
+  monthlyIncome: number;
+  monthlySpending: number;
+  surplus: number;
+  surplusChange: number;
+  topCategory: string;
+  topCategoryAmount: number;
+  movesCompleted: number;
+  totalMoves: number;
+  topMove: string | null;
+  topMoveImpact: number;
+  newAchievements: Array<{ name: string; description: string; icon: string }>;
+  streakDays: number;
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Verify cron secret
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = (req.headers.authorization as string) || '';
+  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!serviceKey) {
+    return res.json({ success: false, error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
+  }
+
+  const admin = createClient(supabaseUrl!, serviceKey);
+  const results = { sent: 0, skipped: 0, failed: 0, errors: [] as Array<{ user_id: string; error: string }> };
+
+  try {
+    // Get all users with notification preferences enabled
+    const { data: prefs } = await admin
+      .from('notification_preferences')
+      .select('user_id, email, weekly_digest')
+      .eq('weekly_digest', true);
+
+    if (!prefs || prefs.length === 0) {
+      return res.json({ success: true, message: 'No users subscribed to weekly digest', ...results });
+    }
+
+    for (const pref of prefs) {
+      try {
+        // Get latest analysis
+        const { data: analysis } = await admin
+          .from('analyses')
+          .select('decision_score, monthly_income, monthly_spending, surplus, all_moves, discretionary, created_at')
+          .eq('user_id', pref.user_id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (!analysis) {
+          results.skipped++;
+          continue;
+        }
+
+        // Get previous score snapshot for comparison
+        const { data: prevSnapshot } = await admin
+          .from('score_history')
+          .select('decision_score, surplus')
+          .eq('user_id', pref.user_id)
+          .order('created_at', { ascending: false })
+          .range(1, 1) // Second most recent (skip current)
+          .single();
+
+        // Get user info (name + email fallback for Google OAuth users)
+        const { data: { user } } = await admin.auth.admin.getUserById(pref.user_id);
+        const name: string = user?.user_metadata?.full_name || '';
+        // Google OAuth users may not have email in notification_preferences;
+        // fall back to auth.users email or identity data email.
+        const recipientEmail: string | undefined = pref.email
+          || user?.email
+          || user?.user_metadata?.email
+          || user?.identities?.[0]?.identity_data?.email;
+        if (!recipientEmail) {
+          results.skipped++;
+          continue;
+        }
+
+        // Get move progress
+        const { data: progress } = await admin
+          .from('plan_progress')
+          .select('completed_steps')
+          .eq('user_id', pref.user_id);
+
+        const movesCompleted = (progress || []).filter((p: { completed_steps: string[] | null }) =>
+          p.completed_steps && p.completed_steps.length > 0
+        ).length;
+
+        // Get new achievements (unlocked in last 7 days)
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const { data: recentAchievements } = await admin
+          .from('user_achievements')
+          .select('achievement_key, unlocked_at')
+          .eq('user_id', pref.user_id)
+          .gte('unlocked_at', weekAgo.toISOString());
+
+        // Get streak
+        const { data: streakRow } = await admin
+          .from('user_streaks')
+          .select('current_streak')
+          .eq('user_id', pref.user_id)
+          .single();
+
+        // Find top spending category
+        const disc = analysis.discretionary as { items?: Array<{ category: string; monthly: number }> } | null;
+        const items = disc?.items || [];
+        const topCat = items.length > 0
+          ? items.reduce((a, b) => (a.monthly > b.monthly ? a : b))
+          : null;
+
+        // Build and send email
+        const allMoves: Array<{ action: string; monthlyImpact: number }> = analysis.all_moves || [];
+        const topMove = allMoves[0] || null;
+
+        // Achievement definitions (inline to avoid import issues)
+        const ACHIEVEMENT_MAP: Record<string, { name: string; description: string; icon: string }> = {
+          first_analysis: { name: 'First Look', description: 'Completed your first financial analysis', icon: 'B' },
+          goals_set: { name: 'Goal Setter', description: 'Set your financial goals', icon: 'G' },
+          first_override: { name: 'Sharp Eye', description: 'Corrected a transaction category', icon: 'E' },
+          first_plan: { name: 'Action Taker', description: 'Approved your first financial plan', icon: 'P' },
+          score_up_5: { name: 'Momentum', description: 'Decision score improved by 5+ points', icon: '+' },
+          score_up_10: { name: 'Serious Progress', description: 'Decision score improved by 10+ points', icon: '!' },
+          score_up_20: { name: 'Transformation', description: 'Decision score improved by 20+ points', icon: '*' },
+          spending_down_10: { name: 'Trimmer', description: 'Reduced monthly spending by 10%+', icon: '-' },
+          surplus_doubled: { name: 'Surplus Surge', description: 'Doubled your monthly surplus', icon: '2' },
+          streak_7: { name: 'Week Warrior', description: 'Used Bocy 7 days in a row', icon: '7' },
+          streak_30: { name: 'Monthly Habit', description: 'Used Bocy for 30 days', icon: '3' },
+          debt_free: { name: 'Debt Free', description: 'Zero outstanding debt accounts', icon: '0' },
+          savings_rate_10: { name: 'Saver', description: 'Savings rate reached 10%+', icon: 'S' },
+          score_strong: { name: 'Strong Position', description: 'Decision score reached 75+', icon: 'A' },
+        };
+
+        const newAchievementDefs = (recentAchievements || [])
+          .map((a: { achievement_key: string }) => ACHIEVEMENT_MAP[a.achievement_key])
+          .filter(Boolean);
+
+        const surplusChange = prevSnapshot ? analysis.surplus - prevSnapshot.surplus : 0;
+
+        // Build push notification body — lead with actionable info
+        const pushBody = topMove
+          ? `Top move: ${topMove.action} — £${Math.round(topMove.monthlyImpact * 12).toLocaleString()}/yr. ${movesCompleted}/${allMoves.length} moves done. Surplus: £${Math.round(analysis.surplus)}.`
+          : `${movesCompleted}/${allMoves.length} moves done. Surplus: £${Math.round(analysis.surplus)}.`;
+
+        // Build subject line — lead with top move or surplus
+        const subject = topMove
+          ? `${topMove.action} could save £${Math.round(topMove.monthlyImpact * 12).toLocaleString()}/yr — Bocy Weekly`
+          : `£${Math.round(analysis.surplus).toLocaleString()} surplus this month — Bocy Weekly`;
+
+        // Use the send endpoint
+        const sendRes = await fetch(`${appUrl}/api/notifications/send`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${cronSecret || ''}`,
+          },
+          body: JSON.stringify({
+            to: recipientEmail,
+            subject,
+            html: buildDigestHtml({
+              name,
+              monthlyIncome: analysis.monthly_income,
+              monthlySpending: analysis.monthly_spending,
+              surplus: analysis.surplus,
+              surplusChange,
+              topCategory: topCat?.category || 'N/A',
+              topCategoryAmount: topCat?.monthly || 0,
+              movesCompleted,
+              totalMoves: allMoves.length,
+              topMove: topMove?.action || null,
+              topMoveImpact: topMove?.monthlyImpact || 0,
+              newAchievements: newAchievementDefs,
+              streakDays: streakRow?.current_streak || 0,
+            }),
+            push_body: pushBody,
+            user_id: pref.user_id,
+            notification_type: 'weekly_digest',
+          }),
+        });
+
+        const sendData = await sendRes.json();
+        if (sendData.success) {
+          results.sent++;
+        } else if (sendData.skipped) {
+          results.skipped++;
+        } else {
+          results.failed++;
+          results.errors.push({ user_id: pref.user_id, error: sendData.error });
+        }
+      } catch (userErr: unknown) {
+        const message = userErr instanceof Error ? userErr.message : String(userErr);
+        results.failed++;
+        results.errors.push({ user_id: pref.user_id, error: message });
+      }
+    }
+
+    return res.json({ success: true, ...results });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[weekly-digest] Cron failed:', message);
+    return res.status(500).json({ success: false, error: message });
+  }
+}
+
+// ── Inline HTML builder (avoids TS import issues in JS cron) ──
+function buildDigestHtml(data: DigestData): string {
+  const BRAND = '#00d4aa';
+  const BG = '#0A0A0A';
+  const SURFACE = '#141414';
+  const BORDER = '#1F1F1F';
+  const DIM = '#999999';
+
+  const surplusColor = data.surplusChange > 0 ? BRAND : data.surplusChange < 0 ? '#E05252' : DIM;
+
+  const achievements = data.newAchievements.length > 0
+    ? `<div style="background:${SURFACE};border:1px solid ${BORDER};border-radius:14px;padding:24px;margin-bottom:16px;">
+        <h2 style="font-size:18px;margin:0 0 16px;">New achievements</h2>
+        ${data.newAchievements.map((a) => `
+          <div style="margin-bottom:12px;">
+            <span style="display:inline-block;width:36px;height:36px;line-height:36px;text-align:center;background:${BRAND}20;color:${BRAND};border:1px solid ${BRAND}40;border-radius:50%;font-weight:700;margin-right:12px;vertical-align:middle;">${a.icon}</span>
+            <strong>${a.name}</strong> <span style="color:${DIM};font-size:12px;">${a.description}</span>
+          </div>
+        `).join('')}
+      </div>`
+    : '';
+
+  // Hero section: top move (actionable) or fallback to surplus summary
+  const heroSection = data.topMove
+    ? `<div style="background:${SURFACE};border:1px solid ${BRAND}40;border-radius:14px;padding:24px;margin-bottom:16px;">
+        <h2 style="font-size:18px;margin:0 0 12px;">Your top move this week</h2>
+        <p style="font-size:16px;line-height:24px;margin:0 0 12px;">${data.topMove}</p>
+        <p style="color:${BRAND};font-weight:700;font-size:20px;margin:0;">\u00a3${Math.round(data.topMoveImpact * 12).toLocaleString()}/year impact</p>
+      </div>`
+    : `<div style="background:${SURFACE};border:1px solid ${BORDER};border-radius:14px;padding:24px;margin-bottom:16px;">
+        <h2 style="font-size:18px;margin:0 0 12px;">All moves completed!</h2>
+        <p style="font-size:14px;line-height:22px;color:${DIM};margin:0;">You've worked through every move in your plan. Nice work.</p>
+      </div>`;
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="color-scheme" content="dark"><style>body{margin:0;padding:0;background:${BG};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;}</style></head><body>
+<div style="max-width:520px;margin:0 auto;padding:32px 24px;">
+  <div style="text-align:center;margin-bottom:24px;"><span style="font-size:24px;font-weight:800;">B</span> <span style="color:${DIM};font-size:14px;">Bocy</span></div>
+  <h2 style="font-size:18px;margin:0 0 16px;">Hi ${data.name || 'there'}, here's your week</h2>
+  ${heroSection}
+  <div style="background:${SURFACE};border:1px solid ${BORDER};border-radius:14px;padding:24px;margin-bottom:16px;">
+    <div style="text-align:center;padding:8px 0;">
+      <div style="display:inline-block;text-align:center;padding:0 16px;">
+        <div style="font-size:28px;font-weight:700;">\u00a3${Math.round(data.surplus).toLocaleString()}</div>
+        <div style="font-size:11px;color:${DIM};text-transform:uppercase;">Surplus <span style="color:${surplusColor};">${data.surplusChange >= 0 ? '+' : ''}\u00a3${Math.round(data.surplusChange).toLocaleString()}</span></div>
+      </div>
+      <div style="display:inline-block;text-align:center;padding:0 16px;">
+        <div style="font-size:28px;font-weight:700;">${data.movesCompleted}/${data.totalMoves}</div>
+        <div style="font-size:11px;color:${DIM};text-transform:uppercase;">Moves done</div>
+      </div>
+    </div>
+    <hr style="border:none;border-top:1px solid ${BORDER};margin:16px 0;">
+    <p style="font-size:14px;line-height:22px;margin:0;">
+      <strong>Top spending:</strong> ${data.topCategory} at \u00a3${Math.round(data.topCategoryAmount).toLocaleString()}/mo
+      ${data.streakDays > 0 ? `<br><strong>Active days:</strong> ${data.streakDays} day streak` : ''}
+    </p>
+  </div>
+  ${achievements}
+  <div style="text-align:center;margin-top:24px;padding-top:24px;border-top:1px solid ${BORDER};">
+    <p style="color:${DIM};font-size:12px;">You're receiving this because you have a Bocy account.<br>To manage or turn off email notifications, visit your <a href="${appUrl}/profile?section=notifications" style="color:${DIM};">notification settings</a> in the app.</p>
+  </div>
+</div></body></html>`;
+}

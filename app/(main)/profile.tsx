@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, Linking,
-  LayoutAnimation, Animated, Easing, Switch, Platform, ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking,
+  LayoutAnimation, Switch, ActivityIndicator,
   Modal, Pressable, TextInput,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -11,37 +11,9 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { useSubscription } from '@/lib/subscription';
 import Paywall from '@/components/Paywall';
-import { restorePurchases } from '@/lib/revenuecat';
 import { useWebPush } from '@/lib/web-push';
-
-// ── Glyph micro-animation: fade+scale on mount ──
-const AnimGlyph = ({ children, delay = 0, style }: { children: React.ReactNode; delay?: number; style?: any }) => {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 500,
-      delay,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
-  }, []);
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          opacity: anim,
-          transform: [{
-            scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
-          }],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
-};
+import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { AnimGlyph, BreathingBar } from '@/components/Card';
 
 const CONSENT_DAYS = 90;
 const WARN_DAYS = 14;
@@ -74,13 +46,12 @@ function getProviderInitial(name: string) {
 export default function Profile() {
   const router = useRouter();
   const { connected, upgraded } = useLocalSearchParams<{ connected?: string; upgraded?: string }>();
-  const { tier, isPro, status, billingInterval, currentPeriodEnd, cancelAtPeriodEnd, refresh: refreshTier } = useSubscription();
+  const { isActive, isTrial, isSubscribed, trialDaysLeft, billingInterval, currentPeriodEnd, cancelAtPeriodEnd, refresh: refreshTier } = useSubscription();
   const { colors, isDark, toggleTheme } = useTheme();
   const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
   const [showPaywall, setShowPaywall] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
-  const [restoringPurchases, setRestoringPurchases] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
@@ -89,9 +60,7 @@ export default function Profile() {
   const [showUpgradeSuccess, setShowUpgradeSuccess] = useState(upgraded === 'true');
   const [notifPrefs, setNotifPrefs] = useState({
     weekly_digest: true,
-    milestone_alerts: true,
     checkin_prompts: true,
-    achievement_alerts: true,
   });
   const [notifExpanded, setNotifExpanded] = useState(false);
   const [userId, setUserId] = useState<string | undefined>();
@@ -124,6 +93,7 @@ export default function Profile() {
   }, [upgraded]);
 
   useEffect(() => {
+    trackScreen('Profile');
     loadUser();
   }, []);
 
@@ -132,7 +102,8 @@ export default function Profile() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      setName(user.user_metadata?.full_name || '');
+      const rawFullName = user.user_metadata?.full_name || '';
+      setName(rawFullName.split(' ').map((w: string) => w ? w.charAt(0).toUpperCase() + w.slice(1) : '').join(' '));
       setEmail(user.email || '');
       setUserId(user.id);
 
@@ -164,15 +135,13 @@ export default function Profile() {
       try {
         const { data: prefs } = await supabase
           .from('notification_preferences')
-          .select('weekly_digest, milestone_alerts, checkin_prompts, achievement_alerts')
+          .select('weekly_digest, checkin_prompts')
           .eq('user_id', user.id)
           .maybeSingle();
         if (prefs) {
           setNotifPrefs({
             weekly_digest: prefs.weekly_digest ?? true,
-            milestone_alerts: prefs.milestone_alerts ?? true,
             checkin_prompts: prefs.checkin_prompts ?? true,
-            achievement_alerts: prefs.achievement_alerts ?? true,
           });
         }
       } catch {}
@@ -182,44 +151,39 @@ export default function Profile() {
   };
 
   const handleRemoveBank = async (bankId: string, label: string) => {
-    const confirmed = Platform.OS === 'web'
-      ? window.confirm(`Remove ${label}?\n\nThis will disconnect this account and remove its data. You can reconnect later.`)
-      : await new Promise<boolean>((resolve) =>
-          Alert.alert(
-            `Remove ${label}?`,
-            'This will disconnect this account and remove its data. You can reconnect later.',
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
-            ],
-          ),
-        );
+    trackEvent('Bank Removed');
+    const confirmed = window.confirm(`Remove ${label}?\n\nThis will disconnect this account and remove its data. You can reconnect later.`);
     if (!confirmed) return;
-    await supabase.from('bank_data').delete().eq('id', bankId);
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setConnectedBanks((prev) => prev.filter((b) => b.id !== bankId));
+    try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setConnectedBanks((prev) => prev.filter((b) => b.id !== bankId));
+      const { error } = await supabase.from('bank_data').delete().eq('id', bankId);
+      if (error) {
+        console.warn('[profile] Remove bank failed:', error.message);
+      }
+    } catch (err: any) {
+      console.warn('[profile] Remove bank error:', err?.message);
+    }
   };
 
   const handleRemoveDebtAccount = async (debtId: string, label: string) => {
-    const confirmed = Platform.OS === 'web'
-      ? window.confirm(`Remove ${label}?\n\nThis will remove this account from your profile.`)
-      : await new Promise<boolean>((resolve) =>
-          Alert.alert(
-            `Remove ${label}?`,
-            'This will remove this account from your profile.',
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Remove', style: 'destructive', onPress: () => resolve(true) },
-            ],
-          ),
-        );
+    trackEvent('Debt Account Removed');
+    const confirmed = window.confirm(`Remove ${label}?\n\nThis will remove this account from your profile.`);
     if (!confirmed) return;
-    await supabase.from('debt_accounts').delete().eq('id', debtId);
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setDebtAccounts((prev) => prev.filter((d) => d.id !== debtId));
+    try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setDebtAccounts((prev) => prev.filter((d) => d.id !== debtId));
+      const { error } = await supabase.from('debt_accounts').delete().eq('id', debtId);
+      if (error) {
+        console.warn('[profile] Remove debt account failed:', error.message);
+      }
+    } catch (err: any) {
+      console.warn('[profile] Remove debt account error:', err?.message);
+    }
   };
 
   const handleAddAccount = () => {
+    trackEvent('Add Bank Tapped');
     router.push({ pathname: '/(main)/connect', params: { from: 'profile' } });
   };
 
@@ -276,6 +240,8 @@ export default function Profile() {
         return;
       }
 
+      trackEvent('Debt Account Added', { type: addDebtType });
+
       // Optimistic UI update
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setDebtAccounts((prev) => [...prev, inserted]);
@@ -296,6 +262,7 @@ export default function Profile() {
   };
 
   const handleManageSubscription = async () => {
+    trackEvent('Manage Subscription Tapped');
     setPortalLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -309,7 +276,7 @@ export default function Profile() {
         },
       });
       const data = await res.json();
-      if (data.url && Platform.OS === 'web') {
+      if (data.url) {
         window.location.href = data.url;
       }
     } catch (err) {
@@ -318,30 +285,9 @@ export default function Profile() {
     setPortalLoading(false);
   };
 
-  const handleRestorePurchases = async () => {
-    setRestoringPurchases(true);
-    try {
-      const restored = await restorePurchases();
-      if (restored) {
-        await refreshTier();
-        Alert.alert('Restored', 'Your Pro subscription has been restored.');
-      } else {
-        Alert.alert('No subscription found', 'We couldn\u2019t find an active subscription linked to this account.');
-      }
-    } catch {
-      Alert.alert('Error', 'Could not restore purchases. Please try again.');
-    }
-    setRestoringPurchases(false);
-  };
-
-  const PRO_ONLY_NOTIFS: (keyof typeof notifPrefs)[] = ['checkin_prompts', 'achievement_alerts'];
-
   const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
-    if (!isPro && PRO_ONLY_NOTIFS.includes(key)) {
-      setShowPaywall(true);
-      return;
-    }
     const newVal = !notifPrefs[key];
+    trackEvent('Notification Toggled', { type: key, enabled: newVal });
     setNotifPrefs((prev) => ({ ...prev, [key]: newVal }));
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -363,6 +309,7 @@ export default function Profile() {
 
 
   const handleSignOut = async () => {
+    trackEvent('Sign Out');
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -372,24 +319,12 @@ export default function Profile() {
   };
 
   const handleDeleteAccount = async () => {
-    const confirmed = Platform.OS === 'web'
-      ? window.confirm('Delete account?\n\nThis will permanently delete your account and all associated data. This action cannot be undone.')
-      : await new Promise<boolean>((resolve) =>
-          Alert.alert(
-            'Delete account',
-            'This will permanently delete your account and all associated data. This action cannot be undone.',
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Delete', style: 'destructive', onPress: () => resolve(true) },
-            ],
-          ),
-        );
+    const confirmed = window.confirm('Delete account?\n\nThis will permanently delete your account and all associated data. This action cannot be undone.');
     if (!confirmed) return;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        if (Platform.OS === 'web') window.alert('You are not signed in.');
-        else Alert.alert('Error', 'You are not signed in.');
+        window.alert('You are not signed in.');
         return;
       }
       const res = await fetch('/api/delete-account', {
@@ -404,14 +339,10 @@ export default function Profile() {
         await supabase.auth.signOut();
         router.replace('/(auth)/sign-in');
       } else {
-        const msg = data.error || 'Could not delete account. Please try again.';
-        if (Platform.OS === 'web') window.alert(msg);
-        else Alert.alert('Error', msg);
+        window.alert(data.error || 'Could not delete account. Please try again.');
       }
     } catch (err: any) {
-      const msg = err.message || 'Something went wrong. Please try again.';
-      if (Platform.OS === 'web') window.alert(msg);
-      else Alert.alert('Error', msg);
+      window.alert(err.message || 'Something went wrong. Please try again.');
     }
   };
 
@@ -419,7 +350,7 @@ export default function Profile() {
   const hasAccounts = allAccounts.length > 0 || debtAccounts.length > 0;
 
   return (
-    <ScrollView style={s.container} contentContainerStyle={[s.scroll, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding }]}>
+    <ScrollView style={s.container} contentContainerStyle={[s.scroll, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding }]} testID="profile-screen">
       {/* ── Header ── */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/(main)/(tabs)')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -450,17 +381,22 @@ export default function Profile() {
           <Text style={s.userName}>{name.split(' ')[0] || 'User'}</Text>
           <Text style={s.userEmail}>{email}</Text>
           <View style={s.tierRow}>
-            <View style={[s.tierBadge, isPro && s.tierBadgePro]}>
-              <Text style={[s.tierBadgeText, isPro && s.tierBadgeTextPro]}>
-                {isPro ? 'PRO' : 'FREE'}
+            <View style={[s.tierBadge, isSubscribed ? s.tierBadgePro : isTrial ? s.tierBadgeTrial : undefined]}>
+              <Text style={[s.tierBadgeText, isSubscribed ? s.tierBadgeTextPro : isTrial ? s.tierBadgeTextTrial : undefined]}>
+                {isSubscribed ? 'PRO' : isTrial ? 'TRIAL' : 'EXPIRED'}
               </Text>
             </View>
-            {isPro && currentPeriodEnd && !cancelAtPeriodEnd && (
+            {isTrial && (
+              <Text style={s.tierMeta}>
+                {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left
+              </Text>
+            )}
+            {isSubscribed && currentPeriodEnd && !cancelAtPeriodEnd && (
               <Text style={s.tierMeta}>
                 renews {currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
               </Text>
             )}
-            {isPro && cancelAtPeriodEnd && (
+            {isSubscribed && cancelAtPeriodEnd && (
               <Text style={[s.tierMeta, { color: colors.amber }]}>
                 cancels {currentPeriodEnd ? currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'soon'}
               </Text>
@@ -490,6 +426,16 @@ export default function Profile() {
                   {isBank ? 'Bank' : 'Credit'}
                   {expired ? ' — expired' : expiring ? ` — ${daysLeft}d left` : ` — ${daysLeft}d remaining`}
                 </Text>
+                {/* Consent health bar */}
+                {!expired && (
+                  <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
+                    <BreathingBar
+                      color={statusColor}
+                      width={`${Math.max(0, Math.min(100, Math.round((daysLeft / CONSENT_DAYS) * 100)))}%`}
+                      style={{ height: '100%', borderRadius: 1.5 }}
+                    />
+                  </View>
+                )}
               </View>
               {expired ? (
                 <TouchableOpacity style={s.accountAction} onPress={handleAddAccount} activeOpacity={0.7}>
@@ -499,6 +445,9 @@ export default function Profile() {
                 <TouchableOpacity
                   onPress={() => handleRemoveBank(bank.id, displayName)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${displayName} account`}
+                  style={s.accountRemoveBtn}
                 >
                   <Text style={s.accountRemove}>Remove</Text>
                 </TouchableOpacity>
@@ -533,10 +482,23 @@ export default function Profile() {
                     : d.account_type === 'bnpl' ? 'BNPL'
                     : d.account_type || 'Debt'}
                 </Text>
+                {/* Utilization bar for debt with credit limit */}
+                {lim > 0 && util != null && (
+                  <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
+                    <BreathingBar
+                      color={isHigh ? colors.coral : colors.accent}
+                      width={`${Math.min(100, util)}%`}
+                      style={{ height: '100%', borderRadius: 1.5 }}
+                    />
+                  </View>
+                )}
               </View>
               <TouchableOpacity
                 onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${d.account_name} account`}
+                style={s.accountRemoveBtn}
               >
                 <Text style={s.accountRemove}>Remove</Text>
               </TouchableOpacity>
@@ -550,7 +512,7 @@ export default function Profile() {
       )}
 
       <View style={s.addButtonsRow}>
-        <TouchableOpacity style={s.addBtn} onPress={handleAddAccount} activeOpacity={0.7}>
+        <TouchableOpacity style={s.addBtn} onPress={handleAddAccount} activeOpacity={0.7} testID="profile-add-account-button" accessibilityRole="button" accessibilityLabel="Add account">
           <Text style={s.addBtnText}>+ Add account</Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -635,9 +597,10 @@ export default function Profile() {
           <Text style={s.groupRowLabel}>{isDark ? 'Dark mode' : 'Light mode'}</Text>
           <Switch
             value={!isDark}
-            onValueChange={toggleTheme}
+            onValueChange={() => { trackEvent('Theme Toggled'); toggleTheme(); }}
             trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
             thumbColor={isDark ? colors.thumbOff : colors.green}
+            testID="profile-theme-toggle"
           />
         </View>
 
@@ -659,36 +622,27 @@ export default function Profile() {
           <>
             <View style={s.groupDivider} />
             {([
-              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Score & spending recap every Monday', pro: false },
-              { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Bocy flags things that need attention', pro: true },
-              { key: 'achievement_alerts' as const, label: 'Achievements', desc: 'Celebrate milestones', pro: true },
-              { key: 'milestone_alerts' as const, label: 'Score changes', desc: 'Alert on significant shifts', pro: false },
+              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Top moves & spending recap every Monday' },
+              { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Spending updates, nudges & income alerts' },
             ]).map((item, idx) => (
               <View key={item.key}>
                 {idx > 0 && <View style={s.groupDivider} />}
                 <View style={s.notifRow}>
                   <View style={s.notifInfo}>
                     <View style={s.notifLabelRow}>
-                      <Text style={[s.notifLabel, item.pro && !isPro && s.notifLabelLocked]}>{item.label}</Text>
-                      {item.pro && !isPro && <Text style={s.proBadge}>PRO</Text>}
+                      <Text style={s.notifLabel}>{item.label}</Text>
                     </View>
                     <Text style={s.notifDesc}>{item.desc}</Text>
                   </View>
                   <Switch
-                    value={item.pro && !isPro ? false : notifPrefs[item.key]}
+                    value={notifPrefs[item.key]}
                     onValueChange={() => toggleNotifPref(item.key)}
                     trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-                    thumbColor={(item.pro && !isPro) ? colors.thumbOff : (notifPrefs[item.key] ? colors.green : colors.thumbOff)}
-                    disabled={item.pro && !isPro}
+                    thumbColor={notifPrefs[item.key] ? colors.green : colors.thumbOff}
                   />
                 </View>
               </View>
             ))}
-            {!isPro && (
-              <TouchableOpacity style={s.notifUpgrade} onPress={() => setShowPaywall(true)} activeOpacity={0.7}>
-                <Text style={s.notifUpgradeText}>Unlock all with Pro</Text>
-              </TouchableOpacity>
-            )}
             {webPush.supported && (
               <>
                 <View style={s.groupDivider} />
@@ -722,35 +676,17 @@ export default function Profile() {
       </View>
 
       {/* ── Subscription management ── */}
-      {!isPro && (
-        <>
-          <TouchableOpacity style={s.upgradeBtn} onPress={() => setShowPaywall(true)} activeOpacity={0.8}>
-            <Text style={s.upgradeBtnText}>Upgrade to Pro</Text>
-          </TouchableOpacity>
-          {(Platform.OS === 'ios' || Platform.OS === 'android') && (
-            <TouchableOpacity
-              style={s.restorePurchasesBtn}
-              onPress={handleRestorePurchases}
-              disabled={restoringPurchases}
-              activeOpacity={0.7}
-            >
-              {restoringPurchases ? (
-                <ActivityIndicator size="small" color={colors.dim} />
-              ) : (
-                <Text style={s.restorePurchasesBtnText}>Restore purchases</Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </>
+      {!isSubscribed && (
+        <TouchableOpacity style={s.upgradeBtn} onPress={() => { trackEvent('Upgrade Tapped'); setShowPaywall(true); }} activeOpacity={0.8} testID="profile-upgrade-button" accessibilityRole="button" accessibilityLabel="Subscribe">
+          <Text style={s.upgradeBtnText}>{isTrial ? 'Subscribe now' : 'Subscribe'}</Text>
+        </TouchableOpacity>
       )}
-      {isPro && (
+      {isSubscribed && (
         <TouchableOpacity style={s.manageSubBtn} onPress={handleManageSubscription} disabled={portalLoading} activeOpacity={0.7}>
           {portalLoading ? (
             <ActivityIndicator size="small" color={colors.accent} />
           ) : (
-            <Text style={s.manageSubBtnText}>
-              {status === 'past_due' ? 'Update payment method' : 'Manage subscription'}
-            </Text>
+            <Text style={s.manageSubBtnText}>Manage subscription</Text>
           )}
         </TouchableOpacity>
       )}
@@ -780,14 +716,14 @@ export default function Profile() {
 
         <View style={s.groupDivider} />
 
-        <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7}>
+        <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Sign out of your account" testID="profile-sign-out-button">
           <Text style={s.groupRowLabel}>Sign out</Text>
           <Text style={s.groupRowChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
         <View style={s.groupDivider} />
 
-        <TouchableOpacity style={s.groupRow} onPress={handleDeleteAccount} activeOpacity={0.7}>
+        <TouchableOpacity style={s.groupRow} onPress={handleDeleteAccount} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Delete your account permanently" testID="profile-delete-account-button">
           <Text style={[s.groupRowLabel, { color: colors.coral }]}>Delete account</Text>
           <Text style={[s.groupRowChevron, { color: colors.coral }]}>{'\u203A'}</Text>
         </TouchableOpacity>
@@ -829,8 +765,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: 100, paddingVertical: 3, paddingHorizontal: 10,
   },
   tierBadgePro: { backgroundColor: c.greenDim, borderColor: c.green + '40' },
+  tierBadgeTrial: { backgroundColor: c.accentDim, borderColor: c.accent + '40' },
   tierBadgeText: { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: c.dim },
   tierBadgeTextPro: { color: c.green },
+  tierBadgeTextTrial: { color: c.accent },
   tierMeta: { fontFamily: fonts.regular, fontSize: 12, color: c.dim },
 
   // ── Section labels ──
@@ -850,6 +788,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   accountMeta: { fontFamily: fonts.regular, fontSize: 12, color: c.dim, marginTop: 2 },
   accountAction: { paddingVertical: 4, paddingHorizontal: 10 },
   accountActionText: { fontFamily: fonts.semibold, fontSize: 12 },
+  accountRemoveBtn: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
   accountRemove: { fontFamily: fonts.regular, fontSize: 12, color: c.muted },
 
   // ── Empty + add ──
@@ -905,10 +844,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     alignItems: 'center', marginBottom: 24,
   },
   upgradeBtnText: { fontFamily: fonts.semibold, fontSize: 15, color: c.bg },
-  restorePurchasesBtn: {
-    alignItems: 'center', paddingVertical: 10, marginTop: -16, marginBottom: 24,
-  },
-  restorePurchasesBtnText: { fontFamily: fonts.regular, fontSize: 13, color: c.dim, textDecorationLine: 'underline' as const },
   manageSubBtn: {
     borderWidth: 1, borderColor: c.border, borderRadius: 100,
     paddingVertical: 12, alignItems: 'center', marginBottom: 24,

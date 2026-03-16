@@ -2,13 +2,14 @@
 // Reusable card primitives with variants, press feedback, and entrance animations.
 // Nothing OS design language: border-defined, minimal shadows, monochrome-first.
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Animated, Easing,
   Platform, LayoutAnimation, type ViewStyle, type TextStyle,
 } from 'react-native';
 import { fonts, spacing, radius, cardShadow, animation, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { hapticLight } from '@/lib/haptics';
 
 // ── Smooth layout animation config ──
 export const SMOOTH_ANIM = {
@@ -56,6 +57,7 @@ export default function Card({
   const variantStyles = getVariantStyles(colors, variant, borderColor);
 
   const handlePressIn = useCallback(() => {
+    hapticLight();
     Animated.timing(scaleAnim, {
       toValue: animation.press.scale,
       duration: animation.press.duration,
@@ -227,10 +229,21 @@ export function AnimGlyph({ children, delay = 0, style }: { children: React.Reac
 
 // ── BreathingBar ──
 // Subtle pulse animation for progress indicators.
+// Width animates from 0% → target on mount, then breathes.
 export function BreathingBar({ color, width: barWidth, style }: { color: string; width: string; style?: any }) {
   const breathAnim = useRef(new Animated.Value(0)).current;
+  const scaleXAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Animate scaleX from 0 to 1 on mount (avoids string interpolation issues on web)
+    Animated.timing(scaleXAnim, {
+      toValue: 1,
+      duration: 800,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+
+    // Breathing pulse loop
     Animated.loop(
       Animated.sequence([
         Animated.timing(breathAnim, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.sin), useNativeDriver: false }),
@@ -239,10 +252,21 @@ export function BreathingBar({ color, width: barWidth, style }: { color: string;
     ).start();
   }, []);
 
-  const opacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
+  const opacity = breathAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0.95] });
 
   return (
-    <Animated.View style={[style, { width: barWidth, backgroundColor: color, opacity }]} />
+    <Animated.View
+      style={[
+        style,
+        {
+          width: barWidth,
+          backgroundColor: color,
+          opacity,
+          transform: [{ scaleX: scaleXAnim }],
+          transformOrigin: 'left center',
+        },
+      ]}
+    />
   );
 }
 
@@ -265,6 +289,7 @@ export function InfoIcon({ expanded, onPress }: { expanded: boolean; onPress: ()
     <Pressable
       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
       onPress={() => {
+        hapticLight();
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         onPress();
       }}
@@ -273,6 +298,183 @@ export function InfoIcon({ expanded, onPress }: { expanded: boolean; onPress: ()
         {expanded ? '\u2715' : 'i'}
       </Text>
     </Pressable>
+  );
+}
+
+// ── ExpandDots ──
+// Dotted glyph micro-animation: a small cluster of dots that scatter
+// outward and fade when a collapsed card expands. Nothing Phone LED aesthetic.
+export function ExpandDots({ color, count = 5, size = 3 }: { color?: string; count?: number; size?: number }) {
+  const { colors } = useTheme();
+  const dotColor = color || colors.accent;
+  const anims = useRef(
+    Array.from({ length: count }, () => ({
+      opacity: new Animated.Value(0),
+      x: new Animated.Value(0),
+      y: new Animated.Value(0),
+    })),
+  ).current;
+
+  useEffect(() => {
+    // Each dot fades in then scatters outward and fades out
+    const animations = anims.map((dot, i) => {
+      const angle = (i / count) * 2 * Math.PI + Math.random() * 0.4;
+      const dist = 8 + Math.random() * 10;
+      return Animated.sequence([
+        Animated.delay(i * 30),
+        Animated.parallel([
+          Animated.sequence([
+            Animated.timing(dot.opacity, { toValue: 1, duration: 120, useNativeDriver: true }),
+            Animated.timing(dot.opacity, { toValue: 0, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          ]),
+          Animated.timing(dot.x, { toValue: Math.cos(angle) * dist, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+          Animated.timing(dot.y, { toValue: Math.sin(angle) * dist, duration: 420, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        ]),
+      ]);
+    });
+    Animated.parallel(animations).start();
+  }, []);
+
+  return (
+    <View style={{ width: size * 3, height: size * 3, alignItems: 'center', justifyContent: 'center' }}>
+      {anims.map((dot, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: dotColor,
+            opacity: dot.opacity,
+            transform: [{ translateX: dot.x }, { translateY: dot.y }],
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+// ── ConnectorDots ──
+// Vertical dot pipe that visually bridges Budget → Transactions.
+// On period change, dots light up top-to-bottom like data flowing down.
+export type ConnectorDotsHandle = { pulse: () => void };
+
+export const ConnectorDots = forwardRef<ConnectorDotsHandle, { color?: string; accentColor?: string }>(
+  function ConnectorDots({ color, accentColor }, ref) {
+    const { colors } = useTheme();
+    const dotColor = color || colors.border;
+    const dotAccent = accentColor || colors.accent;
+    const COUNT = 7;
+    const anims = useRef(
+      Array.from({ length: COUNT }, () => ({
+        colorProgress: new Animated.Value(0),
+        scale: new Animated.Value(1),
+      })),
+    ).current;
+
+    useImperativeHandle(ref, () => ({
+      pulse() {
+        // Reset all dots before starting
+        anims.forEach((dot) => {
+          dot.colorProgress.setValue(0);
+          dot.scale.setValue(1);
+        });
+        // Staggered top-to-bottom cascade: each dot lights up, swells, then fades
+        const cascade = anims.map((dot, i) =>
+          Animated.sequence([
+            Animated.delay(i * 60),
+            Animated.parallel([
+              Animated.sequence([
+                Animated.timing(dot.colorProgress, { toValue: 1, duration: 120, useNativeDriver: false }),
+                Animated.timing(dot.colorProgress, { toValue: 0, duration: 350, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+              ]),
+              Animated.sequence([
+                Animated.timing(dot.scale, { toValue: 1.8, duration: 120, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+                Animated.timing(dot.scale, { toValue: 1, duration: 350, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }),
+              ]),
+            ]),
+          ]),
+        );
+        Animated.parallel(cascade).start();
+      },
+    }));
+
+    return (
+      <View style={{ alignItems: 'center', paddingVertical: 2 }}>
+        {anims.map((dot, i) => {
+          const bg = dot.colorProgress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [dotColor, dotAccent],
+          });
+          return (
+            <Animated.View
+              key={i}
+              style={{
+                width: 3,
+                height: 3,
+                borderRadius: 1.5,
+                backgroundColor: bg,
+                marginVertical: 2.5,
+                transform: [{ scale: dot.scale }],
+              }}
+            />
+          );
+        })}
+      </View>
+    );
+  },
+);
+
+// ── HorizontalConnectorDots ──
+// Horizontal dot bridge between hero carousel cards.
+// Dots cascade left-to-right driven by scroll progress (0 → 1).
+export function HorizontalConnectorDots({
+  scrollProgress,
+  color,
+  accentColor,
+}: {
+  scrollProgress: Animated.AnimatedInterpolation<string | number>;
+  color?: string;
+  accentColor?: string;
+}) {
+  const { colors } = useTheme();
+  const dotColor = color || colors.border;
+  const dotAccent = accentColor || colors.accent;
+  const COUNT = 3;
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+      {Array.from({ length: COUNT }).map((_, i) => {
+        // Each dot lights up at a staggered point as scroll progresses 0→1
+        const start = i / COUNT;
+        const peak = (i + 0.5) / COUNT;
+        const end = (i + 1) / COUNT;
+        const bg = scrollProgress.interpolate({
+          inputRange: [Math.max(0, start), peak, Math.min(1, end)],
+          outputRange: [dotColor, dotAccent, dotColor],
+          extrapolate: 'clamp',
+        });
+        const scale = scrollProgress.interpolate({
+          inputRange: [Math.max(0, start), peak, Math.min(1, end)],
+          outputRange: [1, 1.3, 1],
+          extrapolate: 'clamp',
+        });
+        return (
+          <Animated.View
+            key={i}
+            style={{
+              width: 2.5,
+              height: 2.5,
+              borderRadius: 1.25,
+              backgroundColor: bg,
+              marginHorizontal: 1,
+              transform: [{ scale }],
+            }}
+          />
+        );
+      })}
+    </View>
   );
 }
 
@@ -286,15 +488,16 @@ function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: st
 
   switch (variant) {
     case 'hero':
-      return { ...base, borderColor: borderColor || (c.green + '40') };
+      // Monochrome hero — elevated by accent border, no green tint
+      return { ...base, borderColor: borderColor || c.accent, borderWidth: 1.5 };
     case 'active':
       return { ...base, borderColor: borderColor || c.accentDim };
     case 'highlight':
-      return { ...base, borderColor: borderColor || c.accent, borderWidth: 2 };
+      return { ...base, borderColor: borderColor || c.accent, borderWidth: 1.5 };
     case 'error':
       return { ...base, backgroundColor: c.coralDim, borderColor: borderColor || c.coral };
     case 'upgrade':
-      return { ...base, borderColor: borderColor || c.greenDim };
+      return { ...base, borderColor: borderColor || c.accentDim };
     case 'action':
       return { ...base, backgroundColor: c.surface, borderColor: borderColor || c.accentDim };
     case 'compact':
@@ -307,19 +510,19 @@ function getVariantStyles(c: ThemeColors, variant: CardVariant, borderColor?: st
 // ── Shared styles ──
 const styles = StyleSheet.create({
   base: {
-    borderRadius: 24,
+    borderRadius: 22,
     padding: 28,
     paddingTop: 32,
     paddingBottom: 32,
-    marginBottom: 16,
+    marginBottom: 18,
     overflow: 'hidden' as const,
   },
   title: {
     fontFamily: fonts.mono,
-    fontSize: 13,
-    letterSpacing: 1.5,
+    fontSize: 11,
+    letterSpacing: 2,
     textTransform: 'uppercase',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   titleRow: {
     flexDirection: 'row',

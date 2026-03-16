@@ -1,4 +1,4 @@
-import type { Analysis, BudgetCategory } from './types';
+import type { Analysis, BudgetCategory } from './types.js';
 
 // ── Milestone definitions ──
 
@@ -8,12 +8,12 @@ export interface MilestoneContent {
   title: string;
   /** Personalised insight line — generated from analysis data */
   insight: string;
-  /** Additional detail for Pro subscribers */
-  proDetail: string | null;
+  /** Additional detail */
+  detail: string | null;
   /** CTA label */
   cta: string;
   /** Where the CTA navigates */
-  ctaRoute: 'plan' | 'chat' | 'paywall';
+  ctaRoute: 'plan' | 'chat';
 }
 
 // ── Sanity bounds ──
@@ -42,7 +42,6 @@ function inBounds(val: number, bounds: { min?: number; max?: number }): boolean 
 export function getActiveMilestone(
   daysSinceFirstAnalysis: number,
   analysis: Analysis | null,
-  isPro: boolean,
   dismissed: Set<string>,
 ): MilestoneContent | null {
   if (!analysis) return null;
@@ -51,15 +50,15 @@ export function getActiveMilestone(
   // If a builder returns null (data not reliable), skip to the next.
   let result: MilestoneContent | null = null;
   if (daysSinceFirstAnalysis >= 15 && !dismissed.has('day_15')) {
-    result = buildDay15(analysis, isPro);
+    result = buildDay15(analysis);
     if (result) return result;
   }
   if (daysSinceFirstAnalysis >= 7 && !dismissed.has('day_7')) {
-    result = buildDay7(analysis, isPro);
+    result = buildDay7(analysis);
     if (result) return result;
   }
   if (daysSinceFirstAnalysis >= 3 && !dismissed.has('day_3')) {
-    result = buildDay3(analysis, isPro);
+    result = buildDay3(analysis);
     if (result) return result;
   }
   return null;
@@ -67,7 +66,7 @@ export function getActiveMilestone(
 
 // ── Day 3: "Your Money Snapshot" ──
 
-function buildDay3(a: Analysis, isPro: boolean): MilestoneContent | null {
+function buildDay3(a: Analysis): MilestoneContent | null {
   const topMerchant = getTopMerchantSpend(a);
   const subCount = countSubscriptions(a);
   const income = Math.round(a.monthly_income || 0);
@@ -93,7 +92,7 @@ function buildDay3(a: Analysis, isPro: boolean): MilestoneContent | null {
     }
   }
 
-  const proDetail = buildProDetail(isPro, () => {
+  const detail = buildDetail(() => {
     const arch = a.archetype ? formatArchetype(a.archetype) : null;
     const pattern = a.behavioral_patterns?.[0]?.trim();
     if (!arch && !pattern) return null;
@@ -108,15 +107,15 @@ function buildDay3(a: Analysis, isPro: boolean): MilestoneContent | null {
     day: 3,
     title: 'Your money snapshot',
     insight: parts.join(' '),
-    proDetail,
-    cta: isPro ? 'See your full plan' : 'Unlock your full analysis',
-    ctaRoute: isPro ? 'plan' : 'paywall',
+    detail,
+    cta: 'See your full plan',
+    ctaRoute: 'plan',
   };
 }
 
 // ── Day 7: "Your First Week" ──
 
-function buildDay7(a: Analysis, isPro: boolean): MilestoneContent | null {
+function buildDay7(a: Analysis): MilestoneContent | null {
   const score = a.decision_score || 0;
   const surplus = Math.round(a.surplus || 0);
   const moveCount = a.all_moves?.length || 0;
@@ -142,7 +141,7 @@ function buildDay7(a: Analysis, isPro: boolean): MilestoneContent | null {
 
   if (parts.length === 0) return null;
 
-  const proDetail = buildProDetail(isPro, () => {
+  const detail = buildDetail(() => {
     if (!topMove) return null;
     const action = truncate(stripMd(topMove.action), 60);
     const impact = topMove.annualImpact || 0;
@@ -155,15 +154,15 @@ function buildDay7(a: Analysis, isPro: boolean): MilestoneContent | null {
     day: 7,
     title: 'Your first week',
     insight: parts.join(' '),
-    proDetail,
-    cta: isPro ? 'Review your moves' : 'Unlock personalised moves',
-    ctaRoute: isPro ? 'plan' : 'paywall',
+    detail,
+    cta: 'Review your insights',
+    ctaRoute: 'plan',
   };
 }
 
 // ── Day 15: "Two Week Check-in" ──
 
-function buildDay15(a: Analysis, isPro: boolean): MilestoneContent | null {
+function buildDay15(a: Analysis): MilestoneContent | null {
   const income = Math.round(a.monthly_income || 0);
   const spending = Math.round(a.monthly_spending || 0);
   const moveCount = a.all_moves?.length || 0;
@@ -189,7 +188,7 @@ function buildDay15(a: Analysis, isPro: boolean): MilestoneContent | null {
 
   if (parts.length === 0) return null;
 
-  const proDetail = buildProDetail(isPro, () => {
+  const detail = buildDetail(() => {
     if (!goalContext) return null;
     const label = goalContext.goalLabel?.trim();
     if (!label) return null;
@@ -206,19 +205,18 @@ function buildDay15(a: Analysis, isPro: boolean): MilestoneContent | null {
     day: 15,
     title: 'Two week check-in',
     insight: parts.join(' '),
-    proDetail,
-    cta: isPro ? 'Ask Bocy for a strategy update' : 'Unlock goal tracking',
-    ctaRoute: isPro ? 'chat' : 'paywall',
+    detail,
+    cta: 'Ask Bocy for a strategy update',
+    ctaRoute: 'chat',
   };
 }
 
 // ── Helpers ──
 
 /**
- * Build pro detail safely — returns null if builder returns null/empty or user isn't pro.
+ * Build detail safely — returns null if builder returns null/empty.
  */
-function buildProDetail(isPro: boolean, builder: () => string | null): string | null {
-  if (!isPro) return null;
+function buildDetail(builder: () => string | null): string | null {
   const result = builder();
   return result?.trim() || null;
 }

@@ -13,24 +13,6 @@
       "resizeMode": "contain",
       "backgroundColor": "#000000"
     },
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.bocy.app",
-      "buildNumber": "1",
-      "infoPlist": {
-        "NSCameraUsageDescription": "Bocy needs camera access to scan documents.",
-        "NSPhotoLibraryUsageDescription": "Bocy needs photo library access to upload documents.",
-        "NSFaceIDUsageDescription": "Bocy uses Face ID to protect your financial data.",
-        "ITSAppUsesNonExemptEncryption": false
-      }
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
-      },
-      "package": "com.bocy.app"
-    },
     "web": {
       "bundler": "metro",
       "output": "single",
@@ -42,30 +24,8 @@
       "themeColor": "#000000"
     },
     "plugins": [
-      "expo-router",
-      "expo-secure-store",
-      [
-        "expo-build-properties",
-        {
-          "ios": {
-            "deploymentTarget": "16.0",
-            "useFrameworks": "static"
-          }
-        }
-      ],
-      "./plugins/withIAP.js"
+      "expo-router"
     ],
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/f8e22d4e-78f5-43b2-9369-4dfa3c00ff02"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "f8e22d4e-78f5-43b2-9369-4dfa3c00ff02"
-      }
-    },
     "experiments": {
       "typedRoutes": true
     }

@@ -4,7 +4,7 @@
 //
 // Runs client-side: 1,000 sims × 60 months = 60k ops, <50ms on low-end phone.
 
-import type { FinancialProfile, Move, UserIdentity } from './types';
+import type { FinancialProfile, Move, UserIdentity, UpcomingEvent } from './types.js';
 
 // ── Simulation parameters ──
 
@@ -74,24 +74,31 @@ export function estimateVolatility(
   const essential = profile.budgetReality.nonDiscretionary.total;
   const discretionary = profile.budgetReality.discretionary.total;
 
-  // Income volatility depends on work setup
+  // Income volatility: prefer the real CV computed from transaction data,
+  // fall back to heuristic estimates from work setup / frequency detection.
   const work = identity?.work_setup || 'office';
-  let incomeCV = 0.05; // coefficient of variation (default: salaried ≈ 5%)
-  if (work === 'self_employed') incomeCV = 0.25;
-  else if (work === 'multiple_jobs') incomeCV = 0.18;
-  else if (work === 'student') incomeCV = 0.20;
+  let incomeCV = profile.monthly.incomeCV ?? 0;
+  if (incomeCV <= 0) {
+    // Heuristic fallback when transaction data is insufficient
+    incomeCV = 0.05; // default: salaried ≈ 5%
+    if (work === 'self_employed') incomeCV = 0.25;
+    else if (work === 'multiple_jobs') incomeCV = 0.18;
+    else if (work === 'student') incomeCV = 0.20;
 
-  // Detect irregular income from source frequency
-  const hasIrregular = profile.incomeSources.some(
-    (s) => s.frequency === 'irregular' || s.frequency === 'weekly',
-  );
-  if (hasIrregular) incomeCV = Math.max(incomeCV, 0.15);
+    // Detect irregular income from source frequency
+    const hasIrregular = profile.incomeSources.some(
+      (s) => s.frequency === 'irregular' || s.frequency === 'weekly',
+    );
+    if (hasIrregular) incomeCV = Math.max(incomeCV, 0.15);
+  }
 
-  // Essential spending: low variance (rent/mortgage are fixed, utilities predictable)
-  const essentialCV = 0.08;
-
-  // Discretionary spending: higher variance (varies by month, mood, events)
-  const discretionaryCV = 0.22;
+  // Spending CVs: heuristic estimates by category type.
+  // Note: budget reality items are per-category averages, not month-to-month data,
+  // so computing temporal variance from them would be meaningless (cross-category ≠ temporal).
+  // Real month-to-month CV requires transaction-level grouping which happens in the
+  // enrichment engine's _dataDrivenCutPct() instead.
+  const essentialCV = 0.08; // low variance (rent/mortgage are fixed, utilities predictable)
+  const discretionaryCV = 0.22; // higher variance (varies by month, mood, events)
 
   // Emergency events: ~1 per year (car repair, appliance, medical)
   let emergencyRate = 0.083; // 1/12
@@ -104,11 +111,10 @@ export function estimateVolatility(
     emergencyCost *= 1.3;
   }
 
-  // Upcoming events increase emergency probability
-  const events = identity?.upcoming_events || [];
-  if (events.some((e) => e === 'moving' || e === 'baby' || e === 'wedding')) {
-    emergencyRate += 0.04;
-  }
+  // Note: Baby, moving, wedding are deterministic planned events — NOT stochastic emergencies.
+  // They are modelled as CashflowScenario objects in buildScenarios() and flow into
+  // buffer recommendations via the enrichment engine's timeline-scaled move generation.
+  // Do NOT bump emergencyRate here — that conflates planned spending with random shocks.
 
   // Income shock (job loss) probability
   let incomeShockProb = 0.005; // ~6% annual probability
@@ -304,16 +310,26 @@ export function calcMoveConsistency(
   move: Move,
   volatility: VolatilityProfile,
   seed: number = 456,
+  categoryCV?: number,
 ): MoveConsistency {
   const rng = createRng(seed);
 
-  // Base follow-through rate by effort level
-  const baseRate: Record<string, number> = {
-    low: 0.88,    // Cancel a subscription — almost certain
-    medium: 0.65, // Reduce grocery spend — some months you slip
-    high: 0.42,   // Major lifestyle change — hard to sustain
-  };
-  const rate = baseRate[move.effort] || 0.65;
+  // Follow-through rate: prefer data-derived from category spending variance.
+  // High CV = spending already fluctuates = easier to change = higher follow-through.
+  // Low CV = steady spend = harder to change = lower follow-through.
+  let rate: number;
+  if (categoryCV != null && categoryCV > 0 && move.category === 'spending') {
+    // Formula: 0.5 base + 0.4 scaled by CV (capped at CV=1.0)
+    rate = Math.min(0.9, 0.5 + 0.4 * Math.min(1.0, categoryCV));
+  } else {
+    // Fallback: effort-based base rates
+    const baseRate: Record<string, number> = {
+      low: 0.88,    // Cancel a subscription — almost certain
+      medium: 0.65, // Reduce grocery spend — some months you slip
+      high: 0.42,   // Major lifestyle change — hard to sustain
+    };
+    rate = baseRate[move.effort] || 0.65;
+  }
 
   // Simulate 12 months of follow-through
   const monthlySavings: number[] = [];
@@ -481,7 +497,9 @@ function buildScenarios(
   vol: VolatilityProfile,
 ): CashflowScenario[] {
   const scenarios: CashflowScenario[] = [];
-  const events = identity?.upcoming_events || [];
+  const rawEvts: UpcomingEvent[] = identity?.upcoming_events || [];
+  const evtTypes = rawEvts.map((e: UpcomingEvent) => typeof e === 'string' ? e : e?.type || '');
+  const events = evtTypes; // backwards-compatible: array of event type strings
   const deps = identity?.dependents || [];
   const household = identity?.household || 'single';
 
