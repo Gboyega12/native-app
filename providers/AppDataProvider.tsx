@@ -134,6 +134,7 @@ export default function AppDataProvider({ children }: { children: React.ReactNod
       setPrevSnapshot(prev);
 
       setError(null);
+      setLoading(false);
       hasFetched.current = true;
 
       // Return snapshot so callers can use fresh data immediately

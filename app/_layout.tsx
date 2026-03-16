@@ -144,7 +144,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       // Once we've evaluated and routed for this session, don't re-run the
       // DB queries on every segment change (e.g. switching tabs). Reset on
       // session change (login/logout).
-      if (getRouted() === session.user.id) return;
+      // Exception: if the user is on the root index (e.g. after a page refresh),
+      // we must re-route — index.tsx is just a loading spinner, never a destination.
+      const inMain = segments[0] === '(main)';
+      if (getRouted() === session.user.id && inMain) return;
 
       // Route to the correct onboarding step (or dashboard) based on DB state.
       const name = session.user.user_metadata?.full_name;
