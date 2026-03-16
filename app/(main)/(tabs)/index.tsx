@@ -1069,13 +1069,14 @@ export default function Home() {
 
   // ── Background verification polling ──
   // When an analysis is saved as 'draft', /api/verify runs Claude AI in the background.
-  // Poll every 15s (max 4 attempts) until the analysis is 'verified', then refresh.
+  // Poll every 3s (max 5 attempts = 15s) until the analysis is 'verified', then refresh.
+  // Fast polling ensures Claude AI classifications surface quickly, reducing manual review.
   const startVerifyPolling = (userId: string, adjustments: any[]) => {
     if (verifyPollRef.current) clearTimeout(verifyPollRef.current);
     let attempts = 0;
     const poll = async () => {
       attempts++;
-      if (attempts > 4) {
+      if (attempts > 5) {
         setVerificationStatus('verified'); // Stop showing indicator after max attempts
         return;
       }
@@ -1094,9 +1095,9 @@ export default function Home() {
           return;
         }
       } catch {}
-      verifyPollRef.current = setTimeout(poll, 15_000);
+      verifyPollRef.current = setTimeout(poll, 3_000);
     };
-    verifyPollRef.current = setTimeout(poll, 15_000);
+    verifyPollRef.current = setTimeout(poll, 3_000);
   };
 
   // Cleanup polling on unmount

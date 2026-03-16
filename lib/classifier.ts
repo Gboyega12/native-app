@@ -124,6 +124,22 @@ const KEYWORD_RULES: KeywordRule[] = [
   // Pets
   { patterns: [/\bvet\b/, /\bveterinar\w*\b/, /\bpets?\s*at\s*home\b/, /\bpet\s*shop\b/, /\bkennel\b/],
     category: 'Pets', isEssential: false },
+
+  // Cash withdrawals
+  { patterns: [/\batm\b/, /\bcash\s*(?:withdrawal|machine|point)\b/, /\bwithdrawal\b/, /\bcashpoint\b/],
+    category: 'Cash', isEssential: false },
+
+  // Parking
+  { patterns: [/\bparking\b/, /\bcar\s*park\b/, /\bncp\b/, /\bringgo\b/, /\bjustpark\b/, /\bparkopedia\b/],
+    category: 'Transport', isEssential: false },
+
+  // Pharmacy
+  { patterns: [/\bpharmacy\b/, /\bchemist\b/, /\bdispensary\b/],
+    category: 'Health', isEssential: true },
+
+  // Markets / Groceries
+  { patterns: [/\bmarket\b/, /\bmkts?\b/, /\bfarm\s*shop\b/, /\bgreengrocers?\b/],
+    category: 'Groceries', isEssential: true },
 ];
 
 /**

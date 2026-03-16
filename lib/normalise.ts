@@ -91,6 +91,29 @@ export function normaliseDescription(description: string): string {
     text = text.replace(noise, '');
   }
 
+  // Expand common abbreviations before collapsing whitespace
+  const ABBREVIATIONS: Record<string, string> = {
+    'ldn': 'london',
+    'mcr': 'manchester',
+    'bham': 'birmingham',
+    'mkts': 'markets',
+    'mkt': 'market',
+    'svc': 'service',
+    'svcs': 'services',
+    'intl': 'international',
+    'natl': 'national',
+    'dept': 'department',
+    'pymt': 'payment',
+    'pymnt': 'payment',
+    'acct': 'account',
+    'hlth': 'health',
+    'pharm': 'pharmacy',
+    'rstrnt': 'restaurant',
+    'grp': 'group',
+    'hldgs': 'holdings',
+  };
+  text = text.split(/\s+/).map((w) => ABBREVIATIONS[w] || w).join(' ');
+
   // Collapse multiple spaces / trim
   text = text.replace(/\s+/g, ' ').trim();
 

@@ -695,7 +695,6 @@ export function fuzzyMatchMerchant(
 
   let bestMatch: MerchantMatch | null = null;
   let bestSimilarity = 0;
-  const MIN_SIMILARITY = 0.75;
   const MIN_PATTERN_LEN = 4;
 
   for (const text of candidates) {
@@ -705,15 +704,21 @@ export function fuzzyMatchMerchant(
       for (const pattern of entry.patterns) {
         if (pattern.length < MIN_PATTERN_LEN) continue;
 
+        // Dynamic threshold: longer patterns tolerate more variation
+        const minSimilarity = pattern.length >= 8 ? 0.65 : 0.75;
+
         for (const substr of substrings) {
           // Skip if length difference too large
           if (Math.abs(substr.length - pattern.length) > Math.max(2, pattern.length * 0.4)) continue;
 
-          const dist = levenshtein(substr, pattern);
-          const maxLen = Math.max(substr.length, pattern.length);
-          const similarity = 1 - dist / maxLen;
+          // Word-reorder tolerance: "coffee house" matches "house coffee"
+          const sortedSubstr = substr.split(/\s+/).sort().join(' ');
+          const sortedPattern = pattern.split(/\s+/).sort().join(' ');
+          const similarity = sortedSubstr === sortedPattern
+            ? 1.0
+            : 1 - levenshtein(substr, pattern) / Math.max(substr.length, pattern.length);
 
-          if (similarity > bestSimilarity && similarity >= MIN_SIMILARITY) {
+          if (similarity > bestSimilarity && similarity >= minSimilarity) {
             bestSimilarity = similarity;
             bestMatch = {
               merchant: entry.merchant,
