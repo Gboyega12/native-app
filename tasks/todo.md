@@ -1,3 +1,23 @@
+# Improve Spending Details — Trends, Hierarchy & Discoverability
+
+**Date:** 2026-03-16
+**Status:** Complete
+
+## Changes
+- [x] Per-category month-over-month trends (isPreviousMonth helper, prevTotal on period data)
+- [x] Overall MoM trend indicator in header (▲/▼ X% vs last month)
+- [x] Tiered category list — significant (>5% or ≥3 txs) vs minor (collapsed)
+- [x] Attention sorting — categories trending up >20% or over-budget surface first
+- [x] Trend badges on category bars in Charts.tsx
+- [x] Inline review nudge inside Spending Details card
+- [x] Low-confidence transaction "hold to move" hints
+
+## Files modified
+- `app/(main)/(tabs)/index.tsx` — all spending details UI changes
+- `components/Charts.tsx` — trend badge on CategoryBarRow
+
+---
+
 # Fix: Income Identification & P2P Transfer Classification
 
 **Date:** 2026-03-16

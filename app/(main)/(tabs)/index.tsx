@@ -237,6 +237,14 @@ export default function Home() {
     return d >= monday;
   };
 
+  const isPreviousMonth = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const prevMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+    const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+    return d.getMonth() === prevMonth && d.getFullYear() === prevYear;
+  };
+
   const { isTrial, trialDaysLeft } = useSubscription();
   const [showInsightModal, setShowInsightModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -1827,20 +1835,34 @@ export default function Home() {
     return { txs, total, count: txs.length };
   };
 
+  const computePrevMonthCategory = (item: BudgetCategory) => {
+    const txs = (Array.isArray(item?.transactions) ? item.transactions : []).filter(tx => tx?.date && isPreviousMonth(tx.date));
+    return txs.reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
+  };
+
   const periodNonDiscData = nonDiscItems.map(item => ({
     ...item,
     ...computePeriodCategory(item),
     budget: item.monthly / periodDivisor,
+    prevTotal: computePrevMonthCategory(item),
   }));
   const periodDiscData = discItems.map(item => ({
     ...item,
     ...computePeriodCategory(item),
     budget: item.monthly / periodDivisor,
+    prevTotal: computePrevMonthCategory(item),
   }));
 
   const periodNonDiscTotal = periodNonDiscData.reduce((s, d) => s + d.total, 0);
   const periodDiscTotal = periodDiscData.reduce((s, d) => s + d.total, 0);
   const periodSpendTotal = periodNonDiscTotal + periodDiscTotal;
+
+  // Month-over-month trend (only meaningful in month view)
+  const prevMonthSpendTotal = periodNonDiscData.reduce((s, d) => s + d.prevTotal, 0)
+    + periodDiscData.reduce((s, d) => s + d.prevTotal, 0);
+  const overallMoMChange = budgetPeriod === 'month' && prevMonthSpendTotal > 0
+    ? Math.round(((periodSpendTotal - prevMonthSpendTotal) / prevMonthSpendTotal) * 100)
+    : null;
 
   // Budget targets for the period (from analysis averages)
   const periodNonDiscBudget = nonDiscTotal / periodDivisor;
@@ -3123,6 +3145,17 @@ export default function Home() {
                   <Text style={s.periodTotalOf}>
                     of {'\u00a3'}{Math.round(periodIncome).toLocaleString()}
                   </Text>
+                  {budgetPeriod === 'month' && overallMoMChange !== null && (
+                    <Text style={{
+                      fontFamily: fonts.mono,
+                      fontSize: 11,
+                      color: overallMoMChange > 0 ? colors.coral : overallMoMChange < 0 ? colors.green : colors.dim,
+                      letterSpacing: 0.3,
+                      marginTop: 4,
+                    }}>
+                      {overallMoMChange > 0 ? '\u25B2' : overallMoMChange < 0 ? '\u25BC' : '\u2500'} {Math.abs(overallMoMChange)}% vs last month
+                    </Text>
+                  )}
                 </View>
 
                 {/* Overall progress bar with percentage label */}
@@ -3193,7 +3226,14 @@ export default function Home() {
                     .filter((d) => d.count > 0)
                     .sort((a, b) => b.total - a.total)
                     .slice(0, 5)
-                    .map((d) => ({ label: d.category, spent: d.total, budget: d.budget }));
+                    .map((d) => ({
+                      label: d.category,
+                      spent: d.total,
+                      budget: d.budget,
+                      trend: budgetPeriod === 'month' && d.prevTotal > 0
+                        ? Math.round(((d.total - d.prevTotal) / d.prevTotal) * 100)
+                        : undefined,
+                    }));
                   return topCats.length > 0 ? (
                     <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                       <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
@@ -3206,44 +3246,122 @@ export default function Home() {
 
                 {/* ── Transactions (inline within Spending Details) ── */}
                 <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                  {unresolvedGroups.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => { setCatAssignments({}); setShowReviewModal(true); }}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: colors.amberDim,
+                        borderRadius: 8,
+                        padding: 10,
+                        marginBottom: 12,
+                        gap: 8,
+                      }}
+                    >
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.amber, flex: 1 }}>
+                        {unresolvedGroups.length} uncategorised {'\u2014'} tap to quick-fix
+                      </Text>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.amber }}>{`REVIEW \u25B8`}</Text>
+                    </TouchableOpacity>
+                  )}
                   <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
                     TRANSACTIONS
                   </Text>
-                  {[
-                    ...periodNonDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'essential' as const, colorKey: 'text' as const })),
-                    ...periodDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'lifestyle' as const, colorKey: 'dim' as const })),
-                  ].map((item, i) => {
-                    const key = `${item.section === 'essential' ? 'nd' : 'd'}-${item.category}`;
-                    const isExp = expandedCategories.has(key);
-                    const accentColor = item.colorKey === 'text' ? colors.text : colors.dim;
-                    return (
-                      <View key={`${item.section}-${item.category}-${i}`}>
-                        <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
-                          <View style={s.dataRowLeft}>
-                            <Text style={[s.catArrow, { color: accentColor }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
-                            <Text style={s.dataLabel}>{item.category}</Text>
-                          </View>
-                          <Text style={[s.dataValue, { color: accentColor }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
-                        </TouchableOpacity>
-                        {isExp && (
-                          <>
-                            <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
-                              <ExpandDots count={4} size={2} />
+                  {(() => {
+                    const allCats = [
+                      ...periodNonDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'essential' as const, colorKey: 'text' as const })),
+                      ...periodDiscData.filter(d => d.count > 0).map(d => ({ ...d, section: 'lifestyle' as const, colorKey: 'dim' as const })),
+                    ];
+
+                    const significantThreshold = periodSpendTotal * 0.05;
+                    const significant = allCats.filter(d => d.total >= significantThreshold || d.count >= 3);
+                    const minor = allCats.filter(d => d.total < significantThreshold && d.count < 3);
+                    const minorTotal = minor.reduce((s2, d) => s2 + d.total, 0);
+
+                    // Attention sorting: trending up or over-budget categories surface first
+                    const attentionScore = (d: typeof allCats[0]) => {
+                      const trendPenalty = (d.prevTotal > 0 && d.total > d.prevTotal * 1.2) ? 1000 : 0;
+                      const overBudgetPenalty = (d.budget > 0 && d.total > d.budget) ? 500 : 0;
+                      return trendPenalty + overBudgetPenalty + d.total;
+                    };
+                    significant.sort((a, b) => attentionScore(b) - attentionScore(a));
+
+                    const renderCategoryRow = (item: typeof allCats[0], i: number) => {
+                      const key = `${item.section === 'essential' ? 'nd' : 'd'}-${item.category}`;
+                      const isExp = expandedCategories.has(key);
+                      const accentColor = item.colorKey === 'text' ? colors.text : colors.dim;
+                      const trendPct = budgetPeriod === 'month' && item.prevTotal > 0
+                        ? Math.round(((item.total - item.prevTotal) / item.prevTotal) * 100)
+                        : null;
+                      const isNew = budgetPeriod === 'month' && item.prevTotal === 0 && item.total > 0;
+                      const needsAttention = (item.prevTotal > 0 && item.total > item.prevTotal * 1.2) && (item.budget > 0 && item.total > item.budget);
+                      return (
+                        <View key={`${item.section}-${item.category}-${i}`}>
+                          <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory(key)} style={s.dataRow}>
+                            <View style={s.dataRowLeft}>
+                              <Text style={[s.catArrow, { color: accentColor }]}>{isExp ? '\u25BC' : '\u25B6'}</Text>
+                              <Text style={s.dataLabel}>{item.category}</Text>
+                              {needsAttention && (
+                                <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.coral, marginLeft: 6 }} />
+                              )}
+                              {trendPct !== null && trendPct !== 0 && (
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, letterSpacing: 0.5, marginLeft: 6, color: trendPct > 0 ? colors.coral : colors.green }}>
+                                  {trendPct > 0 ? '+' : ''}{trendPct}%
+                                </Text>
+                              )}
+                              {isNew && (
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 8, letterSpacing: 0.5, marginLeft: 6, color: colors.amber }}>NEW</Text>
+                              )}
                             </View>
-                            {item.txs.map((tx: any, j: number) => (
-                              <TouchableOpacity key={`${key}-tx-${j}`} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: item.section }); setRecatTarget(''); setRecatEssential(item.section === 'essential'); }} activeOpacity={0.7}>
-                                <View style={s.txLeft}>
-                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
-                                  <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                            <Text style={[s.dataValue, { color: accentColor }]}>{'\u00a3'}{Math.round(item.total).toLocaleString()}</Text>
+                          </TouchableOpacity>
+                          {isExp && (
+                            <>
+                              <View style={{ alignSelf: 'flex-end', marginTop: 2, marginBottom: -4 }}>
+                                <ExpandDots count={4} size={2} />
+                              </View>
+                              {item.txs.map((tx: any, j: number) => (
+                                <TouchableOpacity key={`${key}-tx-${j}`} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: item.section }); setRecatTarget(''); setRecatEssential(item.section === 'essential'); }} activeOpacity={0.7}>
+                                  <View style={s.txLeft}>
+                                    <Text style={s.txMerchant}>{tx.merchant}</Text>
+                                    <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                                  </View>
+                                  <View style={s.txRightCol}>
+                                    <Text style={[s.txAmount, { color: item.colorKey === 'text' ? colors.text2 : colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                                    {tx.confidence === 'low' && (
+                                      <Text style={s.txRecatHint}>hold to move</Text>
+                                    )}
+                                  </View>
+                                </TouchableOpacity>
+                              ))}
+                            </>
+                          )}
+                        </View>
+                      );
+                    };
+
+                    return (
+                      <>
+                        {significant.map(renderCategoryRow)}
+                        {minor.length > 0 && (() => {
+                          const minorExpanded = expandedCategories.has('__minor__');
+                          return (
+                            <View>
+                              <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory('__minor__')} style={s.dataRow}>
+                                <View style={s.dataRowLeft}>
+                                  <Text style={[s.catArrow, { color: colors.muted }]}>{minorExpanded ? '\u25BC' : '\u25B6'}</Text>
+                                  <Text style={[s.dataLabel, { color: colors.muted }]}>{minor.length} more categories</Text>
                                 </View>
-                                <Text style={[s.txAmount, { color: item.colorKey === 'text' ? colors.text2 : colors.dim }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                                <Text style={[s.dataValue, { color: colors.muted }]}>{'\u00a3'}{Math.round(minorTotal).toLocaleString()}</Text>
                               </TouchableOpacity>
-                            ))}
-                          </>
-                        )}
-                      </View>
+                              {minorExpanded && minor.sort((a, b) => b.total - a.total).map(renderCategoryRow)}
+                            </View>
+                          );
+                        })()}
+                      </>
                     );
-                  })}
+                  })()}
                   <Text style={s.cardFooter}>Hold a transaction to re-categorise</Text>
                 </View>
               </Card>

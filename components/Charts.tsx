@@ -142,6 +142,7 @@ interface CategoryBarItem {
   label: string;
   spent: number;
   budget: number;
+  trend?: number;
 }
 
 interface CategoryBarsProps {
@@ -185,10 +186,17 @@ function CategoryBarRow({ item, index, colors }: { item: CategoryBarItem; index:
         <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2 }} numberOfLines={1}>
           {item.label}
         </Text>
-        <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: isOver ? colors.coral : colors.dim }}>
-          {'\u00a3'}{Math.round(item.spent).toLocaleString()}
-          {item.budget > 0 ? ` / \u00a3${Math.round(item.budget).toLocaleString()}` : ''}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: isOver ? colors.coral : colors.dim }}>
+            {'\u00a3'}{Math.round(item.spent).toLocaleString()}
+            {item.budget > 0 ? ` / \u00a3${Math.round(item.budget).toLocaleString()}` : ''}
+          </Text>
+          {item.trend !== undefined && item.trend !== null && item.trend !== 0 && (
+            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: item.trend > 0 ? colors.coral : colors.green, marginLeft: 4 }}>
+              {item.trend > 0 ? '\u2191' : '\u2193'}{Math.abs(item.trend)}%
+            </Text>
+          )}
+        </View>
       </View>
       <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.border, overflow: 'hidden' }}>
         <Animated.View
