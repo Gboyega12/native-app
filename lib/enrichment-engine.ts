@@ -117,6 +117,15 @@ const EnrichmentEngine = {
       }
     }
 
+    // ── Pass 3: Internal transfer detection ──
+    // Person-name transactions where the SAME name appears in both credits
+    // and debits are likely transfers between the user's own accounts (e.g.
+    // current → savings via "JOHN SMITH"). Mark these as isTransfer=true so
+    // they're excluded from income and spending totals.
+    // Other P2P transactions remain as spending/visible — bill splits, rent
+    // to flatmates, etc. are real financial activity.
+    this._detectInternalTransfers(enriched);
+
     // Reclassify credit card payoffs for full-payers.
     // Users who use credit cards for points and pay off in full each month
     // should not have those payoffs counted as "Debt Payments" — they are
@@ -414,10 +423,11 @@ const EnrichmentEngine = {
         confidence = 'high';
         classifiedBy = 'keyword';
       } else if (isPerson) {
-        // Inbound person transfer — uncategorised, let user decide.
-        // Keep isPerson=true so isTransfer is set in the return value,
-        // preventing this credit from inflating income totals.
-        category = 'Other';
+        // Inbound person transfer (e.g. salary from sole trader, bill split).
+        // Tentatively income — buildProfile's regularity filter will validate.
+        // Internal-transfer pass will reclassify genuine self-transfers.
+        isIncome = true;
+        category = 'Income';
       } else if (this._isInternationalTransfer(tx.description)) {
         // Inbound international transfer — NOT income
         category = 'Transfers';
@@ -452,10 +462,10 @@ const EnrichmentEngine = {
         isPerson = false;
         classifiedBy = 'keyword';
       } else if (isPerson) {
-        // Outbound person transfer — uncategorised, let user decide.
-        // Keep isPerson=true so isTransfer is set in the return value,
-        // preventing this debit from inflating spending totals.
-        category = 'Other';
+        // Outbound person transfer (e.g. rent to flatmate, bill split).
+        // Counted as spending by default — the internal-transfer pass will
+        // reclassify genuine self-transfers. Users can override category.
+        category = 'Person-to-Person';
       } else {
         // ── Amount/frequency heuristic ──
         // Last chance before default: check amount patterns and recurrence
@@ -488,7 +498,8 @@ const EnrichmentEngine = {
       isBNPL: detectedBNPL,
       isDebt: detectedDebt,
       isIncome,
-      isTransfer: isPerson,
+      isTransfer: false,
+      isPersonTransfer: isPerson,
       isRefund,
       isSavings,
       confidence,
@@ -701,22 +712,22 @@ const EnrichmentEngine = {
       // Known salary/employer/benefit keywords → always income
       if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
 
-      // Regular credits: require 3+ occurrences, minimum amount, and low variability.
-      // High variability (CV > 0.5) suggests ad-hoc transfers, not real income.
+      // Regular credits: require 3+ occurrences with a recognisable frequency.
+      // Variability is NOT a gate — salary with overtime, commission, or tips
+      // can have high CV but is still real income. The income volatility system
+      // downstream (incomeFloor) handles budgeting for variable earners.
       if (
         src.frequency !== 'irregular' &&
         src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount &&
-        src.count >= INCOME_THRESHOLDS.minRegularCount &&
-        src.variability <= 0.5
+        src.count >= INCOME_THRESHOLDS.minRegularCount
       ) return true;
 
-      // Large recurring credits: require 3+ with regular intervals and low variability
+      // Large recurring credits: require 3+ with regular intervals
       if (
         src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin &&
         src.count >= INCOME_THRESHOLDS.largeCreditMinCount &&
         src.avgInterval >= INCOME_THRESHOLDS.largeCreditIntervalMin &&
-        src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax &&
-        src.variability <= 0.5
+        src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax
       ) return true;
 
       // One-off large credits below windfall threshold with only 1-2 occurrences
@@ -2527,6 +2538,70 @@ const EnrichmentEngine = {
       /\bcredit\s*balance\s*transfer\b/,
     ];
     return patterns.some((rx) => rx.test(lower));
+  },
+
+  /**
+   * Detect internal transfers among person-name (P2P) transactions.
+   *
+   * Strategy: if the same normalised person name appears in BOTH credits and
+   * debits, it's very likely a transfer between the user's own accounts (e.g.
+   * "FASTER PAYMENT TO JOHN SMITH" + "FASTER PAYMENT FROM JOHN SMITH").
+   *
+   * Transactions where the person name only appears in one direction are left
+   * alone — these are real spending (rent to flatmate) or real income (bill
+   * split refund) and should be visible in totals.
+   */
+  _detectInternalTransfers(enriched: EnrichedTransaction[]): void {
+    // Build sets of normalised person names seen in credits vs debits
+    const creditNames = new Set<string>();
+    const debitNames = new Set<string>();
+
+    for (const tx of enriched) {
+      if (!tx.isPersonTransfer) continue;
+      // Normalise: lowercase, strip bank prefixes/refs
+      const name = (tx.merchant || tx.description).toLowerCase()
+        .replace(/^(mobile-|bgc-?|fpo-?|sto-?|dd-?|so-?|tfr-?|cr-?|dr-?)\s*/i, '')
+        .replace(/\b(faster payment|bank transfer|transfer)\s*(to|from)\b/gi, '')
+        .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b|\bfpo\b|\bbgc\b|\bsto\b/g, '')
+        .replace(/\s+(ref|reference|no|id)[\s:]*[a-z0-9]+$/i, '')
+        .replace(/\s+\d[\w-]*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (!name) continue;
+
+      if (tx.amount > 0) creditNames.add(name);
+      else debitNames.add(name);
+    }
+
+    // Names appearing in BOTH directions are internal transfers
+    const internalNames = new Set<string>();
+    for (const name of creditNames) {
+      if (debitNames.has(name)) internalNames.add(name);
+    }
+
+    if (internalNames.size === 0) return;
+
+    // Reclassify matching transactions
+    for (const tx of enriched) {
+      if (!tx.isPersonTransfer) continue;
+      // Skip user-overridden or learned-pattern transactions
+      if (tx.classifiedBy === 'user_override' || tx.classifiedBy === 'learned_pattern') continue;
+
+      const name = (tx.merchant || tx.description).toLowerCase()
+        .replace(/^(mobile-|bgc-?|fpo-?|sto-?|dd-?|so-?|tfr-?|cr-?|dr-?)\s*/i, '')
+        .replace(/\b(faster payment|bank transfer|transfer)\s*(to|from)\b/gi, '')
+        .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b|\bfpo\b|\bbgc\b|\bsto\b/g, '')
+        .replace(/\s+(ref|reference|no|id)[\s:]*[a-z0-9]+$/i, '')
+        .replace(/\s+\d[\w-]*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (internalNames.has(name)) {
+        tx.isTransfer = true;
+        tx.isIncome = false;
+        tx.category = 'Internal Transfer';
+      }
+    }
   },
 
   /**

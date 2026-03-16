@@ -15,6 +15,9 @@ export interface EnrichedTransaction extends RawTransaction {
   isDebt: boolean;
   isIncome: boolean;
   isTransfer: boolean;
+  /** True when the description matches a person-name pattern (P2P payment).
+   *  Does NOT necessarily mean it's an internal transfer — see isTransfer. */
+  isPersonTransfer?: boolean;
   isRefund: boolean;
   isSavings: boolean;
   confidence: 'high' | 'medium' | 'low';

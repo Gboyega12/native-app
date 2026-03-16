@@ -1,51 +1,48 @@
-# Fix: Persistent routing & navigation issues
+# Fix: Income Identification & P2P Transfer Classification
 
 **Date:** 2026-03-16
 **Status:** Complete
 
-## Diagnosis
+## Problem
+1. Annual income showing £180 — nearly all income being excluded
+2. P2P transfers blanket-excluded from spending AND income — wrong for bill splits, rent, etc.
+3. No way for users to manually recategorise P2P transactions
 
-**Symptoms** (overnight idle):
-1. App reopens to connect bank screen instead of dashboard
-2. Back button walks through stale onboarding history (processing → dashboard)
+## Root Cause Analysis
 
-**Root causes** — three compounding bugs:
+### Income too low (£180 annual = £15/month)
+The income filter chain is too aggressive:
+- Line 491: `isTransfer: isPerson` — any credit from a person name → `isTransfer=true` → excluded from income
+- Lines 700-727: `variability <= 0.5` filter — variable salary (overtime, bonuses) gets dropped
+- Together: salary paid via "FASTER PAYMENT FROM JOHN SMITH" gets marked as person transfer → excluded
+- Remaining income may only be a small benefit credit → £15/month
 
-1. **Token refresh nukes routing cache**: `onAuthStateChange` ignored the `_event` param. Overnight token refresh fires a transient null session → `setRouted(null)` wipes cache → full DB reconstruction runs → fragile query chain routes to wrong screen.
+### P2P transfers blanket excluded
+- Line 491: ALL person-name matches → `isTransfer=true`
+- Line 595: spending filter excludes `isTransfer`
+- Line 596: income filter excludes `isTransfer`
+- Result: rent paid to flatmate, bill split to partner, etc. all invisible
 
-2. **No durable onboarding flag**: Every cache miss reconstructs onboarding state by querying 3 tables (`user_identity` → `analyses` → routing). Any failure defaults to an earlier onboarding step.
+## Plan
 
-3. **Navigation stack not cleared**: `router.replace()` in processing.tsx only replaces the top entry. Onboarding screens (welcome → education → identity → connect → processing) remain in back stack.
+### 1. Smarter P2P classification (enrichment-engine.ts)
+- [x] Split person transfers into 3 tiers:
+  - **Internal transfer**: Same name appears in both credit AND debit person-name transactions → `isTransfer=true`
+  - **Outbound P2P (debit)**: Default to spending, category = "Person-to-Person" → `isTransfer=false`
+  - **Inbound P2P (credit)**: Don't auto-count as income → `isTransfer=false, isIncome=false`, category = "Person-to-Person"
+- [x] Use a 2-pass approach: first pass enriches normally, second pass detects internal transfer pairs
 
-## Fix (3 parts)
+### 2. Fix income identification
+- [x] Remove `variability <= 0.5` hard filter on income sources
+- [x] Replace with softer approach: salary keywords OR count >= 3 with regular intervals → include regardless of variability
+- [x] Only exclude truly erratic credits (1-2 occurrences, no pattern)
 
-### 1. Use `_event` parameter in `onAuthStateChange`
-- Only clear routing cache + analytics on `SIGNED_OUT` event
-- Ignore transient null sessions from `TOKEN_REFRESHED` / `INITIAL_SESSION`
-- File: `app/_layout.tsx`
+### 3. Override support for P2P
+- [x] Verify existing `TransactionOverride` system handles P2P descriptions
+- [x] When user overrides a P2P transaction, it should clear the `isTransfer` flag
 
-### 2. Durable `bocy_onboarding_done` localStorage flag
-- Set in `processing.tsx` after analysis saves successfully
-- Checked in `_layout.tsx` routing — if flag exists + valid session → dashboard directly
-- Cleared on `SIGNED_OUT` so new login routes correctly
-- Files: `app/_layout.tsx`, `app/(main)/processing.tsx`
+### 4. Annual display fix
+- [x] Income calculation upstream is the root cause — fixing income identification fixes the display
 
-### 3. Reset navigation stack after processing
-- Use `CommonActions.reset()` instead of `router.replace()` in processing.tsx
-- Resets `(main)` stack to only contain `(tabs)` — no onboarding ghost entries
-- File: `app/(main)/processing.tsx`
-
-## Tasks
-
-- [x] Fix 1: Use `_event` param, only clear cache on `SIGNED_OUT`
-- [x] Fix 2: Add `bocy_onboarding_done` localStorage flag
-- [x] Fix 3: Clear navigation stack with `CommonActions.reset()`
-- [x] Commit and push
-
----
-
-## Previous Fix History
-
-**2026-03-15**: Replaced `useRef` with `sessionStorage` for `routedForSession` to survive page refreshes. Added destination caching to skip DB queries on refresh.
-
-**2026-03-15 (earlier)**: Fixed TrueLayer/OAuth callback flows not setting `routedForSession` after consuming signals.
+## Files to modify
+- `lib/enrichment-engine.ts` — P2P classification, income filter, internal transfer detection
