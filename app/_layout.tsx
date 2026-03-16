@@ -54,13 +54,23 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   // Persist routing cache in sessionStorage so it survives page refreshes
   // (useRef resets on remount, causing unnecessary DB queries + wrong redirects).
+  // We store BOTH the session id and the destination so that on refresh we can
+  // skip the DB queries entirely and route directly.
   const ROUTED_KEY = '_routedForSession';
+  const ROUTED_DEST_KEY = '_routedDestination';
   const getRouted = () =>
     typeof window !== 'undefined' ? sessionStorage.getItem(ROUTED_KEY) : null;
-  const setRouted = (id: string | null) => {
+  const getRoutedDest = () =>
+    typeof window !== 'undefined' ? sessionStorage.getItem(ROUTED_DEST_KEY) : null;
+  const setRouted = (id: string | null, destination?: string) => {
     if (typeof window === 'undefined') return;
-    if (id) sessionStorage.setItem(ROUTED_KEY, id);
-    else sessionStorage.removeItem(ROUTED_KEY);
+    if (id) {
+      sessionStorage.setItem(ROUTED_KEY, id);
+      if (destination) sessionStorage.setItem(ROUTED_DEST_KEY, destination);
+    } else {
+      sessionStorage.removeItem(ROUTED_KEY);
+      sessionStorage.removeItem(ROUTED_DEST_KEY);
+    }
   };
 
   useEffect(() => {
@@ -113,7 +123,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (session && pendingSignals.oauth) {
       const { code, state } = pendingSignals.oauth;
       pendingSignals.oauth = null; // consume so it doesn't fire again
-      setRouted(session.user.id);
+      setRouted(session.user.id, '/(main)/connect');
       router.replace({ pathname: '/(main)/connect', params: { code, state } });
       return;
     }
@@ -123,7 +133,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (pendingSignals.bankCallback) {
       if (session) {
         pendingSignals.bankCallback = false; // session restored, connect screen is handling it
-        setRouted(session.user.id);
+        setRouted(session.user.id, '/(main)/connect');
       }
       // Whether session is null (restoring) or present, don't interfere —
       // connect is already mounted with connection_id + status in the URL.
@@ -144,15 +154,32 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       // Once we've evaluated and routed for this session, don't re-run the
       // DB queries on every segment change (e.g. switching tabs). Reset on
       // session change (login/logout).
-      // Exception: if the user is on the root index (e.g. after a page refresh),
-      // we must re-route — index.tsx is just a loading spinner, never a destination.
+      // On page refresh, Expo Router starts at the root index (segments=[''])
+      // before resolving — use the cached destination to route directly.
       const inMain = segments[0] === '(main)';
-      if (getRouted() === session.user.id && inMain) return;
+      if (getRouted() === session.user.id) {
+        if (inMain) {
+          // Update cached destination when user reaches the dashboard,
+          // so a future page refresh goes straight there.
+          const onTabs = (segments as string[])[1] === '(tabs)';
+          if (onTabs && getRoutedDest() !== '/(main)/(tabs)') {
+            setRouted(session.user.id, '/(main)/(tabs)');
+          }
+          return;
+        }
+        // Page refresh starts at root index — use cached destination
+        // to skip DB queries and route directly.
+        const cachedDest = getRoutedDest();
+        if (cachedDest) {
+          router.replace(cachedDest as any);
+          return;
+        }
+      }
 
       // Route to the correct onboarding step (or dashboard) based on DB state.
       const name = session.user.user_metadata?.full_name;
       if (!name) {
-        setRouted(session.user.id);
+        setRouted(session.user.id, '/(main)/welcome');
         router.replace('/(main)/welcome');
       } else {
         void (async () => {
@@ -171,21 +198,22 @@ function AuthGate({ children }: { children: React.ReactNode }) {
                   .eq('user_id', session.user.id)
                   .order('created_at', { ascending: false })
                   .limit(1);
-                setRouted(session.user.id);
-                router.replace(rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect');
+                const dest = rows && rows.length > 0 ? '/(main)/(tabs)' : '/(main)/connect';
+                setRouted(session.user.id, dest);
+                router.replace(dest);
               } catch {
                 // Transient DB error — let dashboard handle missing data
-                setRouted(session.user.id);
+                setRouted(session.user.id, '/(main)/(tabs)');
                 router.replace('/(main)/(tabs)');
               }
             } else {
               // No identity yet — start education flow
-              setRouted(session.user.id);
+              setRouted(session.user.id, '/(main)/education');
               router.replace('/(main)/education');
             }
           } catch {
             // Query failed — fall back to education flow
-            setRouted(session.user.id);
+            setRouted(session.user.id, '/(main)/education');
             router.replace('/(main)/education');
           }
         })();
