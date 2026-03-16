@@ -231,7 +231,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── 6. Rank moves ──
     determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
-    const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
+    const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData, result.signals);
 
     // Filter dismissed moves
     const allMoves = [...rankedMoves];

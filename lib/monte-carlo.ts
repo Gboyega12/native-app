@@ -4,7 +4,7 @@
 //
 // Runs client-side: 1,000 sims × 60 months = 60k ops, <50ms on low-end phone.
 
-import type { FinancialProfile, Move, UserIdentity, UpcomingEvent } from './types.js';
+import type { FinancialProfile, Move, UserIdentity, UpcomingEvent, EnrichedTransaction } from './types.js';
 
 // ── Simulation parameters ──
 
@@ -133,6 +133,30 @@ export function estimateVolatility(
     incomeShockProb,
     incomeShockDuration,
   };
+}
+
+/**
+ * Enhanced volatility estimation: tries empirical data first, falls back to heuristic.
+ * Import is dynamic to avoid circular dependency.
+ */
+export function estimateVolatilityEnhanced(
+  profile: FinancialProfile,
+  identity?: UserIdentity | null,
+  enriched?: EnrichedTransaction[] | null,
+): VolatilityProfile {
+  if (enriched && enriched.length > 0) {
+    // Dynamic import workaround: inline the empirical estimation
+    // to avoid circular dependency with spending-forecast.ts
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { estimateEmpiricalVolatility } = require('./spending-forecast.js');
+      const empirical = estimateEmpiricalVolatility(enriched, profile, identity);
+      if (empirical) return empirical;
+    } catch {
+      // Fall through to heuristic
+    }
+  }
+  return estimateVolatility(profile, identity);
 }
 
 // ── Simulation Results ──
