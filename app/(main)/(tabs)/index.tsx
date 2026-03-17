@@ -336,6 +336,11 @@ export default function Home() {
   // Unified review modal state
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [catAssignments, setCatAssignments] = useState<Record<string, { category: string; isEssential: boolean; aiSuggested?: boolean }>>({});
+  // AI confirm/reject state: confirmed keys accept AI suggestion, rejected keys have user override
+  const [aiConfirmed, setAiConfirmed] = useState<Set<string>>(new Set());
+  const [aiOverrides, setAiOverrides] = useState<Record<string, { category: string; isEssential: boolean }>>({});
+  // Track which AI group is expanded for category change
+  const [aiExpandedKey, setAiExpandedKey] = useState<string | null>(null);
   const [savingReview, setSavingReview] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [aiSuggesting, setAiSuggesting] = useState(false);
@@ -579,10 +584,55 @@ export default function Home() {
     return Array.from(groups.values()).sort((a, b) => b.total - a.total);
   }, [analysis, savedOverrideKeys]);
 
+  // AI-classified transactions: enrichment engine already classified these via Claude,
+  // but they need user confirmation before being persisted as overrides.
+  const aiSuggestedGroups = useMemo(() => {
+    if (!analysis) return [];
+    const txs: TransactionDetail[] = [];
+    const seen = new Set<string>();
+    for (const section of [analysis.discretionary, analysis.non_discretionary]) {
+      const items = (section as any)?.items;
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        const sectionTxs: TransactionDetail[] = Array.isArray(item.transactions) ? item.transactions : [];
+        for (const tx of sectionTxs) {
+          if (!tx || (tx as any).classifiedBy !== 'claude_ai') continue;
+          const key = `${tx.date}|${tx.description}|${tx.amount}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          // Skip merchants user already has an override for
+          const normalized = normalizeMerchant(tx.merchant || tx.description || '');
+          if (savedOverrideKeys.has(normalized)) continue;
+          txs.push(tx);
+        }
+      }
+    }
+    // Group by normalized merchant — same as unresolvedGroups
+    const groups = new Map<string, { key: string; label: string; merchants: string[]; txs: TransactionDetail[]; total: number; aiCategory: string; aiEssential: boolean }>();
+    for (const tx of txs) {
+      const raw = tx.merchant || tx.description || '';
+      const normalized = normalizeMerchant(raw);
+      if (!groups.has(normalized)) {
+        const mappedCat = mapClaudeCategory((tx as any).category || 'Other');
+        groups.set(normalized, {
+          key: normalized, label: raw, merchants: [], txs: [], total: 0,
+          aiCategory: mappedCat, aiEssential: ESSENTIAL_CATS.has(mappedCat),
+        });
+      }
+      const g = groups.get(normalized)!;
+      if (!g.merchants.includes(raw)) g.merchants.push(raw);
+      g.txs.push(tx);
+      g.total += Math.abs(tx.amount ?? 0);
+    }
+    return Array.from(groups.values()).sort((a, b) => b.total - a.total);
+  }, [analysis, savedOverrideKeys]);
+
   const unresolvedTxCount = useMemo(
     () => unresolvedGroups.reduce((sum, g) => sum + g.txs.length, 0),
     [unresolvedGroups],
   );
+
+  const totalReviewCount = unresolvedGroups.length + aiSuggestedGroups.length;
 
   // Auto-suggest categories using Claude AI when modal opens
   useEffect(() => {
@@ -738,10 +788,33 @@ export default function Home() {
   };
 
   const saveReview = async () => {
-    const catKeys = Object.keys(catAssignments);
-    if (catKeys.length === 0) { setShowReviewModal(false); return; }
+    // Merge AI confirmed/overridden items with manual categorizations
+    // into a single map: merchantKey → { category, isEssential, group }
+    const allOverrides: Array<{ key: string; category: string; isEssential: boolean; merchants: string[] }> = [];
 
-    trackEvent('Unified Review Saved', { categories: catKeys.length });
+    // 1. AI confirmed items (keep AI-suggested category)
+    for (const group of aiSuggestedGroups) {
+      if (aiConfirmed.has(group.key)) {
+        allOverrides.push({ key: group.key, category: group.aiCategory, isEssential: group.aiEssential, merchants: group.merchants });
+      }
+    }
+    // 2. AI overridden items (user changed the category)
+    for (const [key, override] of Object.entries(aiOverrides)) {
+      const group = aiSuggestedGroups.find((g) => g.key === key);
+      if (group) {
+        allOverrides.push({ key, category: override.category, isEssential: override.isEssential, merchants: group.merchants });
+      }
+    }
+    // 3. Manual categorizations (existing unresolvedGroups chip picker)
+    for (const [key, assignment] of Object.entries(catAssignments)) {
+      const group = unresolvedGroups.find((g) => g.key === key);
+      allOverrides.push({ key, category: assignment.category, isEssential: assignment.isEssential, merchants: group?.merchants || [key] });
+    }
+
+    if (allOverrides.length === 0) { setShowReviewModal(false); return; }
+
+    const aiCount = aiConfirmed.size + Object.keys(aiOverrides).length;
+    trackEvent('Unified Review Saved', { categories: allOverrides.length, aiConfirmed: aiCount, manualCategorised: Object.keys(catAssignments).length });
     setSavingReview(true);
 
     try {
@@ -749,12 +822,8 @@ export default function Home() {
       if (!user) throw new Error('Not signed in');
 
       // ── Save category overrides ──
-      for (const matchKey of catKeys) {
-        const a = catAssignments[matchKey];
-        const group = unresolvedGroups.find(g => g.key === matchKey);
-        const merchantNames = group?.merchants || [matchKey];
-
-        for (const name of merchantNames) {
+      for (const item of allOverrides) {
+        for (const name of item.merchants) {
           await supabase.from('transaction_overrides')
             .delete()
             .eq('user_id', user.id)
@@ -762,24 +831,22 @@ export default function Home() {
           const { error: insertErr } = await supabase.from('transaction_overrides').insert({
             user_id: user.id,
             match_description: name,
-            category: a.category,
-            is_essential: a.isEssential,
+            category: item.category,
+            is_essential: item.isEssential,
           });
           if (insertErr) throw new Error(`Failed to save ${name}: ${insertErr.message}`);
         }
       }
 
-      // ── Optimistic UI: move categorised transactions from "Other" to their target categories ──
+      // ── Optimistic UI: move transactions to their target categories ──
       if (analysis) {
         const updated = { ...analysis };
 
-        // Build a map of merchant name → { target category, isEssential, transactions }
+        // Build a map of merchant name → { target category, isEssential }
         const merchantToTarget = new Map<string, { category: string; isEssential: boolean }>();
-        for (const matchKey of catKeys) {
-          const a = catAssignments[matchKey];
-          const group = unresolvedGroups.find(g => g.key === matchKey);
-          for (const m of (group?.merchants || [matchKey])) {
-            merchantToTarget.set(m, { category: a.category, isEssential: a.isEssential });
+        for (const item of allOverrides) {
+          for (const m of item.merchants) {
+            merchantToTarget.set(m, { category: item.category, isEssential: item.isEssential });
           }
         }
 
@@ -789,38 +856,36 @@ export default function Home() {
         const nonDisc = { ...((updated as any).non_discretionary || { total: 0, items: [] }) };
         nonDisc.items = [...(nonDisc.items || [])].map((i: BudgetCategory) => ({ ...i, transactions: [...(i.transactions || [])] }));
 
-        // Collect removed transactions from "Other" in both sections
+        // Collect transactions that need to move (from any category, not just "Other")
         const removedTxs: { tx: TransactionDetail; target: { category: string; isEssential: boolean } }[] = [];
 
         for (const section of [disc, nonDisc]) {
-          const otherIdx = section.items.findIndex((i: BudgetCategory) => i.category === 'Other');
-          if (otherIdx < 0) continue;
-          const otherCat = section.items[otherIdx];
-          const kept: TransactionDetail[] = [];
-          for (const tx of (otherCat.transactions || [])) {
-            const target = merchantToTarget.get(tx.merchant || tx.description);
-            if (target) {
-              removedTxs.push({ tx, target });
-            } else {
-              kept.push(tx);
+          for (let catIdx = section.items.length - 1; catIdx >= 0; catIdx--) {
+            const cat = section.items[catIdx];
+            const kept: TransactionDetail[] = [];
+            for (const tx of (cat.transactions || [])) {
+              const target = merchantToTarget.get(tx.merchant || tx.description);
+              if (target && target.category !== cat.category) {
+                removedTxs.push({ tx, target });
+              } else {
+                kept.push(tx);
+              }
             }
-          }
-          otherCat.transactions = kept;
-          otherCat.txs = kept.length;
-          if (otherCat.txs === 0) {
-            section.items.splice(otherIdx, 1);
-          } else {
-            otherCat.monthly = kept.reduce((s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0);
+            cat.transactions = kept;
+            cat.txs = kept.length;
+            if (cat.txs === 0) {
+              section.items.splice(catIdx, 1);
+            } else {
+              cat.monthly = kept.reduce((s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0);
+            }
           }
         }
 
-        // Non-spending categories: Refund and Internal Transfer are excluded from budget totals.
-        // They are removed from "Other" but not added to any spending section.
+        // Non-spending categories: excluded from budget totals
         const NON_SPENDING_CATS = new Set(['Refund', 'Internal Transfer']);
 
         // Add removed transactions to their target categories in the correct section
         for (const { tx, target } of removedTxs) {
-          // Skip adding to budget sections for non-spending categories
           if (NON_SPENDING_CATS.has(target.category)) continue;
           const destSection = target.isEssential ? nonDisc : disc;
           const destIdx = destSection.items.findIndex((i: BudgetCategory) => i.category === target.category);
@@ -849,9 +914,6 @@ export default function Home() {
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
-
-        // Persist optimistic state to Supabase immediately so it survives page refreshes.
-        // The background sync will eventually overwrite with the canonical enrichment result.
         persistAnalysis(updated);
       }
 
@@ -862,16 +924,16 @@ export default function Home() {
 
       setShowReviewModal(false);
       setCatAssignments({});
+      setAiConfirmed(new Set());
+      setAiOverrides({});
+      setAiExpandedKey(null);
       setSaveSuccess(false);
 
-      // Track which merchants were just categorised so we can reject stale sync results
-      // that still show them in "Other". This is more robust than the timestamp guard alone.
-      // Also update savedOverrideKeys so unresolvedGroups filters them immediately.
+      // Track which merchants were just categorised so unresolvedGroups/aiSuggestedGroups filter them
       setSavedOverrideKeys((prev) => {
         const next = new Set(prev);
-        for (const matchKey of catKeys) {
-          const group = unresolvedGroups.find(g => g.key === matchKey);
-          for (const m of (group?.merchants || [matchKey])) {
+        for (const item of allOverrides) {
+          for (const m of item.merchants) {
             const key = normalizeMerchant(m);
             overriddenMerchants.current.add(key);
             next.add(key);
@@ -880,9 +942,7 @@ export default function Home() {
         return next;
       });
 
-      // Re-sync so the enrichment engine re-runs with the new overrides.
-      // The persisted optimistic state above protects against refresh in the meantime.
-      // Delay by 10s to give the enrichment engine time to ingest the new overrides.
+      // Re-sync so the enrichment engine re-runs with the new overrides
       overridesSavedAt.current = Date.now();
       AsyncStorage.setItem('overrides_saved_at', String(overridesSavedAt.current)).catch(() => {});
       invalidateSyncCache();
@@ -2326,20 +2386,25 @@ export default function Home() {
       ) : (
         <>
           {/* ── Unified review nudge ── */}
-          {unresolvedGroups.length > 0 && (
+          {totalReviewCount > 0 && (
             <TouchableOpacity
               style={s.reviewBanner}
               onPress={() => {
                 setCatAssignments({});
+                setAiConfirmed(new Set());
+                setAiOverrides({});
+                setAiExpandedKey(null);
                 setShowReviewModal(true);
-                trackEvent('Review Modal Opened', { categories: unresolvedGroups.length });
+                trackEvent('Review Modal Opened', { aiSuggested: aiSuggestedGroups.length, unresolved: unresolvedGroups.length });
               }}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel={`${unresolvedGroups.length} items need your input. Tap to review.`}
+              accessibilityLabel={`${totalReviewCount} items need your input. Tap to review.`}
             >
               <Text style={s.reviewBannerText}>
-                {unresolvedGroups.length} item{unresolvedGroups.length !== 1 ? 's' : ''} need{unresolvedGroups.length === 1 ? 's' : ''} your input.{' '}
+                {aiSuggestedGroups.length > 0
+                  ? `${aiSuggestedGroups.length} AI-categorised item${aiSuggestedGroups.length !== 1 ? 's' : ''} to confirm`
+                  : `${unresolvedGroups.length} item${unresolvedGroups.length !== 1 ? 's' : ''} need${unresolvedGroups.length === 1 ? 's' : ''} your input`}.{' '}
                 <Text style={s.reviewBannerLink}>Tap to review</Text>
               </Text>
             </TouchableOpacity>
@@ -3375,24 +3440,29 @@ export default function Home() {
                   ))}
                 </View>
 
-                {/* Uncategorised review banner */}
-                {unresolvedGroups.length > 0 && (
+                {/* Review banner: AI suggestions + uncategorised */}
+                {totalReviewCount > 0 && (
                   <TouchableOpacity
-                    onPress={() => { setCatAssignments({}); setShowReviewModal(true); }}
+                    onPress={() => {
+                      setCatAssignments({}); setAiConfirmed(new Set()); setAiOverrides({}); setAiExpandedKey(null);
+                      setShowReviewModal(true);
+                    }}
                     style={{
                       flexDirection: 'row',
                       alignItems: 'center',
-                      backgroundColor: colors.amberDim,
+                      backgroundColor: aiSuggestedGroups.length > 0 ? colors.accentDim : colors.amberDim,
                       borderRadius: 8,
                       padding: 10,
                       marginBottom: 12,
                       gap: 8,
                     }}
                   >
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.amber, flex: 1 }}>
-                      {unresolvedGroups.length} uncategorised {'\u2014'} tap to quick-fix
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: aiSuggestedGroups.length > 0 ? colors.accent : colors.amber, flex: 1 }}>
+                      {aiSuggestedGroups.length > 0
+                        ? `${aiSuggestedGroups.length} AI-categorised \u2014 tap to confirm`
+                        : `${unresolvedGroups.length} uncategorised \u2014 tap to quick-fix`}
                     </Text>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.amber }}>{`REVIEW \u25B8`}</Text>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: aiSuggestedGroups.length > 0 ? colors.accent : colors.amber }}>{`REVIEW \u25B8`}</Text>
                   </TouchableOpacity>
                 )}
 
@@ -3863,7 +3933,9 @@ export default function Home() {
                     <Text style={s.catReviewSubtitle}>
                       {aiSuggesting
                         ? 'Bocy is analysing your transactions...'
-                        : 'Help us get your numbers right'}
+                        : aiSuggestedGroups.length > 0
+                          ? 'Confirm or adjust AI suggestions'
+                          : 'Help us get your numbers right'}
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -3879,8 +3951,10 @@ export default function Home() {
 
                 {/* Progress indicator */}
                 {(() => {
-                  const totalItems = unresolvedGroups.length;
-                  const reviewedItems = Object.keys(catAssignments).length;
+                  const aiDone = aiConfirmed.size + Object.keys(aiOverrides).length;
+                  const manualDone = Object.keys(catAssignments).length;
+                  const totalItems = aiSuggestedGroups.length + unresolvedGroups.length;
+                  const reviewedItems = aiDone + manualDone;
                   const progress = totalItems > 0 ? reviewedItems / totalItems : 0;
                   return totalItems > 0 ? (
                     <View style={s.reviewProgressBar}>
@@ -3904,10 +3978,140 @@ export default function Home() {
 
 
                 <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
-                  {/* ── UNCATEGORISED section ── */}
-                  {unresolvedGroups.length > 0 && (
+
+                  {/* ── AI SUGGESTIONS section: confirm-first list ── */}
+                  {aiSuggestedGroups.length > 0 && (
                     <>
                       <Text style={s.reviewSectionHeader}>
+                        AI CATEGORISED ({aiSuggestedGroups.length})
+                      </Text>
+
+                      {/* Accept all button */}
+                      {(() => {
+                        const unreviewed = aiSuggestedGroups.filter(
+                          (g) => !aiConfirmed.has(g.key) && !aiOverrides[g.key],
+                        );
+                        return unreviewed.length > 0 ? (
+                          <TouchableOpacity
+                            style={s.acceptAllBtn}
+                            onPress={() => {
+                              hapticSuccess();
+                              setAiConfirmed((prev) => {
+                                const next = new Set(prev);
+                                for (const g of unreviewed) next.add(g.key);
+                                return next;
+                              });
+                              setAiExpandedKey(null);
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Accept all ${unreviewed.length} AI suggestions`}
+                          >
+                            <Text style={s.acceptAllText}>
+                              Accept all ({unreviewed.length}) {'\u2713'}
+                            </Text>
+                          </TouchableOpacity>
+                        ) : null;
+                      })()}
+
+                      {aiSuggestedGroups.map((group) => {
+                        const isConfirmed = aiConfirmed.has(group.key);
+                        const override = aiOverrides[group.key];
+                        const isExpanded = aiExpandedKey === group.key;
+                        const displayCat = override?.category || group.aiCategory;
+                        const isDone = isConfirmed || !!override;
+
+                        return (
+                          <View
+                            key={`ai-${group.key}`}
+                            style={[s.catReviewRow, isDone && s.catReviewRowDone]}
+                            accessibilityLabel={`${group.label}, ${displayCat}, ${isDone ? 'confirmed' : 'pending'}`}
+                          >
+                            <View style={s.catReviewRowHeader}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={s.catReviewMerchant} numberOfLines={1}>
+                                  {group.label}
+                                </Text>
+                                <Text style={s.catReviewAmount}>
+                                  {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
+                                </Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                {/* Category badge — tap to expand picker */}
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    hapticLight();
+                                    setAiExpandedKey(isExpanded ? null : group.key);
+                                  }}
+                                  style={[s.aiCatBadge, isDone && s.aiCatBadgeDone]}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`${displayCat}, tap to change`}
+                                >
+                                  <Text style={[s.aiCatBadgeText, isDone && s.aiCatBadgeTextDone]} numberOfLines={1}>
+                                    {displayCat}
+                                  </Text>
+                                </TouchableOpacity>
+                                {/* Confirm button */}
+                                <TouchableOpacity
+                                  onPress={() => {
+                                    hapticLight();
+                                    if (isConfirmed) {
+                                      setAiConfirmed((prev) => { const next = new Set(prev); next.delete(group.key); return next; });
+                                    } else {
+                                      setAiConfirmed((prev) => new Set(prev).add(group.key));
+                                      setAiExpandedKey(null);
+                                    }
+                                  }}
+                                  style={[s.aiConfirmBtn, isDone && s.aiConfirmBtnDone]}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={isDone ? 'Undo confirm' : 'Confirm'}
+                                >
+                                  <Text style={[s.aiConfirmBtnText, isDone && s.aiConfirmBtnTextDone]}>
+                                    {isDone ? '\u2713' : '\u2713'}
+                                  </Text>
+                                </TouchableOpacity>
+                              </View>
+                            </View>
+
+                            {/* Expanded category picker for overriding */}
+                            {isExpanded && (
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                                {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
+                                  <TouchableOpacity
+                                    key={cat}
+                                    style={[s.categoryChip, displayCat === cat && s.categoryChipActive]}
+                                    onPress={() => {
+                                      hapticLight();
+                                      if (cat === group.aiCategory) {
+                                        // User selected the AI suggestion — just confirm
+                                        setAiOverrides((prev) => { const next = { ...prev }; delete next[group.key]; return next; });
+                                        setAiConfirmed((prev) => new Set(prev).add(group.key));
+                                      } else {
+                                        setAiOverrides((prev) => ({
+                                          ...prev,
+                                          [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat) },
+                                        }));
+                                        setAiConfirmed((prev) => { const next = new Set(prev); next.delete(group.key); return next; });
+                                      }
+                                      setAiExpandedKey(null);
+                                    }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={cat}
+                                  >
+                                    <Text style={[s.categoryChipText, displayCat === cat && s.categoryChipTextActive]}>{cat}</Text>
+                                  </TouchableOpacity>
+                                ))}
+                              </ScrollView>
+                            )}
+                          </View>
+                        );
+                      })}
+                    </>
+                  )}
+
+                  {/* ── UNCATEGORISED section: chip picker for truly unresolved items ── */}
+                  {unresolvedGroups.length > 0 && (
+                    <>
+                      <Text style={[s.reviewSectionHeader, aiSuggestedGroups.length > 0 && { marginTop: 20 }]}>
                         UNCATEGORISED ({unresolvedGroups.length})
                       </Text>
                       {unresolvedGroups.map((group) => {
@@ -3969,7 +4173,9 @@ export default function Home() {
 
                 {/* Done button */}
                 {(() => {
-                  const totalReviewed = Object.keys(catAssignments).length;
+                  const aiDone = aiConfirmed.size + Object.keys(aiOverrides).length;
+                  const manualDone = Object.keys(catAssignments).length;
+                  const totalReviewed = aiDone + manualDone;
                   return (
                     <TouchableOpacity
                       style={[s.catReviewDone]}
@@ -6061,9 +6267,49 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     borderRadius: radius.md,
     alignItems: 'center' as const,
   },
-  acceptAllBtnText: {
+  acceptAllText: {
     fontFamily: fonts.semibold,
     fontSize: 14,
+    color: c.bg,
+  },
+  aiCatBadge: {
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  aiCatBadgeDone: {
+    borderColor: c.accent,
+    backgroundColor: c.accentDim,
+  },
+  aiCatBadgeText: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.text2,
+  },
+  aiCatBadgeTextDone: {
+    color: c.accent,
+  },
+  aiConfirmBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: c.border,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  aiConfirmBtnDone: {
+    borderColor: c.accent,
+    backgroundColor: c.accent,
+  },
+  aiConfirmBtnText: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: c.dim,
+  },
+  aiConfirmBtnTextDone: {
     color: c.bg,
   },
   reviewSectionHeader: {
