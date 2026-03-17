@@ -1,81 +1,103 @@
-# Savings/Surplus Split + Transfer Recategorization + AI Recategorization
+# Decision Engine: Seamless Categorization
 
 **Date:** 2026-03-17
 **Status:** Planning
 
 ---
 
-## Context & Research Summary
+## Problem Audit
 
-### Current State
-- **Income card** shows 4 rows: Income, Essentials, Lifestyle, "Savings & Surplus" (single combined value)
-- **Transactions card** has 3 tabs: Essentials, Lifestyle, Savings (single tab combining savings txs + surplus)
-- `leftToDecide = income - nonDiscTotal - discTotal` — lumps savings and surplus together
-- `analysis.savings_categories` already identifies savings transactions (flagged via `isSavings` keyword matching)
-- `analysis.monthly_savings` already tracks their monthly total
-- **Transfer to People** grouped by normalized merchant, shown in Savings tab with long-press to recategorize
-- **Claude AI classify endpoint** already exists at `/api/claude` with `action: 'classify'`
-- Existing recategorization modal: long-press → category chips + essential/lifestyle toggle → `saveRecategorize()`
+Current categorization requires **5-7 taps per transaction**:
+1. Tap amber banner → opens review modal
+2. Scroll to find transaction in list
+3. Tap category from horizontal chip scroller
+4. Tap Essential/Lifestyle toggle
+5. Repeat for every uncategorized transaction
+6. Tap "Save all"
 
----
+**Root causes of friction:**
+- AI classify runs AFTER modal opens (reactive, not proactive)
+- No learning loop: user corrects "Tesco Express" once, but "TESCO EXPRESS LONDON GB" stays uncategorized
+- Enrichment pipeline has NO Claude AI step — goes straight from merchant-db/keywords to "Other"
+- Review modal dumps ALL uncategorized at once (overwhelming with 20+ items)
+- No swipe gestures — everything is tap-tap-tap
+- No confidence tiers in UX — high-confidence AI suggestions treated same as wild guesses
 
-## Plan
-
-### Phase 1: Split Savings & Surplus into separate variables
-
-**Income Card** (lines ~3186-3204):
-- [ ] Compute `savingsTotal` from `analysis.monthly_savings ?? 0`
-- [ ] Compute `surplusTotal` = `Math.max(0, income - nonDiscTotal - discTotal - savingsTotal)`
-- [ ] Replace single "Savings & Surplus" row with two rows:
-  - "Savings" → `savingsTotal` (green)
-  - "Surplus" → `surplusTotal` (different color, e.g. `colors.accent` or lighter green)
-- [ ] Update border logic (was `idx === 3` for last row, now `idx === 4`)
-
-**Transactions Card** (lines ~3298-3530):
-- [ ] Split "Savings" tab into showing two distinct sections:
-  - **SAVINGS** section header → savings categories (from `analysis.savings_categories`)
-  - **SURPLUS** section header → the unallocated remainder
-  - **TRANSFERS TO PEOPLE** section stays as-is
-- [ ] Update tab total to still show combined (savings + surplus) so numbers add up
-- [ ] Or: consider splitting into two tabs — but likely too crowded. **Decision: keep one tab, two sections.**
-
-### Phase 2: Transfer to People — allow re-categorization of individual items within groups
-
-**Current behavior**: Long-press on a transfer group → recategorizes ALL transactions with that merchant name as a batch.
-
-**New behavior**:
-- [ ] When a transfer group is expanded (showing individual transactions), allow long-press on **individual** transactions within the group
-- [ ] Wire individual transaction long-press to open the same recategorization modal
-- [ ] In `saveRecategorize()`, handle single-transaction moves (vs batch) — use `match_description` scoped to that specific transaction
-- [ ] After recategorizing a single tx from a group, remove it from the group and update the group total
-- [ ] If group becomes empty after removal, remove the group entirely
-
-### Phase 3: Claude AI-assisted recategorization in transactions card
-
-**Approach**: When a user opens the recategorization modal, show an AI suggestion chip at the top.
-
-**How it works**:
-- [ ] The existing `/api/claude` classify endpoint already returns category suggestions
-- [ ] Current code already fetches AI suggestions on modal open (lines 585-628) for "Other" transactions
-- [ ] Extend this to work for ALL recategorization modals (not just "Other" items)
-- [ ] Show suggested category as a highlighted/recommended chip in the modal
-- [ ] If Claude already classified it (`classifiedBy: 'claude_ai'`), show that as the suggestion without a new API call
-- [ ] For transfer-to-people items, Claude can suggest whether it's actually "Charity", "Rent", "Childcare", etc.
-
-**UI additions**:
-- [ ] Add "AI suggested: {category}" label above category chips when suggestion available
-- [ ] Auto-select the suggested category chip (user can still change)
-- [ ] Add subtle loading state while fetching suggestion
+**Pipeline gap:** `enrichTransaction()` goes merchant-db → fuzzy → keywords → "Other". Claude AI is only called on-demand when review modal opens. This means 20-35% of transactions sit as "Other" until the user manually intervenes.
 
 ---
 
-## Decisions to Confirm
+## Plan: Zero-Tap Categorization Engine
 
-1. **Surplus color**: Use a distinct color from Savings green? (e.g. blue/accent)
-2. **Tab structure**: Keep single "Savings" tab with internal sections vs split into "Savings" + "Surplus" tabs?
-3. **AI recategorization scope**: Should we also add a "Categorize all with AI" bulk action button, or just per-transaction suggestions in the modal?
+### Phase 1: AI-first enrichment (biggest impact, ~80% reduction in uncategorized)
+
+Add Claude AI as step 4 in `enrichTransaction()` pipeline, before the "Other" fallback:
+
+1. Collect all transactions that would become "Other" after merchant-db + fuzzy + keyword passes
+2. Batch-classify them via `/api/claude` classify endpoint (already exists, uses Haiku)
+3. Insert results with `confidence: 'medium'`, `classifiedBy: 'claude_ai'`
+4. Only transactions where AI also returns low confidence become "Other"
+
+**Files:**
+- `lib/enrichment-engine.ts` — add AI classify step in `enrichTransaction()` or post-enrichment batch
+- `api/enrich.ts` — wire the AI classify call into the enrichment flow
+- `api/claude/index.ts` — already exists, may need batch size optimization
+
+### Phase 2: Swipe-to-confirm review (UX speed, ~10x faster)
+
+Replace tap-heavy review modal with swipe gestures:
+
+1. Each review row becomes swipeable:
+   - **Swipe right** = accept AI suggestion (one gesture, done)
+   - **Swipe left** = reject → slides open category picker inline
+2. Add "Accept all AI suggestions" button at top of review modal
+3. Animate rows out on accept (satisfying feedback)
+
+**Files:**
+- `app/(main)/(tabs)/index.tsx` — review modal rows (lines ~3838-3900)
+- New: `react-native-gesture-handler` Swipeable or custom PanResponder
+
+### Phase 3: Override propagation (learning loop)
+
+When user overrides one transaction, auto-apply to ALL matching merchants:
+
+1. After `saveRecategorize()`, find all "Other" transactions with same normalized merchant
+2. Auto-recategorize them in the UI immediately (optimistic)
+3. Store override with fuzzy matching tolerance (not just exact)
+4. On next enrichment, overrides catch ALL variants of that merchant
+
+**Files:**
+- `app/(main)/(tabs)/index.tsx` — `saveRecategorize()` + `saveReviewChanges()`
+- `lib/enrichment-engine.ts` — override matching with fuzzy tolerance
+
+### Phase 4: Confidence-based progressive disclosure
+
+Different UX treatment based on confidence level:
+
+| Confidence | Source | UX Treatment |
+|-----------|--------|-------------|
+| High | merchant-db, user override | Auto-categorized, no review |
+| Medium | claude_ai, fuzzy_match | Show as "suggested" — one-tap accept |
+| Low | default fallback | Full category picker (current) |
+
+**Result:** User only manually picks categories for ~5% of transactions.
+
+**Files:**
+- `app/(main)/(tabs)/index.tsx` — review modal rendering
+- `lib/enrichment-engine.ts` — confidence thresholds
 
 ---
 
-## Review
-*(to be filled after implementation)*
+## Implementation Order
+
+**Phase 1 → 2 → 3 → 4**
+
+Phase 1 eliminates the problem at the source. Phase 2 makes the remaining review fast. Phase 3 makes corrections stick. Phase 4 is polish.
+
+---
+
+## Decisions
+
+1. **Phase 1 batching**: Classify "Other" transactions in one batch call at end of enrichment (not per-tx) — cheaper, faster
+2. **Swipe library**: Use `react-native-gesture-handler` Swipeable (already likely in deps via navigation)
+3. **Override propagation scope**: Apply to same normalized merchant only (not fuzzy across different merchants)
