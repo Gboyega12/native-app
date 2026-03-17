@@ -1360,13 +1360,19 @@ const EnrichmentEngine = {
         const debtUrgency = hasExpensiveDebt ? 0.7 : 0.5; // 70% of surplus for expensive debt
         const surplusForDebt = claimSurplus(Math.round(Math.min(p.surplus * debtUrgency, 500)));
         let totalInterestSaved = 0;
+        let totalMonthlyInterestCost = 0;
         for (const d of sortedDebts) {
           const bal = d.outstanding_balance || 0;
           const apr = (d as any).interest_rate || fallbackAPR;
           const saved = calcInterestSaved(bal, apr, monthlyPayment, monthlyPayment + surplusForDebt / actualDebtCount);
           totalInterestSaved += saved;
+          totalMonthlyInterestCost += Math.round(bal * apr / 12);
         }
-        const debtSaving = Math.round(totalInterestSaved / 12); // monthly equivalent
+        // Fallback 1: 10% of current payments (parity with single-debt path)
+        // Fallback 2: when surplus = 0, show what debt is costing in interest
+        const debtSaving = Math.round(totalInterestSaved / 12)
+          || Math.round(p.debtPayments * T.singleDebtOverpayPct)
+          || totalMonthlyInterestCost;
 
         const debtSubGoals: MoveSubGoal[] = sortedDebts
           .map((d: any, i: number) => ({
@@ -1410,7 +1416,9 @@ const EnrichmentEngine = {
           merchants: debtMerchants,
           strategy: `${debtBreakdown}. Currently paying \u00a3${Math.round(p.debtPayments)}/month across ${actualDebtCount} debts.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}${useAvalanche ? ' Targeting highest interest rate first to minimise total cost.' : ' Pay off the smallest balance first for quick wins and momentum.'}`,
           steps: stepsBase,
-          effect: `Saves \u00a3${debtSaving * 12}/year in interest across all debts.`,
+          effect: totalInterestSaved > 0
+            ? `Saves \u00a3${debtSaving * 12}/year in interest across all debts.`
+            : `\u00a3${totalMonthlyInterestCost}/month in interest across ${actualDebtCount} debts — clearing these frees that up.`,
           subGoals: debtSubGoals.length > 0 ? debtSubGoals : undefined,
         });
       }

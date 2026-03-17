@@ -1038,6 +1038,18 @@ export default function Home() {
           );
         }
 
+        // Remove matching income sources and recalculate income total atomically
+        if (Array.isArray(updated.income_sources)) {
+          const prevSources = updated.income_sources;
+          updated.income_sources = prevSources.filter(
+            (src: any) => normalizeMerchant(src.source || '') !== normalizedMatch
+          );
+          // If sources were removed, recalculate monthly income from remaining sources
+          if (updated.income_sources.length < prevSources.length) {
+            updated.monthly_income = updated.income_sources.reduce((s: number, src: any) => s + (src.monthly || 0), 0);
+          }
+        }
+
         // Recalculate totals
         disc.total = disc.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
         nonDisc.total = nonDisc.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
@@ -2254,7 +2266,7 @@ export default function Home() {
               </>
             ) : (
               <>
-                <Text style={s.emptyTitle}>Analysing your transactions</Text>
+                <Text style={s.emptyTitle}>Building your financial picture</Text>
                 <Text style={s.emptyDesc}>
                   Your bank is connected. Transactions can take a little while to appear — Bocy will have your plan ready as soon as they settle.
                 </Text>
@@ -2289,12 +2301,12 @@ export default function Home() {
               }}
               activeOpacity={0.7}
               accessibilityRole="button"
-              accessibilityLabel={`${totalReviewCount} items need your input. Tap to review.`}
+              accessibilityLabel={`${totalReviewCount} items to confirm. Tap to review.`}
             >
               <Text style={s.reviewBannerText}>
                 {aiSuggestedGroups.length > 0
-                  ? `${aiSuggestedGroups.length} AI-categorised item${aiSuggestedGroups.length !== 1 ? 's' : ''} to confirm`
-                  : `${unresolvedGroups.length} item${unresolvedGroups.length !== 1 ? 's' : ''} need${unresolvedGroups.length === 1 ? 's' : ''} your input`}.{' '}
+                  ? `${aiSuggestedGroups.length} item${aiSuggestedGroups.length !== 1 ? 's' : ''} to confirm`
+                  : `${unresolvedGroups.length} item${unresolvedGroups.length !== 1 ? 's' : ''} to confirm`}.{' '}
                 <Text style={s.reviewBannerLink}>Tap to review</Text>
               </Text>
             </TouchableOpacity>
@@ -3348,8 +3360,8 @@ export default function Home() {
                   >
                     <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: aiSuggestedGroups.length > 0 ? colors.accent : colors.amber, flex: 1 }}>
                       {aiSuggestedGroups.length > 0
-                        ? `${aiSuggestedGroups.length} AI-categorised \u2014 tap to confirm`
-                        : `${unresolvedGroups.length} uncategorised \u2014 tap to quick-fix`}
+                        ? `${aiSuggestedGroups.length} ready to confirm \u2014 tap to review`
+                        : `${unresolvedGroups.length} to review \u2014 tap to improve`}
                     </Text>
                     <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: aiSuggestedGroups.length > 0 ? colors.accent : colors.amber }}>{`REVIEW \u25B8`}</Text>
                   </TouchableOpacity>
@@ -3402,7 +3414,7 @@ export default function Home() {
                                 <View style={s.txRightCol}>
                                   <Text style={[s.txAmount, { color: accentColor }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
                                   {tx.confidence === 'low' && (
-                                    <Text style={s.txRecatHint}>hold to move</Text>
+                                    <Text style={s.txRecatHint}>hold to recategorise</Text>
                                   )}
                                 </View>
                               </TouchableOpacity>
@@ -3520,7 +3532,7 @@ export default function Home() {
                                         </View>
                                       )}
                                     </View>
-                                    <Text style={s.txRecatHint}>hold to move</Text>
+                                    <Text style={s.txRecatHint}>hold to recategorise</Text>
                                   </View>
                                   <View style={s.txRightCol}>
                                     <Text style={[s.txAmount, { color: colors.amber }]}>{'\u00a3'}{Math.round(group.total).toLocaleString()}</Text>
@@ -3539,7 +3551,7 @@ export default function Home() {
                                   >
                                     <View style={s.txLeft}>
                                       <Text style={[s.txDate, { fontSize: 12 }]}>{formatDate(tx.date)}</Text>
-                                      <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted }}>hold to move</Text>
+                                      <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted }}>hold to recategorise</Text>
                                     </View>
                                     <Text style={[s.txAmount, { color: colors.amber, fontSize: 12 }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
                                   </TouchableOpacity>
@@ -3821,10 +3833,10 @@ export default function Home() {
                     <Text style={s.modalTitle}>Review items</Text>
                     <Text style={s.catReviewSubtitle}>
                       {aiSuggesting
-                        ? 'Bocy is analysing your transactions...'
+                        ? 'Bocy is reviewing your transactions...'
                         : aiSuggestedGroups.length > 0
-                          ? 'Confirm or adjust AI suggestions'
-                          : 'Help us get your numbers right'}
+                          ? "Bocy's best guesses \u2014 tap to confirm"
+                          : 'Confirm a few items to sharpen your plan'}
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -3861,7 +3873,7 @@ export default function Home() {
                 {aiSuggesting && (
                   <View style={s.aiSuggestBar}>
                     <ActivityIndicator color={colors.accent} size="small" />
-                    <Text style={s.aiSuggestText}>Analysing merchants...</Text>
+                    <Text style={s.aiSuggestText}>Matching merchants...</Text>
                   </View>
                 )}
 
@@ -3872,7 +3884,7 @@ export default function Home() {
                   {aiSuggestedGroups.length > 0 && (
                     <>
                       <Text style={s.reviewSectionHeader}>
-                        AI CATEGORISED ({aiSuggestedGroups.length})
+                        READY TO CONFIRM ({aiSuggestedGroups.length})
                       </Text>
 
                       {/* Accept all button */}
@@ -3893,10 +3905,10 @@ export default function Home() {
                               setAiExpandedKey(null);
                             }}
                             accessibilityRole="button"
-                            accessibilityLabel={`Accept all ${unreviewed.length} AI suggestions`}
+                            accessibilityLabel={`Confirm all ${unreviewed.length} suggestions`}
                           >
                             <Text style={s.acceptAllText}>
-                              Accept all ({unreviewed.length}) {'\u2713'}
+                              Confirm all ({unreviewed.length}) {'\u2713'}
                             </Text>
                           </TouchableOpacity>
                         ) : null;
@@ -4001,7 +4013,7 @@ export default function Home() {
                   {unresolvedGroups.length > 0 && (
                     <>
                       <Text style={[s.reviewSectionHeader, aiSuggestedGroups.length > 0 && { marginTop: 20 }]}>
-                        UNCATEGORISED ({unresolvedGroups.length})
+                        NEEDS REVIEW ({unresolvedGroups.length})
                       </Text>
                       {unresolvedGroups.map((group) => {
                         const assigned = catAssignments[group.key];
@@ -4082,7 +4094,7 @@ export default function Home() {
                         )
                       ) : (
                         <Text style={s.catReviewDoneText}>
-                          Done{totalReviewed > 0 ? ` (${totalReviewed} reviewed)` : ''}
+                          Save{totalReviewed > 0 ? ` (${totalReviewed} confirmed)` : ''}
                         </Text>
                       )}
                     </TouchableOpacity>
