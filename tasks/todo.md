@@ -1,3 +1,23 @@
+# Fix Enrichment Pipeline — False P2P, Transfer Override, Income Inflation
+
+**Date:** 2026-03-17
+**Status:** Complete
+
+## Changes
+- [x] Rewrite `isPersonTransfer` to require known UK first name match (~500 names)
+- [x] Guard keyword override when explicit transfer method detected ("faster payment" etc.)
+- [x] Add bidirectional transfer detection to income filter
+- [x] Person-name gate on income sources (require monthly + low CV + 4+ count)
+- [x] Add `isPersonTransfer` guard to Bayesian ensemble
+- [x] Expand Eating Out keywords with 25+ cuisine/food terms
+
+## Files modified
+- `lib/merchant-db.ts` — COMMON_FIRST_NAMES set, rewritten isPersonTransfer
+- `lib/classifier.ts` — expanded Eating Out patterns
+- `lib/enrichment-engine.ts` — transfer keyword guard, income filter, ensemble guard
+
+---
+
 # Improve Spending Details — Trends, Hierarchy & Discoverability
 
 **Date:** 2026-03-16
