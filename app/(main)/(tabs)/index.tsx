@@ -3187,7 +3187,7 @@ export default function Home() {
                   { label: 'Income', value: income, color: colors.text },
                   { label: 'Essentials', value: nonDiscTotal, color: colors.coral },
                   { label: 'Lifestyle', value: discTotal, color: colors.dim },
-                  { label: 'Savings', value: leftToDecide, color: colors.green },
+                  { label: 'Savings & Surplus', value: leftToDecide, color: colors.green },
                 ].map((row, idx) => (
                   <View
                     key={row.label}
