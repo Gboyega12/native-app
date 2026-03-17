@@ -67,10 +67,7 @@ export default function Home() {
   const weeklyCtx = appData.weeklyCtx;
   const setWeeklyCtx = appData.setWeeklyCtx;
 
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedMoves, setExpandedMoves] = useState<Set<number>>(new Set());
-  const [txCardExpanded, setTxCardExpanded] = useState(false);
-  const [txTab, setTxTab] = useState<'essentials' | 'lifestyle' | 'savings'>('essentials');
   const [refreshing, setRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<number>(0);
   const [latestTxDate, setLatestTxDate] = useState<string | null>(null);
@@ -189,18 +186,6 @@ export default function Home() {
     }).catch(() => {});
   }, [!!analysis]);
 
-  const toggleCategory = (key: string) => {
-    trackEvent('Category Toggled', { category: key });
-    hapticMedium();
-    LayoutAnimation.configureNext(SMOOTH_ANIM);
-    setExpandedCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
   const toggleMove = (idx: number) => {
     trackEvent('Move Toggled', { move_index: idx });
     hapticMedium();
@@ -211,40 +196,6 @@ export default function Home() {
       else next.add(idx);
       return next;
     });
-  };
-
-  const formatDate = (dateStr: string) => {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-  };
-
-  const isCurrentYear = (dateStr: string) => {
-    return new Date(dateStr).getFullYear() === new Date().getFullYear();
-  };
-
-  const isCurrentMonth = (dateStr: string) => {
-    const d = new Date(dateStr);
-    const now = new Date();
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  };
-
-  const isCurrentWeek = (dateStr: string) => {
-    const d = new Date(dateStr);
-    const now = new Date();
-    const day = now.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - diff);
-    monday.setHours(0, 0, 0, 0);
-    return d >= monday;
-  };
-
-  const isPreviousMonth = (dateStr: string) => {
-    const d = new Date(dateStr);
-    const now = new Date();
-    const prevMonth = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
-    const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-    return d.getMonth() === prevMonth && d.getFullYear() === prevYear;
   };
 
   const { isTrial, trialDaysLeft } = useSubscription();
@@ -285,7 +236,6 @@ export default function Home() {
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
-  const [budgetExpanded, setBudgetExpanded] = useState(false);
   const [incomeExpanded, setIncomeExpanded] = useState(false);
   const [showAllMoves, setShowAllMoves] = useState(false);
   const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
@@ -297,23 +247,6 @@ export default function Home() {
   const [showWeeklyInfo, setShowWeeklyInfo] = useState(false);
   const [limitInput, setLimitInput] = useState('');
   const [breakdownExpanded, setBreakdownExpanded] = useState(false);
-  const [budgetPeriod, setBudgetPeriod] = useState<'year' | 'month' | 'week'>('month');
-  const budgetPeriodInitialised = useRef(false);
-
-  // Default budget period matches salary frequency
-  useEffect(() => {
-    if (budgetPeriodInitialised.current) return;
-    const sources = Array.isArray(analysis?.income_sources) ? analysis.income_sources : [];
-    const primary = sources.find((s: IncomeSource) => s?.isSalary)
-      || (sources.length > 0
-        ? sources.reduce((a: IncomeSource, b: IncomeSource) => (a?.avgAmount ?? 0) > (b?.avgAmount ?? 0) ? a : b)
-        : null);
-    if (!primary) return;
-    budgetPeriodInitialised.current = true;
-    const freq = primary.frequency;
-    if (freq === 'weekly' || freq === 'fortnightly') setBudgetPeriod('week');
-    else setBudgetPeriod('month');
-  }, [analysis]);
 
 
   // Load custom weekly limit from storage
@@ -2045,88 +1978,8 @@ export default function Home() {
     return floored as [number, number, number];
   })();
 
-  // ── Period-aware budget calculations ──
-  // Budget targets = analysis monthly averages (what you'd normally spend)
-  // Actual = real transactions in the selected period
-  const txFilter = budgetPeriod === 'year' ? isCurrentYear : budgetPeriod === 'week' ? isCurrentWeek : isCurrentMonth;
-  // periodDivisor converts monthly values: year = 1/12 (×12), month = 1, week = 4.33 (÷4.33)
-  const periodDivisor = budgetPeriod === 'year' ? (1 / 12) : budgetPeriod === 'week' ? 4.33 : 1;
-
-  const computePeriodCategory = (item: BudgetCategory) => {
-    const txs = (Array.isArray(item?.transactions) ? item.transactions : []).filter(tx => tx?.date && txFilter(tx.date));
-    const total = txs.reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
-    return { txs, total, count: txs.length };
-  };
-
-  const computePrevMonthCategory = (item: BudgetCategory) => {
-    const txs = (Array.isArray(item?.transactions) ? item.transactions : []).filter(tx => tx?.date && isPreviousMonth(tx.date));
-    return txs.reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
-  };
-
-  const periodNonDiscData = nonDiscItems.map(item => ({
-    ...item,
-    ...computePeriodCategory(item),
-    budget: item.monthly / periodDivisor,
-    prevTotal: computePrevMonthCategory(item),
-  }));
-  const periodDiscData = discItems.map(item => ({
-    ...item,
-    ...computePeriodCategory(item),
-    budget: item.monthly / periodDivisor,
-    prevTotal: computePrevMonthCategory(item),
-  }));
-
-  const periodNonDiscTotal = periodNonDiscData.reduce((s, d) => s + d.total, 0);
-  const periodDiscTotal = periodDiscData.reduce((s, d) => s + d.total, 0);
-  const periodSpendTotal = periodNonDiscTotal + periodDiscTotal;
-
-  // Month-over-month trend (only meaningful in month view)
-  const prevMonthSpendTotal = periodNonDiscData.reduce((s, d) => s + d.prevTotal, 0)
-    + periodDiscData.reduce((s, d) => s + d.prevTotal, 0);
-  const overallMoMChange = budgetPeriod === 'month' && prevMonthSpendTotal > 0
-    ? Math.round(((periodSpendTotal - prevMonthSpendTotal) / prevMonthSpendTotal) * 100)
-    : null;
-
-  // Budget targets for the period (from analysis averages)
-  const periodNonDiscBudget = nonDiscTotal / periodDivisor;
-  const periodDiscBudget = discTotal / periodDivisor;
-  const periodIncome = income / periodDivisor;
-  const periodTotalBudget = periodNonDiscBudget + periodDiscBudget;
-
-  // Period labels for display
-  const periodAdj = budgetPeriod === 'year' ? 'yearly' : budgetPeriod === 'week' ? 'weekly' : 'monthly';
-  const periodSuffix = budgetPeriod === 'year' ? '/yr' : budgetPeriod === 'week' ? '/wk' : '/mo';
-  const periodThisLabel = budgetPeriod === 'year' ? 'this year' : budgetPeriod === 'week' ? 'this week' : 'this month';
-
-  // On-track status per section
-  const essentialsOnTrack = periodNonDiscTotal <= periodNonDiscBudget * 1.05; // 5% tolerance
-  const lifestyleOnTrack = periodDiscTotal <= periodDiscBudget * 1.05;
-  const essentialsPctUsed = periodNonDiscBudget > 0 ? Math.min(150, Math.round((periodNonDiscTotal / periodNonDiscBudget) * 100)) : 0;
-  const lifestylePctUsed = periodDiscBudget > 0 ? Math.min(150, Math.round((periodDiscTotal / periodDiscBudget) * 100)) : 0;
-  const overallPctUsed = periodIncome > 0 ? Math.min(150, Math.round((periodSpendTotal / periodIncome) * 100)) : 0;
-
-  // Remaining breakdown: prioritized by user's ranked plan
-  const periodRemaining = Math.max(0, periodIncome - periodSpendTotal);
   const allMoves = analysis?.all_moves ?? [];
   const goalTarget = analysis?.goal_context?.targetAmount ?? 0;
-
-  // Build allocations from ranked moves (top priority first)
-  // Each move's monthlyImpact represents what should be set aside
-  type Allocation = { label: string; amount: number; priority: number };
-  const moveAllocations: Allocation[] = [];
-  let allocBudget = periodRemaining;
-
-  for (let i = 0; i < allMoves.length && allocBudget > 0; i++) {
-    const move = allMoves[i];
-    const impact = (move.monthlyImpact || 0) / periodDivisor;
-    if (impact <= 0) continue;
-    const amt = Math.min(impact, allocBudget);
-
-    moveAllocations.push({ label: move.action, amount: amt, priority: i + 1 });
-    allocBudget -= amt;
-  }
-
-  const freeToSpend = Math.max(0, allocBudget);
 
   // ── Safe-to-spend weekly calculation ──
   // Static weekly budget is the baseline: unallocated monthly / 4.33 weeks
@@ -3412,11 +3265,10 @@ export default function Home() {
           </View>
           )}
 
-          {/* ══════════════════════════════════════════════
-              SPENDING DETAILS — merged Budget + Transactions, collapsed by default
-              ══════════════════════════════════════════════ */}
+          {/* Transactions moved to dedicated Transactions tab */}
           <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; cardPositions.current.transactions = e.nativeEvent.layout.y; }}>
-            <TouchableOpacity
+            {/* Content moved to Transactions tab — see app/(main)/(tabs)/transactions.tsx */}
+            {false && <TouchableOpacity
               activeOpacity={0.7}
               onPress={() => {
                 LayoutAnimation.configureNext(SMOOTH_ANIM);

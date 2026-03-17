@@ -58,7 +58,16 @@ export default function TabsLayout() {
             ),
           }}
         />
-<Tabs.Screen
+        <Tabs.Screen
+          name="transactions"
+          options={{
+            title: 'Transactions',
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="receipt-outline" size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="chat"
           options={{
             title: 'Chat',
