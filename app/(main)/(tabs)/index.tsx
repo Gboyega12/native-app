@@ -252,10 +252,12 @@ export default function Home() {
   const [syncing, setSyncing] = useState(false);
   const [verifyMove, setVerifyMove] = useState<Move | null>(null);
   const [infoCard, setInfoCard] = useState<string | null>(null);
-  const [recatTx, setRecatTx] = useState<{ tx: TransactionDetail; catKey: string; section: 'essential' | 'lifestyle' } | null>(null);
+  const [recatTx, setRecatTx] = useState<{ tx: TransactionDetail; catKey: string; section: 'essential' | 'lifestyle'; singleTx?: boolean } | null>(null);
   const [recatTarget, setRecatTarget] = useState('');
   const [recatEssential, setRecatEssential] = useState(true);
   const [savingRecat, setSavingRecat] = useState(false);
+  const [recatAiSuggestion, setRecatAiSuggestion] = useState<{ category: string; isEssential: boolean } | null>(null);
+  const [recatAiLoading, setRecatAiLoading] = useState(false);
   const [removingSource, setRemovingSource] = useState<string | null>(null);
 
   // Add budget item state
@@ -627,6 +629,51 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [showReviewModal, unresolvedGroups.length]);
 
+  // AI suggestion for single-transaction recategorization modal
+  useEffect(() => {
+    if (!recatTx) { setRecatAiSuggestion(null); return; }
+
+    // If already classified by AI, use that directly
+    if ((recatTx.tx as any).classifiedBy === 'claude_ai' && (recatTx.tx as any).category) {
+      const cat = mapClaudeCategory((recatTx.tx as any).category);
+      if (cat !== 'Other' && cat !== recatTx.catKey) {
+        setRecatAiSuggestion({ category: cat, isEssential: ESSENTIAL_CATS.has(cat) });
+        setRecatTarget(cat);
+        setRecatEssential(ESSENTIAL_CATS.has(cat));
+      }
+      return;
+    }
+
+    let cancelled = false;
+    setRecatAiLoading(true);
+
+    (async () => {
+      try {
+        const res = await fetch('/api/claude', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'classify',
+            transactions: [{ description: recatTx.tx.merchant || recatTx.tx.description, amount: recatTx.tx.amount }],
+          }),
+        });
+        const data = await res.json();
+        if (cancelled || !data.success || !data.classifications?.[0]) return;
+        const cat = mapClaudeCategory(data.classifications[0].category);
+        if (cat !== 'Other' && cat !== recatTx.catKey) {
+          const isEssential = ESSENTIAL_CATS.has(cat);
+          setRecatAiSuggestion({ category: cat, isEssential });
+          // Auto-select if user hasn't chosen yet
+          setRecatTarget((prev) => prev || cat);
+          setRecatEssential((prev) => prev ?? isEssential);
+        }
+      } catch { /* silent */ }
+      if (!cancelled) setRecatAiLoading(false);
+    })();
+
+    return () => { cancelled = true; };
+  }, [recatTx?.tx.merchant, recatTx?.tx.description]);
+
   const dismissReviewModal = useCallback(() => {
     const hasUnsaved = Object.keys(catAssignments).length > 0;
     if (hasUnsaved) {
@@ -885,8 +932,8 @@ export default function Home() {
         const normalizedMatch = normalizeMerchant(matchDesc);
         let txsToMove: any[] = [recatTx.tx];
 
-        if (recatTx.catKey === 'Transfers' && Array.isArray((updated as any).person_transfers)) {
-          // Find all transfers with same normalized merchant name
+        if (recatTx.catKey === 'Transfers' && !recatTx.singleTx && Array.isArray((updated as any).person_transfers)) {
+          // Batch: find all transfers with same normalized merchant name
           txsToMove = (updated as any).person_transfers.filter(
             (t: any) => normalizeMerchant(t?.merchant || t?.description || '') === normalizedMatch
           );
@@ -944,11 +991,25 @@ export default function Home() {
         (updated as any)[fromKey] = fromSection;
         if (fromKey !== toKey) (updated as any)[toKey] = toSection;
 
-        // Remove ALL matching transfers from person_transfers (batch removal)
+        // Remove transfer(s) from person_transfers
         if (recatTx.catKey === 'Transfers' && Array.isArray((updated as any).person_transfers)) {
-          (updated as any).person_transfers = (updated as any).person_transfers.filter(
-            (t: any) => normalizeMerchant(t?.merchant || t?.description || '') !== normalizedMatch
-          );
+          if (recatTx.singleTx) {
+            // Single tx: remove only the exact matching transaction
+            const tx = recatTx.tx;
+            let removed = false;
+            (updated as any).person_transfers = (updated as any).person_transfers.filter((t: any) => {
+              if (!removed && t.date === tx.date && t.amount === tx.amount && (t.merchant || t.description) === (tx.merchant || tx.description)) {
+                removed = true;
+                return false;
+              }
+              return true;
+            });
+          } else {
+            // Batch: remove ALL matching transfers by normalized merchant
+            (updated as any).person_transfers = (updated as any).person_transfers.filter(
+              (t: any) => normalizeMerchant(t?.merchant || t?.description || '') !== normalizedMatch
+            );
+          }
         }
 
         // Recompute moves based on updated totals so all cards stay correlated
@@ -1857,7 +1918,9 @@ export default function Home() {
   const discTotal = disc?.total ?? 0;
   const nonDiscItems: BudgetCategory[] = Array.isArray(nonDisc?.items) ? nonDisc.items : [];
   const discItems: BudgetCategory[] = Array.isArray(disc?.items) ? disc.items : [];
-  const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
+  const savingsTotal = analysis?.monthly_savings ?? 0;
+  const surplusTotal = Math.max(0, income - nonDiscTotal - discTotal - savingsTotal);
+  const leftToDecide = savingsTotal + surplusTotal; // combined for bar/percentage calculations
 
   // Bar segment proportions
   const barTotal = nonDiscTotal + discTotal + leftToDecide || 1;
@@ -3187,11 +3250,12 @@ export default function Home() {
                   { label: 'Income', value: income, color: colors.text },
                   { label: 'Essentials', value: nonDiscTotal, color: colors.coral },
                   { label: 'Lifestyle', value: discTotal, color: colors.dim },
-                  { label: 'Savings & Surplus', value: leftToDecide, color: colors.green },
-                ].map((row, idx) => (
+                  { label: 'Savings', value: savingsTotal, color: colors.green },
+                  { label: 'Surplus', value: surplusTotal, color: colors.text2 },
+                ].map((row, idx, arr) => (
                   <View
                     key={row.label}
-                    style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: idx === 3 ? 0 : StyleSheet.hairlineWidth, borderBottomColor: colors.border }}
+                    style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: idx === arr.length - 1 ? 0 : StyleSheet.hairlineWidth, borderBottomColor: colors.border }}
                   >
                     <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text }}>{row.label}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -3456,18 +3520,21 @@ export default function Home() {
 
                   return (
                     <View>
+                      {/* ── Savings section ── */}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
                         <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2 }}>SAVINGS</Text>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green, letterSpacing: 0.3 }}>{'\u00a3'}{Math.round(savingsTxTotal + remaining).toLocaleString()}</Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green, letterSpacing: 0.3 }}>{'\u00a3'}{Math.round(savingsTxTotal).toLocaleString()}</Text>
                       </View>
 
                       {/* Savings/investment transactions */}
-                      {savingsCats.map(renderCategoryRow)}
+                      {savingsCats.length > 0 ? savingsCats.map(renderCategoryRow) : (
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted, marginBottom: 8 }}>No savings transactions identified</Text>
+                      )}
 
                       {/* Person transfers */}
                       {groupedTransfers.length > 0 && (
-                        <View style={{ marginTop: savingsCats.length > 0 ? 12 : 0 }}>
-                          <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.amber, letterSpacing: 1, marginBottom: 8 }}>TRANSFERS TO PEOPLE</Text>
+                        <View style={{ marginTop: 12 }}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.amber, letterSpacing: 2, marginBottom: 8 }}>TRANSFERS TO PEOPLE</Text>
                           {groupedTransfers.map(([tKey, group]) => {
                             const groupExpanded = expandedCategories.has(`__transfer_${tKey}__`);
                             return (
@@ -3501,12 +3568,22 @@ export default function Home() {
                                   </View>
                                 </TouchableOpacity>
                                 {groupExpanded && group.txs.map((tx: any, j: number) => (
-                                  <View key={`tg-${tKey}-tx-${j}`} style={[s.txRow, { paddingLeft: 28 }]}>
+                                  <TouchableOpacity
+                                    key={`tg-${tKey}-tx-${j}`}
+                                    style={[s.txRow, { paddingLeft: 28 }]}
+                                    activeOpacity={0.7}
+                                    onLongPress={() => {
+                                      setRecatTx({ tx: { ...tx, confidence: 'low' }, catKey: 'Transfers', section: 'lifestyle' as const, singleTx: true });
+                                      setRecatTarget('');
+                                      setRecatEssential(true);
+                                    }}
+                                  >
                                     <View style={s.txLeft}>
                                       <Text style={[s.txDate, { fontSize: 12 }]}>{formatDate(tx.date)}</Text>
+                                      <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted }}>hold to move</Text>
                                     </View>
                                     <Text style={[s.txAmount, { color: colors.amber, fontSize: 12 }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
-                                  </View>
+                                  </TouchableOpacity>
                                 ))}
                               </View>
                             );
@@ -3514,16 +3591,16 @@ export default function Home() {
                         </View>
                       )}
 
-                      {/* Remaining (unallocated) */}
-                      <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.muted }}>Remaining</Text>
-                          <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: remaining > 0 ? colors.green : colors.coral, letterSpacing: 0.3 }}>
+                      {/* ── Surplus section ── */}
+                      <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2 }}>SURPLUS</Text>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: remaining > 0 ? colors.text2 : colors.coral, letterSpacing: 0.3 }}>
                             {'\u00a3'}{Math.round(remaining).toLocaleString()}
                           </Text>
                         </View>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, marginTop: 4, lineHeight: 14 }}>
-                          Income minus essentials, lifestyle and savings
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, lineHeight: 14 }}>
+                          Unallocated after essentials, lifestyle {'\u0026'} savings
                         </Text>
                       </View>
                     </View>
@@ -3698,8 +3775,26 @@ export default function Home() {
                 {recatTx && (
                   <>
                     <Text style={s.modalSubtitle}>
-                      "{recatTx.tx.merchant}" ({'\u00a3'}{Math.abs(recatTx.tx.amount).toFixed(2)}) is currently in {recatTx.catKey}. Choose the correct category:
+                      "{recatTx.tx.merchant}" ({'\u00a3'}{Math.abs(recatTx.tx.amount).toFixed(2)}) is currently in {recatTx.catKey}.
                     </Text>
+
+                    {/* AI suggestion */}
+                    {recatAiLoading && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: colors.greenDim, borderRadius: 10, borderWidth: 1, borderColor: colors.green }}>
+                        <ActivityIndicator size="small" color={colors.green} />
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green, letterSpacing: 0.3 }}>Suggesting category{'\u2026'}</Text>
+                      </View>
+                    )}
+                    {recatAiSuggestion && !recatAiLoading && (
+                      <TouchableOpacity
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: recatTarget === recatAiSuggestion.category ? colors.greenDim : colors.mintDim, borderRadius: 10, borderWidth: 1, borderColor: recatTarget === recatAiSuggestion.category ? colors.green : colors.border }}
+                        activeOpacity={0.7}
+                        onPress={() => { setRecatTarget(recatAiSuggestion.category); setRecatEssential(recatAiSuggestion.isEssential); }}
+                      >
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1 }}>AI</Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: recatTarget === recatAiSuggestion.category ? colors.green : colors.text2, letterSpacing: 0.3 }}>{recatAiSuggestion.category}</Text>
+                      </TouchableOpacity>
+                    )}
 
                     <Text style={s.modalLabel}>Category</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.categoryScroll}>
