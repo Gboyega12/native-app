@@ -85,6 +85,8 @@ export interface FinancialProfile {
     eatingOut: number;
     entertainment: number;
     debtPayments: number;
+    /** Monthly savings/investment outflows (ISA, pension, SIPP, premium bonds) */
+    savings?: number;
     /** Conservative income estimate (p25 — what to budget against for variable earners) */
     incomeFloor?: number;
     /** Whether income is classified as variable (CV > 10%) */
@@ -99,6 +101,16 @@ export interface FinancialProfile {
   incomeSources: IncomeSource[];
   /** Person-to-person transfer debits (e.g. rent to partner) — excluded from spending but surfaced for manual recategorisation */
   transfers?: { date: string; merchant: string; description: string; amount: number }[];
+  /** Irregular incoming person credits (repayments, gifts) — not income, not spending */
+  incomingTransfers?: { date: string; merchant: string; description: string; amount: number }[];
+  /** Savings/investment category items tracked separately from spending */
+  savingsCategories?: BudgetCategory[];
+  /** Monthly savings/investment total */
+  monthlySavings?: number;
+  /** Monthly-normalised transfer total */
+  monthlyTransferTotal?: number;
+  /** Analysis window in months */
+  months?: number;
   subscriptions: RecurringItem[];
   metrics: {
     savingsRate: number;
@@ -299,6 +311,19 @@ export interface Analysis {
   verified_bills?: VerifiedBill[];
   /** Person-to-person transfer debits surfaced for manual recategorisation */
   person_transfers?: { date: string; merchant: string; description: string; amount: number }[];
+  /** Savings/investment outflows tracked separately from spending */
+  savings_categories?: BudgetCategory[];
+  /** Monthly savings total (ISA, pension, SIPP etc.) */
+  monthly_savings?: number;
+  /** Irregular incoming person credits (repayments, gifts) — not income, not spending */
+  incoming_transfers?: { date: string; merchant: string; description: string; amount: number }[];
+  /** Enrichment metrics preserved for move recomputation */
+  enrichment_metrics?: {
+    subscriptionCount: number;
+    streamingCount: number;
+    creditCardCount: number;
+    bnplCount: number;
+  };
 }
 
 // ── Goal Trajectory ──

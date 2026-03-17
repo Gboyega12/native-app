@@ -520,6 +520,15 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     essential_gaps: result.essentialGaps,
     verified_bills: result.verifiedBills,
     person_transfers: result.profile.transfers,
+    savings_categories: (result.profile as any).savingsCategories,
+    monthly_savings: Math.round((result.profile as any).monthlySavings || 0),
+    incoming_transfers: (result.profile as any).incomingTransfers,
+    enrichment_metrics: {
+      subscriptionCount: result.profile.metrics.subscriptionCount,
+      streamingCount: result.profile.metrics.streamingCount,
+      creditCardCount: result.profile.metrics.creditCardCount,
+      bnplCount: result.profile.metrics.bnplCount,
+    },
   };
 
   // ── 6. Upsert to Supabase ──
@@ -542,6 +551,10 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     person_transfers: rawAnalysis.person_transfers,
     essential_gaps: rawAnalysis.essential_gaps,
     verified_bills: rawAnalysis.verified_bills,
+    savings_categories: rawAnalysis.savings_categories,
+    monthly_savings: rawAnalysis.monthly_savings,
+    incoming_transfers: rawAnalysis.incoming_transfers,
+    enrichment_metrics: rawAnalysis.enrichment_metrics,
   };
 
   try {

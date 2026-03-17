@@ -466,10 +466,31 @@ const EnrichmentEngine = {
     const spending = recent.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
     const income = recent.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer && !t.isDebt);
 
+    // ── Refunds: net against originating spending categories ──
+    // Refunds are credits (amount > 0) that should reduce spend in their matched category.
+    const refunds = recent.filter((t) => t.isRefund && t.amount > 0);
+    const totalRefunds = refunds.reduce((s, t) => s + t.amount, 0);
+
+    // ── Savings/investment debits: track separately so they're visible ──
+    const savingsTxs = recent.filter((t) => t.amount < 0 && (t.isSavings || t.category === 'Savings' || t.category === 'Investments'));
+
     // Collect person-to-person transfer debits so the UI can surface them
     // for manual recategorisation (e.g. rent paid via partner).
+    // Exclude CC payoffs (reclassified as isTransfer but category 'Credit Card Payoff')
     const personTransfers = recent
-      .filter((t) => t.amount < 0 && t.isTransfer && !t.isDebt && !t.isSavings)
+      .filter((t) => t.amount < 0 && t.isTransfer && !t.isDebt && !t.isSavings && t.category !== 'Credit Card Payoff')
+      .map((t) => ({
+        date: t.date,
+        merchant: t.merchant || t.description,
+        description: t.description,
+        amount: t.amount,
+      }))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    // ── Irregular incoming person credits (repayments, gifts) ──
+    // These are credits from people that weren't classified as income.
+    const incomingTransfers = recent
+      .filter((t) => t.amount > 0 && t.isTransfer && !t.isIncome && !t.isRefund)
       .map((t) => ({
         date: t.date,
         merchant: t.merchant || t.description,
@@ -485,7 +506,8 @@ const EnrichmentEngine = {
     const months = Math.max(span, 1);
 
     const totalIncome = income.reduce((s, t) => s + t.amount, 0);
-    const totalSpending = Math.abs(spending.reduce((s, t) => s + t.amount, 0));
+    const rawSpending = Math.abs(spending.reduce((s, t) => s + t.amount, 0));
+    const totalSpending = Math.max(0, rawSpending - totalRefunds);
     const monthlyIncome = totalIncome / months;
     const monthlySpending = totalSpending / months;
     const surplus = monthlyIncome - monthlySpending;
@@ -504,6 +526,43 @@ const EnrichmentEngine = {
         amount: tx.amount,
       });
     }
+
+    // ── Net refunds against matching spending categories ──
+    for (const tx of refunds) {
+      const cat = tx.category || 'Other';
+      if (catTotals[cat]) {
+        catTotals[cat].total = Math.max(0, catTotals[cat].total - tx.amount);
+        catTotals[cat].transactions.push({
+          date: tx.date,
+          merchant: tx.merchant || tx.description,
+          description: tx.description,
+          amount: tx.amount, // positive amount shown as refund
+        });
+      }
+      // If no matching category, the refund reduces total spending via the recalculated total
+    }
+
+    // ── Savings/investment category items (tracked separately) ──
+    const savingsCatTotals: Record<string, { total: number; count: number; transactions: { date: string; merchant: string; description: string; amount: number }[] }> = {};
+    for (const tx of savingsTxs) {
+      const cat = tx.category || 'Savings';
+      if (!savingsCatTotals[cat]) savingsCatTotals[cat] = { total: 0, count: 0, transactions: [] };
+      savingsCatTotals[cat].total += Math.abs(tx.amount);
+      savingsCatTotals[cat].count++;
+      savingsCatTotals[cat].transactions.push({
+        date: tx.date,
+        merchant: tx.merchant || tx.description,
+        description: tx.description,
+        amount: tx.amount,
+      });
+    }
+    const savingsItems: BudgetCategory[] = Object.entries(savingsCatTotals).map(([cat, d]) => ({
+      category: cat,
+      monthly: d.total / months,
+      txs: d.count,
+      transactions: d.transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    }));
+    const monthlySavings = savingsItems.reduce((s, i) => s + i.monthly, 0);
 
     // ── Essential vs discretionary split ──
     // Uses per-transaction isEssential flag (description-first, category-fallback)
@@ -644,6 +703,9 @@ const EnrichmentEngine = {
       return false;
     })();
 
+    // Monthly-normalise person transfer totals for consistency with budget sections
+    const monthlyTransferTotal = personTransfers.reduce((s, t) => s + Math.abs(t.amount), 0) / months;
+
     return {
       monthly: {
         income: monthlyIncome,
@@ -657,6 +719,7 @@ const EnrichmentEngine = {
         eatingOut: metrics.eatingOut,
         entertainment: metrics.entertainment,
         debtPayments: metrics.debtPayments,
+        savings: monthlySavings,
         incomeFloor: Math.round(incomeFloor),
         isVariableIncome,
         incomeCV: Math.round(overallIncomeCV * 100) / 100,
@@ -667,6 +730,11 @@ const EnrichmentEngine = {
       },
       incomeSources,
       transfers: personTransfers,
+      incomingTransfers,
+      savingsCategories: savingsItems,
+      monthlySavings,
+      monthlyTransferTotal,
+      months,
       subscriptions,
       metrics,
     };
@@ -2112,7 +2180,8 @@ const EnrichmentEngine = {
     const nonDiscTotal = nonDisc.total ?? 0;
     const discTotal = disc.total ?? 0;
     const spending = nonDiscTotal + discTotal;
-    const surplus = income - spending;
+    const savingsTotal = analysis.monthly_savings ?? 0;
+    const surplus = income - spending - savingsTotal;
 
     // Helper to extract monthly spend from a category name across both sections
     const catMonthly = (name: string): number => {
@@ -2120,15 +2189,21 @@ const EnrichmentEngine = {
         const item = (section.items || []).find((i: BudgetCategory) => i.category === name);
         if (item) return item.monthly || 0;
       }
+      // Also check savings categories
+      const savCat = (analysis.savings_categories || []).find((i: BudgetCategory) => i.category === name);
+      if (savCat) return savCat.monthly || 0;
       return 0;
     };
+
+    // Restore preserved metrics from enrichment (Gap 5)
+    const em = analysis.enrichment_metrics;
 
     const profile: FinancialProfile = {
       monthly: {
         income,
         spending,
         surplus,
-        subscriptions: catMonthly('Subscriptions'),
+        subscriptions: catMonthly('Subscriptions') + catMonthly('Streaming'),
         foodDelivery: catMonthly('Delivery'),
         transport: catMonthly('Transport'),
         groceries: catMonthly('Groceries'),
@@ -2136,6 +2211,7 @@ const EnrichmentEngine = {
         eatingOut: catMonthly('Eating Out') + catMonthly('Coffee & Cafes'),
         entertainment: catMonthly('Entertainment'),
         debtPayments: catMonthly('Debt Payments'),
+        savings: savingsTotal,
         incomeFloor: analysis.income_floor ?? income,
         isVariableIncome: analysis.is_variable_income ?? false,
         incomeCV: analysis.income_cv ?? 0,
@@ -2149,11 +2225,11 @@ const EnrichmentEngine = {
       subscriptions: [],
       metrics: {
         savingsRate: income > 0 ? (surplus / income) * 100 : 0,
-        creditCardCount: 0,
-        bnplCount: 0,
+        creditCardCount: em?.creditCardCount ?? 0,
+        bnplCount: em?.bnplCount ?? 0,
         debtAccountCount: (debtAccounts || []).length,
-        subscriptionCount: 0,
-        streamingCount: 0,
+        subscriptionCount: em?.subscriptionCount ?? 0,
+        streamingCount: em?.streamingCount ?? 0,
         foodDelivery: catMonthly('Delivery'),
         transport: catMonthly('Transport'),
         groceries: catMonthly('Groceries'),

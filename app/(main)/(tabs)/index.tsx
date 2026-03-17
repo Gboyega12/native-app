@@ -285,9 +285,6 @@ export default function Home() {
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
   const [incomeExpanded, setIncomeExpanded] = useState(false);
-  // Editable income card overrides
-  const [editingIncomeField, setEditingIncomeField] = useState<'income' | 'essentials' | 'lifestyle' | 'surplus' | null>(null);
-  const [incomeEditValue, setIncomeEditValue] = useState('');
   const [showAllMoves, setShowAllMoves] = useState(false);
   const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
   const userIdRef = useRef<string | null>(null);
@@ -358,12 +355,17 @@ export default function Home() {
     }
   }, [showReviewModal]);
 
-  const ESSENTIAL_CATS = new Set(['Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Childcare', 'Health', 'Education', 'Debt Payments', 'Savings']);
+  const ESSENTIAL_CATS = new Set([
+    'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport',
+    'Childcare', 'Health', 'Education', 'Debt Payments', 'Savings',
+    // Granular enrichment categories that are essential
+    'Council Tax', 'Energy', 'Water', 'Broadband & Phone', 'TV Licence',
+  ]);
 
   const BUDGET_CATEGORIES = [
     'Rent', 'Mortgage', 'Bills', 'Insurance', 'Groceries', 'Transport', 'Travel',
     'Eating Out', 'Shopping', 'Entertainment', 'Subscriptions', 'Health',
-    'Childcare', 'Education', 'Charity', 'Transfers', 'Savings', 'Investments',
+    'Childcare', 'Education', 'Charity', 'Debt Payments', 'Transfers', 'Savings', 'Investments',
     'Refund', 'Internal Transfer', 'Other',
   ];
 
@@ -376,7 +378,6 @@ export default function Home() {
       'Council Tax': 'Bills', 'Energy': 'Bills', 'Water': 'Bills',
       'TV Licence': 'Bills', 'Personal Care': 'Shopping',
       'Gambling': 'Entertainment', 'Pets': 'Shopping',
-      'Debt Payments': 'Bills',
       'Refund': 'Refund', 'Refunds': 'Refund',
       'Internal Transfer': 'Internal Transfer', 'Internal Transfers': 'Internal Transfer',
       'Bank Transfer': 'Internal Transfer', 'Account Transfer': 'Internal Transfer',
@@ -865,6 +866,7 @@ export default function Home() {
           match_description: matchDesc,
           category: recatTarget,
           is_essential: recatEssential,
+          direction: (recatTx.tx.amount ?? 0) < 0 ? 'debit' : 'credit',
         });
       }
 
@@ -958,7 +960,7 @@ export default function Home() {
         });
         updated.all_moves = preservedMoves;
         updated.monthly_spending = (updated.non_discretionary as any)?.total + (updated.discretionary as any)?.total;
-        updated.surplus = (updated.monthly_income ?? 0) - updated.monthly_spending;
+        updated.surplus = (updated.monthly_income ?? 0) - updated.monthly_spending - (updated.monthly_savings ?? 0);
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
@@ -989,66 +991,6 @@ export default function Home() {
       console.warn('[home] Recategorize failed:', err?.message);
     }
     setSavingRecat(false);
-  };
-
-  // Save income card override (income, essentials, or surplus)
-  const saveIncomeOverride = (field: 'income' | 'essentials' | 'lifestyle' | 'surplus', rawValue: string) => {
-    const value = parseFloat(rawValue);
-    if (isNaN(value) || value < 0 || !analysis) {
-      setEditingIncomeField(null);
-      return;
-    }
-
-    const updated = { ...analysis };
-    const currentIncome = analysis.monthly_income ?? 0;
-    const currentNonDiscTotal = (analysis.non_discretionary as any)?.total ?? 0;
-    const currentDiscTotal = (analysis.discretionary as any)?.total ?? 0;
-
-    if (field === 'income') {
-      (updated as any).monthly_income = value;
-    } else if (field === 'essentials') {
-      // Scale non_discretionary total
-      const nonDisc = { ...(updated as any).non_discretionary };
-      const ratio = currentNonDiscTotal > 0 ? value / currentNonDiscTotal : 1;
-      nonDisc.total = value;
-      nonDisc.items = (nonDisc.items || []).map((item: BudgetCategory) => ({
-        ...item,
-        monthly: Math.round(item.monthly * ratio),
-      }));
-      (updated as any).non_discretionary = nonDisc;
-    } else if (field === 'lifestyle') {
-      // Scale discretionary total
-      const disc = { ...(updated as any).discretionary };
-      const ratio = currentDiscTotal > 0 ? value / currentDiscTotal : 1;
-      disc.total = value;
-      disc.items = (disc.items || []).map((item: BudgetCategory) => ({
-        ...item,
-        monthly: Math.round(item.monthly * ratio),
-      }));
-      (updated as any).discretionary = disc;
-    } else if (field === 'surplus') {
-      // Adjust income to achieve desired surplus: income = surplus + essentials + lifestyle
-      const newIncome = value + currentNonDiscTotal + currentDiscTotal;
-      (updated as any).monthly_income = newIncome;
-    }
-
-    // Recompute derived totals and moves so all cards stay correlated
-    const updNonDisc = (updated as any).non_discretionary?.total ?? currentNonDiscTotal;
-    const updDisc = (updated as any).discretionary?.total ?? currentDiscTotal;
-    updated.monthly_spending = updNonDisc + updDisc;
-    updated.surplus = (updated.monthly_income ?? 0) - updated.monthly_spending;
-    const freshMoves = EnrichmentEngine.recomputeMovesFromAnalysis(updated, debtAccounts);
-    const preservedMoves = freshMoves.map((fm) => {
-      const existing = (analysis.all_moves || []).find((m) => m.action === fm.action);
-      return existing ? { ...fm, ...existing, monthlyImpact: fm.monthlyImpact, annualImpact: fm.annualImpact } : fm;
-    });
-    updated.all_moves = preservedMoves;
-
-    LayoutAnimation.configureNext(SMOOTH_ANIM);
-    setAnalysis(updated);
-    persistAnalysis(updated);
-    setEditingIncomeField(null);
-    trackEvent('Income Override Saved', { field });
   };
 
   const doRemoveIncomeSource = async (sourceName: string) => {
@@ -3240,49 +3182,25 @@ export default function Home() {
 
             {incomeExpanded && (
               <Card style={{ marginBottom: spacing.md }}>
-                {/* Editable summary: Income / Essentials / Surplus */}
+                {/* Read-only summary derived from transaction categorisation */}
                 {[
-                  { key: 'income' as const, label: 'Income', value: income, color: colors.text },
-                  { key: 'essentials' as const, label: 'Essentials', value: nonDiscTotal, color: colors.coral },
-                  { key: 'lifestyle' as const, label: 'Lifestyle', value: discTotal, color: colors.dim },
-                  { key: 'surplus' as const, label: 'Savings & Surplus', value: leftToDecide, color: colors.green },
-                ].map((row) => (
-                  <TouchableOpacity
-                    key={row.key}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      setEditingIncomeField(row.key);
-                      setIncomeEditValue(String(Math.round(row.value)));
-                    }}
-                    style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: row.key === 'surplus' ? 0 : StyleSheet.hairlineWidth, borderBottomColor: colors.border }}
+                  { label: 'Income', value: income, color: colors.text },
+                  { label: 'Essentials', value: nonDiscTotal, color: colors.coral },
+                  { label: 'Lifestyle', value: discTotal, color: colors.dim },
+                  { label: 'Savings', value: leftToDecide, color: colors.green },
+                ].map((row, idx) => (
+                  <View
+                    key={row.label}
+                    style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: idx === 3 ? 0 : StyleSheet.hairlineWidth, borderBottomColor: colors.border }}
                   >
                     <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text }}>{row.label}</Text>
-                    {editingIncomeField === row.key ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 16, color: row.color }}>{'\u00a3'}</Text>
-                        <TextInput
-                          style={{ fontFamily: fonts.mono, fontSize: 16, color: row.color, minWidth: 60, textAlign: 'right', padding: 0, borderBottomWidth: 1, borderBottomColor: colors.accent }}
-                          value={incomeEditValue}
-                          onChangeText={setIncomeEditValue}
-                          keyboardType="numeric"
-                          autoFocus
-                          selectTextOnFocus
-                          onBlur={() => saveIncomeOverride(row.key, incomeEditValue)}
-                          onSubmitEditing={() => saveIncomeOverride(row.key, incomeEditValue)}
-                          returnKeyType="done"
-                        />
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>/mo</Text>
-                      </View>
-                    ) : (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 16, color: row.color }}>
-                          {'\u00a3'}{Math.round(row.value).toLocaleString()}
-                        </Text>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>/mo</Text>
-                        <Text style={{ fontSize: 10, color: colors.dim, marginLeft: 4 }}>{'\u270E'}</Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 16, color: row.color }}>
+                        {'\u00a3'}{Math.round(row.value).toLocaleString()}
+                      </Text>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>/mo</Text>
+                    </View>
+                  </View>
                 ))}
 
                 {isVariableIncome && (
@@ -3377,13 +3295,10 @@ export default function Home() {
                   {([
                     { key: 'essentials' as const, label: 'Essentials', total: periodNonDiscTotal },
                     { key: 'lifestyle' as const, label: 'Lifestyle', total: periodDiscTotal },
-                    { key: 'savings' as const, label: 'Savings & Surplus', total: (() => {
-                      const savingsTxTotal = [...periodNonDiscData, ...periodDiscData]
-                        .filter(d => d.category === 'Savings' || d.category === 'Investments')
-                        .reduce((acc, d) => acc + d.total, 0);
-                      const transfers = Array.isArray((analysis as any)?.person_transfers) ? (analysis as any).person_transfers : [];
-                      const transferTotal = transfers.reduce((acc: number, t: any) => acc + Math.abs(t?.amount ?? 0), 0);
-                      return savingsTxTotal + transferTotal + Math.max(0, periodRemaining);
+                    { key: 'savings' as const, label: 'Savings', total: (() => {
+                      const mSavings = analysis.monthly_savings ?? 0;
+                      const savingsForPeriod = mSavings * (1 / periodDivisor);
+                      return savingsForPeriod + Math.max(0, periodIncome - periodSpendTotal - savingsForPeriod);
                     })() },
                   ] as const).map((tab) => (
                     <TouchableOpacity
@@ -3513,11 +3428,10 @@ export default function Home() {
                     );
                   }
 
-                  // Savings & Surplus tab
+                  // Savings tab
                   const transfers = Array.isArray((analysis as any)?.person_transfers) ? (analysis as any).person_transfers : [];
-                  const transferTotal = transfers.reduce((s2: number, t: any) => s2 + Math.abs(t?.amount ?? 0), 0);
 
-                  // Group transfers by person name
+                  // Group transfers by person name, using monthly-normalised amounts
                   const transferGroups = new Map<string, { name: string; txs: any[]; total: number }>();
                   for (const tx of transfers) {
                     if (!tx) continue;
@@ -3530,18 +3444,21 @@ export default function Home() {
                   }
                   const groupedTransfers = Array.from(transferGroups.entries()).sort((a, b) => b[1].total - a[1].total);
 
-                  // Savings/investment category transactions
-                  const savingsCats = [...periodNonDiscData, ...periodDiscData]
-                    .filter(d => d.count > 0 && (d.category === 'Savings' || d.category === 'Investments'))
-                    .map(d => ({ ...d, section: 'essential' as const }));
-                  const savingsTxTotal = savingsCats.reduce((acc, d) => acc + d.total, 0);
-                  const remaining = Math.max(0, periodRemaining);
+                  // Use savings_categories from enrichment (tracked separately from spending)
+                  const savingsCats = (analysis.savings_categories || [])
+                    .filter((d: BudgetCategory) => d.txs > 0)
+                    .map((d: BudgetCategory) => ({ ...d, section: 'essential' as const, budget: 0, count: d.txs, total: d.monthly, prevTotal: 0, txs: d.transactions || [] }));
+                  const savingsTxTotal = savingsCats.reduce((acc: number, d: any) => acc + d.monthly, 0);
+
+                  // Remaining = income - spending - savings (no double-counting)
+                  const monthlySavingsTotal = analysis.monthly_savings ?? savingsTxTotal;
+                  const remaining = Math.max(0, periodIncome - periodSpendTotal - (monthlySavingsTotal * periodDivisor));
 
                   return (
                     <View>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2 }}>SAVINGS & SURPLUS</Text>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green, letterSpacing: 0.3 }}>{'\u00a3'}{Math.round(savingsTxTotal + transferTotal + remaining).toLocaleString()}</Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2 }}>SAVINGS</Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green, letterSpacing: 0.3 }}>{'\u00a3'}{Math.round(savingsTxTotal + remaining).toLocaleString()}</Text>
                       </View>
 
                       {/* Savings/investment transactions */}
@@ -3606,7 +3523,7 @@ export default function Home() {
                           </Text>
                         </View>
                         <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, marginTop: 4, lineHeight: 14 }}>
-                          Income minus essentials and lifestyle
+                          Income minus essentials, lifestyle and savings
                         </Text>
                       </View>
                     </View>
@@ -5108,14 +5025,16 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   periodBtn: {
     paddingVertical: 7,
-    paddingHorizontal: 16,
+    paddingHorizontal: 10,
     borderRadius: 100,
     borderWidth: 1,
     borderColor: c.border,
+    alignItems: 'center' as const,
   },
   periodBtnText: {
     fontFamily: fonts.mono,
     fontSize: 10,
+    textAlign: 'center' as const,
     color: c.muted,
     letterSpacing: 0.8,
   },
