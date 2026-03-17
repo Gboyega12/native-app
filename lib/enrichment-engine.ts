@@ -1833,7 +1833,7 @@ const EnrichmentEngine = {
       const delta = Math.round(targetSurplus - p.surplus);
       if (delta > 0 && delta < p.spending * 0.5) { // Only if achievable (less than halving spending)
         const annualGain = delta * 12;
-        const rateProof = `Current savings rate: ${Math.round(currentRate)}% (£${Math.round(p.surplus)}/mo surplus on £${Math.round(p.income)}/mo income). `
+        const rateProof = `Current savings rate: ${Math.round(currentRate)}% (UK median: ${UK_BENCHMARKS.savingsRate}%). £${Math.round(p.surplus)}/mo surplus on £${Math.round(p.income)}/mo income. `
           + `Target: ${targetRate}% = £${Math.round(targetSurplus)}/mo surplus. `
           + `Gap: £${Math.round(targetSurplus)} - £${Math.round(p.surplus)} = £${delta}/mo additional savings needed. `
           + `Annual impact: £${delta} × 12 = £${annualGain}.`;
@@ -1844,7 +1844,7 @@ const EnrichmentEngine = {
           effort: 'medium',
           category: 'savings',
           merchants: [],
-          strategy: `Savings rate is ${Math.round(currentRate)}%. At ${targetRate}%, compound effects accelerate: buffer builds faster, debt clears sooner, surplus compounds. Gap is £${delta}/month.`,
+          strategy: `Savings rate is ${Math.round(currentRate)}% (UK median: ${UK_BENCHMARKS.savingsRate}%). At ${targetRate}%, compound effects accelerate: buffer builds faster, debt clears sooner, surplus compounds. Gap is £${delta}/month.`,
           steps: [
             `Find £${delta}/month in discretionary spending or income growth`,
             'Automate the additional amount on payday',
@@ -2335,7 +2335,7 @@ const EnrichmentEngine = {
           category: 'invest',
           merchants: [],
           strategy: `At your income level, each \u00a3100 directed to a pension has a net cost of \u00a3${netCostPer100} after ${reliefRate}% tax relief. Via salary sacrifice, NI savings reduce this further.`,
-          steps: ['Tax relief is ${reliefRate}% at your marginal rate', 'Salary sacrifice also saves ${isHigherRate ? 2 : 8}% in National Insurance', 'Annual pension allowance is \u00a360,000 (including employer contributions)'],
+          steps: [`Tax relief is ${reliefRate}% at your marginal rate`, `Salary sacrifice also saves ${isHigherRate ? 2 : 8}% in National Insurance`, 'Annual pension allowance is \u00a360,000 (including employer contributions)'],
           effect: `\u00a3${annualRelief.toLocaleString()}/year in tax relief on \u00a3${(pensionExtra * 12).toLocaleString()}/year of contributions.`,
         });
       }
@@ -2397,6 +2397,284 @@ const EnrichmentEngine = {
         steps: ['Cashback is typically treated as a discount, not taxable income', 'Stacking cashback sources can increase the effective rate', 'The value depends on whether you pay balances in full each month'],
         effect: `\u00a3${cashbackEstimate}/year from spending that already happens.`,
       });
+    }
+
+    // ── Mortgage overpayment ──
+    // For mortgage holders: the amortisation math shows exact interest saved
+    // and years shaved off. Uses same calcPayoffMonths/calcInterestSaved as debt.
+    if (hasMortgage && p.surplus > 100) {
+      // Detect mortgage from connected debt accounts or estimate from transactions
+      const mortgageAccount = activeDebts.find((d: DebtAccount) => d.account_type === 'mortgage');
+      const mortgageBalance = mortgageAccount?.outstanding_balance || 0;
+      const mortgageRate = mortgageAccount?.interest_rate || DEFAULT_APR.mortgage;
+      const mortgageMin = mortgageAccount?.minimum_payment || 0;
+      // Use rent/mortgage category transactions as fallback for payment amount
+      const mortgageTxs = txs.filter((t) => t.category === 'Mortgage' && t.amount < 0);
+      const monthlyMortgage = mortgageMin > 0
+        ? mortgageMin
+        : mortgageTxs.length > 0
+          ? Math.round(Math.abs(mortgageTxs.reduce((s, t) => s + t.amount, 0)) / Math.max(mortgageTxs.length, 1))
+          : 0;
+
+      if (monthlyMortgage > 0) {
+        // Overpay with 20% of surplus (conservative — leaves buffer for other goals)
+        const overpayment = Math.round(p.surplus * 0.2);
+        const newPayment = monthlyMortgage + overpayment;
+        // Estimate balance if not connected: 25-year term assumption
+        const estimatedBalance = mortgageBalance > 0 ? mortgageBalance : monthlyMortgage * 12 * 20;
+        const currentMonths = calcPayoffMonths(estimatedBalance, mortgageRate, monthlyMortgage);
+        const newMonths = calcPayoffMonths(estimatedBalance, mortgageRate, newPayment);
+        const monthsSaved = Math.max(0, currentMonths - newMonths);
+        const yearsSaved = Math.round(monthsSaved / 12 * 10) / 10;
+        const interestSaved = calcInterestSaved(estimatedBalance, mortgageRate, monthlyMortgage, newPayment);
+        const annualInterestSaved = Math.round(interestSaved / Math.max(1, newMonths / 12));
+
+        if (yearsSaved > 0 && overpayment >= 50) {
+          const proof = `Mortgage: £${estimatedBalance.toLocaleString()} at ${Math.round(mortgageRate * 100 * 10) / 10}%. `
+            + `Current payment: £${monthlyMortgage}/mo → ${Math.round(currentMonths / 12)} years remaining. `
+            + `Overpay £${overpayment}/mo → ${Math.round(newMonths / 12)} years remaining. `
+            + `${yearsSaved} years saved. Lifetime interest saved: £${interestSaved.toLocaleString()}.`;
+          moves.push({
+            action: `Overpay mortgage by £${overpayment}/month to save £${interestSaved.toLocaleString()} and clear ${yearsSaved} years early`,
+            annualImpact: annualInterestSaved,
+            monthlyImpact: overpayment,
+            effort: 'low',
+            category: 'debt',
+            merchants: [],
+            strategy: `At ${Math.round(mortgageRate * 100 * 10) / 10}% APR, every £1 overpaid saves £${Math.round((mortgageRate / 0.045) * 1.5 * 10) / 10} in interest over the term. Most UK lenders allow 10% overpayment per year without early repayment charges.`,
+            steps: ['Check your lender\'s overpayment allowance (typically 10%/year)', `Set up £${overpayment}/month overpayment on top of your regular payment`, 'I\'ll track the impact as your balance reduces'],
+            effect: `Clears mortgage ${yearsSaved} years early. Saves £${interestSaved.toLocaleString()} in lifetime interest.`,
+            proof,
+          });
+        }
+      }
+    }
+
+    // ── Car finance intelligence ──
+    // Detect car finance accounts and provide PCP/HP-specific advice:
+    // voluntary termination rights, balloon payment awareness, refinancing.
+    const carFinanceAccounts = activeDebts.filter((d: DebtAccount) => d.account_type === 'car_finance');
+    if (carFinanceAccounts.length > 0) {
+      for (const car of carFinanceAccounts) {
+        const carName = debtDisplayName(car);
+        const carBalance = car.outstanding_balance || 0;
+        const carRate = getAPR(car);
+        const carMin = estimateMinimum(car);
+        // Total paid estimate: assume 48-month PCP deal, balance is remaining
+        const monthsPaid = carMin > 0 ? Math.round((carBalance / carMin) * 0.5) : 12;
+        // CCA 1974 voluntary termination: once you've paid 50% of total amount payable,
+        // you can hand the car back with nothing more to pay
+        const totalAmountPayable = carBalance + (carMin * monthsPaid); // rough: paid so far + remaining
+        const halfTAP = Math.round(totalAmountPayable / 2);
+        const paidSoFar = Math.round(carMin * monthsPaid);
+        const vtGap = Math.max(0, halfTAP - paidSoFar);
+
+        const proof = `${carName}: £${carBalance.toLocaleString()} remaining at ${Math.round(carRate * 100)}% APR. `
+          + `Monthly payment: £${Math.round(carMin)}. `
+          + `Estimated total payable: £${totalAmountPayable.toLocaleString()}. `
+          + `50% threshold (VT right): £${halfTAP.toLocaleString()}. `
+          + `${vtGap > 0 ? `£${vtGap.toLocaleString()} away from voluntary termination eligibility.` : 'You may already be eligible for voluntary termination.'}`;
+
+        if (vtGap <= 0) {
+          // Already eligible for VT
+          moves.push({
+            action: `You can voluntarily terminate your ${carName} agreement and owe nothing more`,
+            annualImpact: Math.round(carMin * 12),
+            monthlyImpact: Math.round(carMin),
+            effort: 'medium',
+            category: 'debt',
+            merchants: [],
+            strategy: `Under the Consumer Credit Act 1974 (Section 99-100), once you've paid 50% of the total amount payable on a HP or PCP agreement, you can hand the car back with nothing more owed. You appear to have passed this threshold.`,
+            steps: ['Confirm your total amount payable with the finance company', 'Ensure the car is in good condition (you may be charged for excess damage)', 'Send a written voluntary termination notice to the lender', 'Return the car — no balloon payment, no further obligation'],
+            effect: `Frees up £${Math.round(carMin)}/month. No balloon payment required.`,
+            proof,
+          });
+        } else if (vtGap < carMin * 6) {
+          // Within 6 months of VT eligibility
+          moves.push({
+            action: `£${vtGap.toLocaleString()} away from voluntary termination on ${carName} — eligible in ~${Math.round(vtGap / carMin)} months`,
+            annualImpact: Math.round(carMin * 12 * 0.5),
+            monthlyImpact: 0,
+            effort: 'low',
+            category: 'debt',
+            merchants: [],
+            strategy: `Under CCA 1974, once you've paid 50% of the total amount payable, you can hand the car back. You're £${vtGap.toLocaleString()} away. Keep making regular payments and this becomes an option in ~${Math.round(vtGap / carMin)} months.`,
+            steps: ['Keep making your regular £' + Math.round(carMin) + '/month payments', 'Request a settlement statement showing total amount payable', 'Once 50% is reached, decide: keep the car or terminate', 'If PCP: compare balloon payment vs car value at that point'],
+            effect: `Option to end the agreement with no balloon payment in ~${Math.round(vtGap / carMin)} months.`,
+            proof,
+          });
+        }
+
+        // PCP balloon payment warning — if car finance detected, alert about end-of-term
+        if (carBalance > 3000 && carRate > 0) {
+          const refinanceSaving = carRate > 0.07
+            ? Math.round(calcInterestSaved(carBalance, carRate, carMin, carMin) * 0.3)
+            : 0;
+          if (refinanceSaving > 200) {
+            moves.push({
+              action: `Refinancing ${carName} at a lower rate could save ~£${refinanceSaving.toLocaleString()} in interest`,
+              annualImpact: Math.round(refinanceSaving / Math.max(1, carBalance / (carMin * 12))),
+              monthlyImpact: 0,
+              effort: 'medium',
+              category: 'debt',
+              merchants: [],
+              strategy: `Your car finance is at ${Math.round(carRate * 100)}% APR. Personal loans from high-street banks currently start at 3-5% for good credit. Refinancing the remaining £${carBalance.toLocaleString()} could reduce total interest.`,
+              steps: ['Check your credit score (free via ClearScore, Experian, or Credit Karma)', 'Compare personal loan rates from 3+ lenders', 'Ensure no early settlement penalty exceeds the interest saving', 'If switching, request a settlement figure from your current lender'],
+              effect: `Could save ~£${refinanceSaving.toLocaleString()} in total interest on the remaining balance.`,
+            });
+          }
+        }
+      }
+    }
+
+    // ── Debt consolidation / balance transfer ──
+    // For users with 2+ high-interest debts: suggest consolidation via personal
+    // loan or 0% balance transfer. Only when total interest burn justifies it.
+    if (actualDebtCount >= 2 && !isGoodDebt) {
+      const highRateDebts = activeDebts.filter((d: DebtAccount) => getAPR(d) > 0.15);
+      if (highRateDebts.length >= 2) {
+        const consolidateBalance = highRateDebts.reduce((s: number, d: DebtAccount) => s + (d.outstanding_balance || 0), 0);
+        const weightedAPR = highRateDebts.reduce((s: number, d: DebtAccount) => s + getAPR(d) * (d.outstanding_balance || 0), 0) / Math.max(1, consolidateBalance);
+        const currentAnnualInterest = Math.round(consolidateBalance * weightedAPR);
+        // Personal loan at 7.9% or 0% balance transfer (assume 3% fee)
+        const consolidatedAPR = 0.079;
+        const consolidatedAnnualInterest = Math.round(consolidateBalance * consolidatedAPR);
+        const annualSaving = currentAnnualInterest - consolidatedAnnualInterest;
+        // Balance transfer: 0% for 24 months with ~3% fee
+        const btFee = Math.round(consolidateBalance * 0.03);
+        const btSaving = currentAnnualInterest - btFee; // First year saving (0% vs current rate minus fee)
+
+        if (annualSaving > 200) {
+          const bestOption = btSaving > annualSaving ? 'balance transfer' : 'personal loan';
+          const bestSaving = Math.max(annualSaving, btSaving);
+          const proof = `${highRateDebts.length} debts totalling £${consolidateBalance.toLocaleString()} at weighted ${Math.round(weightedAPR * 100)}% APR. `
+            + `Current annual interest: £${currentAnnualInterest.toLocaleString()}. `
+            + `Personal loan at 7.9%: £${consolidatedAnnualInterest.toLocaleString()}/year (saves £${annualSaving.toLocaleString()}). `
+            + `0% balance transfer (3% fee = £${btFee}): saves £${btSaving.toLocaleString()} in year one.`;
+          moves.push({
+            action: `Consolidate £${consolidateBalance.toLocaleString()} across ${highRateDebts.length} debts via ${bestOption} to save £${bestSaving.toLocaleString()}/year`,
+            annualImpact: bestSaving,
+            monthlyImpact: Math.round(bestSaving / 12),
+            effort: 'medium',
+            category: 'debt',
+            merchants: highRateDebts.map((d: DebtAccount) => debtDisplayName(d)),
+            strategy: `You're paying ~£${currentAnnualInterest.toLocaleString()}/year in interest across ${highRateDebts.length} high-rate debts. ${bestOption === 'balance transfer'
+              ? `A 0% balance transfer card (typically 24-29 months) with a 3% fee (£${btFee}) beats a personal loan here.`
+              : `A personal loan at ~7.9% APR reduces annual interest from £${currentAnnualInterest.toLocaleString()} to £${consolidatedAnnualInterest.toLocaleString()}.`}`,
+            steps: ['Check eligibility with a soft-search tool (no credit score impact)', `Apply for a ${bestOption} to cover £${consolidateBalance.toLocaleString()}`, 'Pay off all existing high-rate debts immediately on approval', bestOption === 'balance transfer' ? 'Set up a direct debit to clear the balance before the 0% period ends' : 'Set up a fixed monthly payment to clear within the loan term'],
+            effect: `Saves £${bestSaving.toLocaleString()}/year in interest. Single payment instead of ${highRateDebts.length}.`,
+            proof,
+          });
+        }
+      }
+    }
+
+    // ── Salary sacrifice NI saving ──
+    // Salary sacrifice pension contributions save both income tax AND National
+    // Insurance (employee NI: 8% on earnings £12,570-£50,270, 2% above).
+    // This is on top of the pension tax relief already shown above.
+    if (p.income > 2500 && p.surplus > 100 && !isSelfEmployed && !isStudent) {
+      const pensionExtra = Math.round(p.surplus * 0.15);
+      const isHigherRate = p.income > 4167; // ~£50k/year
+      const niRate = isHigherRate ? 0.02 : 0.08; // 2% above UEL, 8% below
+      const annualNISaving = Math.round(pensionExtra * 12 * niRate);
+      const incomeTaxRate = isHigherRate ? 0.40 : 0.20;
+      const annualTaxSaving = Math.round(pensionExtra * 12 * incomeTaxRate);
+      const totalAnnualSaving = annualNISaving + annualTaxSaving;
+      // Net cost: what £100 actually costs via salary sacrifice
+      const netCostPer100 = Math.round(100 * (1 - incomeTaxRate - niRate));
+
+      if (annualNISaving > 50) {
+        moves.push({
+          action: `Salary sacrifice £${pensionExtra}/month into pension — costs £${Math.round(pensionExtra * netCostPer100 / 100)} net (saves £${annualNISaving}/year in NI)`,
+          annualImpact: totalAnnualSaving,
+          monthlyImpact: Math.round(totalAnnualSaving / 12),
+          effort: 'low',
+          category: 'invest',
+          merchants: [],
+          strategy: `Via salary sacrifice, £${pensionExtra}/month pension contribution saves ${Math.round(incomeTaxRate * 100)}% income tax AND ${Math.round(niRate * 100)}% NI. Net cost: £${netCostPer100} per £100 contributed. Regular pension contributions only get the tax relief — salary sacrifice gets both.`,
+          steps: ['Ask your employer if salary sacrifice is available (most large employers offer it)', 'Request a salary sacrifice increase through HR/payroll', 'Your take-home drops by £' + Math.round(pensionExtra * netCostPer100 / 100) + ' but pension gets the full £' + pensionExtra, 'Employer also saves NI — some pass this on as an additional contribution'],
+          effect: `£${totalAnnualSaving}/year in combined tax and NI savings. Your employer may also contribute their NI saving.`,
+        });
+      }
+    }
+
+    // ── Marriage allowance ──
+    // If in a couple and one partner earns below the personal allowance (£12,570),
+    // they can transfer £1,260 to the higher earner, saving £252/year (20% of £1,260).
+    // Only available to basic rate taxpayers (not higher rate).
+    const isCouple = id.household === 'couple_shared' || id.household === 'couple_separate' || id.household === 'family';
+    if (isCouple && p.income > 0) {
+      const isBasicRate = p.income <= 4167; // Up to ~£50k/year
+      if (isBasicRate) {
+        const marriageAllowanceSaving = 252; // Fixed: 20% × £1,260
+        moves.push({
+          action: `Marriage allowance could save £${marriageAllowanceSaving}/year if your partner earns below £12,570`,
+          annualImpact: marriageAllowanceSaving,
+          monthlyImpact: Math.round(marriageAllowanceSaving / 12),
+          effort: 'low',
+          category: 'savings',
+          merchants: [],
+          strategy: 'If one partner earns below the personal allowance (£12,570) and the other is a basic rate taxpayer, £1,260 of unused allowance can be transferred. This reduces the higher earner\'s tax by £252/year. You can backdate up to 4 years.',
+          steps: ['Check if your partner earns below £12,570/year', 'Apply online at gov.uk/marriage-allowance', 'You can backdate claims for up to 4 tax years (up to £1,008 total)', 'The allowance renews automatically each year'],
+          effect: '£252/year tax reduction. Up to £1,008 if backdated 4 years.',
+        });
+      }
+    }
+
+    // ── Capital Gains Tax annual exemption ──
+    // The CGT annual exempt amount is £3,000 (2024-25). For investment optimisers
+    // with significant holdings outside ISAs, this affects sell/rebalance decisions.
+    if (m.savingsRate >= 20 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
+      const investmentTxs = txs.filter((t) => t.category === 'Investments' && t.amount < 0);
+      const monthlyInvestments = investmentTxs.length > 0
+        ? Math.round(Math.abs(investmentTxs.reduce((s, t) => s + t.amount, 0)) / Math.max(ANALYSIS_MONTHS, 1))
+        : 0;
+      if (monthlyInvestments > 100 || wantsGrowth) {
+        const cgtExemption = 3000;
+        moves.push({
+          action: `Use your £${cgtExemption.toLocaleString()} CGT annual exemption before 5 April`,
+          annualImpact: Math.round(cgtExemption * 0.20), // 20% basic rate CGT on gains
+          monthlyImpact: 0,
+          effort: 'low',
+          category: 'invest',
+          merchants: [],
+          strategy: `The capital gains tax annual exempt amount is £${cgtExemption.toLocaleString()} (2024-25). Gains up to this amount are tax-free. For holdings outside ISAs, you can crystallise up to £${cgtExemption.toLocaleString()} in gains each tax year by selling and rebuying (known as "bed and ISA" if moved into an ISA wrapper).`,
+          steps: ['Review non-ISA holdings for unrealised gains before 5 April', 'Sell up to £' + cgtExemption.toLocaleString() + ' of gains tax-free', 'Rebuy inside an ISA wrapper to shelter future growth', 'Unused CGT exemption cannot be carried forward'],
+          effect: `Saves up to £${Math.round(cgtExemption * 0.20)}/year in capital gains tax (at 20% basic rate).`,
+        });
+      }
+    }
+
+    // ── Cash ISA vs Stocks & Shares ISA comparison ──
+    // For users with surplus: show the mathematical difference between cash
+    // and investing over 5-10 year horizons using historical UK returns.
+    if (m.savingsRate >= 10 && p.surplus > 200 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
+      const monthlyISA = Math.round(Math.min(p.surplus * 0.5, T.isaAnnualLimit / 12));
+      const cashRate = 0.045; // Best easy-access cash ISA rate
+      const equityReturn = 0.07; // Long-term UK equity average (nominal)
+      const years = 10;
+      // Compound: FV = PMT × ((1+r)^n - 1) / r, where r = monthly rate, n = months
+      const cashMonthlyRate = cashRate / 12;
+      const equityMonthlyRate = equityReturn / 12;
+      const months10y = years * 12;
+      const cashFV = Math.round(monthlyISA * ((Math.pow(1 + cashMonthlyRate, months10y) - 1) / cashMonthlyRate));
+      const equityFV = Math.round(monthlyISA * ((Math.pow(1 + equityMonthlyRate, months10y) - 1) / equityMonthlyRate));
+      const difference = equityFV - cashFV;
+
+      if (difference > 1000) {
+        moves.push({
+          action: `£${monthlyISA}/month in S&S ISA could grow to £${equityFV.toLocaleString()} vs £${cashFV.toLocaleString()} in Cash ISA over ${years} years`,
+          annualImpact: Math.round(difference / years),
+          monthlyImpact: 0,
+          effort: 'medium',
+          category: 'invest',
+          merchants: [],
+          strategy: `At £${monthlyISA}/month over ${years} years: Cash ISA at ${cashRate * 100}% → £${cashFV.toLocaleString()}. S&S ISA at ${equityReturn * 100}% average → £${equityFV.toLocaleString()}. Difference: £${difference.toLocaleString()}. Past performance isn't guaranteed, but over ${years}+ year horizons, equities have historically outperformed cash in the UK.`,
+          steps: ['Cash ISA: guaranteed return, instant access, no risk to capital', 'S&S ISA: higher expected return over 5+ years, but value can fall', 'Both are tax-free wrappers (no CGT, no income tax on gains/dividends)', 'You can hold one of each per tax year within the £' + T.isaAnnualLimit.toLocaleString() + ' total allowance'],
+          effect: `£${difference.toLocaleString()} potential difference over ${years} years (£${Math.round(difference / years).toLocaleString()}/year average).`,
+        });
+      }
     }
 
     // Break-even move if in deficit

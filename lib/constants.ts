@@ -52,6 +52,7 @@ export const DEFAULT_APR: Record<string, number> = {
   personal_loan: 0.079,    // 7.9% representative APR
   car_finance: 0.089,      // 8.9% PCP/HP typical
   student_loan: 0.077,     // Plan 2: RPI + 3% (variable, ~7.7% 2024)
+  mortgage: 0.045,         // 4.5% typical UK mortgage rate (2024-25)
   bnpl: 0,                 // Buy Now Pay Later — 0% if paid on time
 };
 
