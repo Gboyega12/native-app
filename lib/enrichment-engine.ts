@@ -6,6 +6,7 @@ import { classifyTransaction } from './classifier';
 import { normaliseDescription } from './normalise';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
 import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants';
+import { calcInterestSaved } from './amortisation';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -62,7 +63,22 @@ export type TransactionOverride = {
 const EnrichmentEngine = {
   enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[], identity?: any): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
-    const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
+    // Pre-pass: identify regular person-name senders (likely partner/shared income)
+    // so they aren't excluded as one-off transfers during enrichment
+    const personCreditCounts: Record<string, number> = {};
+    for (const tx of transactions) {
+      if (tx.amount > 0 && isPersonTransfer(tx.description)) {
+        const key = normaliseDescription(tx.description);
+        personCreditCounts[key] = (personCreditCounts[key] || 0) + 1;
+      }
+    }
+    const regularPersonSenders = new Set<string>(
+      Object.entries(personCreditCounts)
+        .filter(([, count]) => count >= INCOME_THRESHOLDS.minRegularCount)
+        .map(([key]) => key),
+    );
+
+    const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides, regularPersonSenders));
 
     // Reclassify credit card payoffs for full-payers.
     // Users who use credit cards for points and pay off in full each month
@@ -174,7 +190,7 @@ const EnrichmentEngine = {
     return transactions;
   },
 
-  enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[]): EnrichedTransaction {
+  enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[], regularPersonSenders?: Set<string>): EnrichedTransaction {
     // Check user overrides first — try both raw and normalised descriptions
     if (overrides?.length) {
       const descLower = tx.description.toLowerCase();
@@ -296,8 +312,16 @@ const EnrichmentEngine = {
         confidence = 'high';
         classifiedBy = 'keyword';
       } else if (isPerson) {
-        category = 'Transfers';
-        classifiedBy = 'keyword';
+        // Regular person-name credits (3+ occurrences) → likely partner/shared income
+        if (regularPersonSenders?.has(normalised)) {
+          isIncome = true;
+          category = 'Income';
+          confidence = 'medium';
+          classifiedBy = 'keyword';
+        } else {
+          category = 'Transfers';
+          classifiedBy = 'keyword';
+        }
       } else if (this._isInternationalTransfer(tx.description)) {
         // Inbound international transfer — NOT income
         category = 'Transfers';
@@ -1138,25 +1162,53 @@ const EnrichmentEngine = {
           effect: `Earn more from spending you're already doing.`,
         });
       } else {
-        const debtSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
-        // Build sub-goals from actual debt accounts, sorted smallest balance first (snowball order)
-        const debtSubGoals: MoveSubGoal[] = [...connectedDebts]
-          .sort((a, b) => (a.outstanding_balance || 0) - (b.outstanding_balance || 0))
-          .map((d) => ({
+        // Determine if we have interest rate data to use avalanche (highest interest first)
+        const hasRates = connectedDebts.some((d: any) => d.interest_rate && d.interest_rate > 0);
+        const useAvalanche = hasRates;
+        const fallbackAPR = T.defaultDebtAPR;
+
+        // Sort: avalanche = highest interest first; snowball fallback = smallest balance first
+        const sortedDebts = [...connectedDebts].sort((a: any, b: any) => {
+          if (useAvalanche) {
+            return (b.interest_rate || fallbackAPR) - (a.interest_rate || fallbackAPR);
+          }
+          return (a.outstanding_balance || 0) - (b.outstanding_balance || 0);
+        });
+
+        // Calculate real interest savings using amortisation math
+        // Estimate: surplus directed at top-priority debt, minimums on the rest
+        const monthlyPayment = p.debtPayments / actualDebtCount; // avg current payment per debt
+        const surplusForDebt = Math.min(p.surplus * 0.5, 300); // up to half surplus or £300
+        let totalInterestSaved = 0;
+        for (const d of sortedDebts) {
+          const bal = d.outstanding_balance || 0;
+          const apr = (d as any).interest_rate || fallbackAPR;
+          const saved = calcInterestSaved(bal, apr, monthlyPayment, monthlyPayment + surplusForDebt / actualDebtCount);
+          totalInterestSaved += saved;
+        }
+        const debtSaving = Math.round(totalInterestSaved / 12); // monthly equivalent
+
+        const debtSubGoals: MoveSubGoal[] = sortedDebts
+          .map((d: any) => ({
             type: 'debt_clear' as const,
             target: d.account_name || d.institution || 'Debt',
             startValue: Math.round(d.outstanding_balance || 0),
             targetValue: 0,
           }));
+
+        const strategyName = useAvalanche ? 'highest interest first' : 'snowball method';
+        const stepsAvalanche = ['List all debts by interest rate, highest first', 'Pay minimums on all except the highest-rate debt', 'Direct your surplus at the highest-interest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'];
+        const stepsSnowball = ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Direct your surplus at the smallest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'];
+
         moves.push({
-          action: `Attack ${actualDebtCount} debts with snowball method`,
+          action: `Attack ${actualDebtCount} debts, ${strategyName}`,
           annualImpact: debtSaving * 12,
           monthlyImpact: debtSaving,
           effort: 'high',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `${actualDebtCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}`,
-          steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Direct your surplus at the smallest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'],
+          strategy: `${actualDebtCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}${useAvalanche ? ' Targeting highest interest rate first to minimise total cost.' : ''}`,
+          steps: useAvalanche ? stepsAvalanche : stepsSnowball,
           effect: `Saves \u00a3${debtSaving * 12}/year in interest.`,
           subGoals: debtSubGoals.length > 0 ? debtSubGoals : undefined,
         });
@@ -1179,9 +1231,12 @@ const EnrichmentEngine = {
           effect: 'Continue earning rewards on responsible credit card use.',
         });
       } else {
-        const debtSaving = Math.round(p.debtPayments * T.singleDebtOverpayPct);
         const overpay = Math.round(Math.min(p.surplus * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
         const singleDebt = connectedDebts[0];
+        const singleAPR = (singleDebt as any)?.interest_rate || T.defaultDebtAPR;
+        const singleBal = singleDebt?.outstanding_balance || 0;
+        const interestSaved = calcInterestSaved(singleBal, singleAPR, p.debtPayments, p.debtPayments + overpay);
+        const debtSaving = Math.round(interestSaved / 12) || Math.round(p.debtPayments * T.singleDebtOverpayPct);
         moves.push({
           action: `Overpay debt by \u00a3${overpay}/month to clear faster`,
           annualImpact: debtSaving * 12,

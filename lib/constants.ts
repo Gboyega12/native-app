@@ -20,7 +20,7 @@ export const MOVE_THRESHOLDS = {
   coffeeMin: 40,
   coffeeCutPct: 0.5,
   subscriptionCutPct: 0.3,
-  debtSnowballSavePct: 0.15,
+  defaultDebtAPR: 0.079,            // Fallback APR when interest rate unknown (personal loan floor)
   singleDebtOverpayPct: 0.1,
   singleDebtOverpayMaxSurplusPct: 0.5,
   singleDebtOverpayCap: 200,
@@ -43,7 +43,7 @@ export const INCOME_THRESHOLDS = {
   minRegularCount: 3,       // Require 3+ regular credits to count as income
   largeCreditMin: 500,
   largeCreditMinCount: 3,   // Require 3+ large credits (was 2)
-  largeCreditIntervalMin: 20,
+  largeCreditIntervalMin: 5,         // Lowered from 20 to support weekly partner/shared income
   largeCreditIntervalMax: 45,
   windfallMin: 1000,        // One-off credits above this → windfall, not income
 } as const;
