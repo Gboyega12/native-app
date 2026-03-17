@@ -427,7 +427,8 @@ const EnrichmentEngine = {
     const detectedDebt = category === 'Debt Payments';
 
     // Self-transfers: override category and exclude from budget math
-    if (selfTransfer && classifiedBy !== 'user_override') {
+    // (user overrides already returned early above, so no need to check classifiedBy)
+    if (selfTransfer) {
       return {
         ...tx,
         merchant: tx.description,
