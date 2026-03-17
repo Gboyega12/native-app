@@ -441,7 +441,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     // Re-fetch debt accounts so the rest of the pipeline uses updated balances
     const { data: freshDebt } = await supabase
       .from('debt_accounts')
-      .select('account_name, account_type, outstanding_balance, credit_limit')
+      .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, is_default_apr, provider_name')
       .eq('user_id', userId);
     if (freshDebt) debtAccountsData = freshDebt;
   } catch (e: unknown) {
@@ -628,7 +628,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
 
   return {
     analysis: rawAnalysis,
-    debtAccounts: syncedDebt,
+    debtAccounts: debtAccountsData,
     weeklyContext,
     dataSource,
     latestTransactionDate,
