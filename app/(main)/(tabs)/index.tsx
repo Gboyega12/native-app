@@ -689,6 +689,12 @@ export default function Home() {
         (updated as any).discretionary = disc;
         (updated as any).non_discretionary = nonDisc;
 
+        // Recalculate top-level spending and surplus so the income card stays in sync
+        const newSpending = Math.round(disc.total + nonDisc.total);
+        const income = updated.monthly_income || 0;
+        updated.monthly_spending = newSpending;
+        updated.surplus = Math.round(income - newSpending - (updated.monthly_savings || 0));
+
         // Remove classified person transfers (using normalized matching)
         if (Array.isArray((updated as any).person_transfers)) {
           (updated as any).person_transfers = (updated as any).person_transfers.filter(
