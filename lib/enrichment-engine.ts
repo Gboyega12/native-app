@@ -5,8 +5,6 @@ import {
 } from './merchant-db.js';
 import { classifyTransaction } from './classifier.js';
 import { normaliseDescription } from './normalise.js';
-import { extractSignals } from './signal-engine.js';
-import type { FinancialSignal } from './types.js';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes.js';
 import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS, PLATFORM_FEES, DEFAULT_APR, defaultMinimumPayment } from './constants.js';
 import { calcInterestSaved, calcPayoffMonths, calcTotalInterest } from './amortisation.js';
@@ -106,9 +104,7 @@ const EnrichmentEngine = {
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
     const patterns = this.detectBehavioralPatterns(profile);
-    // Extract predictive signals from transaction time series
-    const signals = extractSignals(enriched, profile, identity, recurring);
-    const score = this.calcDecisionScore(profile, signals);
+    const score = this.calcDecisionScore(profile);
     const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
 
     const metrics = profile.metrics;
@@ -138,7 +134,6 @@ const EnrichmentEngine = {
       enrichmentMetrics,
       essentialGaps,
       verifiedBills: verifiedBills.length > 0 ? verifiedBills : undefined,
-      signals,
     };
   },
 
@@ -1103,50 +1098,47 @@ const EnrichmentEngine = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
-  // Decision Score (Signal-Derived)
-  // @deprecated — being replaced by predictive FinancialSignal ensemble.
-  // Score is now derived from signal severity distribution for backwards
-  // compatibility. The real intelligence is in the signals themselves.
-  //
-  // Baseline: 70 (healthy default — no signals = no problems detected).
-  // Alert signals: −12 each (urgent issues)
-  // Watch signals: −5 each (monitor)
-  // Positive info signals: +8 each (momentum in right direction)
-  // Structural factors still applied for non-signal data (savings rate, debt)
+  // Decision Score Algorithm
+  // Produces a 0-100 score reflecting overall financial health.
+  // Starts at 50 (neutral baseline) and applies additive/subtractive
+  // factors. Each factor's weight reflects its relative importance:
+  //   - Savings rate: ±15 (strongest signal of financial trajectory)
+  //   - Debt-free: +10 (structural advantage)
+  //   - Multiple debts: -12 (compounding risk from juggling payments)
+  //   - Stable salary: +8 (income predictability)
+  //   - BNPL: -8 (correlates with cash flow stress in UK data)
+  // Verdict bands: 75+ Strong, 55-74 Balanced, 35-54 Needs Attention, <35 At Risk
   // ═══════════════════════════════════════════════════════════════════
-  calcDecisionScore(profile: FinancialProfile, signals?: FinancialSignal[]): DecisionScore {
+  calcDecisionScore(profile: FinancialProfile): DecisionScore {
     const m = profile.metrics;
-    let score = 70;
+    // Baseline of 50: an average user with no strong signals scores neutral
+    let score = 50;
     const breakdown: { factor: string; impact: number }[] = [];
 
-    // Structural factors (from profile metrics — always available)
-    if (m.savingsRate >= 20) { score += 10; breakdown.push({ factor: 'Strong savings rate', impact: +10 }); }
-    else if (m.savingsRate < 5) { score -= 12; breakdown.push({ factor: 'Thin savings margin', impact: -12 }); }
+    // Savings rate tiers: 20%+ is excellent (UK median ~12%), <5% is critical
+    if (m.savingsRate >= 20) { score += 15; breakdown.push({ factor: 'Savings rate', impact: +15 }); }
+    else if (m.savingsRate >= 10) { score += 8; breakdown.push({ factor: 'Savings rate', impact: +8 }); }
+    else if (m.savingsRate < 5) { score -= 10; breakdown.push({ factor: 'Savings rate', impact: -10 }); }
 
-    if (m.debtAccountCount === 0) { score += 5; breakdown.push({ factor: 'Debt-free', impact: +5 }); }
-    else if (m.debtAccountCount >= 3) { score -= 10; breakdown.push({ factor: 'Multiple debts', impact: -10 }); }
+    // 3+ debts gets a heavier penalty than 1-2 because juggling multiple
+    // minimum payments increases the probability of missed payments
+    if (m.debtAccountCount === 0) { score += 10; breakdown.push({ factor: 'Debt-free', impact: +10 }); }
+    else if (m.debtAccountCount >= 3) { score -= 12; breakdown.push({ factor: 'Multiple debts', impact: -12 }); }
 
-    if (m.bnplCount >= 2) { score -= 8; breakdown.push({ factor: 'BNPL exposure', impact: -8 }); }
+    // 7+ subscriptions: UK average is 4-5; above 7 suggests subscription creep
+    if (m.subscriptionCount <= 3) { score += 5; breakdown.push({ factor: 'Lean subscriptions', impact: +5 }); }
+    else if (m.subscriptionCount >= 7) { score -= 8; breakdown.push({ factor: 'Subscription creep', impact: -8 }); }
 
-    // Signal-derived adjustments (predictive — from transaction time series)
-    if (signals && signals.length > 0) {
-      const alerts = signals.filter((s) => s.severity === 'alert');
-      const watches = signals.filter((s) => s.severity === 'watch');
-      const positiveInfos = signals.filter((s) => s.severity === 'info' && (s.impact ?? 0) > 0);
-
-      for (const sig of alerts.slice(0, 3)) {
-        score -= 12;
-        breakdown.push({ factor: sig.title, impact: -12 });
-      }
-      for (const sig of watches.slice(0, 3)) {
-        score -= 5;
-        breakdown.push({ factor: sig.title, impact: -5 });
-      }
-      for (const sig of positiveInfos.slice(0, 2)) {
-        score += 8;
-        breakdown.push({ factor: sig.title, impact: +8 });
-      }
+    if (m.foodDelivery > UK_BENCHMARKS.foodDelivery) {
+      score -= 5; breakdown.push({ factor: 'High delivery spend', impact: -5 });
     }
+
+    const hasSalary = profile.incomeSources.some((s: any) => s.isSalary);
+    if (hasSalary) { score += 8; breakdown.push({ factor: 'Stable salary', impact: +8 }); }
+
+    // BNPL penalty: 2+ active BNPL agreements signal cash flow pressure.
+    // FCA data shows BNPL users are 3x more likely to be in financial difficulty.
+    if (m.bnplCount >= 2) { score -= 8; breakdown.push({ factor: 'BNPL usage', impact: -8 }); }
 
     score = Math.max(0, Math.min(100, score));
     let verdict: DecisionScore['verdict'] = 'Balanced';
@@ -2440,8 +2432,7 @@ const EnrichmentEngine = {
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
     const patterns = this.detectBehavioralPatterns(profile);
-    const signals = extractSignals(enriched, profile, identity, recurring);
-    const score = this.calcDecisionScore(profile, signals);
+    const score = this.calcDecisionScore(profile);
     const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
 
     const metrics = profile.metrics;
@@ -2467,7 +2458,6 @@ const EnrichmentEngine = {
       enrichmentMetrics,
       essentialGaps,
       verifiedBills: verifiedBills.length > 0 ? verifiedBills : undefined,
-      signals,
     };
   },
 

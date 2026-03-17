@@ -1,4 +1,4 @@
-import type { Goals, Move, GoalTrajectory, FlowchartPosition, FinancialProfile, UserIdentity, FinancialSignal } from './types.js';
+import type { Goals, Move, GoalTrajectory, FlowchartPosition, FinancialProfile, UserIdentity } from './types.js';
 import type { LiquidityTier } from './liquidity-engine.js';
 import { MAX_TRAJECTORY_MONTHS } from './constants.js';
 import {
@@ -127,7 +127,6 @@ export function rankMoves(
   goals: Goals | null,
   identity?: UserIdentity | null,
   debtAccounts?: any[],
-  signals?: FinancialSignal[],
 ): RankedMove[] {
   if (!decisionStack || decisionStack.length === 0) return [];
 
@@ -252,67 +251,6 @@ export function rankMoves(
       score = score * 0.7 + score * consistencyNormalized * 0.3;
     }
 
-    // ── Signal-weighted boosting ──
-    // Predictive signals from the time series boost related moves.
-    // E.g. "delivery spending accelerating" → boost delivery reduction move.
-    if (signals && signals.length > 0) {
-      for (const sig of signals) {
-        if (!sig.relatedMoveCategory || sig.relatedMoveCategory !== moveCategory) continue;
-        // Category match — check if specific category also matches
-        const categoryMatch = sig.category
-          ? move.action?.toLowerCase().includes(sig.category.toLowerCase())
-          : true;
-        if (!categoryMatch) continue;
-
-        const boost = sig.severity === 'alert' ? 1.20
-          : sig.severity === 'watch' ? 1.10
-          : 1.05;
-        score *= boost;
-      }
-    }
-
-    // ── Impact distribution (P10/P50/P90) ──
-    // Subscription moves → tight range. Spending cuts → wide, proportional to CV.
-    let impactRange: [number, number, number] | undefined;
-    let achievability: number | undefined;
-    const mi = move.monthlyImpact;
-
-    if (mi > 0) {
-      const isSubscription = move.action?.toLowerCase().includes('cancel') ||
-        move.action?.toLowerCase().includes('subscript');
-
-      if (isSubscription) {
-        // Near-certain: cancel = cancel
-        impactRange = [mi, mi, mi];
-        achievability = 0.88;
-      } else if (moveCategory === 'spending' && move.spendingCV !== undefined) {
-        const cv = move.spendingCV;
-        impactRange = [
-          Math.round(mi * (1 + 0.5 * cv)),        // P10 optimistic
-          mi,                                       // P50 expected
-          Math.round(mi * Math.max(0.2, 1 - cv)),  // P90 conservative
-        ];
-        const followThrough = consistencyScore ?? 0.65;
-        achievability = Math.min(0.95, followThrough * (1 - 0.3 * cv));
-      } else if (moveCategory === 'debt') {
-        // APR uncertainty: ±20% on impact if using default rates
-        impactRange = [
-          Math.round(mi * 1.20),  // P10 (higher APR = more savings from paying off)
-          mi,                     // P50
-          Math.round(mi * 0.80),  // P90
-        ];
-        achievability = 0.75;
-      } else if (moveCategory === 'invest' || moveCategory === 'savings') {
-        // Market/rate variance
-        impactRange = [
-          Math.round(mi * 1.40),  // P10 (10% return)
-          mi,                     // P50 (7% return)
-          Math.round(mi * 0.60),  // P90 (4% return)
-        ];
-        achievability = 0.70;
-      }
-    }
-
     // Calculate trajectory for this move (with Monte Carlo if profile available)
     const trajectory = calcGoalTrajectory(profile, goals, move, identity);
 
@@ -325,8 +263,6 @@ export function rankMoves(
       consistencyScore,
       marginalMultiplier: marginal,
       liquidityTier,
-      impactRange,
-      achievability,
     };
   });
 

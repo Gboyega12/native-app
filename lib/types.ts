@@ -181,10 +181,6 @@ export interface Move {
   /** Per-category spending CV (coefficient of variation) from month-to-month transaction data.
    *  Attached by the enrichment engine for spending moves; used by Monte Carlo for follow-through. */
   spendingCV?: number;
-  /** Impact distribution: [P10 (optimistic), P50 (expected), P90 (conservative)] monthly savings */
-  impactRange?: [number, number, number];
-  /** Probability (0-1) of achieving ≥50% of stated impact over 6 months */
-  achievability?: number;
 }
 
 /**
@@ -292,30 +288,11 @@ export function hydrateSubGoals(move: Move, debtAccounts?: DebtAccountInfo[]): M
 }
 
 // ── Decision Score ──
-// @deprecated — being replaced by predictive FinancialSignal ensemble.
-// Kept for backwards compatibility; derived from signals when available.
 
 export interface DecisionScore {
   score: number;
   verdict: 'Strong' | 'Balanced' | 'Needs Attention' | 'At Risk';
   breakdown: { factor: string; impact: number }[];
-}
-
-// ── Predictive Financial Signals ──
-
-export type SignalType = 'momentum' | 'regime' | 'trajectory' | 'seasonal' | 'drift' | 'anomaly' | 'timing';
-export type SignalSeverity = 'info' | 'watch' | 'alert';
-
-export interface FinancialSignal {
-  id: string;
-  type: SignalType;
-  severity: SignalSeverity;
-  title: string;
-  detail: string;
-  impact?: number;
-  category?: string;
-  confidence: number;
-  relatedMoveCategory?: string;
 }
 
 // ── Goals ──
@@ -452,8 +429,6 @@ export interface EnrichmentResult {
   essentialGaps?: EssentialGap[];
   /** Bills verified from actual transaction data with exact amounts */
   verifiedBills?: VerifiedBill[];
-  /** Predictive financial signals extracted from transaction time series */
-  signals?: FinancialSignal[];
 }
 
 // ── Chat ──

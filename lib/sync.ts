@@ -473,7 +473,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   }
 
   const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
-  const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData, result.signals);
+  const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
 
   // Filter dismissed moves
   const allMoves = [...rankedMoves];
