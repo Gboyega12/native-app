@@ -7,6 +7,7 @@ import { normaliseDescription } from './normalise';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
 import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants';
 import { calcInterestSaved } from './amortisation';
+import { calcMarginalRate, inferTaxSituation, UK_TAX } from './surplus-engine';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -1058,8 +1059,13 @@ const EnrichmentEngine = {
     const changingCareer = (id.upcoming_events || []).includes('career_change');
     const isAdvanced = id.financial_experience === 'confident' || id.financial_experience === 'advanced';
 
+    // ── High saver gate ──
+    // Users saving 25%+ of income don't need spending cut advice — they're already excellent.
+    // Only show spending cuts if savings rate is below this threshold.
+    const isHighSaver = m.savingsRate >= 25;
+
     // Subscriptions — single consolidated recommendation (not per-merchant)
-    if (m.subscriptionCount >= T.subscriptionMinCount) {
+    if (!isHighSaver && m.subscriptionCount >= T.subscriptionMinCount) {
       const subNames = subs.map((s) => s.merchant).filter(Boolean);
       const cutCount = Math.max(2, Math.round(m.subscriptionCount * T.subscriptionCutPct));
       const saving = Math.round(p.subscriptions * T.subscriptionCutPct);
@@ -1089,7 +1095,7 @@ const EnrichmentEngine = {
     }
 
     // Food delivery
-    if (m.foodDelivery > T.foodDeliveryMin) {
+    if (!isHighSaver && m.foodDelivery > T.foodDeliveryMin) {
       const saving = Math.round(m.foodDelivery * Math.min(T.foodDeliveryCutPct * cutMultiplier, 0.6));
       const deliveryMerchants = this._getMerchantsByCategory(txs, 'Delivery');
       moves.push({
@@ -1112,7 +1118,7 @@ const EnrichmentEngine = {
     }
 
     // Eating out
-    if (m.eatingOut > T.eatingOutMin) {
+    if (!isHighSaver && m.eatingOut > T.eatingOutMin) {
       const saving = Math.round(m.eatingOut * Math.min(T.eatingOutCutPct * cutMultiplier, 0.5));
       const eatingMerchants = this._getMerchantsByCategory(txs, 'Eating Out');
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
@@ -1136,7 +1142,7 @@ const EnrichmentEngine = {
     }
 
     // Shopping
-    if (m.shopping > T.shoppingMin) {
+    if (!isHighSaver && m.shopping > T.shoppingMin) {
       const saving = Math.round(m.shopping * Math.min(T.shoppingCutPct * cutMultiplier, 0.5));
       const shopMerchants = this._getMerchantsByCategory(txs, 'Shopping');
       moves.push({
@@ -1307,7 +1313,7 @@ const EnrichmentEngine = {
     }
 
     // Transport — adjusted for work setup
-    if (m.transport > T.transportMin && !isRemote) {
+    if (!isHighSaver && m.transport > T.transportMin && !isRemote) {
       const cutPct = isHybrid ? T.transportCutPct * 0.5 : T.transportCutPct; // Hybrid workers already commute less
       const saving = Math.round(m.transport * cutPct);
       const transportMerchants = this._getMerchantsByCategory(txs, 'Transport');
@@ -1403,7 +1409,7 @@ const EnrichmentEngine = {
     }
 
     // Coffee
-    if (m.coffeeAndCafes > T.coffeeMin) {
+    if (!isHighSaver && m.coffeeAndCafes > T.coffeeMin) {
       const saving = Math.round(m.coffeeAndCafes * Math.min(T.coffeeCutPct * cutMultiplier, 0.7));
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       moves.push({
@@ -1520,8 +1526,8 @@ const EnrichmentEngine = {
     // This is guaranteed 100% return (employer matches your contribution).
     // Should rank #1 regardless of savings rate — it's free money.
     const isEmployed = !isSelfEmployed && !isStudent && p.income > 1500;
-    if (isEmployed && p.surplus > 0 && !(hasExpensiveDebt && highestDebtAPR > 0.20)) {
-      // Suppress only if debt APR > 20% (credit card territory) — employer match still beats most debt
+    if (isEmployed && p.surplus > 0) {
+      // Never suppress — employer match is a guaranteed 100% return, beats any debt rate
       const matchAmount = Math.round(p.income * 0.05); // assume 5% match
       moves.push({
         action: `Ensure you're getting your full employer pension match (\u00a3${matchAmount}/month)`,
@@ -1574,7 +1580,7 @@ const EnrichmentEngine = {
           category: 'invest',
           merchants: [],
           strategy: `At your income level, each \u00a3100 directed to a pension has a net cost of \u00a3${netCostPer100} after ${reliefRate}% tax relief. Via salary sacrifice, NI savings reduce this further.`,
-          steps: ['Tax relief is ${reliefRate}% at your marginal rate', 'Salary sacrifice also saves ${isHigherRate ? 2 : 8}% in National Insurance', 'Annual pension allowance is \u00a360,000 (including employer contributions)'],
+          steps: [`Tax relief is ${reliefRate}% at your marginal rate`, `Salary sacrifice also saves ${isHigherRate ? 2 : 8}% in National Insurance`, 'Annual pension allowance is \u00a360,000 (including employer contributions)'],
           effect: `\u00a3${annualRelief.toLocaleString()}/year in tax relief on \u00a3${(pensionExtra * 12).toLocaleString()}/year of contributions.`,
         });
       }
@@ -1650,6 +1656,138 @@ const EnrichmentEngine = {
         strategy: `Spending \u00a3${deficit}/month more than income. Top discretionary categories: ${topCuts.join(', ') || 'unknown'}.`,
         steps: ['Freeze all non-essential spending for 30 days', 'Cancel unnecessary subscriptions immediately', 'Switch to cash/prepaid for discretionary spending'],
         effect: `Stops the bleed and creates a foundation for saving.`,
+      });
+    }
+
+
+    // ── Mortgage moves — overpay analysis and refinance prompt ──
+    if (hasMortgage && p.surplus > 200) {
+      const taxInfo = inferTaxSituation(profile, identity || null);
+      const mortgageRate = taxInfo.mortgageRate || 0.045;
+      const mortgageBalance = taxInfo.mortgageBalance || 0;
+      const monthlyOverpay = Math.min(Math.round(p.surplus * 0.3), 500);
+      // Most UK lenders allow 10% overpayment per year without penalty
+      const annualOverpayLimit = Math.round(mortgageBalance * 0.1);
+      const annualOverpay = Math.min(monthlyOverpay * 12, annualOverpayLimit);
+      const interestSaved = Math.round(annualOverpay * mortgageRate);
+
+      if (mortgageBalance > 0) {
+        moves.push({
+          action: `Overpay mortgage by £${monthlyOverpay}/month to save £${interestSaved}/year in interest`,
+          annualImpact: interestSaved,
+          monthlyImpact: Math.round(interestSaved / 12),
+          effort: 'low',
+          category: 'savings',
+          merchants: [],
+          strategy: `At ${(mortgageRate * 100).toFixed(1)}% mortgage rate, overpaying is a guaranteed ${(mortgageRate * 100).toFixed(1)}% tax-free return. Most lenders allow 10% overpayment/year (£${annualOverpayLimit.toLocaleString()}) without penalty.`,
+          steps: ['Check your lender\'s overpayment allowance (typically 10%/year)', 'Set up a standing order for the overpayment amount', 'Review whether offset mortgage could work better', 'I\'ll track your remaining balance reduction'],
+          effect: `Saves £${interestSaved}/year and shortens your mortgage term.`,
+        });
+      }
+
+      // Refinance prompt if rate seems high
+      if (mortgageRate >= 0.05) {
+        const rateDrop = 0.005; // assume 0.5% saving possible
+        const refinanceSaving = Math.round(mortgageBalance * rateDrop);
+        moves.push({
+          action: `Review mortgage rate — ${(mortgageRate * 100).toFixed(1)}% may be above market`,
+          annualImpact: refinanceSaving,
+          monthlyImpact: Math.round(refinanceSaving / 12),
+          effort: 'medium',
+          category: 'savings',
+          merchants: [],
+          strategy: `Your estimated mortgage rate of ${(mortgageRate * 100).toFixed(1)}% may be above current best buys. Even a 0.5% reduction on £${mortgageBalance.toLocaleString()} saves £${refinanceSaving.toLocaleString()}/year.`,
+          steps: ['Check when your current deal expires', 'Compare rates on MoneySuperMarket or a broker', 'Factor in arrangement fees vs savings', 'Start looking 3-6 months before your deal ends'],
+          effect: `Potential £${refinanceSaving.toLocaleString()}/year saving from a better rate.`,
+        });
+      }
+    }
+
+    // ── PA taper warning — £100k+ earners losing personal allowance ──
+    if (p.income > 7500) { // ~£100k/year gross (net ~£90k, /12 ≈ £7,500+)
+      const taxInfo = inferTaxSituation(profile, identity || null);
+      const grossIncome = taxInfo.grossIncome;
+      if (grossIncome >= UK_TAX.personalAllowanceTaperStart && grossIncome <= UK_TAX.personalAllowanceTaperEnd + 10000) {
+        const marginal = calcMarginalRate(grossIncome);
+        const amountInTaper = Math.max(0, grossIncome - UK_TAX.personalAllowanceTaperStart);
+        const paLost = Math.min(amountInTaper / 2, UK_TAX.personalAllowance);
+        const extraTax = Math.round(paLost * UK_TAX.basicRate);
+        const pensionToEscape = Math.min(amountInTaper, UK_TAX.personalAllowanceTaperEnd - UK_TAX.personalAllowanceTaperStart);
+
+        moves.push({
+          action: `£${amountInTaper.toLocaleString()} of income taxed at ${Math.round(marginal.combined * 100)}% effective rate — pension contributions can fix this`,
+          annualImpact: extraTax,
+          monthlyImpact: Math.round(extraTax / 12),
+          effort: 'medium',
+          category: 'invest',
+          merchants: [],
+          strategy: `Between £100k and £125,140, you lose £1 of personal allowance for every £2 of income. This creates an effective 60% marginal rate. A pension contribution of £${pensionToEscape.toLocaleString()} via salary sacrifice would bring your adjusted income below £100k, restoring your full personal allowance.`,
+          steps: ['Your effective marginal rate is ' + Math.round(marginal.combined * 100) + '% in this band', 'Pension contributions reduce adjusted net income', 'Salary sacrifice is most efficient (saves NI too)', 'Charitable donations also reduce adjusted income'],
+          effect: `Recover £${extraTax.toLocaleString()}/year by reducing adjusted income below £100k.`,
+        });
+      }
+    }
+
+    // ── Debt timeline — months to freedom ──
+    if (actualDebtCount >= 1 && totalDebtBalance > 0 && p.surplus > 0 && !isGoodDebt) {
+      const monthlyTowardDebt = p.debtPayments + Math.min(p.surplus * 0.5, 300);
+      const monthsToFreedom = monthlyTowardDebt > 0 ? Math.ceil(totalDebtBalance / monthlyTowardDebt) : 999;
+      if (monthsToFreedom > 0 && monthsToFreedom < 600) {
+        const years = Math.floor(monthsToFreedom / 12);
+        const months = monthsToFreedom % 12;
+        const timeStr = years > 0 ? `${years} year${years > 1 ? 's' : ''}${months > 0 ? ` ${months} month${months > 1 ? 's' : ''}` : ''}` : `${months} month${months > 1 ? 's' : ''}`;
+        moves.push({
+          action: `Debt-free in ${timeStr} if you direct £${Math.round(monthlyTowardDebt)}/month at your ${actualDebtCount === 1 ? 'debt' : `${actualDebtCount} debts`}`,
+          annualImpact: 0, // timeline move, not a savings move
+          monthlyImpact: 0,
+          effort: 'medium',
+          category: 'debt',
+          merchants: [],
+          timeline: timeStr,
+          strategy: `Total debt: £${totalDebtBalance.toLocaleString()}. Current payments: £${Math.round(p.debtPayments)}/month. With £${Math.round(Math.min(p.surplus * 0.5, 300))}/month extra from surplus, you can be debt-free in ${timeStr}.`,
+          steps: ['Current debt payments: £' + Math.round(p.debtPayments) + '/month', 'Additional surplus allocation: £' + Math.round(Math.min(p.surplus * 0.5, 300)) + '/month', 'Total: £' + Math.round(monthlyTowardDebt) + '/month toward £' + totalDebtBalance.toLocaleString() + ' balance', 'I\'ll update this timeline as you make progress'],
+          effect: `Debt-free target: ${timeStr} from now.`,
+        });
+      }
+    }
+
+    // ── Salary sacrifice vs SIPP comparison for higher-rate taxpayers ──
+    if (isEmployed && p.income > 4167) { // ~£50k/year = higher rate
+      const pensionAmount = Math.round(p.surplus * 0.15);
+      const salSacNISaving = Math.round(pensionAmount * 12 * 0.02); // 2% NI saving (above UEL)
+      const isAboveUEL = p.income > 4189; // £50,270/12
+      const niPct = isAboveUEL ? 2 : 8;
+      const niSaving = Math.round(pensionAmount * 12 * (niPct / 100));
+      if (niSaving > 50) { // Only show if meaningful
+        moves.push({
+          action: `Salary sacrifice saves £${niSaving}/year more than a personal pension (SIPP)`,
+          annualImpact: niSaving,
+          monthlyImpact: Math.round(niSaving / 12),
+          effort: 'low',
+          category: 'invest',
+          merchants: [],
+          strategy: `Both salary sacrifice and SIPPs get ${p.income > 4167 ? '40' : '20'}% income tax relief. But salary sacrifice also avoids ${niPct}% National Insurance on the contributed amount — a saving your employer may share with you too.`,
+          steps: ['Ask HR if salary sacrifice is available', 'Employer also saves 13.8% employer NI — ask if they pass this on', 'Salary sacrifice reduces your gross pay (can affect mortgage applications)', 'SIPP is better if you need flexibility or your employer doesn\'t offer sacrifice'],
+          effect: `£${niSaving}/year NI saving on £${(pensionAmount * 12).toLocaleString()}/year of pension contributions.`,
+        });
+      }
+    }
+
+    // ── Investment roadmap synthesis for Level 9+ users ──
+    if (m.savingsRate >= 30 && actualDebtCount <= 1 && (isGoodDebt || actualDebtCount === 0) && p.surplus > 500) {
+      const annualSurplus = Math.round(p.surplus * 12);
+      const isaRemaining = Math.max(0, 20000 - (annualSurplus > 20000 ? 20000 : annualSurplus));
+      const growthAt7Pct5yr = Math.round(p.surplus * 12 * 5 * 0.07); // Simple approx
+      moves.push({
+        action: `You have £${annualSurplus.toLocaleString()}/year surplus — build a tax-efficient investment ladder`,
+        annualImpact: growthAt7Pct5yr > 0 ? Math.round(growthAt7Pct5yr / 5) : 0,
+        monthlyImpact: growthAt7Pct5yr > 0 ? Math.round(growthAt7Pct5yr / 60) : 0,
+        effort: 'medium',
+        category: 'invest',
+        merchants: [],
+        strategy: `With a ${Math.round(m.savingsRate)}% savings rate and minimal debt, you're ready for a structured investment approach. Prioritise tax wrappers: employer match first, then ISA (£20k/year), then pension for higher-rate relief.`,
+        steps: ['1. Max employer pension match (guaranteed 100% return)', '2. Fill ISA allowance (£20,000/year, tax-free growth)', '3. Additional pension for higher-rate tax relief', '4. General investment account for anything above allowances'],
+        effect: `£${annualSurplus.toLocaleString()}/year invested at 7% could grow to ~£${(Math.round(p.surplus * 12 * 5 * 1.07)).toLocaleString()} over 5 years.`,
       });
     }
 
