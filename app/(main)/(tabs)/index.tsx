@@ -821,9 +821,18 @@ export default function Home() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not signed in');
 
-      // ── Save category overrides ──
+      // ── Save category overrides (with learning loop propagation) ──
+      // Phase 3: For each override, also find any other merchant name variants
+      // across the full analysis that normalize to the same key. This ensures
+      // "TESCO EXPRESS LONDON GB" and "TESCO STORES 4521" both get the override.
       for (const item of allOverrides) {
-        for (const name of item.merchants) {
+        const allVariants = new Set(item.merchants);
+        if (analysis) {
+          const { merchantVariants } = findMatchingTransactions(analysis, item.key);
+          for (const v of merchantVariants) allVariants.add(v);
+        }
+
+        for (const name of allVariants) {
           await supabase.from('transaction_overrides')
             .delete()
             .eq('user_id', user.id)
@@ -836,18 +845,19 @@ export default function Home() {
           });
           if (insertErr) throw new Error(`Failed to save ${name}: ${insertErr.message}`);
         }
+        // Update merchants list for optimistic UI below
+        item.merchants = Array.from(allVariants);
       }
 
       // ── Optimistic UI: move transactions to their target categories ──
       if (analysis) {
         const updated = { ...analysis };
 
-        // Build a map of merchant name → { target category, isEssential }
-        const merchantToTarget = new Map<string, { category: string; isEssential: boolean }>();
+        // Build a map of normalized merchant key → { target category, isEssential }
+        // Uses normalized keys so the learning loop catches all variants
+        const normalizedToTarget = new Map<string, { category: string; isEssential: boolean }>();
         for (const item of allOverrides) {
-          for (const m of item.merchants) {
-            merchantToTarget.set(m, { category: item.category, isEssential: item.isEssential });
-          }
+          normalizedToTarget.set(item.key, { category: item.category, isEssential: item.isEssential });
         }
 
         // Deep-clone both sections so mutations are safe
@@ -857,6 +867,7 @@ export default function Home() {
         nonDisc.items = [...(nonDisc.items || [])].map((i: BudgetCategory) => ({ ...i, transactions: [...(i.transactions || [])] }));
 
         // Collect transactions that need to move (from any category, not just "Other")
+        // Phase 3: match by normalized merchant key so ALL variants get moved
         const removedTxs: { tx: TransactionDetail; target: { category: string; isEssential: boolean } }[] = [];
 
         for (const section of [disc, nonDisc]) {
@@ -864,7 +875,8 @@ export default function Home() {
             const cat = section.items[catIdx];
             const kept: TransactionDetail[] = [];
             for (const tx of (cat.transactions || [])) {
-              const target = merchantToTarget.get(tx.merchant || tx.description);
+              const txNorm = normalizeMerchant(tx.merchant || tx.description || '');
+              const target = normalizedToTarget.get(txNorm);
               if (target && target.category !== cat.category) {
                 removedTxs.push({ tx, target });
               } else {
@@ -905,10 +917,10 @@ export default function Home() {
         (updated as any).discretionary = disc;
         (updated as any).non_discretionary = nonDisc;
 
-        // Remove classified person transfers
+        // Remove classified person transfers (using normalized matching)
         if (Array.isArray((updated as any).person_transfers)) {
           (updated as any).person_transfers = (updated as any).person_transfers.filter(
-            (t: any) => !merchantToTarget.has(t?.merchant || t?.description)
+            (t: any) => !normalizedToTarget.has(normalizeMerchant(t?.merchant || t?.description || ''))
           );
         }
 
@@ -955,126 +967,150 @@ export default function Home() {
     setSavingReview(false);
   };
 
+  // ── Learning loop helper: find ALL transactions matching a normalized merchant ──
+  // across every category in both discretionary and non_discretionary sections.
+  // Returns the transactions AND their variant merchant names for override persistence.
+  const findMatchingTransactions = (updated: any, normalizedKey: string, excludeCategory?: string) => {
+    const matches: { tx: TransactionDetail; section: 'discretionary' | 'non_discretionary'; catIdx: number; category: string }[] = [];
+    const merchantVariants = new Set<string>();
+
+    for (const sectionKey of ['discretionary', 'non_discretionary'] as const) {
+      const section = (updated as any)[sectionKey];
+      if (!section?.items) continue;
+      for (let catIdx = 0; catIdx < section.items.length; catIdx++) {
+        const cat = section.items[catIdx];
+        if (excludeCategory && cat.category === excludeCategory) continue;
+        for (const tx of (cat.transactions || [])) {
+          const txMerchant = tx.merchant || tx.description || '';
+          if (normalizeMerchant(txMerchant) === normalizedKey) {
+            matches.push({ tx, section: sectionKey, catIdx, category: cat.category });
+            merchantVariants.add(txMerchant);
+          }
+        }
+      }
+    }
+
+    // Also check person_transfers
+    if (Array.isArray((updated as any).person_transfers)) {
+      for (const pt of (updated as any).person_transfers) {
+        const ptMerchant = pt?.merchant || pt?.description || '';
+        if (normalizeMerchant(ptMerchant) === normalizedKey) {
+          merchantVariants.add(ptMerchant);
+        }
+      }
+    }
+
+    return { matches, merchantVariants };
+  };
+
   const saveRecategorize = async () => {
     trackEvent('Transaction Recategorized', { category: recatTarget });
     if (!recatTx || !recatTarget) return;
     setSavingRecat(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        // Save override so future enrichment uses this category (delete-then-insert, no unique constraint)
-        const matchDesc = recatTx.tx.merchant || recatTx.tx.description;
-        await supabase.from('transaction_overrides')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('match_description', matchDesc);
-        await supabase.from('transaction_overrides').insert({
-          user_id: user.id,
-          match_description: matchDesc,
-          category: recatTarget,
-          is_essential: recatEssential,
-          direction: (recatTx.tx.amount ?? 0) < 0 ? 'debit' : 'credit',
-        });
+      const matchDesc = recatTx.tx.merchant || recatTx.tx.description;
+      const normalizedMatch = normalizeMerchant(matchDesc);
+
+      // ── Phase 3: Learning loop — find ALL transactions with same normalized merchant ──
+      // This propagates the user's correction to every variant of the same merchant.
+      const allMerchantVariants = new Set<string>([matchDesc]);
+
+      if (analysis) {
+        const { merchantVariants } = findMatchingTransactions(analysis, normalizedMatch);
+        for (const v of merchantVariants) allMerchantVariants.add(v);
       }
 
-      // Optimistic UI update: move transaction(s) between categories
+      if (user) {
+        // Save overrides for ALL variants of this merchant (learning loop)
+        for (const name of allMerchantVariants) {
+          await supabase.from('transaction_overrides')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('match_description', name);
+          await supabase.from('transaction_overrides').insert({
+            user_id: user.id,
+            match_description: name,
+            category: recatTarget,
+            is_essential: recatEssential,
+            direction: (recatTx.tx.amount ?? 0) < 0 ? 'debit' : 'credit',
+          });
+        }
+      }
+
+      // Optimistic UI update: move ALL matching transactions across categories
       if (analysis) {
         const updated = { ...analysis };
-        const fromKey = recatTx.section === 'essential' ? 'non_discretionary' : 'discretionary';
-        const toKey = recatEssential ? 'non_discretionary' : 'discretionary';
-        const fromSection = { ...(updated as any)[fromKey] };
-        const toSection = fromKey === toKey ? fromSection : { ...(updated as any)[toKey] };
-        fromSection.items = [...(fromSection.items || [])];
-        if (fromKey !== toKey) toSection.items = [...(toSection.items || [])];
 
-        // For transfers, collect ALL transactions with matching merchant name (batch move)
-        const matchDesc = recatTx.tx.merchant || recatTx.tx.description;
-        const normalizedMatch = normalizeMerchant(matchDesc);
-        let txsToMove: any[] = [recatTx.tx];
+        // Deep-clone both sections
+        const disc = { ...((updated as any).discretionary || { total: 0, items: [] }) };
+        disc.items = [...(disc.items || [])].map((i: BudgetCategory) => ({ ...i, transactions: [...(i.transactions || [])] }));
+        const nonDisc = { ...((updated as any).non_discretionary || { total: 0, items: [] }) };
+        nonDisc.items = [...(nonDisc.items || [])].map((i: BudgetCategory) => ({ ...i, transactions: [...(i.transactions || [])] }));
+        (updated as any).discretionary = disc;
+        (updated as any).non_discretionary = nonDisc;
 
-        if (recatTx.catKey === 'Transfers' && !recatTx.singleTx && Array.isArray((updated as any).person_transfers)) {
-          // Batch: find all transfers with same normalized merchant name
-          txsToMove = (updated as any).person_transfers.filter(
-            (t: any) => normalizeMerchant(t?.merchant || t?.description || '') === normalizedMatch
-          );
-          if (txsToMove.length === 0) txsToMove = [recatTx.tx]; // fallback
-        }
-
-        // Remove tx(s) from source category
-        const srcCatIdx = fromSection.items.findIndex((i: BudgetCategory) => i.category === recatTx.catKey);
-        if (srcCatIdx >= 0) {
-          const srcCat = { ...fromSection.items[srcCatIdx] };
-          for (const tx of txsToMove) {
-            const txAmt = Math.abs(tx.amount);
-            srcCat.transactions = (srcCat.transactions || []).filter(
-              (t: TransactionDetail) => !(t.description === tx.description && t.date === tx.date && t.amount === tx.amount)
-            );
-            srcCat.monthly = Math.max(0, srcCat.monthly - txAmt);
-            srcCat.txs = Math.max(0, srcCat.txs - 1);
-          }
-          if (srcCat.txs === 0) fromSection.items.splice(srcCatIdx, 1);
-          else fromSection.items[srcCatIdx] = srcCat;
-        }
-
-        // Add tx(s) to target category (skip for non-spending categories like Refund/Internal Transfer)
-        const NON_SPENDING_CATS = new Set(['Refund', 'Internal Transfer']);
-        if (!NON_SPENDING_CATS.has(recatTarget)) {
-          const destCatIdx = toSection.items.findIndex((i: BudgetCategory) => i.category === recatTarget);
-          let totalAmt = 0;
-          const newTxs: any[] = [];
-
-          for (const tx of txsToMove) {
-            const txAmt = Math.abs(tx.amount);
-            totalAmt += txAmt;
-            // Duplicate guard: check if tx already exists in destination
-            const existingTxs = destCatIdx >= 0 ? (toSection.items[destCatIdx].transactions || []) : [];
-            const isDuplicate = existingTxs.some(
-              (t: TransactionDetail) => t.description === tx.description && t.date === tx.date && t.amount === tx.amount
-            );
-            if (!isDuplicate) newTxs.push(tx);
-          }
-
-          if (destCatIdx >= 0) {
-            const destCat = { ...toSection.items[destCatIdx] };
-            destCat.transactions = [...(destCat.transactions || []), ...newTxs];
-            destCat.monthly += totalAmt;
-            destCat.txs += newTxs.length;
-            toSection.items[destCatIdx] = destCat;
-          } else if (newTxs.length > 0) {
-            toSection.items.push({ category: recatTarget, monthly: totalAmt, txs: newTxs.length, transactions: newTxs });
-          }
-        }
-
-        fromSection.total = fromSection.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
-        if (fromKey !== toKey) toSection.total = toSection.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
-
-        (updated as any)[fromKey] = fromSection;
-        if (fromKey !== toKey) (updated as any)[toKey] = toSection;
-
-        // Remove transfer(s) from person_transfers
-        if (recatTx.catKey === 'Transfers' && Array.isArray((updated as any).person_transfers)) {
-          if (recatTx.singleTx) {
-            // Single tx: remove only the exact matching transaction
-            const tx = recatTx.tx;
-            let removed = false;
-            (updated as any).person_transfers = (updated as any).person_transfers.filter((t: any) => {
-              if (!removed && t.date === tx.date && t.amount === tx.amount && (t.merchant || t.description) === (tx.merchant || tx.description)) {
-                removed = true;
-                return false;
+        // Find and remove ALL matching transactions from every category
+        const removedTxs: TransactionDetail[] = [];
+        for (const section of [disc, nonDisc]) {
+          for (let catIdx = section.items.length - 1; catIdx >= 0; catIdx--) {
+            const cat = section.items[catIdx];
+            // Skip the destination category to avoid double-counting
+            if (cat.category === recatTarget) continue;
+            const kept: TransactionDetail[] = [];
+            for (const tx of (cat.transactions || [])) {
+              const txNorm = normalizeMerchant(tx.merchant || tx.description || '');
+              if (txNorm === normalizedMatch) {
+                removedTxs.push(tx);
+              } else {
+                kept.push(tx);
               }
-              return true;
-            });
-          } else {
-            // Batch: remove ALL matching transfers by normalized merchant
-            (updated as any).person_transfers = (updated as any).person_transfers.filter(
-              (t: any) => normalizeMerchant(t?.merchant || t?.description || '') !== normalizedMatch
-            );
+            }
+            cat.transactions = kept;
+            cat.txs = kept.length;
+            if (cat.txs === 0) {
+              section.items.splice(catIdx, 1);
+            } else {
+              cat.monthly = kept.reduce((s: number, t: TransactionDetail) => s + Math.abs(t.amount), 0);
+            }
           }
         }
 
-        // Recompute moves based on updated totals so all cards stay correlated
+        // Add removed txs to target category
+        const NON_SPENDING_CATS = new Set(['Refund', 'Internal Transfer']);
+        if (!NON_SPENDING_CATS.has(recatTarget) && removedTxs.length > 0) {
+          const destSection = recatEssential ? nonDisc : disc;
+          const destIdx = destSection.items.findIndex((i: BudgetCategory) => i.category === recatTarget);
+          const totalAmt = removedTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
+
+          // Deduplicate against existing transactions in destination
+          const existingTxs = destIdx >= 0 ? (destSection.items[destIdx].transactions || []) : [];
+          const newTxs = removedTxs.filter((tx) =>
+            !existingTxs.some((t: TransactionDetail) => t.description === tx.description && t.date === tx.date && t.amount === tx.amount)
+          );
+
+          if (destIdx >= 0) {
+            destSection.items[destIdx].transactions = [...existingTxs, ...newTxs];
+            destSection.items[destIdx].monthly += totalAmt;
+            destSection.items[destIdx].txs += newTxs.length;
+          } else {
+            destSection.items.push({ category: recatTarget, monthly: totalAmt, txs: newTxs.length, transactions: newTxs });
+          }
+        }
+
+        // Remove matching person transfers
+        if (Array.isArray((updated as any).person_transfers)) {
+          (updated as any).person_transfers = (updated as any).person_transfers.filter(
+            (t: any) => normalizeMerchant(t?.merchant || t?.description || '') !== normalizedMatch
+          );
+        }
+
+        // Recalculate totals
+        disc.total = disc.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+        nonDisc.total = nonDisc.items.reduce((s: number, i: BudgetCategory) => s + i.monthly, 0);
+
+        // Recompute moves based on updated totals
         const freshMoves = EnrichmentEngine.recomputeMovesFromAnalysis(updated, debtAccounts);
-        // Preserve in-progress moves: keep approved moves even if re-ranked stack deprioritizes them
         const preservedMoves = freshMoves.map((fm) => {
           const existing = (analysis.all_moves || []).find((m) => m.action === fm.action);
           return existing ? { ...fm, ...existing, monthlyImpact: fm.monthlyImpact, annualImpact: fm.annualImpact } : fm;
@@ -1086,25 +1122,26 @@ export default function Home() {
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
 
-        // Track recategorised merchant so stale sync results are rejected
-        const normalizedKey = normalizeMerchant(matchDesc);
-        overriddenMerchants.current.add(normalizedKey);
-        setSavedOverrideKeys((prev) => new Set(prev).add(normalizedKey));
+        // Track ALL variants as overridden
+        setSavedOverrideKeys((prev) => {
+          const next = new Set(prev);
+          for (const v of allMerchantVariants) {
+            const key = normalizeMerchant(v);
+            overriddenMerchants.current.add(key);
+            next.add(key);
+          }
+          return next;
+        });
 
         overridesSavedAt.current = Date.now();
         AsyncStorage.setItem('overrides_saved_at', String(overridesSavedAt.current)).catch(() => {});
         invalidateSyncCache();
-
-        // Persist optimistic state immediately so it survives page refreshes
         persistAnalysis(updated);
       }
 
       setRecatTx(null);
       setRecatTarget('');
 
-      // Trigger a delayed background sync so the analyses row in Supabase
-      // gets updated with the correct category split from the enrichment pipeline.
-      // Delayed by 10s to give the enrichment engine time to ingest the new overrides.
       if (user) {
         setTimeout(() => syncInBackground(user.id, true), 10_000);
       }

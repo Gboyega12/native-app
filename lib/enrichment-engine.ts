@@ -237,13 +237,20 @@ const EnrichmentEngine = {
   },
 
   enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[], regularPersonSenders?: Set<string>): EnrichedTransaction {
-    // Check user overrides first — try both raw and normalised descriptions
+    // Check user overrides first — try raw, normalised, and normalised-to-normalised matching.
+    // Phase 3 learning loop: overrides saved for "TESCO EXPRESS LONDON GB" should also
+    // catch "TESCO STORES 4521 GB" via normalised substring matching.
     if (overrides?.length) {
       const descLower = tx.description.toLowerCase();
       const normDesc = normaliseDescription(tx.description);
       const override = overrides.find((o) => {
         const pattern = o.match_description.toLowerCase();
-        const textMatch = descLower.includes(pattern) || normDesc.includes(pattern);
+        const normPattern = normaliseDescription(o.match_description);
+        // Match if: raw includes pattern, normalised includes pattern,
+        // OR normalised includes normalised pattern (catches more variants)
+        const textMatch = descLower.includes(pattern)
+          || normDesc.includes(pattern)
+          || (normPattern.length >= 3 && normDesc.includes(normPattern));
         if (!textMatch) return false;
         // Direction filter: only match credits or debits when specified
         if (o.direction === 'credit' && tx.amount <= 0) return false;

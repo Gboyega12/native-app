@@ -1,7 +1,7 @@
 # Decision Engine: Seamless Categorization
 
 **Date:** 2026-03-17
-**Status:** Planning
+**Status:** In Progress
 
 ---
 
@@ -29,46 +29,33 @@ Current categorization requires **5-7 taps per transaction**:
 
 ## Plan: Zero-Tap Categorization Engine
 
-### Phase 1: AI-first enrichment (biggest impact, ~80% reduction in uncategorized)
+### Phase 1: AI-first enrichment — DONE
 
-Add Claude AI as step 4 in `enrichTransaction()` pipeline, before the "Other" fallback:
+- [x] Export `classifyTransactionsBatch()` from `api/claude/index.ts` for server-side use
+- [x] Add `rebuildFromEnriched()` to `EnrichmentEngine` for post-classification rebuild
+- [x] Wire batch AI step into `api/enrich.ts` between enrichment and move ranking
+- [x] Deduplicate by normalized description to minimize API calls (max 50)
+- [x] Best-effort: AI failures don't break enrichment pipeline
+- [x] Model upgraded from Haiku to Sonnet 4.6 for better accuracy
 
-1. Collect all transactions that would become "Other" after merchant-db + fuzzy + keyword passes
-2. Batch-classify them via `/api/claude` classify endpoint (already exists, uses Haiku)
-3. Insert results with `confidence: 'medium'`, `classifiedBy: 'claude_ai'`
-4. Only transactions where AI also returns low confidence become "Other"
+### Phase 2: Confirm-first review UI — DONE
 
-**Files:**
-- `lib/enrichment-engine.ts` — add AI classify step in `enrichTransaction()` or post-enrichment batch
-- `api/enrich.ts` — wire the AI classify call into the enrichment flow
-- `api/claude/index.ts` — already exists, may need batch size optimization
+- [x] Add `aiSuggestedGroups` memo to collect `classifiedBy: 'claude_ai'` transactions
+- [x] Two-section modal: "AI CATEGORISED" (confirm list) + "UNCATEGORISED" (chip picker)
+- [x] "Accept all" button for one-tap confirmation of AI suggestions
+- [x] Individual confirm/reject per row with inline category picker
+- [x] Banner messaging: accent-colored "X AI-categorised items to confirm"
+- [x] Unified save logic for AI confirmed, AI overridden, and manually categorized items
 
-### Phase 2: Swipe-to-confirm review (UX speed, ~10x faster)
+### Phase 3: Override propagation (learning loop) — DONE
 
-Replace tap-heavy review modal with swipe gestures:
-
-1. Each review row becomes swipeable:
-   - **Swipe right** = accept AI suggestion (one gesture, done)
-   - **Swipe left** = reject → slides open category picker inline
-2. Add "Accept all AI suggestions" button at top of review modal
-3. Animate rows out on accept (satisfying feedback)
-
-**Files:**
-- `app/(main)/(tabs)/index.tsx` — review modal rows (lines ~3838-3900)
-- New: `react-native-gesture-handler` Swipeable or custom PanResponder
-
-### Phase 3: Override propagation (learning loop)
-
-When user overrides one transaction, auto-apply to ALL matching merchants:
-
-1. After `saveRecategorize()`, find all "Other" transactions with same normalized merchant
-2. Auto-recategorize them in the UI immediately (optimistic)
-3. Store override with fuzzy matching tolerance (not just exact)
-4. On next enrichment, overrides catch ALL variants of that merchant
-
-**Files:**
-- `app/(main)/(tabs)/index.tsx` — `saveRecategorize()` + `saveReviewChanges()`
-- `lib/enrichment-engine.ts` — override matching with fuzzy tolerance
+- [x] `findMatchingTransactions()` helper: scans entire analysis for normalized merchant matches
+- [x] `saveRecategorize()`: propagates override to ALL transactions with same normalized merchant across every category
+- [x] `saveRecategorize()`: saves overrides for every merchant name variant (not just the tapped one)
+- [x] `saveReview()`: propagates overrides to all merchant variants found in analysis
+- [x] `saveReview()`: optimistic UI uses normalized matching to move ALL variants
+- [x] `enrichTransaction()`: enhanced override matching with normalised-to-normalised comparison
+- [x] Minimum 3-char normalised pattern threshold prevents overly broad matches
 
 ### Phase 4: Confidence-based progressive disclosure
 
@@ -99,5 +86,7 @@ Phase 1 eliminates the problem at the source. Phase 2 makes the remaining review
 ## Decisions
 
 1. **Phase 1 batching**: Classify "Other" transactions in one batch call at end of enrichment (not per-tx) — cheaper, faster
-2. **Swipe library**: Use `react-native-gesture-handler` Swipeable (already likely in deps via navigation)
-3. **Override propagation scope**: Apply to same normalized merchant only (not fuzzy across different merchants)
+2. **Phase 1 model**: Sonnet 4.6 (upgraded from Haiku for better classification accuracy)
+3. **Phase 2 UX**: Confirm-first list with "Accept all" (chosen over swipe cards — simpler, faster for many items)
+4. **Override propagation scope**: Apply to same normalized merchant only (not fuzzy across different merchants)
+5. **Phase 3 matching**: Normalised-to-normalised substring matching with 3-char minimum to prevent false positives

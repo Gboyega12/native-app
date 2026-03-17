@@ -167,7 +167,7 @@ async function handleClassify(req: VercelRequest, res: VercelResponse) {
     return res.json({ success: true, classifications: results, cacheHits });
   }
 
-  const model = process.env.CLAUDE_CLASSIFY_MODEL || process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
+  const model = process.env.CLAUDE_CLASSIFY_MODEL || process.env.CLAUDE_MODEL || 'claude-sonnet-4-6-20250514';
   const prompt = buildClassifyPrompt(uncached.map((u) => u.tx));
 
   let lastError: Error | null = null;
@@ -323,7 +323,7 @@ export async function classifyTransactionsBatch(
     return results.filter(Boolean) as Array<Classification & { index: number }>;
   }
 
-  const model = process.env.CLAUDE_CLASSIFY_MODEL || process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
+  const model = process.env.CLAUDE_CLASSIFY_MODEL || process.env.CLAUDE_MODEL || 'claude-sonnet-4-6-20250514';
   const prompt = buildClassifyPrompt(uncached.map((u) => u.tx));
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
