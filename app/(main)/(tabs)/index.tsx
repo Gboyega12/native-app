@@ -3312,7 +3312,7 @@ export default function Home() {
                 </Text>
                 <Text style={{ fontSize: 12, color: colors.dim }}>{budgetExpanded ? '\u25B4' : '\u25BE'}</Text>
               </View>
-            </TouchableOpacity>
+            </TouchableOpacity>}
 
             {budgetExpanded && (
               <Card style={{ marginBottom: spacing.md, overflow: 'visible' as const }}>
