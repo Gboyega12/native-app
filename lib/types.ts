@@ -97,6 +97,8 @@ export interface FinancialProfile {
     discretionary: BudgetSection;
   };
   incomeSources: IncomeSource[];
+  /** Person-to-person transfer debits (e.g. rent to partner) — excluded from spending but surfaced for manual recategorisation */
+  transfers?: { date: string; merchant: string; description: string; amount: number }[];
   subscriptions: RecurringItem[];
   metrics: {
     savingsRate: number;
@@ -295,6 +297,8 @@ export interface Analysis {
   essential_gaps?: EssentialGap[];
   /** Bills verified from actual transaction data with exact amounts */
   verified_bills?: VerifiedBill[];
+  /** Person-to-person transfer debits surfaced for manual recategorisation */
+  person_transfers?: { date: string; merchant: string; description: string; amount: number }[];
 }
 
 // ── Goal Trajectory ──

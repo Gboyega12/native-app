@@ -282,6 +282,7 @@ export default function Home() {
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
+  const [incomeExpanded, setIncomeExpanded] = useState(false);
   const [showAllMoves, setShowAllMoves] = useState(false);
   const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
   const userIdRef = useRef<string | null>(null);
@@ -541,6 +542,15 @@ export default function Home() {
           }
         }
       }
+    }
+    // Include person-to-person transfers so users can recategorise them (e.g. rent paid to partner)
+    const personTransfers: any[] = Array.isArray((analysis as any)?.person_transfers) ? (analysis as any).person_transfers : [];
+    for (const pt of personTransfers) {
+      if (!pt) continue;
+      const key = `${pt.date}|${pt.description}|${pt.amount}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      txs.push({ ...pt, confidence: 'low', classifiedBy: 'default' });
     }
     // Group by normalized merchant/description — user assigns one category per group
     const groups = new Map<string, { key: string; label: string; merchants: string[]; txs: TransactionDetail[]; total: number }>();
@@ -897,6 +907,13 @@ export default function Home() {
 
         (updated as any)[fromKey] = fromSection;
         if (fromKey !== toKey) (updated as any)[toKey] = toSection;
+
+        // Remove from person_transfers if this tx came from there
+        if (recatTx.catKey === 'Transfers' && Array.isArray((updated as any).person_transfers)) {
+          (updated as any).person_transfers = (updated as any).person_transfers.filter(
+            (t: any) => !(t?.description === recatTx.tx.description && t?.date === recatTx.tx.date && t?.amount === recatTx.tx.amount)
+          );
+        }
 
         LayoutAnimation.configureNext(SMOOTH_ANIM);
         setAnalysis(updated);
@@ -3090,6 +3107,86 @@ export default function Home() {
           </View>
 
           {/* ══════════════════════════════════════════════
+              INCOME — persistent income card, collapsed by default
+              ══════════════════════════════════════════════ */}
+          {income > 0 && (
+          <View>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => {
+                LayoutAnimation.configureNext(SMOOTH_ANIM);
+                setIncomeExpanded(!incomeExpanded);
+              }}
+              style={[s.collapsedSectionBtn, !incomeExpanded && {
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 16,
+                backgroundColor: colors.mintDim,
+                paddingHorizontal: 20,
+              }]}
+            >
+              <Text style={s.moveSectionLabel}>INCOME</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.text2, letterSpacing: 0.3 }}>
+                  {'\u00a3'}{Math.round(income).toLocaleString()}/mo
+                </Text>
+                <Text style={{ fontSize: 12, color: colors.dim }}>{incomeExpanded ? '\u25B4' : '\u25BE'}</Text>
+              </View>
+            </TouchableOpacity>
+
+            {incomeExpanded && (
+              <Card style={{ marginBottom: spacing.md }}>
+                {/* Total income */}
+                <View style={s.periodTotalRow}>
+                  <Text style={[s.periodTotalAmount, { fontSize: 28, color: colors.text }]}>
+                    {'\u00a3'}{Math.round(income).toLocaleString()}
+                  </Text>
+                  <Text style={s.periodTotalOf}>per month</Text>
+                  {isVariableIncome && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.amber }} />
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.amber, letterSpacing: 0.3 }}>
+                        Variable — budget against {'\u00a3'}{Math.round(incomeFloor).toLocaleString()}/mo
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Income sources */}
+                {incomeSources.length > 0 && (
+                  <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
+                      SOURCES
+                    </Text>
+                    {incomeSources.map((src: IncomeSource, i: number) => (
+                      <View key={`inc-src-${i}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text }}>{src.source}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, letterSpacing: 0.5 }}>
+                              {src.frequency}
+                            </Text>
+                            {src.isSalary && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: 'rgba(147,130,220,0.12)' }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 8, color: '#9382DC', letterSpacing: 0.5 }}>SALARY</Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.text2, letterSpacing: 0.3 }}>
+                          {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
+                          <Text style={{ fontSize: 10, color: colors.muted }}>/{src.frequency === 'weekly' ? 'wk' : src.frequency === 'fortnightly' ? '2wk' : 'mo'}</Text>
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </Card>
+            )}
+          </View>
+          )}
+
+          {/* ══════════════════════════════════════════════
               SPENDING DETAILS — merged Budget + Transactions, collapsed by default
               ══════════════════════════════════════════════ */}
           <View onLayout={(e) => { cardPositions.current.budget = e.nativeEvent.layout.y; cardPositions.current.transactions = e.nativeEvent.layout.y; }}>
@@ -3360,6 +3457,53 @@ export default function Home() {
                           );
                         })()}
                       </>
+                    );
+                  })()}
+                  {/* ── Person transfers (excluded from spending — surface for recategorisation) ── */}
+                  {(() => {
+                    const transfers = Array.isArray((analysis as any)?.person_transfers) ? (analysis as any).person_transfers : [];
+                    if (transfers.length === 0) return null;
+                    const transfersExpanded = expandedCategories.has('__transfers__');
+                    const transferTotal = transfers.reduce((s2: number, t: any) => s2 + Math.abs(t?.amount ?? 0), 0);
+                    return (
+                      <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                        <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory('__transfers__')} style={s.dataRow}>
+                          <View style={s.dataRowLeft}>
+                            <Text style={[s.catArrow, { color: colors.amber }]}>{transfersExpanded ? '\u25BC' : '\u25B6'}</Text>
+                            <Text style={[s.dataLabel, { color: colors.amber }]}>Transfers to people</Text>
+                            <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: colors.amberDim, marginLeft: 6 }}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 8, color: colors.amber, letterSpacing: 0.5 }}>NOT IN BUDGET</Text>
+                            </View>
+                          </View>
+                          <Text style={[s.dataValue, { color: colors.amber }]}>{'\u00a3'}{Math.round(transferTotal).toLocaleString()}</Text>
+                        </TouchableOpacity>
+                        {transfersExpanded && transfers.map((tx: any, j: number) => (
+                          <TouchableOpacity
+                            key={`transfer-${j}`}
+                            style={s.txRow}
+                            onLongPress={() => {
+                              setRecatTx({ tx: { ...tx, confidence: 'low' }, catKey: 'Transfers', section: 'lifestyle' as const });
+                              setRecatTarget('');
+                              setRecatEssential(true);
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <View style={s.txLeft}>
+                              <Text style={s.txMerchant}>{tx.merchant || tx.description}</Text>
+                              <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                            </View>
+                            <View style={s.txRightCol}>
+                              <Text style={[s.txAmount, { color: colors.amber }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                              <Text style={s.txRecatHint}>hold to move</Text>
+                            </View>
+                          </TouchableOpacity>
+                        ))}
+                        {transfersExpanded && (
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, marginTop: 8, lineHeight: 16 }}>
+                            These look like payments to people and aren't counted in your budget. If any are regular expenses (e.g. rent), hold to re-categorise.
+                          </Text>
+                        )}
+                      </View>
                     );
                   })()}
                   <Text style={s.cardFooter}>Hold a transaction to re-categorise</Text>

@@ -465,6 +465,18 @@ const EnrichmentEngine = {
     const spending = recent.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
     const income = recent.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer && !t.isDebt);
 
+    // Collect person-to-person transfer debits so the UI can surface them
+    // for manual recategorisation (e.g. rent paid via partner).
+    const personTransfers = recent
+      .filter((t) => t.amount < 0 && t.isTransfer && !t.isDebt && !t.isSavings)
+      .map((t) => ({
+        date: t.date,
+        merchant: t.merchant || t.description,
+        description: t.description,
+        amount: t.amount,
+      }))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
     const dates = recent.map((t) => new Date(t.date).getTime()).filter(Boolean);
     const span = dates.length >= 2
       ? (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24 * 30)
@@ -653,6 +665,7 @@ const EnrichmentEngine = {
         discretionary: { total: discTotal, items: discItems.sort((a, b) => b.monthly - a.monthly) },
       },
       incomeSources,
+      transfers: personTransfers,
       subscriptions,
       metrics,
     };
