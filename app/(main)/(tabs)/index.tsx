@@ -246,6 +246,8 @@ export default function Home() {
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [incomeExpanded, setIncomeExpanded] = useState(false);
+  const [budgetExpanded, setBudgetExpanded] = useState(false);
+  const [txCardExpanded, setTxCardExpanded] = useState(false);
   const [showAllMoves, setShowAllMoves] = useState(false);
   const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
   const userIdRef = useRef<string | null>(null);
