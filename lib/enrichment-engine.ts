@@ -125,6 +125,50 @@ const EnrichmentEngine = {
     };
   },
 
+  // Rebuild profile/archetype/patterns from already-enriched transactions
+  // Used after AI batch classification patches "Other" items in-place
+  rebuildFromEnriched(
+    enriched: EnrichedTransaction[],
+    overrides?: TransactionOverride[],
+    debtAccounts?: any[],
+    identity?: any,
+  ): Omit<EnrichmentResult, 'enrichedTransactions'> & { enrichedTransactions: EnrichedTransaction[] } {
+    this._reclassifyCreditCardPayoffs(enriched, debtAccounts);
+
+    const recurring = this.detectRecurring(enriched);
+    const profile = this.buildProfile(enriched, recurring);
+    const archetype = this.determineArchetype(profile);
+    const patterns = this.detectBehavioralPatterns(profile);
+    const score = this.calcDecisionScore(profile);
+    const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
+
+    const metrics = profile.metrics;
+    const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
+    const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
+    const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
+    const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
+
+    const verifiedBills = this.verifyBillsFromTransactions(enriched);
+    const essentialGaps = identity
+      ? this.detectEssentialGaps(profile, identity, debtAccounts, undefined, verifiedBills)
+      : undefined;
+
+    return {
+      profile,
+      archetype,
+      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
+      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
+      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
+      decisionScore: score,
+      decisionStack: stack,
+      behavioralPatterns: patterns.map((p: any) => p.pattern || p),
+      enrichedTransactions: enriched,
+      enrichmentMetrics,
+      essentialGaps,
+      verifiedBills: verifiedBills.length > 0 ? verifiedBills : undefined,
+    };
+  },
+
   parseCSV(raw: string): RawTransaction[] {
     const lines = raw.trim().split('\n');
     if (lines.length < 2) return [];

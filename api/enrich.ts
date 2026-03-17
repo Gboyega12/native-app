@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import EnrichmentEngine from '../lib/enrichment-engine.js';
 import { rankMoves, determineFlowchartPosition } from '../lib/move-engine.js';
+import { classifyTransactionsBatch } from './claude/index.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const bodySchema = z.object({
@@ -165,6 +166,79 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
     if (result.enrichedTransactions.length === 0) {
       return res.json({ success: false, reason: 'no_enriched_transactions' });
+    }
+
+    // ── 3b. AI batch classification for unresolved "Other" transactions ──
+    // Collect spending transactions that fell through to "Other" (confidence: low, classifiedBy: default)
+    // and batch-classify them via Claude AI. This dramatically reduces the number of items
+    // users need to manually categorize.
+    try {
+      const otherTxs = result.enrichedTransactions.filter(
+        (tx) => tx.category === 'Other' && tx.confidence === 'low' && tx.classifiedBy === 'default' && tx.amount < 0,
+      );
+
+      if (otherTxs.length > 0) {
+        // Deduplicate by normalized description to minimize API calls
+        const seen = new Map<string, number[]>();
+        for (let i = 0; i < otherTxs.length; i++) {
+          const key = (otherTxs[i].description || '').toLowerCase().trim();
+          if (!seen.has(key)) seen.set(key, []);
+          seen.get(key)!.push(i);
+        }
+
+        const uniqueDescs = Array.from(seen.entries()).map(([, indices]) => ({
+          description: otherTxs[indices[0]].description,
+          amount: otherTxs[indices[0]].amount,
+          indices,
+        }));
+
+        // Batch up to 50 unique descriptions per call
+        const batchItems = uniqueDescs.slice(0, 50);
+        const classifications = await classifyTransactionsBatch(
+          batchItems.map((b) => ({ description: b.description, amount: b.amount })),
+        );
+
+        // Apply classifications back to enriched transactions
+        let aiClassified = 0;
+        for (const cls of classifications) {
+          if (!cls || cls.category === 'Other') continue;
+          const batch = batchItems[cls.index];
+          if (!batch) continue;
+
+          // Apply to all transactions with same normalized description
+          for (const otherIdx of batch.indices) {
+            const tx = otherTxs[otherIdx];
+            // Find the tx in the main enriched array and patch it
+            const mainIdx = result.enrichedTransactions.indexOf(tx);
+            if (mainIdx < 0) continue;
+
+            result.enrichedTransactions[mainIdx] = {
+              ...tx,
+              merchant: cls.merchant || tx.description,
+              category: cls.category,
+              isEssential: cls.isEssential,
+              isSubscription: cls.isSubscription,
+              isBNPL: cls.isBNPL,
+              isDebt: cls.isDebt,
+              confidence: 'medium' as const,
+              classifiedBy: 'claude_ai' as const,
+            };
+            aiClassified++;
+          }
+        }
+
+        if (aiClassified > 0) {
+          console.log(`[enrich] AI classified ${aiClassified}/${otherTxs.length} "Other" transactions`);
+          // Rebuild profile with updated classifications
+          const updatedResult = EnrichmentEngine.rebuildFromEnriched(
+            result.enrichedTransactions, overrides, debtAccountsData, identityData,
+          );
+          Object.assign(result, updatedResult);
+        }
+      }
+    } catch (err) {
+      // AI classification is best-effort — don't fail the entire enrichment
+      console.warn('[enrich] AI batch classification failed:', err instanceof Error ? err.message : err);
     }
 
     // ── 4. Rank moves ──

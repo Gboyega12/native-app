@@ -37,7 +37,7 @@ const RETRY_DELAY_MS = 1000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_CACHE_SIZE = 2000;
 
-interface Classification {
+export interface Classification {
   merchant: string;
   category: string;
   isEssential: boolean;
@@ -299,6 +299,82 @@ Return exactly ${transactions.length} objects in index order.`;
 }
 
 // ─── ENRICH ─────────────────────────────────────────────────
+
+// ── Exported batch classifier for server-side use (e.g. enrichment pipeline) ──
+export async function classifyTransactionsBatch(
+  transactions: Array<{ description: string; amount: number }>,
+): Promise<Array<Classification & { index: number }>> {
+  if (!transactions.length || !process.env.CLAUDE_API_KEY) return [];
+
+  const batch = transactions.slice(0, 50);
+  const results: Array<(Classification & { index: number }) | null> = new Array(batch.length).fill(null);
+  const uncached: Array<{ tx: { description: string; amount: number }; originalIndex: number }> = [];
+
+  for (let i = 0; i < batch.length; i++) {
+    const cached = getCached(batch[i].description);
+    if (cached) {
+      results[i] = { ...cached, index: i };
+    } else {
+      uncached.push({ tx: batch[i], originalIndex: i });
+    }
+  }
+
+  if (uncached.length === 0) {
+    return results.filter(Boolean) as Array<Classification & { index: number }>;
+  }
+
+  const model = process.env.CLAUDE_CLASSIFY_MODEL || process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
+  const prompt = buildClassifyPrompt(uncached.map((u) => u.tx));
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.CLAUDE_API_KEY!,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: 'user', content: prompt }] }),
+      });
+
+      const data = await response.json();
+      let text: string = data.content?.[0]?.text || '';
+      text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) return [];
+
+      parsed.forEach((item: Record<string, unknown>, i: number) => {
+        const entry = uncached[i];
+        if (!entry) return;
+        const rawCategory = VALID_CATEGORIES.includes(item.category as string) ? (item.category as string) : 'Other';
+        const classification: Classification = {
+          merchant: sanitize(item.merchant || entry.tx.description || 'Unknown', 100),
+          category: gateSensitiveCategory(rawCategory, entry.tx.description),
+          isEssential: Boolean(item.isEssential),
+          isSubscription: Boolean(item.isSubscription),
+          isDebt: Boolean(item.isDebt),
+          isBNPL: Boolean(item.isBNPL),
+          isIncome: Boolean(item.isIncome),
+          confidence: item.confidence === 'high' ? 'high' : 'medium',
+        };
+        results[entry.originalIndex] = { ...classification, index: entry.originalIndex };
+        if (classification.category !== 'Other') {
+          setCache(entry.tx.description, classification);
+        }
+      });
+
+      return results.filter(Boolean) as Array<Classification & { index: number }>;
+    } catch (err) {
+      if (attempt < MAX_RETRIES) await sleep(RETRY_DELAY_MS * (attempt + 1));
+    }
+  }
+
+  return [];
+}
+
+// ─── ENRICH (moves) ─────────────────────────────────────────
 
 interface Move {
   action: string;
