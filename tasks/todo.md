@@ -1,7 +1,7 @@
 # Simplify Home Screen: 3-Bucket Model + Correlated Cards
 
 **Date:** 2026-03-17
-**Status:** Planning
+**Status:** Complete
 
 ## Design Decisions (Agreed)
 - **3 buckets**: Essentials, Lifestyle, Savings & Surplus

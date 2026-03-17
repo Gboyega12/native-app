@@ -22,6 +22,7 @@ import type {
   BudgetCategory,
   EssentialGap,
   VerifiedBill,
+  Analysis,
 } from './types';
 
 function splitCSVLine(line: string): string[] {
@@ -2098,6 +2099,73 @@ const EnrichmentEngine = {
     };
 
     return metrics;
+  },
+
+  /**
+   * Recompute moves from a live Analysis object (after recategorization or income edit).
+   * Builds a minimal FinancialProfile from the current analysis totals and calls genDecisionStack.
+   */
+  recomputeMovesFromAnalysis(analysis: Analysis, debtAccounts?: any[], identity?: any): Move[] {
+    const income = analysis.monthly_income ?? 0;
+    const nonDisc = (analysis.non_discretionary as any) || { total: 0, items: [] };
+    const disc = (analysis.discretionary as any) || { total: 0, items: [] };
+    const nonDiscTotal = nonDisc.total ?? 0;
+    const discTotal = disc.total ?? 0;
+    const spending = nonDiscTotal + discTotal;
+    const surplus = income - spending;
+
+    // Helper to extract monthly spend from a category name across both sections
+    const catMonthly = (name: string): number => {
+      for (const section of [nonDisc, disc]) {
+        const item = (section.items || []).find((i: BudgetCategory) => i.category === name);
+        if (item) return item.monthly || 0;
+      }
+      return 0;
+    };
+
+    const profile: FinancialProfile = {
+      monthly: {
+        income,
+        spending,
+        surplus,
+        subscriptions: catMonthly('Subscriptions'),
+        foodDelivery: catMonthly('Delivery'),
+        transport: catMonthly('Transport'),
+        groceries: catMonthly('Groceries'),
+        shopping: catMonthly('Shopping'),
+        eatingOut: catMonthly('Eating Out') + catMonthly('Coffee & Cafes'),
+        entertainment: catMonthly('Entertainment'),
+        debtPayments: catMonthly('Debt Payments'),
+        incomeFloor: analysis.income_floor ?? income,
+        isVariableIncome: analysis.is_variable_income ?? false,
+        incomeCV: analysis.income_cv ?? 0,
+      },
+      budgetReality: {
+        nonDiscretionary: nonDisc,
+        discretionary: disc,
+      },
+      incomeSources: analysis.income_sources || [],
+      transfers: Array.isArray((analysis as any).person_transfers) ? (analysis as any).person_transfers : [],
+      subscriptions: [],
+      metrics: {
+        savingsRate: income > 0 ? (surplus / income) * 100 : 0,
+        creditCardCount: 0,
+        bnplCount: 0,
+        debtAccountCount: (debtAccounts || []).length,
+        subscriptionCount: 0,
+        streamingCount: 0,
+        foodDelivery: catMonthly('Delivery'),
+        transport: catMonthly('Transport'),
+        groceries: catMonthly('Groceries'),
+        shopping: catMonthly('Shopping'),
+        eatingOut: catMonthly('Eating Out') + catMonthly('Coffee & Cafes'),
+        coffeeAndCafes: catMonthly('Coffee & Cafes'),
+        entertainment: catMonthly('Entertainment'),
+        debtPayments: catMonthly('Debt Payments'),
+      },
+    };
+
+    return this.genDecisionStack(profile, [], debtAccounts, identity);
   },
 };
 
