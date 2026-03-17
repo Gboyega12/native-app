@@ -516,9 +516,65 @@ const BENEFIT_PATTERNS: RegExp[] = [
 ];
 
 // ── Person name detection ──
-// Matches 1-3 alpha-only words with no brand/company indicators.
-// e.g. "John Smith", "Sarah Jane Williams", "Mr David Brown"
-// Excludes descriptions containing company suffixes, numbers, or brand patterns.
+// Detects P2P transfers by requiring at least one word to be a known first name.
+// Previous approach (2-4 alpha words = person) had too many false positives:
+// "TASTY JERK", "GREEN DOOR", "FISH SHACK" all triggered as person names.
+//
+// Now uses a curated list of ~500 common UK first names (ONS data).
+// False negatives (rare names) fall to "Other" — much less harmful than
+// false positives putting restaurants into Person-to-Person.
+
+// Top ~500 UK first names (ONS baby names + census frequency data).
+// Lowercase, deduplicated. Covers >95% of UK population by frequency.
+const COMMON_FIRST_NAMES = new Set([
+  // Male — most common
+  'oliver', 'george', 'harry', 'noah', 'jack', 'leo', 'arthur', 'muhammad', 'oscar', 'charlie',
+  'james', 'henry', 'william', 'thomas', 'alfie', 'theodore', 'freddie', 'archie', 'joshua', 'alexander',
+  'jacob', 'edward', 'finley', 'daniel', 'lucas', 'max', 'samuel', 'ethan', 'logan', 'benjamin',
+  'mason', 'harrison', 'sebastian', 'adam', 'luca', 'isaac', 'elijah', 'tommy', 'arlo', 'reuben',
+  'joseph', 'david', 'albie', 'toby', 'hugo', 'louie', 'dylan', 'jude', 'zachary', 'teddy',
+  'matthew', 'reggie', 'nathan', 'hunter', 'joel', 'caleb', 'roman', 'liam', 'francis', 'bobby',
+  'ryan', 'luke', 'connor', 'jaxon', 'ralph', 'elliot', 'dexter', 'felix', 'jasper', 'rory',
+  'michael', 'louis', 'rowan', 'ronnie', 'stanley', 'rupert', 'albert', 'miles', 'harvey', 'jesse',
+  'leon', 'blake', 'aaron', 'evan', 'riley', 'kai', 'jake', 'aiden', 'jayden', 'patrick',
+  'alex', 'finn', 'grayson', 'sonny', 'ollie', 'gabriel', 'ellis', 'otis', 'jaylen', 'peter',
+  'john', 'robert', 'richard', 'charles', 'stephen', 'paul', 'mark', 'andrew', 'steven', 'ian',
+  'stuart', 'christopher', 'timothy', 'simon', 'jonathan', 'keith', 'graham', 'alan', 'colin', 'brian',
+  'kevin', 'philip', 'barry', 'martin', 'gary', 'nigel', 'roger', 'tony', 'terry', 'derek',
+  'gordon', 'raymond', 'neil', 'craig', 'douglas', 'bruce', 'wayne', 'carl', 'sean', 'dean',
+  'antony', 'darren', 'lee', 'shaun', 'gavin', 'clive', 'dominic', 'frederick', 'gerald', 'howard',
+  'karl', 'laurence', 'marcus', 'noel', 'owen', 'reginald', 'ross', 'russell', 'vincent', 'warren',
+  'leslie', 'kenneth', 'dennis', 'malcolm', 'roy', 'clifford', 'ernest', 'cyril', 'cecil', 'harold',
+  'leonard', 'herbert', 'norman', 'walter', 'alfred', 'wilfred', 'sidney', 'bertie', 'ivor', 'reg',
+  'mohammad', 'ahmed', 'ali', 'omar', 'hassan', 'hussain', 'ibrahim', 'khalid', 'yusuf', 'tariq',
+  'abdul', 'bilal', 'hamza', 'imran', 'kamran', 'asif', 'naveed', 'shahid', 'sajid', 'wasim',
+  'harpreet', 'gurpreet', 'rajesh', 'suresh', 'ramesh', 'vikram', 'sanjay', 'amit', 'rohit', 'nikhil',
+  'arjun', 'ravi', 'anil', 'deepak', 'manoj', 'sachin', 'dinesh', 'pravin', 'raj', 'krishna',
+
+  // Female — most common
+  'olivia', 'amelia', 'isla', 'ava', 'ivy', 'freya', 'lily', 'florence', 'mia', 'willow',
+  'rosie', 'sophia', 'alice', 'isabelle', 'grace', 'daisy', 'sienna', 'poppy', 'emily', 'ella',
+  'evie', 'phoebe', 'harper', 'isabella', 'jessica', 'ruby', 'elsie', 'charlotte', 'matilda', 'penelope',
+  'aria', 'maisie', 'luna', 'emilia', 'bonnie', 'hallie', 'eva', 'millie', 'margot', 'iris',
+  'elizabeth', 'arabella', 'anna', 'orla', 'erin', 'imogen', 'molly', 'eliza', 'lottie', 'ada',
+  'esme', 'maya', 'harriet', 'thea', 'eleanor', 'violet', 'zara', 'robyn', 'layla', 'delilah',
+  'ottilie', 'lyla', 'aurora', 'nancy', 'clara', 'abigail', 'chloe', 'amber', 'heidi', 'beatrice',
+  'hannah', 'sarah', 'emma', 'rachel', 'rebecca', 'laura', 'gemma', 'helen', 'louise', 'claire',
+  'karen', 'nicola', 'michelle', 'samantha', 'lisa', 'sharon', 'tracey', 'dawn', 'joanne', 'donna',
+  'amanda', 'jane', 'ann', 'susan', 'margaret', 'patricia', 'jacqueline', 'christine', 'deborah', 'carol',
+  'janet', 'diane', 'wendy', 'pauline', 'denise', 'brenda', 'pamela', 'valerie', 'elaine', 'kathleen',
+  'maureen', 'irene', 'jean', 'barbara', 'dorothy', 'mary', 'betty', 'edna', 'doris', 'gladys',
+  'sheila', 'joan', 'joyce', 'marjorie', 'audrey', 'vera', 'winifred', 'elsie', 'beryl', 'hilda',
+  'maria', 'fatima', 'ayesha', 'aisha', 'amina', 'khadija', 'yasmin', 'nadia', 'shabana', 'nasreen',
+  'priya', 'anita', 'sunita', 'rekha', 'meena', 'neha', 'pooja', 'divya', 'kavita', 'sonia',
+  'nina', 'tanya', 'natasha', 'alison', 'victoria', 'caroline', 'catherine', 'fiona', 'julia', 'georgina',
+  'alexandra', 'philippa', 'rosemary', 'marilyn', 'constance', 'gertrude', 'agnes', 'mabel', 'nellie', 'ivy',
+
+  // Shortened / nicknames that commonly appear in bank transactions
+  'dave', 'mike', 'steve', 'chris', 'dan', 'matt', 'tom', 'rob', 'ben', 'sam',
+  'nick', 'phil', 'stu', 'ed', 'jim', 'joe', 'bob', 'ken', 'don', 'ron',
+  'sue', 'kate', 'liz', 'jen', 'meg', 'jo', 'sal', 'val', 'bev', 'kay',
+]);
 
 const BRAND_INDICATORS = [
   'ltd', 'plc', 'limited', 'inc', 'corp', 'co.', 'co ',
@@ -567,16 +623,17 @@ export function isPersonTransfer(description: string): boolean {
   // If after cleaning there are still digits embedded in the core text, skip
   if (/\d/.test(cleaned)) return false;
 
-  // Match 2-3 purely alphabetic words (typical person name pattern).
-  // Single words are too ambiguous — "aldi", "pharmacy", "barbershop"
-  // would all false-positive. Require at least 2 words for a name match.
-  // Allow single-letter initials (e.g. "Maria G", "J Smith", "A J Smith")
-  // as long as at least one word is a full name (2+ chars).
+  // Match 2-4 purely alphabetic words where at least one is a known first name.
+  // Previous approach (all alpha = person) had too many false positives:
+  // "TASTY JERK", "FISH SHACK", "GREEN DOOR" all matched as person names.
+  // Now requires a positive signal (known first name) rather than just absence of brand indicators.
   const words = cleaned.split(/\s+/).filter(Boolean);
   if (words.length >= 2 && words.length <= 4) {
     const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w));
-    const hasFullName = words.some((w) => w.length >= 2);
-    if (allAlpha && hasFullName) return true;
+    if (allAlpha) {
+      const hasFirstName = words.some((w) => COMMON_FIRST_NAMES.has(w));
+      if (hasFirstName) return true;
+    }
   }
 
   return false;

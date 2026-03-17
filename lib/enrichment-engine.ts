@@ -102,7 +102,7 @@ const EnrichmentEngine = {
     const ensemble = trainEnsemble(confidentTraining);
     if (ensemble) {
       for (let i = 0; i < enriched.length; i++) {
-        if (enriched[i].classifiedBy === 'default' && enriched[i].confidence === 'low' && !enriched[i].isTransfer) {
+        if (enriched[i].classifiedBy === 'default' && enriched[i].confidence === 'low' && !enriched[i].isTransfer && !enriched[i].isPersonTransfer) {
           const prediction = predictWithEnsemble(ensemble, transactions[i], enriched);
           if (prediction && shouldAcceptPrediction(prediction)) {
             enriched[i] = {
@@ -453,9 +453,15 @@ const EnrichmentEngine = {
       // BEFORE person-transfer heuristic, so that descriptions like
       // "barbershop" or "restaurant" get categorised instead of being
       // misclassified as person transfers.
+      //
+      // EXCEPTION: When the description contains an explicit transfer method
+      // ("faster payment", "bank transfer", etc.) AND isPerson is true, the
+      // transfer signal is stronger than a coincidental keyword match
+      // (e.g. "FASTER PAYMENT TO JOHN INTERNET" matching /\binternet\b/).
       const classification = classifyTransaction(tx.description, null, normalised);
-      if (classification.source !== 'default') {
-        // Keyword classifier matched — trust it over person-name heuristic
+      const hasExplicitTransferMarker = isPerson && /\b(faster payment|bank transfer|transfer to|transfer from)\b/i.test(tx.description);
+      if (classification.source !== 'default' && !hasExplicitTransferMarker) {
+        // Keyword classifier matched and no conflicting transfer marker — trust it
         category = classification.category;
         isEssential = classification.isEssential;
         confidence = classification.confidence;
@@ -671,6 +677,14 @@ const EnrichmentEngine = {
     const nonDiscTotal = nonDiscItems.reduce((s, i) => s + i.monthly, 0);
     const discTotal = discItems.reduce((s, i) => s + i.monthly, 0);
 
+    // Build set of outbound P2P recipients for bidirectional transfer detection.
+    // If someone appears as BOTH a credit source AND debit recipient, it's likely
+    // an internal transfer between own accounts — not income.
+    const outboundRecipients = new Set(
+      spending.filter((t) => t.isPersonTransfer)
+        .map((t) => (t.merchant || t.description).toLowerCase().trim())
+    );
+
     const incomeGroups: Record<string, EnrichedTransaction[]> = {};
     for (const tx of income) {
       const key = tx.merchant || tx.description;
@@ -711,6 +725,21 @@ const EnrichmentEngine = {
     .filter((src) => {
       // Known salary/employer/benefit keywords → always income
       if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
+
+      // Bidirectional transfer detection: if the same name appears as both
+      // a credit source AND a debit recipient, it's likely an internal transfer
+      // between the user's own accounts — NOT income.
+      const srcNorm = src.source.toLowerCase().trim();
+      if (outboundRecipients.has(srcNorm)) return false;
+
+      // Person-name credits require much stronger evidence to be income.
+      // Regular P2P credits (friend paying you back monthly) should NOT inflate income.
+      // Genuine employment via person name (sole trader) will have salary keywords
+      // and pass Gate 0 above.
+      if (isPersonTransfer(src.source)) {
+        if (src.frequency === 'monthly' && src.variability < 0.15 && src.count >= 4) return true;
+        return false;
+      }
 
       // Regular credits: require 3+ occurrences with a recognisable frequency.
       // Variability is NOT a gate — salary with overtime, commission, or tips
