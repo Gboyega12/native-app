@@ -68,8 +68,14 @@ export interface IncomeSource {
   source: string;
   frequency: string;
   avgAmount: number;
+  /** Frequency-aware monthly normalisation (weekly × 4.33, fortnightly × 2.17, monthly × 1) */
   monthly: number;
+  /** Frequency-aware annual income (weekly × 52, fortnightly × 26, monthly × 12) */
+  annualIncome: number;
   isSalary: boolean;
+  /** Detection confidence: high (regular + low variability + 3+ data points),
+   *  medium (regular + fewer points), low (irregular or high variability) */
+  confidence: 'high' | 'medium' | 'low';
   /** Individual amounts observed for this source (most recent N periods) */
   recentAmounts?: number[];
   /** Standard deviation of payment amounts */

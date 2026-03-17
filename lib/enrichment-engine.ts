@@ -82,7 +82,7 @@ const EnrichmentEngine = {
   // Each stage feeds into the next; the final result powers the UI dashboard.
   // ═══════════════════════════════════════════════════════════════════
   enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: DebtAccount[], identity?: UserIdentity | null): EnrichmentResult {
-    const transactions = this.parseCSV(rawCSV);
+    const transactions = this._correlatePendingSettled(this.parseCSV(rawCSV));
     const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
 
     // ── Pass 3: Internal transfer detection ──
@@ -216,6 +216,67 @@ const EnrichmentEngine = {
     }
 
     return transactions;
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Pending → Settled Correlation
+  // When a transaction is authorised (pending) and then settles, the bank
+  // may report both as separate CSV rows with slightly different amounts
+  // (e.g. £50.00 pending → £49.87 settled) and dates (0-3 days apart).
+  // This method detects likely pending/settled pairs and keeps only the
+  // settled version (the later date), preventing double-counting.
+  // ═══════════════════════════════════════════════════════════════════
+  _correlatePendingSettled(transactions: RawTransaction[]): RawTransaction[] {
+    if (transactions.length < 2) return transactions;
+
+    // Sort by date (ascending), then by description for grouping
+    const sorted = [...transactions].sort((a, b) => {
+      const da = new Date(a.date).getTime();
+      const db = new Date(b.date).getTime();
+      return da - db || a.description.localeCompare(b.description);
+    });
+
+    const removed = new Set<number>();
+
+    for (let i = 0; i < sorted.length; i++) {
+      if (removed.has(i)) continue;
+      const a = sorted[i];
+      const descA = normaliseDescription(a.description);
+      if (!descA) continue;
+
+      // Look ahead for potential settled counterpart (within 4 days)
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (removed.has(j)) continue;
+        const b = sorted[j];
+        const daysDiff = (new Date(b.date).getTime() - new Date(a.date).getTime()) / (1000 * 60 * 60 * 24);
+        if (daysDiff > 4) break; // Outside correlation window
+
+        const descB = normaliseDescription(b.description);
+        if (descA !== descB) continue;
+
+        // Same merchant, same sign (both credits or both debits)
+        if (Math.sign(a.amount) !== Math.sign(b.amount)) continue;
+
+        // Amount within 5% tolerance or £2 absolute — covers tip adjustments,
+        // currency conversion rounding, and authorization hold differences
+        const absA = Math.abs(a.amount);
+        const absB = Math.abs(b.amount);
+        const diff = Math.abs(absA - absB);
+        const pctDiff = Math.max(absA, absB) > 0 ? diff / Math.max(absA, absB) : 0;
+
+        if (diff <= 2 || pctDiff <= 0.05) {
+          // Keep the later transaction (settled) — remove the earlier (pending)
+          removed.add(i);
+          break;
+        }
+      }
+    }
+
+    if (removed.size > 0) {
+      console.log(`[enrichment] Correlated ${removed.size} pending→settled transaction pair(s)`);
+    }
+
+    return sorted.filter((_, idx) => !removed.has(idx));
   },
 
   // ═══════════════════════════════════════════════════════════════════
@@ -559,9 +620,12 @@ const EnrichmentEngine = {
 
     const totalIncome = income.reduce((s, t) => s + t.amount, 0);
     const totalSpending = Math.abs(spending.reduce((s, t) => s + t.amount, 0));
-    const monthlyIncome = totalIncome / months;
+    // Preliminary monthly income — will be replaced by frequency-aware sum
+    // after income sources are classified below.
+    let monthlyIncome = totalIncome / months;
     const monthlySpending = totalSpending / months;
-    const surplus = monthlyIncome - monthlySpending;
+    // surplus is recomputed after frequency-aware monthlyIncome is set
+    let surplus = monthlyIncome - monthlySpending;
 
     // Group spending by category for budget card display
     const catTotals: Record<string, { total: number; count: number; transactions: TransactionDetail[] }> = {};
@@ -621,8 +685,8 @@ const EnrichmentEngine = {
       incomeGroups[key].push(tx);
     }
     const incomeSources = Object.entries(incomeGroups).map(([source, txs]) => {
-      const monthly = txs.reduce((s, t) => s + t.amount, 0) / months;
-      const avgAmount = txs.reduce((s, t) => s + t.amount, 0) / txs.length;
+      const totalForSource = txs.reduce((s, t) => s + t.amount, 0);
+      const avgAmount = totalForSource / txs.length;
       const isSalary = matchesSalaryKeywords(source);
       const sorted = txs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       const intervals: number[] = [];
@@ -630,14 +694,20 @@ const EnrichmentEngine = {
         intervals.push((new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()) / (1000 * 60 * 60 * 24));
       }
       const avgInt = intervals.length ? intervals.reduce((a, b) => a + b, 0) / intervals.length : 0;
-      // Income frequency detection — UK pay cycles:
-      //   weekly (5-9 days): common in gig/retail/hospitality
-      //   fortnightly (12-17 days): some NHS/public sector roles
-      //   monthly (25-35 days): standard UK salaried pay
+      // Income frequency detection — UK pay cycles with tolerance for bank
+      // holidays, weekend shifts, and month-end boundary drift:
+      //   weekly (5-10 days): gig/retail/hospitality — 10 covers bank holiday gap
+      //   fortnightly (11-18 days): NHS/public sector — 18 covers weekend+holiday
+      //   monthly (24-38 days): standard salaried — 38 covers short-month drift
+      //     e.g. 25th Feb → 2nd April = 36 days, 31st Jan → 28th Feb = 28 days
+      // Requires 2+ intervals (3+ transactions) for reliable frequency detection;
+      // single intervals fall through to 'irregular'.
       let frequency = 'irregular';
-      if (avgInt >= 25 && avgInt <= 35) frequency = 'monthly';
-      else if (avgInt >= 12 && avgInt <= 17) frequency = 'fortnightly';
-      else if (avgInt >= 5 && avgInt <= 9) frequency = 'weekly';
+      if (intervals.length >= 2) {
+        if (avgInt >= 24 && avgInt <= 38) frequency = 'monthly';
+        else if (avgInt >= 11 && avgInt <= 18) frequency = 'fortnightly';
+        else if (avgInt >= 5 && avgInt <= 10) frequency = 'weekly';
+      }
       // Compute per-source variability from individual payment amounts
       const amounts = txs.map((t) => t.amount);
       const recentAmounts = sorted.slice(-8).map((t) => t.amount); // last 8 payments
@@ -649,7 +719,31 @@ const EnrichmentEngine = {
         amountSD = Math.sqrt(variance);
         variability = mean > 0 ? amountSD / mean : 0;
       }
-      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt, recentAmounts, amountSD, variability };
+      // Frequency-aware monthly normalisation:
+      //   weekly: avgAmount × 52/12 (4.333 weeks per month)
+      //   fortnightly: avgAmount × 26/12 (2.167 fortnights per month)
+      //   monthly: avgAmount × 1
+      //   irregular: fall back to total / months (time-span average)
+      const freqMultiplier = frequency === 'weekly' ? 52 / 12
+        : frequency === 'fortnightly' ? 26 / 12
+        : frequency === 'monthly' ? 1
+        : null;
+      const monthly = freqMultiplier !== null
+        ? avgAmount * freqMultiplier
+        : totalForSource / months;
+      const annualIncome = freqMultiplier !== null
+        ? avgAmount * (frequency === 'weekly' ? 52 : frequency === 'fortnightly' ? 26 : 12)
+        : monthly * 12;
+
+      // Confidence: high if regular frequency with low variability and 3+ data points,
+      // medium if regular frequency but fewer data points or moderate variability,
+      // low if irregular or high variability.
+      const confidence: 'high' | 'medium' | 'low' =
+        frequency !== 'irregular' && txs.length >= 3 && variability < 0.15 ? 'high'
+        : frequency !== 'irregular' && txs.length >= 2 ? 'medium'
+        : 'low';
+
+      return { source, frequency, avgAmount, monthly, annualIncome, isSalary, confidence, count: txs.length, avgInterval: avgInt, recentAmounts, amountSD, variability };
     })
     .filter((src) => {
       // Bidirectional transfer detection: if the same name appears as both
@@ -688,6 +782,16 @@ const EnrichmentEngine = {
     // relies on having at least one primary income source identified.
     if (incomeSources.length > 0 && !incomeSources.some((s) => s.isSalary)) {
       incomeSources[0].isSalary = true;
+    }
+
+    // ── Frequency-aware monthly income ──
+    // Replace the preliminary time-span average with the sum of per-source
+    // frequency-aware monthlies. This is mathematically correct for any mix
+    // of weekly/fortnightly/monthly income sources. Falls back to the
+    // time-span average only if no income sources were classified.
+    if (incomeSources.length > 0) {
+      monthlyIncome = incomeSources.reduce((s, src) => s + src.monthly, 0);
+      surplus = monthlyIncome - monthlySpending;
     }
 
     const catMonthly = (name: string) => (catTotals[name]?.total || 0) / months;

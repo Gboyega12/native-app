@@ -1,3 +1,31 @@
+# Income Detection: Frequency-Aware Normalisation & Pending Correlation
+
+**Date:** 2026-03-17
+**Status:** Complete
+
+## Problem
+Income detection was mathematically imprecise:
+1. Per-source `monthly` used `totalIncome / months` (time-span division) instead of frequency-aware multipliers
+2. Aggregate `monthlyIncome` inherited the same imprecision
+3. Frequency detection bands were too narrow — missed payments shifted by bank holidays or month boundaries
+4. No pending-vs-settled transaction correlation — same transaction counted twice
+5. No confidence scoring on income sources
+
+## Changes
+- [x] Widen frequency detection bands: monthly 24-38d, fortnightly 11-18d, weekly 5-10d
+- [x] Require 2+ intervals (3+ transactions) for reliable frequency detection
+- [x] Frequency-aware per-source monthly: weekly × 52/12, fortnightly × 26/12, monthly × 1
+- [x] Derive aggregate `monthlyIncome` from sum of frequency-aware source monthlies
+- [x] Add `annualIncome` field: weekly × 52, fortnightly × 26, monthly × 12
+- [x] Add `confidence` field: high/medium/low based on regularity + variability + data points
+- [x] Add pending→settled transaction correlation (same merchant, 0-4 days apart, ≤5% amount difference)
+
+## Files modified
+- `lib/enrichment-engine.ts` — frequency bands, frequency-aware monthly, pending correlation
+- `lib/types.ts` — IncomeSource: annualIncome, confidence fields
+
+---
+
 # Fix Enrichment Pipeline — False P2P, Transfer Override, Income Inflation
 
 **Date:** 2026-03-17
