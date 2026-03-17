@@ -663,15 +663,13 @@ const EnrichmentEngine = {
       // Compute per-source variability from individual payment amounts
       const amounts = txs.map((t) => t.amount);
       const recentAmounts = sorted.slice(-8).map((t) => t.amount); // last 8 payments
-      let amountSD = 0;
       let variability = 0;
       if (amounts.length >= 2) {
         const mean = avgAmount;
         const variance = amounts.reduce((s, a) => s + Math.pow(a - mean, 2), 0) / amounts.length;
-        amountSD = Math.sqrt(variance);
-        variability = mean > 0 ? amountSD / mean : 0;
+        variability = mean > 0 ? Math.sqrt(variance) / mean : 0;
       }
-      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt, recentAmounts, amountSD, variability };
+      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt, recentAmounts, variability };
     })
     .filter((src) => {
       // Known salary/employer/benefit keywords → always income

@@ -23,7 +23,7 @@ import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { DashboardSkeleton } from '@/components/Skeleton';
-import { SpendingRing, CategoryBars, WeeklySparkline } from '@/components/Charts';
+import { SpendingRing, WeeklySparkline } from '@/components/Charts';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
@@ -2622,7 +2622,7 @@ export default function Home() {
                       if (txAge === 1) return 'Latest transaction: yesterday';
                       return `Latest transaction: ${txAge} days ago`;
                     })()}
-                    {syncDataSource === 'fallback' ? ' (using cached data)' : ''}
+                    {syncDataSource === 'fallback' ? ' \u2014 using your latest transactions' : ''}
                   </Text>
                 )}
 
@@ -3406,9 +3406,9 @@ export default function Home() {
                               <ExpandDots count={4} size={2} />
                             </View>
                             {item.txs.map((tx: any, j: number) => (
-                              <TouchableOpacity key={`${key}-tx-${j}`} style={s.txRow} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: item.section }); setRecatTarget(''); setRecatEssential(item.section === 'essential'); }} activeOpacity={0.7}>
+                              <TouchableOpacity key={`${key}-tx-${j}`} style={[s.txRow, tx.confidence === 'low' && { opacity: 0.7 }]} onLongPress={() => { setRecatTx({ tx, catKey: item.category, section: item.section }); setRecatTarget(''); setRecatEssential(item.section === 'essential'); }} activeOpacity={0.7}>
                                 <View style={s.txLeft}>
-                                  <Text style={s.txMerchant}>{tx.merchant}</Text>
+                                  <Text style={[s.txMerchant, tx.confidence === 'medium' && { color: colors.muted }]}>{tx.merchant}</Text>
                                   <Text style={s.txDate}>{formatDate(tx.date)}</Text>
                                 </View>
                                 <View style={s.txRightCol}>
@@ -3880,19 +3880,23 @@ export default function Home() {
 
                 <ScrollView style={s.catReviewList} showsVerticalScrollIndicator={false}>
 
-                  {/* ── AI SUGGESTIONS section: confirm-first list ── */}
-                  {aiSuggestedGroups.length > 0 && (
-                    <>
-                      <Text style={s.reviewSectionHeader}>
-                        READY TO CONFIRM ({aiSuggestedGroups.length})
-                      </Text>
+                  {/* ── Single unified review list, sorted by confidence: suggested first, then unresolved ── */}
+                  {(() => {
+                    const totalItems = aiSuggestedGroups.length + unresolvedGroups.length;
+                    if (totalItems === 0) return null;
 
-                      {/* Accept all button */}
-                      {(() => {
-                        const unreviewed = aiSuggestedGroups.filter(
-                          (g) => !aiConfirmed.has(g.key) && !aiOverrides[g.key],
-                        );
-                        return unreviewed.length > 0 ? (
+                    // "Confirm all" button for all items with AI suggestions
+                    const unreviewed = aiSuggestedGroups.filter(
+                      (g) => !aiConfirmed.has(g.key) && !aiOverrides[g.key],
+                    );
+
+                    return (
+                      <>
+                        <Text style={s.reviewSectionHeader}>
+                          {totalItems} ITEM{totalItems !== 1 ? 'S' : ''} TO REVIEW
+                        </Text>
+
+                        {unreviewed.length > 0 && (
                           <TouchableOpacity
                             style={s.acceptAllBtn}
                             onPress={() => {
@@ -3911,164 +3915,157 @@ export default function Home() {
                               Confirm all ({unreviewed.length}) {'\u2713'}
                             </Text>
                           </TouchableOpacity>
-                        ) : null;
-                      })()}
+                        )}
 
-                      {aiSuggestedGroups.map((group) => {
-                        const isConfirmed = aiConfirmed.has(group.key);
-                        const override = aiOverrides[group.key];
-                        const isExpanded = aiExpandedKey === group.key;
-                        const displayCat = override?.category || group.aiCategory;
-                        const isDone = isConfirmed || !!override;
+                        {/* AI-suggested items (high confidence) — badge + confirm button */}
+                        {aiSuggestedGroups.map((group) => {
+                          const isConfirmed = aiConfirmed.has(group.key);
+                          const override = aiOverrides[group.key];
+                          const isExpanded = aiExpandedKey === group.key;
+                          const displayCat = override?.category || group.aiCategory;
+                          const isDone = isConfirmed || !!override;
 
-                        return (
-                          <View
-                            key={`ai-${group.key}`}
-                            style={[s.catReviewRow, isDone && s.catReviewRowDone]}
-                            accessibilityLabel={`${group.label}, ${displayCat}, ${isDone ? 'confirmed' : 'pending'}`}
-                          >
-                            <View style={s.catReviewRowHeader}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={s.catReviewMerchant} numberOfLines={1}>
-                                  {group.label}
-                                </Text>
+                          return (
+                            <View
+                              key={`ai-${group.key}`}
+                              style={[s.catReviewRow, isDone && s.catReviewRowDone]}
+                              accessibilityLabel={`${group.label}, ${displayCat}, ${isDone ? 'confirmed' : 'pending'}`}
+                            >
+                              <View style={s.catReviewRowHeader}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={s.catReviewMerchant} numberOfLines={1}>
+                                    {group.label}
+                                  </Text>
+                                  <Text style={s.catReviewAmount}>
+                                    {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
+                                  </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                  {/* Category badge — tap to expand picker */}
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      hapticLight();
+                                      setAiExpandedKey(isExpanded ? null : group.key);
+                                    }}
+                                    style={[s.aiCatBadge, isDone && s.aiCatBadgeDone]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`${displayCat}, tap to change`}
+                                  >
+                                    <Text style={[s.aiCatBadgeText, isDone && s.aiCatBadgeTextDone]} numberOfLines={1}>
+                                      {displayCat}
+                                    </Text>
+                                  </TouchableOpacity>
+                                  {/* Confirm button */}
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      hapticLight();
+                                      if (isConfirmed) {
+                                        setAiConfirmed((prev) => { const next = new Set(prev); next.delete(group.key); return next; });
+                                      } else {
+                                        setAiConfirmed((prev) => new Set(prev).add(group.key));
+                                        setAiExpandedKey(null);
+                                      }
+                                    }}
+                                    style={[s.aiConfirmBtn, isDone && s.aiConfirmBtnDone]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={isDone ? 'Undo confirm' : 'Confirm'}
+                                  >
+                                    <Text style={[s.aiConfirmBtnText, isDone && s.aiConfirmBtnTextDone]}>
+                                      {isDone ? '\u2713' : '\u2713'}
+                                    </Text>
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+
+                              {/* Expanded category picker for overriding */}
+                              {isExpanded && (
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
+                                  {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
+                                    <TouchableOpacity
+                                      key={cat}
+                                      style={[s.categoryChip, displayCat === cat && s.categoryChipActive]}
+                                      onPress={() => {
+                                        hapticLight();
+                                        if (cat === group.aiCategory) {
+                                          setAiOverrides((prev) => { const next = { ...prev }; delete next[group.key]; return next; });
+                                          setAiConfirmed((prev) => new Set(prev).add(group.key));
+                                        } else {
+                                          setAiOverrides((prev) => ({
+                                            ...prev,
+                                            [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat) },
+                                          }));
+                                          setAiConfirmed((prev) => { const next = new Set(prev); next.delete(group.key); return next; });
+                                        }
+                                        setAiExpandedKey(null);
+                                      }}
+                                      accessibilityRole="button"
+                                      accessibilityLabel={cat}
+                                    >
+                                      <Text style={[s.categoryChipText, displayCat === cat && s.categoryChipTextActive]}>{cat}</Text>
+                                    </TouchableOpacity>
+                                  ))}
+                                </ScrollView>
+                              )}
+                            </View>
+                          );
+                        })}
+
+                        {/* Unresolved items (low confidence) — chip picker */}
+                        {unresolvedGroups.map((group) => {
+                          const assigned = catAssignments[group.key];
+                          const isAiSuggested = assigned?.aiSuggested === true;
+                          return (
+                            <View
+                              key={group.key}
+                              style={[
+                                s.catReviewRow,
+                                assigned && s.catReviewRowDone,
+                                isAiSuggested && s.catReviewRowAi,
+                              ]}
+                              accessibilityLabel={`${group.label}, ${group.txs.length} transactions, ${assigned ? `categorised as ${assigned.category}` : 'not yet categorised'}${isAiSuggested ? ', suggested' : ''}`}
+                            >
+                              <View style={s.catReviewRowHeader}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={s.catReviewMerchant} numberOfLines={1}>
+                                    {assigned ? '\u2713 ' : ''}{group.label}
+                                  </Text>
+                                  {isAiSuggested && (
+                                    <Text style={s.aiSuggestedLabel}>Bocy suggested</Text>
+                                  )}
+                                </View>
                                 <Text style={s.catReviewAmount}>
                                   {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
                                 </Text>
                               </View>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                {/* Category badge — tap to expand picker */}
-                                <TouchableOpacity
-                                  onPress={() => {
-                                    hapticLight();
-                                    setAiExpandedKey(isExpanded ? null : group.key);
-                                  }}
-                                  style={[s.aiCatBadge, isDone && s.aiCatBadgeDone]}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={`${displayCat}, tap to change`}
-                                >
-                                  <Text style={[s.aiCatBadgeText, isDone && s.aiCatBadgeTextDone]} numberOfLines={1}>
-                                    {displayCat}
-                                  </Text>
-                                </TouchableOpacity>
-                                {/* Confirm button */}
-                                <TouchableOpacity
-                                  onPress={() => {
-                                    hapticLight();
-                                    if (isConfirmed) {
-                                      setAiConfirmed((prev) => { const next = new Set(prev); next.delete(group.key); return next; });
-                                    } else {
-                                      setAiConfirmed((prev) => new Set(prev).add(group.key));
-                                      setAiExpandedKey(null);
-                                    }
-                                  }}
-                                  style={[s.aiConfirmBtn, isDone && s.aiConfirmBtnDone]}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={isDone ? 'Undo confirm' : 'Confirm'}
-                                >
-                                  <Text style={[s.aiConfirmBtnText, isDone && s.aiConfirmBtnTextDone]}>
-                                    {isDone ? '\u2713' : '\u2713'}
-                                  </Text>
-                                </TouchableOpacity>
-                              </View>
-                            </View>
-
-                            {/* Expanded category picker for overriding */}
-                            {isExpanded && (
                               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
                                 {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
                                   <TouchableOpacity
                                     key={cat}
-                                    style={[s.categoryChip, displayCat === cat && s.categoryChipActive]}
+                                    style={[s.categoryChip, assigned?.category === cat && s.categoryChipActive]}
                                     onPress={() => {
                                       hapticLight();
-                                      if (cat === group.aiCategory) {
-                                        // User selected the AI suggestion — just confirm
-                                        setAiOverrides((prev) => { const next = { ...prev }; delete next[group.key]; return next; });
-                                        setAiConfirmed((prev) => new Set(prev).add(group.key));
-                                      } else {
-                                        setAiOverrides((prev) => ({
-                                          ...prev,
-                                          [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat) },
-                                        }));
-                                        setAiConfirmed((prev) => { const next = new Set(prev); next.delete(group.key); return next; });
-                                      }
-                                      setAiExpandedKey(null);
+                                      setCatAssignments((prev) => ({
+                                        ...prev,
+                                        [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat), aiSuggested: false },
+                                      }));
                                     }}
                                     accessibilityRole="button"
-                                    accessibilityLabel={cat}
+                                    accessibilityLabel={`${cat}${assigned?.category === cat ? ', selected' : ''}`}
+                                    accessibilityState={{ selected: assigned?.category === cat }}
                                   >
-                                    <Text style={[s.categoryChipText, displayCat === cat && s.categoryChipTextActive]}>{cat}</Text>
+                                    <Text style={[
+                                      s.categoryChipText,
+                                      assigned?.category === cat && s.categoryChipTextActive,
+                                    ]}>{cat}</Text>
                                   </TouchableOpacity>
                                 ))}
                               </ScrollView>
-                            )}
-                          </View>
-                        );
-                      })}
-                    </>
-                  )}
-
-                  {/* ── UNCATEGORISED section: chip picker for truly unresolved items ── */}
-                  {unresolvedGroups.length > 0 && (
-                    <>
-                      <Text style={[s.reviewSectionHeader, aiSuggestedGroups.length > 0 && { marginTop: 20 }]}>
-                        NEEDS REVIEW ({unresolvedGroups.length})
-                      </Text>
-                      {unresolvedGroups.map((group) => {
-                        const assigned = catAssignments[group.key];
-                        const isAiSuggested = assigned?.aiSuggested === true;
-                        return (
-                          <View
-                            key={group.key}
-                            style={[
-                              s.catReviewRow,
-                              assigned && s.catReviewRowDone,
-                              isAiSuggested && s.catReviewRowAi,
-                            ]}
-                            accessibilityLabel={`${group.label}, ${group.txs.length} transactions, ${assigned ? `categorised as ${assigned.category}` : 'not yet categorised'}${isAiSuggested ? ', AI suggested' : ''}`}
-                          >
-                            <View style={s.catReviewRowHeader}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={s.catReviewMerchant} numberOfLines={1}>
-                                  {assigned ? '\u2713 ' : ''}{group.label}
-                                </Text>
-                                {isAiSuggested && (
-                                  <Text style={s.aiSuggestedLabel}>Bocy suggested</Text>
-                                )}
-                              </View>
-                              <Text style={s.catReviewAmount}>
-                                {group.txs.length} txn{group.txs.length !== 1 ? 's' : ''} {'\u00b7'} {'\u00a3'}{group.total.toFixed(2)}
-                              </Text>
                             </View>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                              {BUDGET_CATEGORIES.filter(c => c !== 'Other').map((cat) => (
-                                <TouchableOpacity
-                                  key={cat}
-                                  style={[s.categoryChip, assigned?.category === cat && s.categoryChipActive]}
-                                  onPress={() => {
-                                    hapticLight();
-                                    setCatAssignments((prev) => ({
-                                      ...prev,
-                                      [group.key]: { category: cat, isEssential: ESSENTIAL_CATS.has(cat), aiSuggested: false },
-                                    }));
-                                  }}
-                                  accessibilityRole="button"
-                                  accessibilityLabel={`${cat}${assigned?.category === cat ? ', selected' : ''}`}
-                                  accessibilityState={{ selected: assigned?.category === cat }}
-                                >
-                                  <Text style={[
-                                    s.categoryChipText,
-                                    assigned?.category === cat && s.categoryChipTextActive,
-                                  ]}>{cat}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </ScrollView>
-                          </View>
-                        );
-                      })}
-                    </>
-                  )}
+                          );
+                        })}
+                      </>
+                    );
+                  })()}
 
                 </ScrollView>
 

@@ -66,8 +66,6 @@ export interface IncomeSource {
   isSalary: boolean;
   /** Individual amounts observed for this source (most recent N periods) */
   recentAmounts?: number[];
-  /** Standard deviation of payment amounts */
-  amountSD?: number;
   /** Coefficient of variation (SD / mean) — higher = more variable */
   variability?: number;
 }
