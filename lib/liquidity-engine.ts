@@ -91,9 +91,9 @@ const MOVE_CATEGORY_GAMMA: Record<string, number> = {
   break_even: 2.8,  // Deficit is the most urgent state
   buffer: 2.2,      // Buffer has steep returns (insurance against ruin)
   debt: 1.8,        // Interest saved — strong but not as steep
-  spending: 0.9,    // Freed pound ≈ a pound
+  spending: 1.2,    // Freed pound has diminishing returns (first cuts easiest/most impactful)
   savings: 1.0,     // Moderate curve
-  invest: 0.7,      // Long-term, flatter (compounding makes up for it)
+  invest: 1.1,      // Moderate diminishing returns — early investing most impactful
 };
 
 // ── UK Reference Spending (ONS Family Spending Survey) ──

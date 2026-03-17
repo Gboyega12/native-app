@@ -1012,6 +1012,33 @@ const EnrichmentEngine = {
     const txs = (enrichedTxs || []).filter((t) => new Date(t.date) >= cutoff);
     const T = MOVE_THRESHOLDS;
 
+    // ── Surplus budget ──
+    // Tracks how much surplus is still available as moves claim portions.
+    // Prevents moves from collectively promising more than the user has.
+    let remainingSurplus = Math.max(0, p.surplus);
+    const claimSurplus = (amount: number): number => {
+      const claimed = Math.min(amount, remainingSurplus);
+      remainingSurplus -= claimed;
+      return claimed;
+    };
+
+    // ── Expensive debt detection ──
+    // Used to suppress/reduce buffer moves and prioritize debt repayment
+    const connectedDebts = debtAccounts || [];
+    const highestDebtAPR = connectedDebts.reduce((max: number, d: any) => {
+      const apr = d.interest_rate || 0;
+      return apr > max ? apr : max;
+    }, 0);
+    const totalDebtBalance = connectedDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
+    const hasExpensiveDebt = highestDebtAPR > 0.08 && totalDebtBalance > 0;
+
+    // ── Surplus-aware cut modifier ──
+    // Low surplus = more aggressive cuts needed; high surplus = gentler cuts
+    const cutMultiplier = p.surplus < 100 ? 1.4
+      : p.surplus < 300 ? 1.1
+      : p.surplus > 1000 ? 0.7
+      : 1.0;
+
     // ── Identity-aware modifiers ──
     const id = identity || {};
     const isRemote = id.work_setup === 'remote';
@@ -1063,7 +1090,7 @@ const EnrichmentEngine = {
 
     // Food delivery
     if (m.foodDelivery > T.foodDeliveryMin) {
-      const saving = Math.round(m.foodDelivery * T.foodDeliveryCutPct);
+      const saving = Math.round(m.foodDelivery * Math.min(T.foodDeliveryCutPct * cutMultiplier, 0.6));
       const deliveryMerchants = this._getMerchantsByCategory(txs, 'Delivery');
       moves.push({
         action: `Cut delivery spend from \u00a3${Math.round(m.foodDelivery)} to \u00a3${Math.round(m.foodDelivery - saving)}/month`,
@@ -1086,7 +1113,7 @@ const EnrichmentEngine = {
 
     // Eating out
     if (m.eatingOut > T.eatingOutMin) {
-      const saving = Math.round(m.eatingOut * T.eatingOutCutPct);
+      const saving = Math.round(m.eatingOut * Math.min(T.eatingOutCutPct * cutMultiplier, 0.5));
       const eatingMerchants = this._getMerchantsByCategory(txs, 'Eating Out');
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       moves.push({
@@ -1110,7 +1137,7 @@ const EnrichmentEngine = {
 
     // Shopping
     if (m.shopping > T.shoppingMin) {
-      const saving = Math.round(m.shopping * T.shoppingCutPct);
+      const saving = Math.round(m.shopping * Math.min(T.shoppingCutPct * cutMultiplier, 0.5));
       const shopMerchants = this._getMerchantsByCategory(txs, 'Shopping');
       moves.push({
         action: `Cap non-essential shopping at \u00a3${Math.round(m.shopping - saving)}/month`,
@@ -1132,11 +1159,8 @@ const EnrichmentEngine = {
     }
 
     // ── Debt analysis with good/bad debt differentiation ──
-    // Include both synced and manual debt accounts for holistic view
-    const connectedDebts = debtAccounts || [];
     const totalLimit = connectedDebts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
-    const totalBalance = connectedDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
-    const overallUtil = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : -1;
+    const overallUtil = totalLimit > 0 ? (totalDebtBalance / totalLimit) * 100 : -1;
     const isGoodDebt = overallUtil >= 0 && overallUtil <= 30;
     const isMediumUtil = overallUtil > 30 && overallUtil <= 75;
     const isHighUtil = overallUtil > 75;
@@ -1152,8 +1176,8 @@ const EnrichmentEngine = {
         // Low utilization, paying on time — good debt for points
         moves.push({
           action: `Maximise credit card rewards across ${actualDebtCount} cards`,
-          annualImpact: Math.round(totalBalance * 0.02), // ~2% rewards
-          monthlyImpact: Math.round(totalBalance * 0.02 / 12),
+          annualImpact: Math.round(totalDebtBalance * 0.02), // ~2% rewards
+          monthlyImpact: Math.round(totalDebtBalance * 0.02 / 12),
           effort: 'low',
           category: 'savings',
           merchants: debtMerchants,
@@ -1176,9 +1200,10 @@ const EnrichmentEngine = {
         });
 
         // Calculate real interest savings using amortisation math
-        // Estimate: surplus directed at top-priority debt, minimums on the rest
+        // Claim surplus for debt: higher APR = more aggressive allocation
         const monthlyPayment = p.debtPayments / actualDebtCount; // avg current payment per debt
-        const surplusForDebt = Math.min(p.surplus * 0.5, 300); // up to half surplus or £300
+        const debtUrgency = hasExpensiveDebt ? 0.7 : 0.5; // 70% of surplus for expensive debt
+        const surplusForDebt = claimSurplus(Math.round(Math.min(p.surplus * debtUrgency, 500)));
         let totalInterestSaved = 0;
         for (const d of sortedDebts) {
           const bal = d.outstanding_balance || 0;
@@ -1221,8 +1246,8 @@ const EnrichmentEngine = {
       if (isGoodDebt) {
         moves.push({
           action: 'Keep using your credit card strategically for rewards',
-          annualImpact: Math.round(totalBalance * 0.02),
-          monthlyImpact: Math.round(totalBalance * 0.02 / 12),
+          annualImpact: Math.round(totalDebtBalance * 0.02),
+          monthlyImpact: Math.round(totalDebtBalance * 0.02 / 12),
           effort: 'low',
           category: 'savings',
           merchants: debtMerchants,
@@ -1231,10 +1256,13 @@ const EnrichmentEngine = {
           effect: 'Continue earning rewards on responsible credit card use.',
         });
       } else {
-        const overpay = Math.round(Math.min(p.surplus * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
         const singleDebt = connectedDebts[0];
         const singleAPR = (singleDebt as any)?.interest_rate || T.defaultDebtAPR;
         const singleBal = singleDebt?.outstanding_balance || 0;
+        // Dynamic overpay cap: higher APR = more aggressive (up to 70% of surplus)
+        const overpayCap = singleAPR > 0.15 ? 500 : singleAPR > 0.08 ? 350 : T.singleDebtOverpayCap;
+        const overpayPct = singleAPR > 0.15 ? 0.7 : T.singleDebtOverpayMaxSurplusPct;
+        const overpay = claimSurplus(Math.round(Math.min(p.surplus * overpayPct, overpayCap)));
         const interestSaved = calcInterestSaved(singleBal, singleAPR, p.debtPayments, p.debtPayments + overpay);
         const debtSaving = Math.round(interestSaved / 12) || Math.round(p.debtPayments * T.singleDebtOverpayPct);
         moves.push({
@@ -1253,6 +1281,27 @@ const EnrichmentEngine = {
             startValue: Math.round(singleDebt.outstanding_balance || 0),
             targetValue: 0,
           }] : undefined,
+        });
+      }
+    }
+
+    // Balance transfer — for users with high-APR credit card debt
+    // Moving to a 0% promotional card is often the single highest ROI move
+    if (actualDebtCount >= 1 && !isGoodDebt && highestDebtAPR > 0.15 && totalDebtBalance > 500) {
+      const interestAvoidedPerYear = Math.round(totalDebtBalance * highestDebtAPR);
+      const transferFee = Math.round(totalDebtBalance * 0.03); // typical 3% fee
+      const netSaving = interestAvoidedPerYear - transferFee;
+      if (netSaving > 100) {
+        moves.push({
+          action: `Transfer \u00a3${totalDebtBalance.toLocaleString()} to a 0% balance transfer card`,
+          annualImpact: netSaving,
+          monthlyImpact: Math.round(netSaving / 12),
+          effort: 'medium',
+          category: 'debt',
+          merchants: [],
+          strategy: `You're paying ${Math.round(highestDebtAPR * 100)}% APR on \u00a3${totalDebtBalance.toLocaleString()}. A 0% balance transfer card (typically 12-21 months, ~3% fee) would save \u00a3${netSaving}/year in interest.`,
+          steps: ['Check your eligibility for 0% balance transfer cards (soft search won\'t affect credit score)', 'Compare transfer period length vs your repayment timeline', `Set up \u00a3${Math.round(totalDebtBalance / 18)}/month repayments to clear within the 0% period`, 'I\'ll flag when the promotional period is ending'],
+          effect: `Saves \u00a3${netSaving}/year in interest — every pound goes to clearing the balance instead.`,
         });
       }
     }
@@ -1285,35 +1334,49 @@ const EnrichmentEngine = {
     }
 
     // Emergency buffer — adjusted for life situation
+    // When expensive debt exists (>8% APR), only build a minimal £500-1000 buffer
+    // before directing surplus to debt. Full emergency fund comes after debt is cleared.
     if (m.savingsRate < T.bufferSavingsRateThreshold && p.surplus > 0) {
-      const autoSave = Math.round(p.surplus * T.bufferAutoSavePct);
-      const bufferMonths = isSelfEmployed ? 6 : (isSingleParent || hasChildren) ? 3 : 1;
-      const bufferTarget = Math.max(T.bufferMinTarget, Math.round(p.spending * bufferMonths));
-      const monthsToTarget = autoSave > 0 ? Math.ceil(bufferTarget / autoSave) : 0;
-      const reason = isSelfEmployed
-        ? 'As self-employed, you need a larger runway for income gaps.'
-        : isSingleParent
-          ? 'As a single parent, a bigger buffer protects your family from surprises.'
-          : hasChildren
-            ? 'With children, unexpected costs come up — a solid buffer is essential.'
-            : '';
-      moves.push({
-        action: `Auto-save \u00a3${autoSave}/month to build \u00a3${bufferTarget} buffer in ${monthsToTarget} months`,
-        annualImpact: autoSave * 12,
-        monthlyImpact: autoSave,
-        effort: 'low',
-        category: 'buffer',
-        merchants: [],
-        strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Monthly surplus is \u00a3${Math.round(p.surplus)}.${reason ? ' ' + reason : ''} Target: ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses.`,
-        steps: ['Set aside this amount on payday — I\'ll track it', `Target ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses (\u00a3${bufferTarget})`, 'I\'ll update your progress each month'],
-        effect: `\u00a3${bufferTarget} safety net in ${monthsToTarget} months.`,
-        subGoals: [{
-          type: 'buffer_build',
-          target: 'Emergency buffer',
-          startValue: 0,
-          targetValue: bufferTarget,
-        }],
-      });
+      const bufferMonths = hasExpensiveDebt
+        ? 0 // minimal buffer only — don't build full fund while expensive debt bleeds
+        : isSelfEmployed ? 6 : (isSingleParent || hasChildren) ? 3 : 1;
+      const bufferTarget = hasExpensiveDebt
+        ? T.bufferMinTarget // £500 minimal buffer when expensive debt exists
+        : Math.max(T.bufferMinTarget, Math.round(p.spending * bufferMonths));
+      // When expensive debt exists, limit buffer to 20% of surplus (rest goes to debt)
+      const bufferPct = hasExpensiveDebt ? 0.2 : T.bufferAutoSavePct;
+      const autoSave = claimSurplus(Math.round(p.surplus * bufferPct));
+      if (autoSave > 0) {
+        const monthsToTarget = autoSave > 0 ? Math.ceil(bufferTarget / autoSave) : 0;
+        const reason = hasExpensiveDebt
+          ? `Minimal buffer while clearing ${Math.round(highestDebtAPR * 100)}% APR debt — full emergency fund comes after.`
+          : isSelfEmployed
+            ? 'As self-employed, you need a larger runway for income gaps.'
+            : isSingleParent
+              ? 'As a single parent, a bigger buffer protects your family from surprises.'
+              : hasChildren
+                ? 'With children, unexpected costs come up — a solid buffer is essential.'
+                : '';
+        moves.push({
+          action: `Auto-save \u00a3${autoSave}/month to build \u00a3${bufferTarget} buffer in ${monthsToTarget} months`,
+          annualImpact: autoSave * 12,
+          monthlyImpact: autoSave,
+          effort: 'low',
+          category: 'buffer',
+          merchants: [],
+          strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Monthly surplus is \u00a3${Math.round(p.surplus)}.${reason ? ' ' + reason : ''}${hasExpensiveDebt ? '' : ` Target: ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses.`}`,
+          steps: hasExpensiveDebt
+            ? ['Build a minimal \u00a3500-1,000 safety net first', 'Then redirect all surplus to debt repayment', 'Full emergency fund comes after expensive debt is cleared']
+            : ['Set aside this amount on payday — I\'ll track it', `Target ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses (\u00a3${bufferTarget})`, 'I\'ll update your progress each month'],
+          effect: `\u00a3${bufferTarget} safety net in ${monthsToTarget} months.`,
+          subGoals: [{
+            type: 'buffer_build',
+            target: 'Emergency buffer',
+            startValue: 0,
+            targetValue: bufferTarget,
+          }],
+        });
+      }
     }
 
     // High savers
@@ -1341,7 +1404,7 @@ const EnrichmentEngine = {
 
     // Coffee
     if (m.coffeeAndCafes > T.coffeeMin) {
-      const saving = Math.round(m.coffeeAndCafes * T.coffeeCutPct);
+      const saving = Math.round(m.coffeeAndCafes * Math.min(T.coffeeCutPct * cutMultiplier, 0.7));
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
       moves.push({
         action: `Halve caf\u00e9 spending from \u00a3${Math.round(m.coffeeAndCafes)} to \u00a3${Math.round(m.coffeeAndCafes - saving)}/month`,
@@ -1387,7 +1450,17 @@ const EnrichmentEngine = {
     }
 
     if (havingBaby && p.surplus > 0) {
-      const parentalRunway = Math.round(p.spending * 3);
+      // Model statutory maternity pay: 6 weeks at 90% + 33 weeks at ~£184/week (2026 rate)
+      const weeklyIncome = p.income * 12 / 52;
+      const statutoryWeeklyRate = 184; // UK statutory rate
+      const highPayWeeks = 6;
+      const lowPayWeeks = 33;
+      const highPay = Math.min(weeklyIncome * 0.9, weeklyIncome) * highPayWeeks;
+      const lowPay = Math.min(statutoryWeeklyRate, weeklyIncome * 0.9) * lowPayWeeks;
+      const totalStatutory = highPay + lowPay;
+      const totalExpensesDuringLeave = p.spending * (highPayWeeks + lowPayWeeks) / 4.33;
+      const shortfall = Math.max(0, Math.round(totalExpensesDuringLeave - totalStatutory));
+      const parentalRunway = Math.max(Math.round(p.spending * 3), shortfall);
       moves.push({
         action: `Build a \u00a3${parentalRunway.toLocaleString()} parental leave runway`,
         annualImpact: Math.round(parentalRunway),
@@ -1395,9 +1468,9 @@ const EnrichmentEngine = {
         effort: 'medium',
         category: 'buffer',
         merchants: [],
-        strategy: 'With a baby on the way, you\'ll want 3 months of expenses saved to cover reduced income during parental leave.',
-        steps: ['Calculate your expected statutory/employer maternity/paternity pay', 'Work out the monthly shortfall vs current spending', 'Set aside the difference now while you can', 'I\'ll model the income change for you'],
-        effect: `\u00a3${parentalRunway.toLocaleString()} runway covers 3 months of expenses.`,
+        strategy: `With a baby on the way, statutory pay covers ~\u00a3${Math.round(totalStatutory).toLocaleString()} over 39 weeks. Your spending shortfall is ~\u00a3${shortfall.toLocaleString()}. This runway covers the gap.`,
+        steps: ['Check your employer\'s maternity/paternity policy — many pay above statutory', 'Work out the monthly shortfall vs current spending', 'Set aside the difference now while you can', 'I\'ll model the income change for you'],
+        effect: `\u00a3${parentalRunway.toLocaleString()} runway covers the income gap during leave.`,
         subGoals: [{
           type: 'buffer_build',
           target: 'Parental leave runway',
@@ -1440,6 +1513,26 @@ const EnrichmentEngine = {
         strategy: 'As self-employed, your tax isn\'t deducted automatically. Setting aside 25% prevents a January surprise.',
         steps: ['Open a separate savings account for tax', 'Transfer 25% of every payment received', 'I\'ll track your tax reserve vs estimated liability'],
         effect: 'No tax bill shock — always prepared for self-assessment.',
+      });
+    }
+
+    // ── Employer pension match — available to ALL employed users ──
+    // This is guaranteed 100% return (employer matches your contribution).
+    // Should rank #1 regardless of savings rate — it's free money.
+    const isEmployed = !isSelfEmployed && !isStudent && p.income > 1500;
+    if (isEmployed && p.surplus > 0 && !(hasExpensiveDebt && highestDebtAPR > 0.20)) {
+      // Suppress only if debt APR > 20% (credit card territory) — employer match still beats most debt
+      const matchAmount = Math.round(p.income * 0.05); // assume 5% match
+      moves.push({
+        action: `Ensure you're getting your full employer pension match (\u00a3${matchAmount}/month)`,
+        annualImpact: matchAmount * 12,
+        monthlyImpact: matchAmount,
+        effort: 'low',
+        category: 'invest',
+        merchants: [],
+        strategy: `If your employer matches pension contributions (typically 3-5% of salary), contributing below the match threshold means leaving free money on the table. A 5% match is a guaranteed 100% return on your contribution.`,
+        steps: ['Check your employer\'s pension matching policy', 'Increase contributions to at least the match threshold', 'Consider salary sacrifice for additional NI savings', 'I\'ll factor the pension contribution into your surplus'],
+        effect: `Up to \u00a3${(matchAmount * 12).toLocaleString()}/year in free employer contributions.`,
       });
     }
 

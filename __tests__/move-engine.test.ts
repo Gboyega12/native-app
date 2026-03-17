@@ -122,7 +122,7 @@ describe('determineFlowchartPosition', () => {
     expect(result.priority).toBe('debt');
   });
 
-  it('returns level 4 (clear high-interest debt) for users with debt and payments > 50', () => {
+  it('returns level 4 (clear remaining debt) for users with non-expensive debt and payments > 100', () => {
     const profile = makeProfile({
       monthly: { surplus: 300, income: 2500, spending: 2200, debtPayments: 150 },
       metrics: { savingsRate: 12, debtAccountCount: 1, debtPayments: 150 },
@@ -130,6 +130,19 @@ describe('determineFlowchartPosition', () => {
     const goals = { current_situation: 'in_debt', one_year_goal: 'clear_debt', two_year_goal: 'save_target' };
     const result = determineFlowchartPosition(profile, goals);
     expect(result.level).toBe(4);
+    expect(result.priority).toBe('debt');
+    expect(result.label).toBe('Clear remaining debt');
+  });
+
+  it('returns level 3 (clear high-interest debt) when expensive debt exists', () => {
+    const profile = makeProfile({
+      monthly: { surplus: 300, income: 2500, spending: 2200, debtPayments: 150 },
+      metrics: { savingsRate: 12, debtAccountCount: 1, debtPayments: 150 },
+    });
+    const goals = { current_situation: 'in_debt', one_year_goal: 'clear_debt', two_year_goal: 'save_target' };
+    const debtAccounts = [{ outstanding_balance: 5000, interest_rate: 0.199, credit_limit: 5000 }];
+    const result = determineFlowchartPosition(profile, goals, debtAccounts);
+    expect(result.level).toBe(3);
     expect(result.priority).toBe('debt');
     expect(result.label).toBe('Clear high-interest debt');
   });

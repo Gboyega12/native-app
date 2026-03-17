@@ -8,7 +8,7 @@ import {
   calcMoveConsistency,
   type VolatilityProfile,
 } from './monte-carlo';
-import { calcMoveMarginalUtility } from './liquidity-engine';
+import { calcMoveMarginalUtility, calcOpportunityCostMultiplier } from './liquidity-engine';
 
 const GOAL_LABELS: Record<string, string> = {
   clear_debt: 'Clear all debt',
@@ -51,6 +51,13 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null, de
   const overallUtil = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : -1;
   const isGoodDebt = overallUtil >= 0 && overallUtil <= 30;
 
+  // Check for expensive debt (APR > 8%)
+  const highestAPR = debts.reduce((max: number, d: any) => {
+    const apr = d.interest_rate || 0;
+    return apr > max ? apr : max;
+  }, 0);
+  const hasExpensiveDebt = debtCount >= 1 && !isGoodDebt && highestAPR > 0.08;
+
   // Level 0: Spending more than earning — must break even first
   if (surplus < 0) {
     return { level: 0, label: 'Break even', priority: 'break_even' };
@@ -61,18 +68,24 @@ export function determineFlowchartPosition(profile: any, goals: Goals | null, de
     return { level: 1, label: 'Get debt support', priority: 'debt' };
   }
 
-  // Level 2: No buffer — build a 1-month emergency fund
-  if (savingsRate < 5) {
+  // Level 2: Tiny/no buffer AND no expensive debt — build £1k buffer first
+  // But if user has expensive debt (>8%), skip buffer and attack debt (UKPF Step 2)
+  if (savingsRate < 5 && !hasExpensiveDebt) {
     return { level: 2, label: 'Build a buffer', priority: 'buffer' };
   }
 
-  // Level 4: High-interest debt (credit cards, BNPL) — pay it off
-  // Skip this level if user has good debt (low utilization, paying on time for rewards)
-  if (debtCount >= 1 && !isGoodDebt && (situation === 'in_debt' || debtPayments > 100)) {
-    return { level: 4, label: 'Clear high-interest debt', priority: 'debt' };
+  // Level 3: High-interest debt (>8% APR) — clear it before building full emergency fund
+  // This is the mathematical priority: 20%+ APR debt costs more than any savings earn
+  if (hasExpensiveDebt && (situation === 'in_debt' || debtPayments > 0)) {
+    return { level: 3, label: 'Clear high-interest debt', priority: 'debt' };
   }
 
-  // Level 5: Buffer exists but not a full emergency fund (3 months)
+  // Level 4: Non-expensive debt still present — pay it off
+  if (debtCount >= 1 && !isGoodDebt && (situation === 'in_debt' || debtPayments > 100)) {
+    return { level: 4, label: 'Clear remaining debt', priority: 'debt' };
+  }
+
+  // Level 5: Buffer exists but not a full emergency fund (3-6 months)
   if (savingsRate < 15) {
     return { level: 5, label: 'Full emergency fund', priority: 'buffer' };
   }
@@ -160,6 +173,11 @@ export function rankMoves(
     );
     score *= marginal;
 
+    // Opportunity cost multiplier — compares effective return to risk-free rate
+    // Makes 29.9% debt rank ~7x higher than 3.9% debt
+    const opportunityCost = calcOpportunityCostMultiplier(move, profile as FinancialProfile, debtAccounts);
+    score *= opportunityCost;
+
     // UKPF tiebreaker — small boost for matching the user's flowchart priority
     const moveCategory = move.category || 'spending';
     if (moveCategory === ukpf.priority) {
@@ -180,8 +198,10 @@ export function rankMoves(
       const mc = calcMoveConsistency(move, vol, 456 + idx);
       riskAdjustedImpact = mc.expectedMonthly;
       consistencyScore = mc.consistencyScore;
-      // Blend: 70% marginal-utility score + 30% consistency-adjusted score
-      score = score * 0.7 + (mc.expectedMonthly / 100) * mc.consistencyScore * 0.3 * 100;
+      // Blend: keep score in same units — multiply by consistency factor (0.7-1.0)
+      // High consistency (0.95) → barely penalized; low consistency (0.3) → score × 0.79
+      const consistencyFactor = 0.7 + 0.3 * (mc.consistencyScore || 0.5);
+      score *= consistencyFactor;
     }
 
     // Calculate trajectory for this move (with Monte Carlo if profile available)
