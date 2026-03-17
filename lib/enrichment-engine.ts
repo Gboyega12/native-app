@@ -56,6 +56,7 @@ export type TransactionOverride = {
   match_description: string;
   category: string;
   is_essential: boolean;
+  direction?: 'credit' | 'debit';
 };
 
 const EnrichmentEngine = {
