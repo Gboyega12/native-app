@@ -723,45 +723,32 @@ const EnrichmentEngine = {
       return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt, recentAmounts, amountSD, variability };
     })
     .filter((src) => {
-      // Known salary/employer/benefit keywords → always income
-      if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
-
       // Bidirectional transfer detection: if the same name appears as both
       // a credit source AND a debit recipient, it's likely an internal transfer
-      // between the user's own accounts — NOT income.
+      // between the user's own accounts — NOT income. Check this first.
       const srcNorm = src.source.toLowerCase().trim();
       if (outboundRecipients.has(srcNorm)) return false;
 
-      // Person-name credits require much stronger evidence to be income.
-      // Regular P2P credits (friend paying you back monthly) should NOT inflate income.
-      // Genuine employment via person name (sole trader) will have salary keywords
-      // and pass Gate 0 above.
-      if (isPersonTransfer(src.source)) {
-        if (src.frequency === 'monthly' && src.variability < 0.15 && src.count >= 4) return true;
-        return false;
-      }
+      // Income is strictly from businesses and government — never person names.
+      // Real employers always have a business indicator: "Compass Co Ltd",
+      // "Incubeta Ltd", "Scale Ai Ltd", "NHS", "DWP", etc.
+      //
+      // Gate: source must match salary keywords, employer patterns (ltd/plc/
+      // limited/inc/corp/llp/council/nhs/university), or benefit patterns
+      // (hmrc/dwp/universal credit/etc). This catches all UK pay cycles:
+      // weekly, fortnightly, and monthly.
+      if (!src.isSalary && !isLikelyIncomeCredit(src.source)) return false;
 
-      // Regular credits: require 3+ occurrences with a recognisable frequency.
-      // Variability is NOT a gate — salary with overtime, commission, or tips
-      // can have high CV but is still real income. The income volatility system
-      // downstream (incomeFloor) handles budgeting for variable earners.
-      if (
-        src.frequency !== 'irregular' &&
-        src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount &&
-        src.count >= INCOME_THRESHOLDS.minRegularCount
-      ) return true;
+      // Source has business/employer indicators — now validate it's regular enough
+      // to be actual income (not a one-off company refund or rebate).
+      // Accept any recognised frequency (weekly/fortnightly/monthly) with 2+ occurrences,
+      // OR 3+ occurrences at any interval with a meaningful amount.
+      if (src.frequency !== 'irregular' && src.count >= 2) return true;
+      if (src.count >= INCOME_THRESHOLDS.minRegularCount && src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount) return true;
 
-      // Large recurring credits: require 3+ with regular intervals
-      if (
-        src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin &&
-        src.count >= INCOME_THRESHOLDS.largeCreditMinCount &&
-        src.avgInterval >= INCOME_THRESHOLDS.largeCreditIntervalMin &&
-        src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax
-      ) return true;
-
-      // One-off large credits below windfall threshold with only 1-2 occurrences
-      // are NOT income (likely refunds, gifts, or one-off transfers)
-      if (src.count <= 2 && src.avgAmount >= INCOME_THRESHOLDS.windfallMin) return false;
+      // Single occurrence from a business — could be a one-off bonus or refund.
+      // Only count if it's a large amount that looks like a salary payment.
+      if (src.count === 1 && src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin) return true;
 
       return false;
     })

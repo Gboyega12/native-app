@@ -41,6 +41,13 @@
 - **Don't show users things the system already knows.** If enrichment + Claude AI classifies 98% of transactions correctly, auto-apply those results. Only surface truly unclassifiable items in review modals. Users can always re-categorize from the budget section.
 - **Preserve enrichment metadata through the pipeline.** `TransactionDetail` originally stripped `confidence` and `classifiedBy` when mapping from `EnrichedTransaction`. Without these fields, the dashboard can't distinguish auto-classifiable items from truly unresolved ones.
 
+## Enrichment Engine
+
+- **Income is strictly from businesses.** Only sources matching employer patterns (`ltd`, `plc`, `limited`, `inc`, `corp`, `llp`, `council`, `nhs`, `university`) or salary/benefit keywords should qualify as income. No person name should ever count as income, regardless of regularity. People get paid weekly, fortnightly, AND monthly — don't restrict frequency.
+- **Person-name heuristic must require positive evidence.** "2-4 alphabetic words = person" is too aggressive — "TASTY JERK", "FISH SHACK", "GREEN DOOR" all false-positive. Require at least one word to be in a known first-names list.
+- **Transfer method markers trump keyword classification.** When a description contains "faster payment", "bank transfer", etc. AND matches a person name, the transfer signal is stronger than a coincidental keyword match (e.g. "internet" in "FASTER PAYMENT TO JOHN INTERNET").
+- **Adding models without fixing the classification priority order creates cascading errors.** The Bayesian ensemble, learned patterns, and amount heuristics are all good additions — but they interact with the person-name heuristic and keyword classifier in unexpected ways. Always trace the full pipeline for edge cases before adding new classification layers.
+
 ## Workflow Compliance
 
 - **Always write plan to `tasks/todo.md` BEFORE implementing.** Even when using inline TodoWrite for progress tracking, the spec should live in `tasks/todo.md` with checkable items.
