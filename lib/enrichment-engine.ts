@@ -1,5 +1,5 @@
 import {
-  matchMerchant, fuzzyMatchMerchant, isPersonTransfer,
+  matchMerchant, fuzzyMatchMerchant, isPersonTransfer, isSelfTransfer,
   isLikelyIncomeCredit, matchesSalaryKeywords,
 } from './merchant-db';
 import { classifyTransaction } from './classifier';
@@ -63,7 +63,7 @@ export type TransactionOverride = {
 };
 
 const EnrichmentEngine = {
-  enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[], identity?: any): EnrichmentResult {
+  enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[], identity?: any, selfName?: string): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
     // Pre-pass: identify regular person-name senders (likely partner/shared income)
     // so they aren't excluded as one-off transfers during enrichment
@@ -80,7 +80,7 @@ const EnrichmentEngine = {
         .map(([key]) => key),
     );
 
-    const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides, regularPersonSenders));
+    const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides, regularPersonSenders, selfName));
 
     // Reclassify credit card payoffs for full-payers.
     // Users who use credit cards for points and pay off in full each month
@@ -236,7 +236,7 @@ const EnrichmentEngine = {
     return transactions;
   },
 
-  enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[], regularPersonSenders?: Set<string>): EnrichedTransaction {
+  enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[], regularPersonSenders?: Set<string>, selfName?: string): EnrichedTransaction {
     // Check user overrides first — try raw, normalised, and normalised-to-normalised matching.
     // Phase 3 learning loop: overrides saved for "TESCO EXPRESS LONDON GB" should also
     // catch "TESCO STORES 4521 GB" via normalised substring matching.
@@ -280,7 +280,9 @@ const EnrichmentEngine = {
 
     const normalised = normaliseDescription(tx.description);
     const merchantMatch = matchMerchant(tx.description, normalised);
-    let isPerson = isPersonTransfer(tx.description);
+    // Self-transfer detection: check before person transfer to exclude user's own name
+    const selfTransfer = isSelfTransfer(tx.description, selfName);
+    let isPerson = selfTransfer ? false : isPersonTransfer(tx.description);
     const isCredit = tx.amount > 0;
     const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
     const isSavings = !!(tx.amount < 0 && tx.description.toLowerCase().match(/\bsaving|isa\b|premium bond|ns&i/i));
@@ -423,6 +425,25 @@ const EnrichmentEngine = {
     // even when no merchant-DB entry exists.
     const detectedBNPL = category === 'BNPL';
     const detectedDebt = category === 'Debt Payments';
+
+    // Self-transfers: override category and exclude from budget math
+    if (selfTransfer && classifiedBy !== 'user_override') {
+      return {
+        ...tx,
+        merchant: tx.description,
+        category: 'Internal Transfer',
+        isEssential: false,
+        isSubscription: false,
+        isBNPL: false,
+        isDebt: false,
+        isIncome: false,
+        isTransfer: true,
+        isRefund: false,
+        isSavings: false,
+        confidence: 'high' as const,
+        classifiedBy: 'keyword' as const,
+      };
+    }
 
     return {
       ...tx,
@@ -669,7 +690,14 @@ const EnrichmentEngine = {
         const variance = amounts.reduce((s, a) => s + Math.pow(a - mean, 2), 0) / amounts.length;
         variability = mean > 0 ? Math.sqrt(variance) / mean : 0;
       }
-      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt, recentAmounts, variability };
+      // Map enriched transactions to TransactionDetail for income card embedding
+      const transactions = sorted.map((t) => ({
+        date: t.date,
+        merchant: t.merchant || t.description,
+        description: t.description,
+        amount: t.amount,
+      }));
+      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt, recentAmounts, variability, transactions };
     })
     .filter((src) => {
       // Known salary/employer/benefit keywords → always income
@@ -1164,6 +1192,16 @@ const EnrichmentEngine = {
     const totalDebtBalance = connectedDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
     const hasExpensiveDebt = highestDebtAPR > 0.08 && totalDebtBalance > 0;
 
+    // ── Debt-first surplus pre-reservation ──
+    // When APR > 15%, pre-reserve 70% of surplus for debt repayment (min £0, max £500).
+    // Other moves compete for the remaining 30%. Debt claimSurplus draws from reservation first.
+    const hasVeryExpensiveDebt = highestDebtAPR > 0.15 && totalDebtBalance > 0;
+    let debtReservation = 0;
+    if (hasVeryExpensiveDebt) {
+      debtReservation = Math.min(Math.round(remainingSurplus * 0.7), 500);
+      remainingSurplus -= debtReservation; // non-debt moves see reduced surplus
+    }
+
     // ── Surplus-aware cut modifier ──
     // Low surplus = more aggressive cuts needed; high surplus = gentler cuts
     const cutMultiplier = p.surplus < 100 ? 1.4
@@ -1356,6 +1394,8 @@ const EnrichmentEngine = {
         // Claim surplus for debt: higher APR = more aggressive allocation
         const monthlyPayment = p.debtPayments / actualDebtCount; // avg current payment per debt
         const debtUrgency = hasExpensiveDebt ? 0.7 : 0.5; // 70% of surplus for expensive debt
+        // Restore debt reservation back into surplus pool before debt claims
+        remainingSurplus += debtReservation;
         const surplusForDebt = claimSurplus(Math.round(Math.min(p.surplus * debtUrgency, 500)));
         let totalInterestSaved = 0;
         let totalMonthlyInterestCost = 0;
@@ -1445,6 +1485,9 @@ const EnrichmentEngine = {
         // Dynamic overpay cap: higher APR = more aggressive (up to 70% of surplus)
         const overpayCap = singleAPR > 0.15 ? 500 : singleAPR > 0.08 ? 350 : T.singleDebtOverpayCap;
         const overpayPct = singleAPR > 0.15 ? 0.7 : T.singleDebtOverpayMaxSurplusPct;
+        // Restore debt reservation back into surplus pool before single-debt claims
+        remainingSurplus += debtReservation;
+        debtReservation = 0; // consumed — prevent double-restore
         const overpay = claimSurplus(Math.round(Math.min(p.surplus * overpayPct, overpayCap)));
         const interestSaved = calcInterestSaved(singleBal, singleAPR, p.debtPayments, p.debtPayments + overpay);
         const debtSaving = Math.round(interestSaved / 12) || Math.round(p.debtPayments * T.singleDebtOverpayPct);

@@ -84,6 +84,15 @@ export default function Home() {
   const overridesSavedAt = useRef<number>(0); // Timestamp of last override save — syncs started before this are rejected
   const overriddenMerchants = useRef<Set<string>>(new Set()); // Merchant keys categorised by user — reject sync results that still show these in "Other"
   const [savedOverrideKeys, setSavedOverrideKeys] = useState<Set<string>>(new Set()); // Persisted override match_descriptions from Supabase — used to filter unresolvedGroups
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const toggleCategory = useCallback((key: string) => {
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
   const [retriesExhausted, setRetriesExhausted] = useState(false);
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const [heroPage, setHeroPage] = useState(0);

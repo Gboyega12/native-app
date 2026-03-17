@@ -68,6 +68,8 @@ export interface IncomeSource {
   recentAmounts?: number[];
   /** Coefficient of variation (SD / mean) — higher = more variable */
   variability?: number;
+  /** Individual transactions behind this income source */
+  transactions?: TransactionDetail[];
 }
 
 export interface FinancialProfile {

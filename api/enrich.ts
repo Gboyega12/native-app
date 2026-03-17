@@ -162,8 +162,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const identityData = idRes.data || null;
     const goals = goalsRes.data || null;
 
+    // Fetch user's full name for self-transfer detection
+    let selfName: string | undefined;
+    try {
+      const { data: { user: authUser } } = await admin.auth.admin.getUserById(userId);
+      selfName = authUser?.user_metadata?.full_name;
+    } catch { /* non-critical — proceed without self-transfer detection */ }
+
     // ── 3. Enrich ──
-    const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData);
+    const result = EnrichmentEngine.enrich(csvData, overrides, debtAccountsData, identityData, selfName);
     if (result.enrichedTransactions.length === 0) {
       return res.json({ success: false, reason: 'no_enriched_transactions' });
     }

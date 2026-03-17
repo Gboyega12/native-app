@@ -527,6 +527,40 @@ const BRAND_INDICATORS = [
   'pay', 'bill', 'fee', 'charge',
 ];
 
+/**
+ * Checks if a transaction description matches the user's own name,
+ * indicating an internal transfer between the user's own accounts.
+ * Handles variations: "J SMITH", "JOHN SMITH", "MR J SMITH", "SMITH J"
+ */
+export function isSelfTransfer(description: string, selfName?: string): boolean {
+  if (!selfName || selfName.trim().length < 3) return false;
+
+  const lower = description.toLowerCase().trim()
+    .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
+    .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b|\bfaster payment\b|\bbank transfer\b|\btransfer to\b|\btransfer from\b|\bstanding order\b/g, '')
+    .trim();
+
+  const selfParts = selfName.toLowerCase().trim()
+    .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
+    .split(/\s+/)
+    .filter((w) => w.length >= 1);
+
+  if (selfParts.length < 2) return false;
+
+  const selfFirst = selfParts[0];
+  const selfLast = selfParts[selfParts.length - 1];
+  const descWords = lower.split(/\s+/).filter((w) => /^[a-z'-]+$/.test(w) && w.length >= 1);
+
+  // Last name must appear in the description
+  if (!descWords.some((w) => w === selfLast)) return false;
+
+  // First name or initial must also match
+  const hasFirstName = descWords.some((w) => w === selfFirst);
+  const hasInitial = descWords.some((w) => w.length === 1 && w === selfFirst[0]);
+
+  return hasFirstName || hasInitial;
+}
+
 export function isPersonTransfer(description: string): boolean {
   const lower = description.toLowerCase().trim();
 
