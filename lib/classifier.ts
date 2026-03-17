@@ -9,7 +9,7 @@
 //
 // This is the seam where a tree model / SLM can slot in later.
 
-import type { MerchantMatch } from './merchant-db.js';
+import type { MerchantMatch } from './merchant-db';
 
 export interface ClassificationResult {
   category: string;
@@ -78,23 +78,8 @@ const KEYWORD_RULES: KeywordRule[] = [
   // Catches common spending that the merchant DB doesn't cover.
 
   // Eating Out / Restaurants / Street food
-  { patterns: [
-    /\brestaurant\b/, /\bbistro\b/, /\bbrasserie\b/, /\bpizzeria\b/, /\bchippy\b/,
-    /\bfish\s*(?:&|and)\s*chips?\b/, /\btakeaway\b/, /\btake\s*away\b/, /\bgrill\b/, /\bkebab\b/,
-    /\bchicken\s*shop\b/, /\bfried\s*chicken\b/, /\bstreet\s*food\b/, /\bfood\s*truck\b/,
-    /\bburger\b/, /\bpizza\b/, /\bsushi\b/, /\bnoodle\b/,
-    /\bcurry\s*house\b/, /\bindian\s*(?:restaurant|kitchen)\b/,
-    /\bchinese\s*(?:restaurant|kitchen)\b/, /\bthai\s*(?:restaurant|kitchen)\b/,
-    // Cuisine / food words that catch independent restaurants
-    /\bjerk\b/, /\bwings?\b/, /\bbbq\b/, /\bbar\s*b\s*q\b/,
-    /\bdiner\b/, /\beatery\b/, /\bkitchen\b/, /\bcantina\b/, /\bcantine\b/,
-    /\btavern\b/, /\bparlour\b/, /\bparlor\b/, /\bchicken\b/,
-    /\bsteakhouse\b/, /\bsteak\s*house\b/, /\bribs?\b/,
-    /\bramen\b/, /\bpho\b/, /\bdim\s*sum\b/, /\bwok\b/, /\btandoori\b/,
-    /\bshisha\b/, /\bmeze\b/, /\bfalafel\b/, /\bgyros?\b/,
-    /\bgelato\b/, /\bcreperie\b/, /\bwaffle\b/,
-    /\bshack\b/, /\bfood\b/,
-  ], category: 'Eating Out', isEssential: false },
+  { patterns: [/\brestaurant\b/, /\bbistro\b/, /\bbrasserie\b/, /\bpizzeria\b/, /\bchippy\b/, /\bfish\s*(?:&|and)\s*chips?\b/, /\btakeaway\b/, /\btake\s*away\b/, /\bgrill\b/, /\bkebab\b/, /\bchicken\s*shop\b/, /\bfried\s*chicken\b/, /\bstreet\s*food\b/, /\bfood\s*truck\b/, /\bburger\b/, /\bpizza\b/, /\bsushi\b/, /\bnoodle\b/, /\bcurry\s*house\b/, /\bindian\s*(?:restaurant|kitchen)\b/, /\bchinese\s*(?:restaurant|kitchen)\b/, /\bthai\s*(?:restaurant|kitchen)\b/],
+    category: 'Eating Out', isEssential: false },
 
   // Coffee & Cafes
   { patterns: [/\bcafe\b/, /\bcaf[eé]\b/, /\bcoffee\b/, /\bespresso\b/, /\bbakery\b/, /\bpatisserie\b/],
@@ -139,22 +124,6 @@ const KEYWORD_RULES: KeywordRule[] = [
   // Pets
   { patterns: [/\bvet\b/, /\bveterinar\w*\b/, /\bpets?\s*at\s*home\b/, /\bpet\s*shop\b/, /\bkennel\b/],
     category: 'Pets', isEssential: false },
-
-  // Cash withdrawals
-  { patterns: [/\batm\b/, /\bcash\s*(?:withdrawal|machine|point)\b/, /\bwithdrawal\b/, /\bcashpoint\b/],
-    category: 'Cash', isEssential: false },
-
-  // Parking
-  { patterns: [/\bparking\b/, /\bcar\s*park\b/, /\bncp\b/, /\bringgo\b/, /\bjustpark\b/, /\bparkopedia\b/],
-    category: 'Transport', isEssential: false },
-
-  // Pharmacy
-  { patterns: [/\bpharmacy\b/, /\bchemist\b/, /\bdispensary\b/],
-    category: 'Health', isEssential: true },
-
-  // Markets / Groceries
-  { patterns: [/\bmarket\b/, /\bmkts?\b/, /\bfarm\s*shop\b/, /\bgreengrocers?\b/],
-    category: 'Groceries', isEssential: true },
 ];
 
 /**

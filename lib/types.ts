@@ -15,9 +15,6 @@ export interface EnrichedTransaction extends RawTransaction {
   isDebt: boolean;
   isIncome: boolean;
   isTransfer: boolean;
-  /** True when the description matches a person-name pattern (P2P payment).
-   *  Does NOT necessarily mean it's an internal transfer — see isTransfer. */
-  isPersonTransfer?: boolean;
   isRefund: boolean;
   isSavings: boolean;
   confidence: 'high' | 'medium' | 'low';
@@ -29,7 +26,7 @@ export interface EnrichedTransaction extends RawTransaction {
 
 export interface RecurringItem {
   merchant: string;
-  frequency: 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
+  frequency: 'weekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
   averageAmount: number;
   category: string;
   isSubscription: boolean;
@@ -47,9 +44,6 @@ export interface TransactionDetail {
   merchant: string;
   description: string;
   amount: number;
-  /** Preserved from enrichment so the dashboard can filter truly unclassifiable items */
-  confidence?: 'high' | 'medium' | 'low';
-  classifiedBy?: 'user_override' | 'merchant_db' | 'fuzzy_match' | 'keyword' | 'claude_ai' | 'default';
 }
 
 export interface BudgetCategory {
@@ -68,14 +62,8 @@ export interface IncomeSource {
   source: string;
   frequency: string;
   avgAmount: number;
-  /** Frequency-aware monthly normalisation (weekly × 4.33, fortnightly × 2.17, monthly × 1) */
   monthly: number;
-  /** Frequency-aware annual income (weekly × 52, fortnightly × 26, monthly × 12) */
-  annualIncome: number;
   isSalary: boolean;
-  /** Detection confidence: high (regular + low variability + 3+ data points),
-   *  medium (regular + fewer points), low (irregular or high variability) */
-  confidence: 'high' | 'medium' | 'low';
   /** Individual amounts observed for this source (most recent N periods) */
   recentAmounts?: number[];
   /** Standard deviation of payment amounts */
@@ -109,8 +97,6 @@ export interface FinancialProfile {
     discretionary: BudgetSection;
   };
   incomeSources: IncomeSource[];
-  /** Transfers (person-to-person, internal) — excluded from income/spending totals but visible in UI */
-  transfers: { date: string; merchant: string; description: string; amount: number; category: string }[];
   subscriptions: RecurringItem[];
   metrics: {
     savingsRate: number;
@@ -182,51 +168,20 @@ export interface Move {
   merchants?: string[];
   /** Structured sub-goals derived from real data at generation time */
   subGoals?: MoveSubGoal[];
-  /** Mathematical proof: human-readable breakdown showing exactly how the numbers were derived */
-  proof?: string;
-  /** Per-category spending CV (coefficient of variation) from month-to-month transaction data.
-   *  Attached by the enrichment engine for spending moves; used by Monte Carlo for follow-through. */
-  spendingCV?: number;
 }
 
 /**
  * Derive sub-goals from a Move. Returns the move's own subGoals if present,
  * otherwise synthesises them from the action text / merchants for older analyses.
  */
-/** Minimal debt account shape for hydration (avoids importing full DB type). */
-export interface DebtAccountInfo {
-  account_name: string;
-  account_type?: string;
-  outstanding_balance?: number;
-  interest_rate?: number;
-  minimum_payment?: number;
-}
-
-/**
- * Derive sub-goals from a Move. Returns the move's own subGoals if present,
- * otherwise synthesises them from the action text / merchants / debt accounts.
- *
- * When `debtAccounts` is provided, debt moves get real account names, balances,
- * and APRs instead of generic "Debt 1", "Debt 2" labels.
- */
-export function hydrateSubGoals(move: Move, debtAccounts?: DebtAccountInfo[]): MoveSubGoal[] | undefined {
+export function hydrateSubGoals(move: Move): MoveSubGoal[] | undefined {
   if (move.subGoals && move.subGoals.length > 0) return move.subGoals;
 
   const action = (move.action || '').toLowerCase();
   const cat = move.category;
 
-  // Debt moves — use real accounts when available
+  // Debt moves
   if (cat === 'debt') {
-    const activeDebts = (debtAccounts || []).filter((d) => (d.outstanding_balance || 0) > 0);
-    if (activeDebts.length > 0) {
-      return activeDebts.map((d) => ({
-        type: 'debt_clear' as const,
-        target: d.account_name || 'Debt',
-        startValue: Math.round(d.outstanding_balance || 0),
-        targetValue: 0,
-      }));
-    }
-    // Fallback: parse count from action text
     const countMatch = action.match(/(\d+)\s*debt/);
     if (countMatch) {
       const count = parseInt(countMatch[1], 10);
@@ -340,8 +295,6 @@ export interface Analysis {
   essential_gaps?: EssentialGap[];
   /** Bills verified from actual transaction data with exact amounts */
   verified_bills?: VerifiedBill[];
-  /** Person-to-person transfers (excluded from income/spending but visible in UI) */
-  person_transfers?: { date: string; merchant: string; description: string; amount: number; category: string }[];
 }
 
 // ── Goal Trajectory ──
@@ -411,7 +364,7 @@ export interface VerifiedBill {
   /** Verified monthly amount (annualized from actual payments) */
   monthlyAmount: number;
   /** How often the bill is paid */
-  frequency: 'weekly' | 'fortnightly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
+  frequency: 'weekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'irregular';
   /** Last payment amount seen */
   lastPayment: number;
   /** Date of last payment */
@@ -423,9 +376,9 @@ export interface VerifiedBill {
 export interface EnrichmentResult {
   profile: FinancialProfile;
   archetype: Archetype;
-  traits: { name: string; insight: string }[];
-  strengths: { label: string; detail: string }[];
-  blindSpots: { label: string; detail: string }[];
+  traits: string[];
+  strengths: string[];
+  blindSpots: string[];
   decisionScore: DecisionScore;
   decisionStack: Move[];
   behavioralPatterns: string[];
@@ -578,20 +531,7 @@ export type HousingStatus = 'renting' | 'mortgage' | 'with_family' | 'shared_hou
 export type FinancialExperience = 'beginner' | 'basics' | 'confident' | 'advanced';
 export type RiskAppetite = 'conservative' | 'balanced' | 'growth';
 export type Priority = 'security' | 'freedom' | 'growth' | 'experiences' | 'family';
-export type UpcomingEventType = 'moving' | 'baby' | 'wedding' | 'career_change' | 'first_home' | 'business' | 'retirement' | 'none';
-
-/** Backwards-compatible: a string event name OR a structured event with timeline */
-export type UpcomingEvent = UpcomingEventType | { type: UpcomingEventType; months_away?: number | null };
-
-/** Helper: extract event type from either string or structured event */
-export function getEventType(e: UpcomingEvent): UpcomingEventType {
-  return typeof e === 'string' ? e : e.type;
-}
-
-/** Helper: extract months_away from structured event (null if string or unset) */
-export function getEventMonths(e: UpcomingEvent): number | null {
-  return typeof e === 'object' && e.months_away != null ? e.months_away : null;
-}
+export type UpcomingEvent = 'moving' | 'baby' | 'wedding' | 'career_change' | 'first_home' | 'business' | 'retirement' | 'none';
 export type Dependent = 'none' | 'young_children' | 'teenagers' | 'elderly_parents' | 'pets';
 
 export interface UserIdentity {
@@ -608,7 +548,7 @@ export interface UserIdentity {
   updated_at?: string;
 }
 
-// ── Debt Account (synced from TrueLayer or manually added) ──
+// ── Debt Accounts (TrueLayer + manual) ──
 
 export interface DebtAccount {
   account_name?: string;

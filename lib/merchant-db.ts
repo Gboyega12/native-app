@@ -516,76 +516,16 @@ const BENEFIT_PATTERNS: RegExp[] = [
 ];
 
 // ── Person name detection ──
-// Detects P2P transfers by requiring at least one word to be a known first name.
-// Previous approach (2-4 alpha words = person) had too many false positives:
-// "TASTY JERK", "GREEN DOOR", "FISH SHACK" all triggered as person names.
-//
-// Now uses a curated list of ~500 common UK first names (ONS data).
-// False negatives (rare names) fall to "Other" — much less harmful than
-// false positives putting restaurants into Person-to-Person.
-
-// Top ~500 UK first names (ONS baby names + census frequency data).
-// Lowercase, deduplicated. Covers >95% of UK population by frequency.
-const COMMON_FIRST_NAMES = new Set([
-  // Male — most common
-  'oliver', 'george', 'harry', 'noah', 'jack', 'leo', 'arthur', 'muhammad', 'oscar', 'charlie',
-  'james', 'henry', 'william', 'thomas', 'alfie', 'theodore', 'freddie', 'archie', 'joshua', 'alexander',
-  'jacob', 'edward', 'finley', 'daniel', 'lucas', 'max', 'samuel', 'ethan', 'logan', 'benjamin',
-  'mason', 'harrison', 'sebastian', 'adam', 'luca', 'isaac', 'elijah', 'tommy', 'arlo', 'reuben',
-  'joseph', 'david', 'albie', 'toby', 'hugo', 'louie', 'dylan', 'jude', 'zachary', 'teddy',
-  'matthew', 'reggie', 'nathan', 'hunter', 'joel', 'caleb', 'roman', 'liam', 'francis', 'bobby',
-  'ryan', 'luke', 'connor', 'jaxon', 'ralph', 'elliot', 'dexter', 'felix', 'jasper', 'rory',
-  'michael', 'louis', 'rowan', 'ronnie', 'stanley', 'rupert', 'albert', 'miles', 'harvey', 'jesse',
-  'leon', 'blake', 'aaron', 'evan', 'riley', 'kai', 'jake', 'aiden', 'jayden', 'patrick',
-  'alex', 'finn', 'grayson', 'sonny', 'ollie', 'gabriel', 'ellis', 'otis', 'jaylen', 'peter',
-  'john', 'robert', 'richard', 'charles', 'stephen', 'paul', 'mark', 'andrew', 'steven', 'ian',
-  'stuart', 'christopher', 'timothy', 'simon', 'jonathan', 'keith', 'graham', 'alan', 'colin', 'brian',
-  'kevin', 'philip', 'barry', 'martin', 'gary', 'nigel', 'roger', 'tony', 'terry', 'derek',
-  'gordon', 'raymond', 'neil', 'craig', 'douglas', 'bruce', 'wayne', 'carl', 'sean', 'dean',
-  'antony', 'darren', 'lee', 'shaun', 'gavin', 'clive', 'dominic', 'frederick', 'gerald', 'howard',
-  'karl', 'laurence', 'marcus', 'noel', 'owen', 'reginald', 'ross', 'russell', 'vincent', 'warren',
-  'leslie', 'kenneth', 'dennis', 'malcolm', 'roy', 'clifford', 'ernest', 'cyril', 'cecil', 'harold',
-  'leonard', 'herbert', 'norman', 'walter', 'alfred', 'wilfred', 'sidney', 'bertie', 'ivor', 'reg',
-  'mohammad', 'ahmed', 'ali', 'omar', 'hassan', 'hussain', 'ibrahim', 'khalid', 'yusuf', 'tariq',
-  'abdul', 'bilal', 'hamza', 'imran', 'kamran', 'asif', 'naveed', 'shahid', 'sajid', 'wasim',
-  'harpreet', 'gurpreet', 'rajesh', 'suresh', 'ramesh', 'vikram', 'sanjay', 'amit', 'rohit', 'nikhil',
-  'arjun', 'ravi', 'anil', 'deepak', 'manoj', 'sachin', 'dinesh', 'pravin', 'raj', 'krishna',
-
-  // Female — most common
-  'olivia', 'amelia', 'isla', 'ava', 'ivy', 'freya', 'lily', 'florence', 'mia', 'willow',
-  'rosie', 'sophia', 'alice', 'isabelle', 'grace', 'daisy', 'sienna', 'poppy', 'emily', 'ella',
-  'evie', 'phoebe', 'harper', 'isabella', 'jessica', 'ruby', 'elsie', 'charlotte', 'matilda', 'penelope',
-  'aria', 'maisie', 'luna', 'emilia', 'bonnie', 'hallie', 'eva', 'millie', 'margot', 'iris',
-  'elizabeth', 'arabella', 'anna', 'orla', 'erin', 'imogen', 'molly', 'eliza', 'lottie', 'ada',
-  'esme', 'maya', 'harriet', 'thea', 'eleanor', 'violet', 'zara', 'robyn', 'layla', 'delilah',
-  'ottilie', 'lyla', 'aurora', 'nancy', 'clara', 'abigail', 'chloe', 'amber', 'heidi', 'beatrice',
-  'hannah', 'sarah', 'emma', 'rachel', 'rebecca', 'laura', 'gemma', 'helen', 'louise', 'claire',
-  'karen', 'nicola', 'michelle', 'samantha', 'lisa', 'sharon', 'tracey', 'dawn', 'joanne', 'donna',
-  'amanda', 'jane', 'ann', 'susan', 'margaret', 'patricia', 'jacqueline', 'christine', 'deborah', 'carol',
-  'janet', 'diane', 'wendy', 'pauline', 'denise', 'brenda', 'pamela', 'valerie', 'elaine', 'kathleen',
-  'maureen', 'irene', 'jean', 'barbara', 'dorothy', 'mary', 'betty', 'edna', 'doris', 'gladys',
-  'sheila', 'joan', 'joyce', 'marjorie', 'audrey', 'vera', 'winifred', 'elsie', 'beryl', 'hilda',
-  'maria', 'fatima', 'ayesha', 'aisha', 'amina', 'khadija', 'yasmin', 'nadia', 'shabana', 'nasreen',
-  'priya', 'anita', 'sunita', 'rekha', 'meena', 'neha', 'pooja', 'divya', 'kavita', 'sonia',
-  'nina', 'tanya', 'natasha', 'alison', 'victoria', 'caroline', 'catherine', 'fiona', 'julia', 'georgina',
-  'alexandra', 'philippa', 'rosemary', 'marilyn', 'constance', 'gertrude', 'agnes', 'mabel', 'nellie', 'ivy',
-
-  // Shortened / nicknames that commonly appear in bank transactions
-  'dave', 'mike', 'steve', 'chris', 'dan', 'matt', 'tom', 'rob', 'ben', 'sam',
-  'nick', 'phil', 'stu', 'ed', 'jim', 'joe', 'bob', 'ken', 'don', 'ron',
-  'sue', 'kate', 'liz', 'jen', 'meg', 'jo', 'sal', 'val', 'bev', 'kay',
-]);
+// Matches 1-3 alpha-only words with no brand/company indicators.
+// e.g. "John Smith", "Sarah Jane Williams", "Mr David Brown"
+// Excludes descriptions containing company suffixes, numbers, or brand patterns.
 
 const BRAND_INDICATORS = [
   'ltd', 'plc', 'limited', 'inc', 'corp', 'co.', 'co ',
   '.com', '.co.uk', '.org', 'www.',
   'store', 'shop', 'online', 'direct', 'club', 'plus',
-  'charge',
+  'pay', 'bill', 'fee', 'charge',
 ];
-
-// Short words that could false-positive on substring match (e.g. "pay" in "payment",
-// "bill" in "billy", "fee" in "coffee"). Use word-boundary regex instead.
-const BRAND_WORD_PATTERNS = [/\bpay\b/, /\bbill\b/, /\bfee\b/];
 
 export function isPersonTransfer(description: string): boolean {
   const lower = description.toLowerCase().trim();
@@ -603,37 +543,29 @@ export function isPersonTransfer(description: string): boolean {
 
   // "standing order" is only a transfer if the destination looks like a person,
   // not a company (e.g. "STANDING ORDER TO BRITISH GAS" is a bill, not a transfer)
-  if (/\bstanding order\b/.test(lower) && !BRAND_INDICATORS.some((b) => lower.includes(b)) && !BRAND_WORD_PATTERNS.some((rx) => rx.test(lower)) && !/\d/.test(lower)) {
+  if (/\bstanding order\b/.test(lower) && !BRAND_INDICATORS.some((b) => lower.includes(b)) && !/\d/.test(lower)) {
     return true;
   }
 
   // If it contains any brand/company indicators, it's NOT a person
   if (BRAND_INDICATORS.some((b) => lower.includes(b))) return false;
-  if (BRAND_WORD_PATTERNS.some((rx) => rx.test(lower))) return false;
 
-  // Clean the description: strip bank prefixes, method codes, and trailing references
+  // If it contains digits, it's likely a reference number — not a person name
+  if (/\d/.test(lower)) return false;
+
+  // Clean the description: strip common prefixes
   const cleaned = lower
     .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
-    .replace(/^(mobile-|bgc-?|fpo-?|sto-?|dd-?|so-?|tfr-?|cr-?|dr-?)\s*/i, '')
-    .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b|\bfpo\b|\bbgc\b|\bsto\b/g, '')
-    .replace(/\s+(ref|reference|no|id)[\s:]*[a-z0-9]+$/i, '') // strip trailing refs
-    .replace(/\s+\d[\w-]*$/i, '') // strip trailing reference numbers
+    .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b/g, '')
     .trim();
 
-  // If after cleaning there are still digits embedded in the core text, skip
-  if (/\d/.test(cleaned)) return false;
-
-  // Match 2-4 purely alphabetic words where at least one is a known first name.
-  // Previous approach (all alpha = person) had too many false positives:
-  // "TASTY JERK", "FISH SHACK", "GREEN DOOR" all matched as person names.
-  // Now requires a positive signal (known first name) rather than just absence of brand indicators.
+  // Match 2-3 purely alphabetic words (typical person name pattern).
+  // Single words are too ambiguous — "aldi", "pharmacy", "barbershop"
+  // would all false-positive. Require at least 2 words for a name match.
   const words = cleaned.split(/\s+/).filter(Boolean);
-  if (words.length >= 2 && words.length <= 4) {
-    const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w));
-    if (allAlpha) {
-      const hasFirstName = words.some((w) => COMMON_FIRST_NAMES.has(w));
-      if (hasFirstName) return true;
-    }
+  if (words.length >= 2 && words.length <= 3) {
+    const allAlpha = words.every((w) => /^[a-z'-]+$/.test(w) && w.length >= 2);
+    if (allAlpha) return true;
   }
 
   return false;
@@ -662,49 +594,6 @@ export function isLikelyIncomeCredit(description: string): boolean {
   return matchesSalaryKeywords(description)
     || matchesEmployerPattern(description)
     || matchesBenefitKeywords(description);
-}
-
-// ── Credit card / debt brand extraction ──
-// Matches an account name (e.g. "John's Capital One Card") against known
-// credit card and debt provider brands from the merchant DB.
-const DEBT_BRANDS: { patterns: string[]; brand: string }[] = [
-  { patterns: ['amex', 'american express', 'american exp'], brand: 'American Express' },
-  { patterns: ['barclaycard'], brand: 'Barclaycard' },
-  { patterns: ['mbna'], brand: 'MBNA' },
-  { patterns: ['capital one'], brand: 'Capital One' },
-  { patterns: ['vanquis'], brand: 'Vanquis' },
-  { patterns: ['aqua card', 'aqua credit', 'aqua'], brand: 'Aqua' },
-  { patterns: ['newday', 'new day'], brand: 'NewDay' },
-  { patterns: ['virgin money', 'virgin credit'], brand: 'Virgin Money' },
-  { patterns: ['tesco bank', 'tesco credit'], brand: 'Tesco Bank' },
-  { patterns: ['sainsburys bank', "sainsbury's bank"], brand: "Sainsbury's Bank" },
-  { patterns: ['black horse', 'bhfc'], brand: 'Black Horse Finance' },
-  { patterns: ['moneybarn'], brand: 'Moneybarn' },
-  { patterns: ['bmw financial', 'bmw finance'], brand: 'BMW Finance' },
-  { patterns: ['vw financial', 'vw finance', 'volkswagen finance'], brand: 'VW Finance' },
-  { patterns: ['mercedes finance', 'mercedes-benz finance'], brand: 'Mercedes Finance' },
-  { patterns: ['close brothers', 'close motor'], brand: 'Close Brothers' },
-  { patterns: ['motonovo', 'moto novo'], brand: 'MotoNovo' },
-  { patterns: ['hsbc'], brand: 'HSBC' },
-  { patterns: ['barclays'], brand: 'Barclays' },
-  { patterns: ['lloyds'], brand: 'Lloyds' },
-  { patterns: ['natwest'], brand: 'NatWest' },
-  { patterns: ['nationwide'], brand: 'Nationwide' },
-  { patterns: ['halifax'], brand: 'Halifax' },
-  { patterns: ['santander'], brand: 'Santander' },
-  { patterns: ['tsb'], brand: 'TSB' },
-  { patterns: ['monzo'], brand: 'Monzo' },
-  { patterns: ['starling'], brand: 'Starling' },
-  { patterns: ['revolut'], brand: 'Revolut' },
-  { patterns: ['chase'], brand: 'Chase' },
-];
-
-export function extractCreditCardBrand(accountName: string): string | null {
-  const lower = accountName.toLowerCase();
-  for (const { patterns, brand } of DEBT_BRANDS) {
-    if (patterns.some((p) => lower.includes(p))) return brand;
-  }
-  return null;
 }
 
 // ── Fuzzy Merchant Matching ──
@@ -752,6 +641,7 @@ export function fuzzyMatchMerchant(
 
   let bestMatch: MerchantMatch | null = null;
   let bestSimilarity = 0;
+  const MIN_SIMILARITY = 0.75;
   const MIN_PATTERN_LEN = 4;
 
   for (const text of candidates) {
@@ -761,21 +651,15 @@ export function fuzzyMatchMerchant(
       for (const pattern of entry.patterns) {
         if (pattern.length < MIN_PATTERN_LEN) continue;
 
-        // Dynamic threshold: longer patterns tolerate more variation
-        const minSimilarity = pattern.length >= 8 ? 0.65 : 0.75;
-
         for (const substr of substrings) {
           // Skip if length difference too large
           if (Math.abs(substr.length - pattern.length) > Math.max(2, pattern.length * 0.4)) continue;
 
-          // Word-reorder tolerance: "coffee house" matches "house coffee"
-          const sortedSubstr = substr.split(/\s+/).sort().join(' ');
-          const sortedPattern = pattern.split(/\s+/).sort().join(' ');
-          const similarity = sortedSubstr === sortedPattern
-            ? 1.0
-            : 1 - levenshtein(substr, pattern) / Math.max(substr.length, pattern.length);
+          const dist = levenshtein(substr, pattern);
+          const maxLen = Math.max(substr.length, pattern.length);
+          const similarity = 1 - dist / maxLen;
 
-          if (similarity > bestSimilarity && similarity >= minSimilarity) {
+          if (similarity > bestSimilarity && similarity >= MIN_SIMILARITY) {
             bestSimilarity = similarity;
             bestMatch = {
               merchant: entry.merchant,

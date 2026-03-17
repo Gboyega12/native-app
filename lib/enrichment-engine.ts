@@ -1,13 +1,11 @@
-import Papa from 'papaparse';
 import {
   matchMerchant, fuzzyMatchMerchant, isPersonTransfer,
-  isLikelyIncomeCredit, matchesSalaryKeywords, extractCreditCardBrand,
-} from './merchant-db.js';
-import { classifyTransaction } from './classifier.js';
-import { normaliseDescription } from './normalise.js';
-import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes.js';
-import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS, PLATFORM_FEES, DEFAULT_APR, defaultMinimumPayment } from './constants.js';
-import { calcInterestSaved, calcPayoffMonths, calcTotalInterest } from './amortisation.js';
+  isLikelyIncomeCredit, matchesSalaryKeywords,
+} from './merchant-db';
+import { classifyTransaction } from './classifier';
+import { normaliseDescription } from './normalise';
+import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
+import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -22,17 +20,19 @@ import type {
   BudgetCategory,
   EssentialGap,
   VerifiedBill,
-  TransactionDetail,
-  UserIdentity,
-  DebtAccount,
-  BudgetAdjustment,
-  UpcomingEvent,
-} from './types.js';
+} from './types';
 
 function splitCSVLine(line: string): string[] {
-  const result = Papa.parse(line, { header: false, skipEmptyLines: true });
-  const row = result.data[0] as string[] | undefined;
-  return row ? row.map((p) => p.trim()) : [];
+  const parts: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (const ch of line) {
+    if (ch === '"') { inQuotes = !inQuotes; continue; }
+    if (ch === ',' && !inQuotes) { parts.push(current); current = ''; continue; }
+    current += ch;
+  }
+  parts.push(current);
+  return parts.map((p) => p.trim());
 }
 
 function parseDate(str: string): Date | null {
@@ -56,43 +56,12 @@ export type TransactionOverride = {
   match_description: string;
   category: string;
   is_essential: boolean;
-  direction?: 'credit' | 'debit';
 };
 
-function debtDisplayName(d: { account_name?: string; institution?: string; account_type?: string }): string {
-  if (d.institution) return d.institution;
-  const name = d.account_name || '';
-  const brand = extractCreditCardBrand(name);
-  if (brand) return brand;
-  // If account_name looks like a person name (no brand keywords, 2-3 alpha words),
-  // skip it — TrueLayer often returns the cardholder name instead of the card product.
-  const isLikelyPerson = isPersonTransfer(name);
-  if (!isLikelyPerson && name) return name;
-  if (d.account_type === 'credit_card') return 'Credit Card';
-  if (d.account_type === 'car_finance') return 'Car Finance';
-  if (d.account_type === 'overdraft') return 'Overdraft';
-  return isLikelyPerson ? 'Credit Card' : (name || 'Debt');
-}
-
 const EnrichmentEngine = {
-  // ═══════════════════════════════════════════════════════════════════
-  // Main Entry Point
-  // Orchestrates the full enrichment pipeline: parse → classify →
-  // detect recurring → build profile → archetype → score → recommendations.
-  // Each stage feeds into the next; the final result powers the UI dashboard.
-  // ═══════════════════════════════════════════════════════════════════
-  enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: DebtAccount[], identity?: UserIdentity | null): EnrichmentResult {
-    const transactions = this._correlatePendingSettled(this.parseCSV(rawCSV));
+  enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: any[], identity?: any): EnrichmentResult {
+    const transactions = this.parseCSV(rawCSV);
     const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
-
-    // ── Pass 3: Internal transfer detection ──
-    // Person-name transactions where the SAME name appears in both credits
-    // and debits are likely transfers between the user's own accounts (e.g.
-    // current → savings via "JOHN SMITH"). Mark these as isTransfer=true so
-    // they're excluded from income and spending totals.
-    // Other P2P transactions remain as spending/visible — bill splits, rent
-    // to flatmates, etc. are real financial activity.
-    this._detectInternalTransfers(enriched);
 
     // Reclassify credit card payoffs for full-payers.
     // Users who use credit cards for points and pay off in full each month
@@ -124,12 +93,12 @@ const EnrichmentEngine = {
     return {
       profile,
       archetype,
-      traits: traits.map((t) => ({ name: t.name, insight: t.insight })),
-      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })),
-      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })),
+      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
+      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
+      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
       decisionScore: score,
       decisionStack: stack,
-      behavioralPatterns: patterns.map((p: string | { pattern: string }) => typeof p === 'string' ? p : p.pattern),
+      behavioralPatterns: patterns.map((p: any) => p.pattern || p),
       enrichedTransactions: enriched,
       enrichmentMetrics,
       essentialGaps,
@@ -178,9 +147,6 @@ const EnrichmentEngine = {
     const cutoff = new Date(now);
     cutoff.setFullYear(cutoff.getFullYear() - 1);
 
-    // Track rejection reasons for debugging zero-transaction scenarios
-    let rejected = { noDate: 0, tooOld: 0, emptyDesc: 0, zeroAmount: 0, accepted: 0 };
-
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
@@ -189,8 +155,7 @@ const EnrichmentEngine = {
       const dateStr = parts[dateIdx >= 0 ? dateIdx : 0] || '';
       const desc = parts[descIdx >= 0 ? descIdx : 1] || '';
       const date = parseDate(dateStr);
-      if (!date) { rejected.noDate++; continue; }
-      if (date < cutoff) { rejected.tooOld++; continue; }
+      if (!date || date < cutoff) continue;
 
       let amount = 0;
       if (debitIdx >= 0 && creditIdx >= 0) {
@@ -201,96 +166,13 @@ const EnrichmentEngine = {
         amount = parseFloat((parts[amountIdx >= 0 ? amountIdx : 2] || '').replace(/[^0-9.\-]/g, '')) || 0;
       }
 
-      if (!desc) { rejected.emptyDesc++; continue; }
-      if (amount === 0) { rejected.zeroAmount++; continue; }
-
-      rejected.accepted++;
-      transactions.push({ date: date.toISOString(), description: desc.trim(), amount });
+      if (desc && amount !== 0) {
+        transactions.push({ date: date.toISOString(), description: desc.trim(), amount });
+      }
     }
-
-    const totalRejected = rejected.noDate + rejected.tooOld + rejected.emptyDesc + rejected.zeroAmount;
-    if (totalRejected > 0 && transactions.length === 0) {
-      console.warn(`[enrichment] All ${totalRejected} transactions rejected: ${rejected.noDate} bad date, ${rejected.tooOld} too old, ${rejected.emptyDesc} empty desc, ${rejected.zeroAmount} zero amount`);
-    } else if (totalRejected > 0) {
-      console.log(`[enrichment] Parsed ${transactions.length} transactions, rejected ${totalRejected} (${rejected.noDate} bad date, ${rejected.tooOld} too old, ${rejected.emptyDesc} empty desc, ${rejected.zeroAmount} zero amount)`);
-    }
-
     return transactions;
   },
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Pending → Settled Correlation
-  // When a transaction is authorised (pending) and then settles, the bank
-  // may report both as separate CSV rows with slightly different amounts
-  // (e.g. £50.00 pending → £49.87 settled) and dates (0-3 days apart).
-  // This method detects likely pending/settled pairs and keeps only the
-  // settled version (the later date), preventing double-counting.
-  // ═══════════════════════════════════════════════════════════════════
-  _correlatePendingSettled(transactions: RawTransaction[]): RawTransaction[] {
-    if (transactions.length < 2) return transactions;
-
-    // Sort by date (ascending), then by description for grouping
-    const sorted = [...transactions].sort((a, b) => {
-      const da = new Date(a.date).getTime();
-      const db = new Date(b.date).getTime();
-      return da - db || a.description.localeCompare(b.description);
-    });
-
-    const removed = new Set<number>();
-
-    for (let i = 0; i < sorted.length; i++) {
-      if (removed.has(i)) continue;
-      const a = sorted[i];
-      const descA = normaliseDescription(a.description);
-      if (!descA) continue;
-
-      // Look ahead for potential settled counterpart (within 4 days)
-      for (let j = i + 1; j < sorted.length; j++) {
-        if (removed.has(j)) continue;
-        const b = sorted[j];
-        const daysDiff = (new Date(b.date).getTime() - new Date(a.date).getTime()) / (1000 * 60 * 60 * 24);
-        if (daysDiff > 4) break; // Outside correlation window
-
-        const descB = normaliseDescription(b.description);
-        if (descA !== descB) continue;
-
-        // Same merchant, same sign (both credits or both debits)
-        if (Math.sign(a.amount) !== Math.sign(b.amount)) continue;
-
-        // Amount within 5% tolerance or £2 absolute — covers tip adjustments,
-        // currency conversion rounding, and authorization hold differences
-        const absA = Math.abs(a.amount);
-        const absB = Math.abs(b.amount);
-        const diff = Math.abs(absA - absB);
-        const pctDiff = Math.max(absA, absB) > 0 ? diff / Math.max(absA, absB) : 0;
-
-        if (diff <= 2 || pctDiff <= 0.05) {
-          // Keep the later transaction (settled) — remove the earlier (pending)
-          removed.add(i);
-          break;
-        }
-      }
-    }
-
-    if (removed.size > 0) {
-      console.log(`[enrichment] Correlated ${removed.size} pending→settled transaction pair(s)`);
-    }
-
-    return sorted.filter((_, idx) => !removed.has(idx));
-  },
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Transaction Classification Pipeline
-  // Classifies each raw transaction through a priority cascade:
-  //   1. User overrides (highest confidence — user explicitly set category)
-  //   2. Exact merchant DB match (curated merchant → category mapping)
-  //   3. Fuzzy merchant match (Levenshtein distance for typos/variations)
-  //   4. Keyword classifier (regex patterns for common spending categories)
-  //   5. Person-transfer heuristic (1-3 word names → likely P2P transfer)
-  //   6. Default fallback ("Other", low confidence)
-  // Each tier sets confidence level so downstream logic can prioritise
-  // high-confidence data and flag low-confidence for AI re-classification.
-  // ═══════════════════════════════════════════════════════════════════
   enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[]): EnrichedTransaction {
     // Check user overrides first — try both raw and normalised descriptions
     if (overrides?.length) {
@@ -306,26 +188,19 @@ const EnrichmentEngine = {
         return true;
       });
       if (override) {
-        const isHouseholdContribution = override.category === 'Household Contribution';
-        const isInternalTransfer = override.category === 'Internal Transfer';
-        const isTransferCat = override.category === 'Transfers';
-        const isRefundCat = override.category === 'Refund';
-        // Transfers between people/own accounts are NOT income and NOT spending.
-        // They still appear in the transaction list (the UI handles visibility).
-        const isTransfer = isHouseholdContribution || isInternalTransfer || isTransferCat;
         return {
           date: tx.date,
           description: tx.description,
           amount: tx.amount,
-          merchant: this._titleCase(normaliseDescription(tx.description)) || tx.description,
+          merchant: tx.description,
           category: override.category,
           isEssential: override.is_essential,
           isSubscription: false,
           isBNPL: override.category === 'BNPL',
           isDebt: override.category === 'Debt Payments',
-          isIncome: tx.amount > 0 && !isTransfer && !isRefundCat,
-          isTransfer,
-          isRefund: isRefundCat,
+          isIncome: tx.amount > 0,
+          isTransfer: false,
+          isRefund: false,
           isSavings: override.category === 'Savings' || override.category === 'Investments',
           confidence: 'high' as const,
           classifiedBy: 'user_override' as const,
@@ -334,13 +209,10 @@ const EnrichmentEngine = {
     }
 
     const normalised = normaliseDescription(tx.description);
-
     const merchantMatch = matchMerchant(tx.description, normalised);
     let isPerson = isPersonTransfer(tx.description);
     const isCredit = tx.amount > 0;
     const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
-    // Savings/investment detection: outbound-only (debits) to avoid classifying
-    // interest credits or dividend income as savings transfers
     const isSavings = !!(tx.amount < 0 && tx.description.toLowerCase().match(/\bsaving|isa\b|premium bond|ns&i/i));
     const isInvestment = !!(tx.amount < 0 && !isSavings && tx.description.toLowerCase().match(/\binvest|pension|sipp|stocks?\s*(?:&|and)\s*shares?/i));
 
@@ -355,10 +227,10 @@ const EnrichmentEngine = {
     if (merchantMatch) {
       const isIncome = merchantMatch.isIncome || (isCredit && !isPerson && !isRefund && isLikelyIncomeCredit(tx.description));
 
-      // Use the classifier for category + essentiality (e.g. Tesco → Groceries → essential)
+      // Use the classifier for category + essentiality
       const classification = classifyTransaction(tx.description, merchantMatch);
 
-      // Credits to a non-income merchant (e.g. refund from Amazon) → "Refunds"
+      // Savings & Investments are both excluded from spending
       const catFromDb = isIncome ? merchantMatch.category : (isCredit && !merchantMatch.isIncome ? 'Refunds' : classification.category);
       const isSavingsOrInvest = isSavings || isInvestment || catFromDb === 'Savings' || catFromDb === 'Investments';
 
@@ -380,11 +252,11 @@ const EnrichmentEngine = {
     }
 
     // ── Fuzzy merchant matching fallback ──
+    // Only for spending transactions (not credits) to avoid misclassifying income.
     // Uses Levenshtein distance to catch typos and merchant name variations.
-    // Credits are allowed through but skip income-flagged merchants to avoid misclassifying income.
-    {
+    if (!isCredit) {
       const fuzzyMatch = fuzzyMatchMerchant(tx.description, normalised);
-      if (fuzzyMatch && !(isCredit && fuzzyMatch.isIncome)) {
+      if (fuzzyMatch) {
         const classification = classifyTransaction(tx.description, fuzzyMatch);
         const fuzzySavings = isSavings || isInvestment || classification.category === 'Savings' || classification.category === 'Investments';
         return {
@@ -423,11 +295,8 @@ const EnrichmentEngine = {
         confidence = 'high';
         classifiedBy = 'keyword';
       } else if (isPerson) {
-        // Inbound person transfer (e.g. salary from sole trader, bill split).
-        // Tentatively income — buildProfile's regularity filter will validate.
-        // Internal-transfer pass will reclassify genuine self-transfers.
-        isIncome = true;
-        category = 'Income';
+        category = 'Transfers';
+        classifiedBy = 'keyword';
       } else if (this._isInternationalTransfer(tx.description)) {
         // Inbound international transfer — NOT income
         category = 'Transfers';
@@ -453,25 +322,17 @@ const EnrichmentEngine = {
       // BEFORE person-transfer heuristic, so that descriptions like
       // "barbershop" or "restaurant" get categorised instead of being
       // misclassified as person transfers.
-      //
-      // EXCEPTION: When the description contains an explicit transfer method
-      // ("faster payment", "bank transfer", etc.) AND isPerson is true, the
-      // transfer signal is stronger than a coincidental keyword match
-      // (e.g. "FASTER PAYMENT TO JOHN INTERNET" matching /\binternet\b/).
       const classification = classifyTransaction(tx.description, null, normalised);
-      const hasExplicitTransferMarker = isPerson && /\b(faster payment|bank transfer|transfer to|transfer from)\b/i.test(tx.description);
-      if (classification.source !== 'default' && !hasExplicitTransferMarker) {
-        // Keyword classifier matched and no conflicting transfer marker — trust it
+      if (classification.source !== 'default') {
+        // Keyword classifier matched — trust it over person-name heuristic
         category = classification.category;
         isEssential = classification.isEssential;
         confidence = classification.confidence;
         isPerson = false;
         classifiedBy = 'keyword';
       } else if (isPerson) {
-        // Outbound person transfer (e.g. rent to flatmate, bill split).
-        // Counted as spending by default — the internal-transfer pass will
-        // reclassify genuine self-transfers. Users can override category.
-        category = 'Person-to-Person';
+        category = 'Transfers';
+        classifiedBy = 'keyword';
       } else {
         category = classification.category;
         isEssential = classification.isEssential;
@@ -487,15 +348,14 @@ const EnrichmentEngine = {
 
     return {
       ...tx,
-      merchant: this._titleCase(normaliseDescription(tx.description)) || tx.description,
+      merchant: tx.description,
       category,
       isEssential,
       isSubscription: false,
       isBNPL: detectedBNPL,
       isDebt: detectedDebt,
       isIncome,
-      isTransfer: false,
-      isPersonTransfer: isPerson,
+      isTransfer: isPerson,
       isRefund,
       isSavings,
       confidence,
@@ -503,13 +363,6 @@ const EnrichmentEngine = {
     };
   },
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Recurring Payment Detection
-  // Groups transactions by merchant, computes inter-payment intervals,
-  // and classifies frequency by matching average interval to known
-  // billing cycles. Tolerances are wide (e.g. 25-35 days for "monthly")
-  // because UK direct debits can shift by weekends/bank holidays.
-  // ═══════════════════════════════════════════════════════════════════
   detectRecurring(transactions: EnrichedTransaction[]): RecurringItem[] {
     const groups: Record<string, EnrichedTransaction[]> = {};
     for (const tx of transactions) {
@@ -541,15 +394,8 @@ const EnrichmentEngine = {
         intervals.push((new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()) / (1000 * 60 * 60 * 24));
       }
       const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-      // Frequency buckets with tolerances for weekends/bank holidays:
-      //   weekly: 5-10 days (not strict 7 — some skip bank holiday weeks)
-      //   monthly: 25-35 days (direct debits shift by weekends)
-      //   quarterly: 80-100 days (UK utilities often bill quarterly)
-      //   semi-annual: 170-200 days (insurance renewals)
-      //   annual: 340-400 days (annual subscriptions, TV licence)
       let frequency: RecurringItem['frequency'] = 'irregular';
       if (avgInterval >= 5 && avgInterval <= 10) frequency = 'weekly';
-      else if (avgInterval >= 12 && avgInterval <= 18) frequency = 'fortnightly';
       else if (avgInterval >= 25 && avgInterval <= 35) frequency = 'monthly';
       else if (avgInterval >= 80 && avgInterval <= 100) frequency = 'quarterly';
       else if (avgInterval >= 170 && avgInterval <= 200) frequency = 'semi_annual';
@@ -557,8 +403,8 @@ const EnrichmentEngine = {
 
       if (frequency !== 'irregular') {
         const avgAmount = Math.abs(txs.reduce((s, t) => s + t.amount, 0) / txs.length);
-        // Subscription detection heuristic: a recurring payment is only a "subscription"
-        // if it's discretionary. Rent, groceries, and debt payments recur but aren't subs.
+        // Only mark as subscription if already flagged by merchant DB, OR
+        // recurring monthly/quarterly AND not a category that is clearly not a subscription.
         const NON_SUB_CATEGORIES = new Set([
           'Debt Payments', 'Groceries', 'Savings', 'Transfers', 'Transport',
           'Rent', 'Mortgage', 'Bills', 'Insurance', 'Income', 'Refunds',
@@ -582,15 +428,6 @@ const EnrichmentEngine = {
     return recurring;
   },
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Financial Profile Construction
-  // Aggregates enriched transactions into a monthly budget picture:
-  //   - Income sources with frequency detection and salary identification
-  //   - Essential vs discretionary spending split (majority-rule per category)
-  //   - Income volatility analysis with conservative floor for variable earners
-  //   - Subscription and recurring charge summary
-  // All monetary values are normalised to monthly equivalents.
-  // ═══════════════════════════════════════════════════════════════════
   buildProfile(transactions: EnrichedTransaction[], recurring: RecurringItem[]): FinancialProfile {
     // Use only the most recent N months for income & spending calculations
     // so figures reflect the user's current financial picture (especially
@@ -601,34 +438,21 @@ const EnrichmentEngine = {
 
     const spending = recent.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
     const income = recent.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer && !t.isDebt);
-    // Track transfers separately — excluded from totals but visible in the UI
-    const transfers = recent.filter((t) => t.isTransfer);
 
     const dates = recent.map((t) => new Date(t.date).getTime()).filter(Boolean);
     const span = dates.length >= 2
-      ? (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24 * 30.44)
+      ? (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24 * 30)
       : 1;
-    // Count distinct calendar months in the data — prevents the divisor from
-    // being too small when transactions cluster near month boundaries.
-    const calendarMonths = new Set(
-      recent.map((t) => {
-        const d = new Date(t.date);
-        return `${d.getFullYear()}-${d.getMonth()}`;
-      })
-    ).size;
-    const months = Math.max(span, calendarMonths, 1);
+    const months = Math.max(span, 1);
 
     const totalIncome = income.reduce((s, t) => s + t.amount, 0);
     const totalSpending = Math.abs(spending.reduce((s, t) => s + t.amount, 0));
-    // Preliminary monthly income — will be replaced by frequency-aware sum
-    // after income sources are classified below.
-    let monthlyIncome = totalIncome / months;
+    const monthlyIncome = totalIncome / months;
     const monthlySpending = totalSpending / months;
-    // surplus is recomputed after frequency-aware monthlyIncome is set
-    let surplus = monthlyIncome - monthlySpending;
+    const surplus = monthlyIncome - monthlySpending;
 
     // Group spending by category for budget card display
-    const catTotals: Record<string, { total: number; count: number; transactions: TransactionDetail[] }> = {};
+    const catTotals: Record<string, { total: number; count: number; transactions: { date: string; merchant: string; description: string; amount: number }[] }> = {};
     for (const tx of spending) {
       const cat = tx.category || 'Other';
       if (!catTotals[cat]) catTotals[cat] = { total: 0, count: 0, transactions: [] };
@@ -639,8 +463,6 @@ const EnrichmentEngine = {
         merchant: tx.merchant || tx.description,
         description: tx.description,
         amount: tx.amount,
-        confidence: tx.confidence,
-        classifiedBy: tx.classifiedBy,
       });
     }
 
@@ -654,10 +476,9 @@ const EnrichmentEngine = {
       const sortedTxs = d.transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       const item: BudgetCategory = { category: cat, monthly: d.total / months, txs: d.count, transactions: sortedTxs };
 
-      // Majority-rule essentiality: if >50% of spend in a category comes from
-      // transactions individually flagged as essential, the whole category is
-      // treated as non-discretionary. This handles mixed categories like "Shopping"
-      // where some merchants are essential (pharmacy) and others aren't (clothing).
+      // Determine essentiality from the transactions in this category.
+      // If the majority of spend in this category is from essential transactions,
+      // the whole category goes into non-discretionary.
       const catSpending = spending.filter((t) => (t.category || 'Other') === cat);
       const essentialSpend = catSpending.filter((t) => t.isEssential).reduce((s, t) => s + Math.abs(t.amount), 0);
       const totalCatSpend = catSpending.reduce((s, t) => s + Math.abs(t.amount), 0);
@@ -670,24 +491,15 @@ const EnrichmentEngine = {
     const nonDiscTotal = nonDiscItems.reduce((s, i) => s + i.monthly, 0);
     const discTotal = discItems.reduce((s, i) => s + i.monthly, 0);
 
-    // Build set of outbound P2P recipients for bidirectional transfer detection.
-    // If someone appears as BOTH a credit source AND debit recipient, it's likely
-    // an internal transfer between own accounts — not income.
-    const outboundRecipients = new Set(
-      spending.filter((t) => t.isPersonTransfer)
-        .map((t) => normaliseDescription(t.merchant || t.description))
-    );
-
     const incomeGroups: Record<string, EnrichedTransaction[]> = {};
     for (const tx of income) {
-      const key = normaliseDescription(tx.merchant || tx.description);
+      const key = tx.merchant || tx.description;
       if (!incomeGroups[key]) incomeGroups[key] = [];
       incomeGroups[key].push(tx);
     }
-    const incomeSources = Object.entries(incomeGroups).map(([rawKey, txs]) => {
-      const source = this._titleCase(rawKey);
-      const totalForSource = txs.reduce((s, t) => s + t.amount, 0);
-      const avgAmount = totalForSource / txs.length;
+    const incomeSources = Object.entries(incomeGroups).map(([source, txs]) => {
+      const monthly = txs.reduce((s, t) => s + t.amount, 0) / months;
+      const avgAmount = txs.reduce((s, t) => s + t.amount, 0) / txs.length;
       const isSalary = matchesSalaryKeywords(source);
       const sorted = txs.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       const intervals: number[] = [];
@@ -695,20 +507,10 @@ const EnrichmentEngine = {
         intervals.push((new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()) / (1000 * 60 * 60 * 24));
       }
       const avgInt = intervals.length ? intervals.reduce((a, b) => a + b, 0) / intervals.length : 0;
-      // Income frequency detection — UK pay cycles with tolerance for bank
-      // holidays, weekend shifts, and month-end boundary drift:
-      //   weekly (5-10 days): gig/retail/hospitality — 10 covers bank holiday gap
-      //   fortnightly (11-18 days): NHS/public sector — 18 covers weekend+holiday
-      //   monthly (24-38 days): standard salaried — 38 covers short-month drift
-      //     e.g. 25th Feb → 2nd April = 36 days, 31st Jan → 28th Feb = 28 days
-      // Requires 2+ intervals (3+ transactions) for reliable frequency detection;
-      // single intervals fall through to 'irregular'.
       let frequency = 'irregular';
-      if (intervals.length >= 2) {
-        if (avgInt >= 24 && avgInt <= 38) frequency = 'monthly';
-        else if (avgInt >= 11 && avgInt <= 18) frequency = 'fortnightly';
-        else if (avgInt >= 5 && avgInt <= 10) frequency = 'weekly';
-      }
+      if (avgInt >= 25 && avgInt <= 35) frequency = 'monthly';
+      else if (avgInt >= 12 && avgInt <= 17) frequency = 'fortnightly';
+      else if (avgInt >= 5 && avgInt <= 9) frequency = 'weekly';
       // Compute per-source variability from individual payment amounts
       const amounts = txs.map((t) => t.amount);
       const recentAmounts = sorted.slice(-8).map((t) => t.amount); // last 8 payments
@@ -720,79 +522,37 @@ const EnrichmentEngine = {
         amountSD = Math.sqrt(variance);
         variability = mean > 0 ? amountSD / mean : 0;
       }
-      // Frequency-aware monthly normalisation:
-      //   weekly: avgAmount × 52/12 (4.333 weeks per month)
-      //   fortnightly: avgAmount × 26/12 (2.167 fortnights per month)
-      //   monthly: avgAmount × 1
-      //   irregular: fall back to total / months (time-span average)
-      const freqMultiplier = frequency === 'weekly' ? 52 / 12
-        : frequency === 'fortnightly' ? 26 / 12
-        : frequency === 'monthly' ? 1
-        : null;
-      const monthly = freqMultiplier !== null
-        ? avgAmount * freqMultiplier
-        : totalForSource / months;
-      const annualIncome = freqMultiplier !== null
-        ? avgAmount * (frequency === 'weekly' ? 52 : frequency === 'fortnightly' ? 26 : 12)
-        : monthly * 12;
-
-      // Confidence: high if regular frequency with low variability and 3+ data points,
-      // medium if regular frequency but fewer data points or moderate variability,
-      // low if irregular or high variability.
-      const confidence: 'high' | 'medium' | 'low' =
-        frequency !== 'irregular' && txs.length >= 3 && variability < 0.15 ? 'high'
-        : frequency !== 'irregular' && txs.length >= 2 ? 'medium'
-        : 'low';
-
-      return { source, frequency, avgAmount, monthly, annualIncome, isSalary, confidence, count: txs.length, avgInterval: avgInt, recentAmounts, amountSD, variability };
+      return { source, frequency, avgAmount, monthly, isSalary, count: txs.length, avgInterval: avgInt, recentAmounts, amountSD, variability };
     })
     .filter((src) => {
-      // Bidirectional transfer detection: if the same name appears as both
-      // a credit source AND a debit recipient, it's likely an internal transfer
-      // between the user's own accounts — NOT income. Check this first.
-      const srcNorm = src.source.toLowerCase().trim();
-      if (outboundRecipients.has(srcNorm)) return false;
+      // Known salary/employer/benefit keywords → always income
+      if (src.isSalary || isLikelyIncomeCredit(src.source)) return true;
 
-      // Income is strictly from businesses and government — never person names.
-      // Real employers always have a business indicator: "Compass Co Ltd",
-      // "Incubeta Ltd", "Scale Ai Ltd", "NHS", "DWP", etc.
-      //
-      // Gate: source must match salary keywords, employer patterns (ltd/plc/
-      // limited/inc/corp/llp/council/nhs/university), or benefit patterns
-      // (hmrc/dwp/universal credit/etc). This catches all UK pay cycles:
-      // weekly, fortnightly, and monthly.
-      if (!src.isSalary && !isLikelyIncomeCredit(src.source)) return false;
+      // Regular credits: require 3+ occurrences and minimum amount
+      if (
+        src.frequency !== 'irregular' &&
+        src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount &&
+        src.count >= INCOME_THRESHOLDS.minRegularCount
+      ) return true;
 
-      // Source has business/employer indicators — now validate it's regular enough
-      // to be actual income (not a one-off company refund or rebate).
-      // Accept any recognised frequency (weekly/fortnightly/monthly) with 2+ occurrences,
-      // OR 3+ occurrences at any interval with a meaningful amount.
-      if (src.frequency !== 'irregular' && src.count >= 2) return true;
-      if (src.count >= INCOME_THRESHOLDS.minRegularCount && src.avgAmount >= INCOME_THRESHOLDS.minRegularAmount) return true;
+      // Large recurring credits: require 3+ with regular intervals
+      if (
+        src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin &&
+        src.count >= INCOME_THRESHOLDS.largeCreditMinCount &&
+        src.avgInterval >= INCOME_THRESHOLDS.largeCreditIntervalMin &&
+        src.avgInterval <= INCOME_THRESHOLDS.largeCreditIntervalMax
+      ) return true;
 
-      // Single occurrence from a business — could be a one-off bonus or refund.
-      // Only count if it's a large amount that looks like a salary payment.
-      if (src.count === 1 && src.avgAmount >= INCOME_THRESHOLDS.largeCreditMin) return true;
+      // One-off large credits below windfall threshold with only 1-2 occurrences
+      // are NOT income (likely refunds, gifts, or one-off transfers)
+      if (src.count <= 2 && src.avgAmount >= INCOME_THRESHOLDS.windfallMin) return false;
 
       return false;
     })
     .sort((a, b) => b.monthly - a.monthly);
 
-    // If no source explicitly matched salary keywords, promote the largest
-    // income source to "salary" — the archetype and decision stack logic
-    // relies on having at least one primary income source identified.
     if (incomeSources.length > 0 && !incomeSources.some((s) => s.isSalary)) {
       incomeSources[0].isSalary = true;
-    }
-
-    // ── Frequency-aware monthly income ──
-    // Replace the preliminary time-span average with the sum of per-source
-    // frequency-aware monthlies. This is mathematically correct for any mix
-    // of weekly/fortnightly/monthly income sources. Falls back to the
-    // time-span average only if no income sources were classified.
-    if (incomeSources.length > 0) {
-      monthlyIncome = incomeSources.reduce((s, src) => s + src.monthly, 0);
-      surplus = monthlyIncome - monthlySpending;
     }
 
     const catMonthly = (name: string) => (catTotals[name]?.total || 0) / months;
@@ -835,13 +595,9 @@ const EnrichmentEngine = {
         totalWeight += w;
       }
       overallIncomeCV = totalWeight > 0 ? weightedCV / totalWeight : 0;
-      // 10% CV threshold separates stable salary (<5% variation) from variable
-      // income (gig workers, freelancers, commission-based). Salaried workers have
-      // near-zero CV due to fixed monthly pay.
+      // Variable if CV > 10% (salaried workers typically have < 5% variation)
       if (overallIncomeCV > 0.10) {
-        // Conservative floor uses z-score of -0.67 (25th percentile of normal
-        // distribution). This means 75% of months the user earns at least this
-        // much — safe to budget against without assuming a good month.
+        // Conservative floor = mean - 0.67 * SD (≈ 25th percentile assuming normal)
         const incomeSD = overallIncomeCV * monthlyIncome;
         incomeFloor = Math.max(0, monthlyIncome - 0.67 * incomeSD);
         return true;
@@ -871,21 +627,11 @@ const EnrichmentEngine = {
         discretionary: { total: discTotal, items: discItems.sort((a, b) => b.monthly - a.monthly) },
       },
       incomeSources,
-      transfers: transfers.map((t) => ({
-        date: t.date,
-        merchant: t.merchant || t.description,
-        description: t.description,
-        amount: t.amount,
-        category: t.category,
-      })),
       subscriptions,
       metrics,
     };
   },
 
-  // Archetypes are evaluated in priority order: debt/risk archetypes first
-  // (more actionable), lifestyle archetypes in the middle, positive archetypes
-  // last. First match wins — "balanced_realist" is the catch-all fallback.
   determineArchetype(profile: FinancialProfile): Archetype {
     const m = profile.metrics;
     const ordered = [
@@ -939,7 +685,6 @@ const EnrichmentEngine = {
         detail: `${Math.round(m.savingsRate)}% vs UK average ${UK_BENCHMARKS.savingsRate}%.`,
       });
     }
-    // £100/month threshold: ONS data shows UK average dining out spend is ~£80/month
     if (m.eatingOut > 100) {
       patterns.push({
         pattern: 'Frequent dining out',
@@ -999,7 +744,6 @@ const EnrichmentEngine = {
         const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
 
         if (avgInterval >= 5 && avgInterval <= 10) frequency = 'weekly';
-        else if (avgInterval >= 12 && avgInterval <= 18) frequency = 'fortnightly';
         else if (avgInterval >= 25 && avgInterval <= 35) frequency = 'monthly';
         else if (avgInterval >= 80 && avgInterval <= 100) frequency = 'quarterly';
         else if (avgInterval >= 170 && avgInterval <= 200) frequency = 'semi_annual';
@@ -1007,13 +751,12 @@ const EnrichmentEngine = {
 
         // Monthly equivalent: use average payment amount ÷ interval in months
         const avgPayment = txs.reduce((s, t) => s + Math.abs(t.amount), 0) / txs.length;
-        const intervalMonths = avgInterval / 30.44; // 30.44 = average days per month (365.25/12)
+        const intervalMonths = avgInterval / 30.44;
         monthlyAmount = Math.round(avgPayment / Math.max(intervalMonths, 1));
       } else {
         // Single payment — estimate monthly from amount and likely frequency
         const amount = Math.abs(lastTx.amount);
-        // Single-payment frequency heuristic: UK quarterly energy/water bills
-        // are typically £150-400; monthly bills are typically £30-150.
+        // Heuristic: large single bills are likely quarterly/annual
         if (amount > 300) {
           frequency = 'quarterly';
           monthlyAmount = Math.round(amount / 3);
@@ -1057,16 +800,15 @@ const EnrichmentEngine = {
    */
   detectEssentialGaps(
     profile: FinancialProfile,
-    identity: UserIdentity | null,
-    debtAccounts?: DebtAccount[],
-    budgetAdjustments?: BudgetAdjustment[],
+    identity: any,
+    debtAccounts?: any[],
+    budgetAdjustments?: any[],
     verifiedBills?: VerifiedBill[],
   ): EssentialGap[] {
     if (!identity) return [];
     const gaps: EssentialGap[] = [];
 
-    // £5/mo threshold filters out noise (one-off small charges that don't
-    // represent a genuine ongoing expense in that category)
+    // Build a set of categories that have meaningful spend (>£5/mo)
     const nonDisc = profile.budgetReality?.nonDiscretionary?.items || [];
     const disc = profile.budgetReality?.discretionary?.items || [];
     const allItems = [...nonDisc, ...disc];
@@ -1125,20 +867,19 @@ const EnrichmentEngine = {
 
     // ── Council Tax (everyone except students and some living with family) ──
     const isStudent = identity.work_setup === 'student';
-    const housingRaw = housing as string;
-    if (!isStudent && housingRaw !== 'with_family') {
+    if (!isStudent && housing !== 'with_family') {
       if (!has('council tax') && !has('council')) {
         gaps.push({
           category: 'Council Tax',
           reason: 'Most UK households pay council tax',
           typicalRange: { low: 100, high: 250 },
-          confidence: housingRaw === 'with_family' ? 'low' : 'medium',
+          confidence: housing === 'with_family' ? 'low' : 'medium',
         });
       }
     }
 
     // ── Energy (gas + electric) ──
-    if (housingRaw !== 'with_family') {
+    if (housing !== 'with_family') {
       if (!has('energy') && !has('bills') && !has('utilities') && !has('gas') && !has('electric')) {
         gaps.push({
           category: 'Energy',
@@ -1188,7 +929,7 @@ const EnrichmentEngine = {
 
     // ── Debt minimums ──
     if (debtAccounts && debtAccounts.length > 0) {
-      const totalDebt = debtAccounts.reduce((s: number, d: DebtAccount) => s + (d.outstanding_balance || 0), 0);
+      const totalDebt = debtAccounts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
       if (totalDebt > 0 && !has('debt payments') && !has('debt') && !has('loan')) {
         gaps.push({
           category: 'Debt Payments',
@@ -1202,35 +943,18 @@ const EnrichmentEngine = {
     return gaps;
   },
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Decision Score Algorithm
-  // Produces a 0-100 score reflecting overall financial health.
-  // Starts at 50 (neutral baseline) and applies additive/subtractive
-  // factors. Each factor's weight reflects its relative importance:
-  //   - Savings rate: ±15 (strongest signal of financial trajectory)
-  //   - Debt-free: +10 (structural advantage)
-  //   - Multiple debts: -12 (compounding risk from juggling payments)
-  //   - Stable salary: +8 (income predictability)
-  //   - BNPL: -8 (correlates with cash flow stress in UK data)
-  // Verdict bands: 75+ Strong, 55-74 Balanced, 35-54 Needs Attention, <35 At Risk
-  // ═══════════════════════════════════════════════════════════════════
   calcDecisionScore(profile: FinancialProfile): DecisionScore {
     const m = profile.metrics;
-    // Baseline of 50: an average user with no strong signals scores neutral
     let score = 50;
     const breakdown: { factor: string; impact: number }[] = [];
 
-    // Savings rate tiers: 20%+ is excellent (UK median ~12%), <5% is critical
     if (m.savingsRate >= 20) { score += 15; breakdown.push({ factor: 'Savings rate', impact: +15 }); }
     else if (m.savingsRate >= 10) { score += 8; breakdown.push({ factor: 'Savings rate', impact: +8 }); }
     else if (m.savingsRate < 5) { score -= 10; breakdown.push({ factor: 'Savings rate', impact: -10 }); }
 
-    // 3+ debts gets a heavier penalty than 1-2 because juggling multiple
-    // minimum payments increases the probability of missed payments
     if (m.debtAccountCount === 0) { score += 10; breakdown.push({ factor: 'Debt-free', impact: +10 }); }
     else if (m.debtAccountCount >= 3) { score -= 12; breakdown.push({ factor: 'Multiple debts', impact: -12 }); }
 
-    // 7+ subscriptions: UK average is 4-5; above 7 suggests subscription creep
     if (m.subscriptionCount <= 3) { score += 5; breakdown.push({ factor: 'Lean subscriptions', impact: +5 }); }
     else if (m.subscriptionCount >= 7) { score -= 8; breakdown.push({ factor: 'Subscription creep', impact: -8 }); }
 
@@ -1238,11 +962,9 @@ const EnrichmentEngine = {
       score -= 5; breakdown.push({ factor: 'High delivery spend', impact: -5 });
     }
 
-    const hasSalary = profile.incomeSources.some((s: any) => s.isSalary);
+    const hasSalary = profile.incomeSources.some((s) => s.isSalary);
     if (hasSalary) { score += 8; breakdown.push({ factor: 'Stable salary', impact: +8 }); }
 
-    // BNPL penalty: 2+ active BNPL agreements signal cash flow pressure.
-    // FCA data shows BNPL users are 3x more likely to be in financial difficulty.
     if (m.bnplCount >= 2) { score -= 8; breakdown.push({ factor: 'BNPL usage', impact: -8 }); }
 
     score = Math.max(0, Math.min(100, score));
@@ -1255,25 +977,7 @@ const EnrichmentEngine = {
     return { score, verdict, breakdown };
   },
 
-  // ═══════════════════════════════════════════════════════════════════
-  // Decision Stack Generator
-  // Produces a ranked list of actionable financial recommendations ("moves").
-  // Each move includes: action, annual/monthly impact, effort level, proof
-  // (showing the math), and trackable sub-goals.
-  //
-  // Move categories (evaluated in this order):
-  //   1. Spending cuts: subscriptions, delivery, dining, shopping, transport
-  //   2. Debt strategy: avalanche (highest APR first) or rewards optimisation
-  //   3. Buffer/emergency fund: scaled by life situation (self-employed → 6mo)
-  //   4. Savings optimisation: idle cash, duplicate subs, rate acceleration
-  //   5. Investment awareness: platform fees, LISA bonus, ISA/pension tax math
-  //   6. Life events: home purchase, baby, wedding, career change
-  //   7. Break-even: deficit recovery for users spending more than income
-  //
-  // Moves are sorted by annualImpact descending so the highest-value
-  // recommendation appears first.
-  // ═══════════════════════════════════════════════════════════════════
-  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[], debtAccounts?: DebtAccount[], identity?: UserIdentity | null): Move[] {
+  genDecisionStack(profile: FinancialProfile, enrichedTxs?: EnrichedTransaction[], debtAccounts?: any[], identity?: any): Move[] {
     const moves: Move[] = [];
     const m = profile.metrics;
     const p = profile.monthly;
@@ -1284,7 +988,7 @@ const EnrichmentEngine = {
     const T = MOVE_THRESHOLDS;
 
     // ── Identity-aware modifiers ──
-    const id: Partial<UserIdentity> = identity || {};
+    const id = identity || {};
     const isRemote = id.work_setup === 'remote';
     const isHybrid = id.work_setup === 'hybrid';
     const isSelfEmployed = id.work_setup === 'self_employed';
@@ -1297,66 +1001,27 @@ const EnrichmentEngine = {
     const wantsGrowth = (id.priorities || []).includes('growth');
     const wantsFreedom = (id.priorities || []).includes('freedom');
     const wantsExperiences = (id.priorities || []).includes('experiences');
-    // Parse events: support both string ('baby') and structured ({ type: 'baby', months_away: 4 })
-    const rawEvents: UpcomingEvent[] = id.upcoming_events || [];
-    const getEventType = (e: UpcomingEvent): string => typeof e === 'string' ? e : e?.type || '';
-    const getEventMonths = (e: UpcomingEvent | undefined): number | null => typeof e === 'object' && e?.months_away != null ? e.months_away : null;
-    const eventTypes = rawEvents.map(getEventType);
-    const buyingHome = eventTypes.includes('first_home');
-    const havingBaby = eventTypes.includes('baby');
-    const isMoving = eventTypes.includes('moving');
-    const hasWedding = eventTypes.includes('wedding');
-    const changingCareer = eventTypes.includes('career_change');
-    const babyMonths = getEventMonths(rawEvents.find((e: UpcomingEvent) => getEventType(e) === 'baby'));
-    const movingMonths = getEventMonths(rawEvents.find((e: UpcomingEvent) => getEventType(e) === 'moving'));
-    const weddingMonths = getEventMonths(rawEvents.find((e: UpcomingEvent) => getEventType(e) === 'wedding'));
+    const buyingHome = (id.upcoming_events || []).includes('first_home');
+    const havingBaby = (id.upcoming_events || []).includes('baby');
+    const changingCareer = (id.upcoming_events || []).includes('career_change');
     const isAdvanced = id.financial_experience === 'confident' || id.financial_experience === 'advanced';
 
-    // Subscriptions — exclude essential bills + require recurrence proof
-    // Only recommend cutting truly discretionary, proven-recurring subscriptions.
-    const ESSENTIAL_SUB_CATEGORIES = new Set([
-      'Energy', 'Water', 'Council Tax', 'Insurance', 'Rent', 'Mortgage',
-      'Broadband & Phone', 'TV Licence', 'Bills', 'Childcare', 'Education',
-    ]);
-    const discretionarySubs = subs.filter((s) => {
-      // Exclude essential household bills
-      if (ESSENTIAL_SUB_CATEGORIES.has(s.category)) return false;
-      // Must have appeared at least 2 times (proves actual recurrence, not a one-off)
-      if (s.count < 2) return false;
-      // Must not be irregular frequency
-      if (s.frequency === 'irregular') return false;
-      return true;
-    });
-    const discretionarySubCount = discretionarySubs.length;
-    const discretionarySubTotal = discretionarySubs.reduce((s, r) => s + r.averageAmount, 0);
-
-    if (discretionarySubCount >= T.subscriptionMinCount) {
-      const cutCount = Math.max(2, Math.round(discretionarySubCount * T.subscriptionCutPct));
-      const topSubs = discretionarySubs
+    // Subscriptions — single consolidated recommendation (not per-merchant)
+    if (m.subscriptionCount >= T.subscriptionMinCount) {
+      const subNames = subs.map((s) => s.merchant).filter(Boolean);
+      const cutCount = Math.max(2, Math.round(m.subscriptionCount * T.subscriptionCutPct));
+      const saving = Math.round(p.subscriptions * T.subscriptionCutPct);
+      const topSubs = subs
         .filter((s) => s.merchant && s.averageAmount >= 5)
         .sort((a, b) => b.averageAmount - a.averageAmount)
         .slice(0, 4);
-      // Saving = sum of the cheapest subs that could be cut (most realistic targets)
-      const cuttableSubs = [...discretionarySubs]
-        .filter((s) => s.merchant && s.averageAmount >= 5)
-        .sort((a, b) => a.averageAmount - b.averageAmount)
-        .slice(0, cutCount);
-      const saving = Math.round(cuttableSubs.reduce((s, sub) => s + sub.averageAmount, 0));
       const subBreakdown = topSubs.map((s) => `${s.merchant} \u00a3${Math.round(s.averageAmount)}/mo`).join(', ');
-      const subNames = discretionarySubs.map((s) => s.merchant).filter(Boolean);
-      const subGoals: MoveSubGoal[] = cuttableSubs.map((s) => ({
+      const subGoals: MoveSubGoal[] = topSubs.map((s) => ({
         type: 'sub_cancel' as const,
         target: s.merchant,
         startValue: Math.round(s.averageAmount),
         targetValue: 0,
       }));
-
-      const excludedCount = subs.length - discretionarySubCount;
-      const proof = `${subs.length} total recurring charges found. `
-        + (excludedCount > 0 ? `${excludedCount} excluded (essential bills like energy/water/insurance). ` : '')
-        + `${discretionarySubCount} discretionary subs costing \u00a3${Math.round(discretionarySubTotal)}/mo. `
-        + `Cutting ${cutCount} lowest-value: ${cuttableSubs.map(s => `${s.merchant} \u00a3${Math.round(s.averageAmount)}`).join(' + ')} = \u00a3${saving}/mo saved.`;
-
       moves.push({
         action: `Cancel or downgrade ${cutCount} subscriptions to free \u00a3${saving}/month`,
         annualImpact: saving * 12,
@@ -1364,22 +1029,17 @@ const EnrichmentEngine = {
         effort: 'low',
         category: 'spending',
         merchants: subNames,
-        strategy: `${discretionarySubCount} discretionary subscriptions costing \u00a3${Math.round(discretionarySubTotal)}/month. Biggest: ${subBreakdown}. Essential bills excluded.`,
-        steps: ['Review your subscriptions below', 'Cancel the ones you haven\'t used in 30 days', 'Rotate streaming services monthly and I\'ll remind you'],
+        strategy: `${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month total. Biggest: ${subBreakdown}.`,
+        steps: ['Review your subscriptions — I\'ve listed them below', 'Cancel the ones you haven\'t used in 30 days', 'Rotate streaming services monthly — I\'ll remind you'],
         effect: `Saves \u00a3${saving}/month (\u00a3${saving * 12}/year).`,
         subGoals,
-        proof,
       });
     }
 
     // Food delivery
     if (m.foodDelivery > T.foodDeliveryMin) {
-      const { cutPct, cv: deliveryCV } = this._dataDrivenCutPct(txs, 'Delivery', T.foodDeliveryCutPct);
-      const saving = Math.round(m.foodDelivery * cutPct);
+      const saving = Math.round(m.foodDelivery * T.foodDeliveryCutPct);
       const deliveryMerchants = this._getMerchantsByCategory(txs, 'Delivery');
-      const proof = `\u00a3${Math.round(m.foodDelivery)}/mo on delivery (${ANALYSIS_MONTHS}-month avg). `
-        + `${Math.round(cutPct * 100)}% reduction (data-driven) = \u00a3${saving}/mo. `
-        + `Target: \u00a3${Math.round(m.foodDelivery - saving)}/mo.`;
       moves.push({
         action: `Cut delivery spend from \u00a3${Math.round(m.foodDelivery)} to \u00a3${Math.round(m.foodDelivery - saving)}/month`,
         annualImpact: saving * 12,
@@ -1390,8 +1050,6 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.foodDelivery)}/month on food delivery.`,
         steps: ['Batch-cook twice a week', 'Delete saved payment cards from delivery apps', 'I\'ll track your delivery spend weekly'],
         effect: `Frees \u00a3${saving}/month.`,
-        proof,
-        spendingCV: deliveryCV,
         subGoals: [{
           type: 'spending_reduce',
           target: 'Delivery',
@@ -1403,13 +1061,9 @@ const EnrichmentEngine = {
 
     // Eating out
     if (m.eatingOut > T.eatingOutMin) {
-      const { cutPct: eatingCutPct, cv: eatingCV } = this._dataDrivenCutPct(txs, 'Eating Out', T.eatingOutCutPct);
-      const saving = Math.round(m.eatingOut * eatingCutPct);
+      const saving = Math.round(m.eatingOut * T.eatingOutCutPct);
       const eatingMerchants = this._getMerchantsByCategory(txs, 'Eating Out');
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
-      const proof = `\u00a3${Math.round(m.eatingOut)}/mo on dining + caf\u00e9s (${ANALYSIS_MONTHS}-month avg). `
-        + `${Math.round(eatingCutPct * 100)}% reduction (data-driven) = \u00a3${saving}/mo. `
-        + `Target: \u00a3${Math.round(m.eatingOut - saving)}/mo.`;
       moves.push({
         action: `Reduce dining out from \u00a3${Math.round(m.eatingOut)} to \u00a3${Math.round(m.eatingOut - saving)}/month`,
         annualImpact: saving * 12,
@@ -1420,8 +1074,6 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.eatingOut)}/month on restaurants and caf\u00e9s.`,
         steps: ['Replace one meal out per week with home-cooked', 'Bring coffee from home 2x per week'],
         effect: `Saves \u00a3${saving}/month.`,
-        proof,
-        spendingCV: eatingCV,
         subGoals: [{
           type: 'spending_reduce',
           target: 'Eating Out',
@@ -1433,12 +1085,8 @@ const EnrichmentEngine = {
 
     // Shopping
     if (m.shopping > T.shoppingMin) {
-      const { cutPct: shoppingCutPct, cv: shoppingCV } = this._dataDrivenCutPct(txs, 'Shopping', T.shoppingCutPct);
-      const saving = Math.round(m.shopping * shoppingCutPct);
+      const saving = Math.round(m.shopping * T.shoppingCutPct);
       const shopMerchants = this._getMerchantsByCategory(txs, 'Shopping');
-      const proof = `\u00a3${Math.round(m.shopping)}/mo on shopping (${ANALYSIS_MONTHS}-month avg). `
-        + `${Math.round(shoppingCutPct * 100)}% reduction (data-driven) = \u00a3${saving}/mo freed. `
-        + `Target: \u00a3${Math.round(m.shopping - saving)}/mo.`;
       moves.push({
         action: `Cap non-essential shopping at \u00a3${Math.round(m.shopping - saving)}/month`,
         annualImpact: saving * 12,
@@ -1449,8 +1097,6 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.shopping)}/month on shopping.`,
         steps: ['Apply 24-hour rule on purchases over \u00a330', 'Remove saved cards from shopping apps', 'Unsubscribe from marketing emails'],
         effect: `Saves \u00a3${saving}/month.`,
-        proof,
-        spendingCV: shoppingCV,
         subGoals: [{
           type: 'spending_reduce',
           target: 'Shopping',
@@ -1461,41 +1107,21 @@ const EnrichmentEngine = {
     }
 
     // ── Debt analysis with good/bad debt differentiation ──
-    // Credit utilisation ratio determines the strategy:
-    //   0-30%: "good debt" — user pays off regularly, optimise for rewards
-    //   31-75%: medium utilisation — avalanche payoff recommended
-    //   76%+: high utilisation — urgent payoff, credit score impact warning
-    //   -1: no credit limit data available (manual debts without TrueLayer)
+    // Include both synced and manual debt accounts for holistic view
     const connectedDebts = debtAccounts || [];
-    const activeDebts = connectedDebts.filter((d: DebtAccount) => (d.outstanding_balance || 0) > 0);
-    const totalLimit = connectedDebts.reduce((s: number, d: DebtAccount) => s + (d.credit_limit || 0), 0);
-    const totalBalance = activeDebts.reduce((s: number, d: DebtAccount) => s + (d.outstanding_balance || 0), 0);
+    const totalLimit = connectedDebts.reduce((s: number, d: any) => s + (d.credit_limit || 0), 0);
+    const totalBalance = connectedDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
     const overallUtil = totalLimit > 0 ? (totalBalance / totalLimit) * 100 : -1;
     const isGoodDebt = overallUtil >= 0 && overallUtil <= 30;
     const isMediumUtil = overallUtil > 30 && overallUtil <= 75;
     const isHighUtil = overallUtil > 75;
 
-    // Get minimum payment: use stored value, else compute from debt type defaults
-    const estimateMinimum = (d: DebtAccount): number => {
-      if (!d) return 0;
-      if (d.minimum_payment && d.minimum_payment > 0) return d.minimum_payment;
-      const bal = d.outstanding_balance || 0;
-      if (bal <= 0) return 0;
-      return defaultMinimumPayment(d.account_type || 'credit_card', bal);
-    };
-
-    // Get APR: use stored value, else fall back to type-based default
-    const getAPR = (d: DebtAccount): number => {
-      if (d?.interest_rate != null && d.interest_rate > 0) return d.interest_rate;
-      return DEFAULT_APR[d?.account_type || 'credit_card'] ?? DEFAULT_APR.credit_card;
-    };
-
     // Use the higher of transaction-detected debt count or actual debt accounts
     // This ensures manually-added debts (without matching transactions) are counted
-    const actualDebtCount = Math.max(m.debtAccountCount, activeDebts.length);
+    const actualDebtCount = Math.max(m.debtAccountCount, connectedDebts.length);
 
     // Debt snowball — only for bad/medium debt, not for good debt users
-    if (actualDebtCount >= 2 && activeDebts.length >= 2) {
+    if (actualDebtCount >= 2) {
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       if (isGoodDebt) {
         // Low utilization, paying on time — good debt for points
@@ -1506,72 +1132,38 @@ const EnrichmentEngine = {
           effort: 'low',
           category: 'savings',
           merchants: debtMerchants,
-          strategy: `${actualDebtCount} credit cards with ${Math.round(overallUtil)}% utilisation, well managed. Focus on maximising points and cashback.`,
+          strategy: `${actualDebtCount} credit cards with ${Math.round(overallUtil)}% utilisation — well managed. Focus on maximising points and cashback.`,
           steps: ['Route all regular spending through your rewards card', 'Always pay in full to avoid interest', 'Review whether your card gives the best rewards for your spend', 'I\'ll flag if utilisation creeps up'],
           effect: `Earn more from spending you're already doing.`,
         });
       } else {
-        // Avalanche method: mathematically optimal — sort by highest APR first.
-        // Snowball tiebreaker (smallest balance) when rates are equal provides
-        // the psychological win of clearing a debt sooner.
-        const sortedDebts = [...activeDebts].sort((a, b) => {
-          const rateA = getAPR(a);
-          const rateB = getAPR(b);
-          if (rateB !== rateA) return rateB - rateA; // highest rate first
-          return (a.outstanding_balance || 0) - (b.outstanding_balance || 0); // tiebreak: smallest balance
-        });
-        const targetDebt = sortedDebts[0];
-        const targetName = debtDisplayName(targetDebt || {});
-        const targetBalance = Math.round(targetDebt?.outstanding_balance || 0);
-        const targetMin = Math.round(estimateMinimum(targetDebt));
-        const targetAPR = getAPR(targetDebt);
-        // Minimums on all other debts
-        const otherMinimums = sortedDebts.slice(1).reduce((s, d) => s + Math.round(estimateMinimum(d)), 0);
-        // Direct all available surplus to the highest-rate debt on top of its minimum
-        const surplusForDebt = Math.max(0, p.surplus);
-        const realPayment = Math.min(
-          Math.round(targetMin + surplusForDebt),
-          targetBalance, // Never exceed the remaining balance
-        );
-        // If surplus is 0, at least recommend the minimum payment
-        const recommendedPayment = Math.max(realPayment, targetMin);
-        const monthsToClear = calcPayoffMonths(targetBalance, targetAPR, recommendedPayment);
-        // Real interest savings: lifetime saving ÷ payoff years = true annual saving
-        const lifetimeSaving = calcInterestSaved(targetBalance, targetAPR, targetMin, recommendedPayment);
-        const payoffYears = Math.max(1, monthsToClear / 12);
-        const interestSaving = Math.round(lifetimeSaving / payoffYears);
-        const debtSubGoals: MoveSubGoal[] = sortedDebts.map((d) => ({
-          type: 'debt_clear' as const,
-          target: debtDisplayName(d),
-          startValue: Math.round(d.outstanding_balance || 0),
-          targetValue: 0,
-        }));
-
-        const proof = `Surplus: \u00a3${Math.round(surplusForDebt)}/mo. `
-          + `Minimums on ${sortedDebts.length - 1} other debt${sortedDebts.length > 2 ? 's' : ''}: \u00a3${otherMinimums}/mo. `
-          + `${targetName} (${Math.round(targetAPR * 100)}% APR) minimum: \u00a3${targetMin}/mo. `
-          + `Recommended payment: \u00a3${targetMin} min + \u00a3${Math.round(surplusForDebt)} surplus = \u00a3${recommendedPayment}/mo`
-          + (recommendedPayment >= targetBalance ? ` (capped at \u00a3${targetBalance} balance)` : '')
-          + `. Clears \u00a3${targetBalance} in ${monthsToClear} month${monthsToClear !== 1 ? 's' : ''}.`;
-
+        const debtSaving = Math.round(p.debtPayments * T.debtSnowballSavePct);
+        // Build sub-goals from actual debt accounts, sorted smallest balance first (snowball order)
+        const debtSubGoals: MoveSubGoal[] = [...connectedDebts]
+          .sort((a, b) => (a.outstanding_balance || 0) - (b.outstanding_balance || 0))
+          .map((d) => ({
+            type: 'debt_clear' as const,
+            target: d.account_name || d.institution || 'Debt',
+            startValue: Math.round(d.outstanding_balance || 0),
+            targetValue: 0,
+          }));
         moves.push({
-          action: `Pay \u00a3${recommendedPayment} to ${targetName} and clear \u00a3${targetBalance} in ${monthsToClear} months`,
-          annualImpact: interestSaving,
-          monthlyImpact: recommendedPayment,
+          action: `Attack ${actualDebtCount} debts with snowball method`,
+          annualImpact: debtSaving * 12,
+          monthlyImpact: debtSaving,
           effort: 'high',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `${actualDebtCount} debt accounts. Highest rate: ${targetName} at ${Math.round(targetAPR * 100)}% APR (\u00a3${targetBalance}).${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% which is hurting your credit score.` : ''} Avalanche method: clear highest-rate debt first to minimise total interest.`,
-          steps: ['Pay minimums on all debts except the highest-rate one', `Direct \u00a3${recommendedPayment}/month at ${targetName}`, `When it's cleared in ~${monthsToClear} months, roll that \u00a3${recommendedPayment} into the next highest-rate debt`, 'I\'ll track your progress and adjust automatically'],
-          effect: `Clears ${targetName} in ${monthsToClear} months. Saves \u00a3${interestSaving}/year in interest across all debts.`,
+          strategy: `${actualDebtCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}`,
+          steps: ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Direct your surplus at the smallest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'],
+          effect: `Saves \u00a3${debtSaving * 12}/year in interest.`,
           subGoals: debtSubGoals.length > 0 ? debtSubGoals : undefined,
-          proof,
         });
       }
     }
 
-    // Single debt account (only if there's an active balance and actual debt record exists)
-    if (actualDebtCount === 1 && activeDebts.length > 0) {
+    // Single debt account
+    if (actualDebtCount === 1) {
       const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
       if (isGoodDebt) {
         moves.push({
@@ -1581,195 +1173,62 @@ const EnrichmentEngine = {
           effort: 'low',
           category: 'savings',
           merchants: debtMerchants,
-          strategy: `1 card with ${Math.round(overallUtil)}% utilisation, excellent management. You're earning rewards without paying interest.`,
+          strategy: `1 card with ${Math.round(overallUtil)}% utilisation — excellent management. You're earning rewards without paying interest.`,
           steps: ['Keep paying the full balance each month', 'Use this card for all eligible spending', 'Check if a different rewards card offers better value', 'I\'ll track your utilisation'],
           effect: 'Continue earning rewards on responsible credit card use.',
         });
       } else {
-        const singleDebt = activeDebts[0];
-        const singleName = debtDisplayName(singleDebt || {});
-        const singleBalance = Math.round(singleDebt?.outstanding_balance || 0);
-        const singleMin = Math.round(estimateMinimum(singleDebt));
-        const singleAPR = getAPR(singleDebt);
-        // Compute real overpayment from surplus, capped sensibly
-        const surplusAlloc = Math.round(Math.min(Math.max(0, p.surplus) * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
-        const totalPayment = Math.min(singleMin + surplusAlloc, singleBalance);
-        const recommendedPayment = Math.max(totalPayment, singleMin);
-        const monthsToClear = calcPayoffMonths(singleBalance, singleAPR, recommendedPayment);
-        // Real interest saving: lifetime saving ÷ payoff years = true annual saving
-        const singleLifetimeSaving = calcInterestSaved(singleBalance, singleAPR, singleMin, recommendedPayment);
-        const singlePayoffYears = Math.max(1, monthsToClear / 12);
-        const interestSaving = Math.round(singleLifetimeSaving / singlePayoffYears);
-
-        const proof = `${singleName} balance: \u00a3${singleBalance}. Minimum: \u00a3${singleMin}/mo. `
-          + `Surplus allocation: \u00a3${surplusAlloc}/mo (${Math.round(T.singleDebtOverpayMaxSurplusPct * 100)}% of \u00a3${Math.round(Math.max(0, p.surplus))} surplus, capped at \u00a3${T.singleDebtOverpayCap}). `
-          + `Total payment: \u00a3${singleMin} + \u00a3${surplusAlloc} = \u00a3${recommendedPayment}/mo. `
-          + `Clears in ${monthsToClear} month${monthsToClear !== 1 ? 's' : ''}.`;
-
+        const debtSaving = Math.round(p.debtPayments * T.singleDebtOverpayPct);
+        const overpay = Math.round(Math.min(p.surplus * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
+        const singleDebt = connectedDebts[0];
         moves.push({
-          action: `Pay \u00a3${recommendedPayment}/month to ${singleName} to clear in ${monthsToClear} months`,
-          annualImpact: interestSaving,
-          monthlyImpact: recommendedPayment,
+          action: `Overpay debt by \u00a3${overpay}/month to clear faster`,
+          annualImpact: debtSaving * 12,
+          monthlyImpact: debtSaving,
           effort: 'medium',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `${singleName}: \u00a3${singleBalance} at ${Math.round(singleAPR * 100)}% APR.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}%, priority to reduce this.` : ''} Overpaying clears it ${monthsToClear > 0 ? `in ${monthsToClear} months` : 'faster'}.`,
-          steps: ['Check if overpayments are allowed without penalty', `Set up \u00a3${recommendedPayment}/month standing order`, 'I\'ll redirect savings from other moves into this automatically'],
-          effect: `Clears \u00a3${singleBalance} in ${monthsToClear} months. Saves \u00a3${interestSaving}/year in interest.`,
-          proof,
+          strategy: `1 debt account with \u00a3${Math.round(p.debtPayments)}/month in payments.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''}`,
+          steps: ['Check if overpayments are allowed without penalty', 'Set up a monthly overpayment standing order', 'I\'ll redirect savings from other moves into this automatically'],
+          effect: `Reduces total interest paid and clears debt sooner.`,
           subGoals: singleDebt ? [{
             type: 'debt_clear',
-            target: singleName,
-            startValue: singleBalance,
+            target: singleDebt.account_name || singleDebt.institution || 'Debt',
+            startValue: Math.round(singleDebt.outstanding_balance || 0),
             targetValue: 0,
           }] : undefined,
         });
       }
     }
 
-    // Transaction-only debt fallback — when debt payments show in transactions
-    // but no credit card account is connected via TrueLayer, generate a move
-    // from the transaction data alone so debt is never invisible.
-    if (m.debtAccountCount > 0 && activeDebts.length === 0 && p.debtPayments > 0) {
-      const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
-      // Estimate balance as 12x monthly payment — conservative heuristic based on
-      // typical UK credit card minimum payment being ~2-5% of balance
-      const estimatedBalance = Math.round(p.debtPayments * 12);
-      const surplusAlloc = Math.round(Math.min(Math.max(0, p.surplus) * T.singleDebtOverpayMaxSurplusPct, T.singleDebtOverpayCap));
-      const recommendedPayment = Math.max(Math.round(p.debtPayments + surplusAlloc), Math.round(p.debtPayments));
-      const fallbackAPR = DEFAULT_APR.credit_card; // use credit card default when no account data
-      const monthsToClear = calcPayoffMonths(estimatedBalance, fallbackAPR, recommendedPayment);
-      const fbLifetimeSaving = calcInterestSaved(estimatedBalance, fallbackAPR, Math.round(p.debtPayments), recommendedPayment);
-      const fbPayoffYears = Math.max(1, monthsToClear / 12);
-      const interestSaving = Math.round(fbLifetimeSaving / fbPayoffYears);
-
-      const proof = `£${Math.round(p.debtPayments)}/mo detected in debt payments across ${m.debtAccountCount} account${m.debtAccountCount !== 1 ? 's' : ''}. `
-        + `No balance data available — connect your credit card for a precise payoff plan. `
-        + `Estimated balance: ~£${estimatedBalance} (12× monthly payment). `
-        + `At £${recommendedPayment}/mo, clears in ~${monthsToClear} months.`;
-
-      moves.push({
-        action: `Attack your debt: pay £${recommendedPayment}/month to clear ~£${estimatedBalance} in ${monthsToClear} months`,
-        annualImpact: interestSaving,
-        monthlyImpact: recommendedPayment,
-        effort: 'medium',
-        category: 'debt',
-        merchants: debtMerchants,
-        strategy: `£${Math.round(p.debtPayments)}/month going to debt payments. Connect your credit card account for exact balances and a precise snowball plan.`,
-        steps: ['Connect your credit card so I can see the exact balance', `Meanwhile, direct £${surplusAlloc > 0 ? surplusAlloc : 'any spare'}/month extra at your highest-rate debt`, 'I\'ll build a full payoff plan once I can see your balances'],
-        effect: `Could save ~£${interestSaving}/year in interest.`,
-        proof,
-      });
-    }
-
-    // Transport — separates essential commute (TfL, rail operators) from
-    // discretionary transport (Uber, taxis). Only discretionary portion is
-    // targeted for reduction; commute gets optimisation advice instead.
+    // Transport — adjusted for work setup
     if (m.transport > T.transportMin && !isRemote) {
-      const transportTxs = txs.filter((t) => t.category === 'Transport' && t.amount < 0);
+      const cutPct = isHybrid ? T.transportCutPct * 0.5 : T.transportCutPct; // Hybrid workers already commute less
+      const saving = Math.round(m.transport * cutPct);
       const transportMerchants = this._getMerchantsByCategory(txs, 'Transport');
-
-      // Detect regular commute merchants (TfL, rail operators — essential for office workers)
-      const COMMUTE_MERCHANTS = ['tfl', 'oyster', 'national rail', 'lner', 'gwr', 'southern', 'northern rail',
-        'scotrail', 'trainline', 'southeastern', 'thameslink', 'avanti', 'crossrail', 'elizabeth line',
-        'c2c', 'greater anglia', 'chiltern', 'east midlands', 'transpennine'];
-      const isCommuteMerchant = (merchant: string) =>
-        COMMUTE_MERCHANTS.some((cm) => merchant.toLowerCase().includes(cm));
-
-      // Count merchant occurrences to detect one-time travel
-      const merchantCounts = new Map<string, number>();
-      transportTxs.forEach((t) => {
-        const key = t.merchant || t.description;
-        merchantCounts.set(key, (merchantCounts.get(key) || 0) + 1);
+      const steps = isHybrid
+        ? ['Check if 2-3 day travelcards are cheaper than pay-as-you-go', 'Batch office days to reduce trips', 'Compare cycle-to-work scheme for office days']
+        : ['Check railcard or weekly cap options', 'Go car-free one day per week', 'Compare annual vs monthly tickets'];
+      moves.push({
+        action: `Cut transport from \u00a3${Math.round(m.transport)} to \u00a3${Math.round(m.transport - saving)}/month`,
+        annualImpact: saving * 12,
+        monthlyImpact: saving,
+        effort: 'medium',
+        category: 'spending',
+        merchants: transportMerchants,
+        strategy: `\u00a3${Math.round(m.transport)}/month on transport.${isHybrid ? ' As a hybrid worker, you already commute less — but there may be cheaper options for your pattern.' : ''}`,
+        steps,
+        effect: `Saves \u00a3${saving}/month.`,
+        subGoals: [{
+          type: 'spending_reduce',
+          target: 'Transport',
+          startValue: Math.round(m.transport),
+          targetValue: Math.round(m.transport - saving),
+        }],
       });
-
-      // Calculate commute cost (regular commute merchants with 2+ transactions)
-      const commuteTxs = transportTxs.filter((t) => {
-        const key = t.merchant || t.description;
-        return isCommuteMerchant(key) && (merchantCounts.get(key) || 0) >= 2;
-      });
-      const months = Math.max(ANALYSIS_MONTHS, 1);
-      const commuteMonthly = Math.round(commuteTxs.reduce((s, t) => s + Math.abs(t.amount), 0) / months);
-
-      // Detect one-time travel fares (merchant appears only once, amount > £30)
-      const oneTimeTravelTxs = transportTxs.filter((t) => {
-        const key = t.merchant || t.description;
-        return (merchantCounts.get(key) || 0) === 1 && Math.abs(t.amount) > 30;
-      });
-      const oneTimeTravelMonthly = Math.round(oneTimeTravelTxs.reduce((s, t) => s + Math.abs(t.amount), 0) / months);
-
-      // Only the optimisable portion: total - commute - one-time travel
-      const optimisableTransport = Math.max(0, Math.round(m.transport) - commuteMonthly - oneTimeTravelMonthly);
-      const isOfficeWorker = !isHybrid; // full-time office if not hybrid and not remote
-
-      const { cutPct: baseCutPct, cv: transportCV } = this._dataDrivenCutPct(txs, 'Transport', T.transportCutPct);
-      // Hybrid workers get halved cut target — they need transport some days
-      const cutPct = isHybrid ? baseCutPct * 0.5 : baseCutPct;
-
-      if (optimisableTransport > 20) {
-        // There's meaningful discretionary transport to cut (Uber, taxis, etc.)
-        const saving = Math.round(optimisableTransport * cutPct);
-        const proof = `\u00a3${Math.round(m.transport)}/mo total transport. `
-          + (commuteMonthly > 0 ? `\u00a3${commuteMonthly}/mo commute (essential, excluded). ` : '')
-          + (oneTimeTravelMonthly > 0 ? `\u00a3${oneTimeTravelMonthly}/mo one-time travel (excluded). ` : '')
-          + `\u00a3${optimisableTransport}/mo discretionary (Uber, taxis, etc). `
-          + `${Math.round(cutPct * 100)}% reduction = \u00a3${saving}/mo saved.`;
-
-        const steps = isHybrid
-          ? ['Check if 2-3 day travelcards are cheaper than pay-as-you-go', 'Walk or cycle for trips under 2 miles', 'Compare cycle-to-work scheme for office days']
-          : ['Walk or cycle for short trips instead of Uber/taxi', 'Set a weekly discretionary transport budget', 'I\'ll track your non-commute transport spending'];
-        moves.push({
-          action: `Cut discretionary transport from \u00a3${optimisableTransport} to \u00a3${Math.round(optimisableTransport - saving)}/month`,
-          annualImpact: saving * 12,
-          monthlyImpact: saving,
-          effort: 'medium',
-          category: 'spending',
-          merchants: transportMerchants.filter((m) => !isCommuteMerchant(m)),
-          strategy: `\u00a3${Math.round(m.transport)}/month on transport total.${commuteMonthly > 0 ? ` \u00a3${commuteMonthly} is essential commute (not included in cut).` : ''}${isHybrid ? ' As a hybrid worker, there may be cheaper options for your pattern.' : ''}`,
-          steps,
-          effect: `Saves \u00a3${saving}/month from discretionary transport only.`,
-          proof,
-          spendingCV: transportCV,
-          subGoals: [{
-            type: 'spending_reduce',
-            target: 'Transport',
-            startValue: optimisableTransport,
-            targetValue: Math.round(optimisableTransport - saving),
-          }],
-        });
-      } else if (commuteMonthly > 50 && isOfficeWorker) {
-        // No discretionary transport to cut, but commute can be optimised (method, not amount)
-        // 15% is conservative: a 16-25/26-30 Railcard saves 1/3 on off-peak,
-        // and annual season tickets save ~15% vs buying monthly.
-        const railcardSaving = Math.round(commuteMonthly * 0.15);
-        if (railcardSaving >= 10) {
-          const proof = `\u00a3${commuteMonthly}/mo commute cost. No discretionary transport to cut. `
-            + `Commute optimisation (railcard/annual ticket): est. 15% = \u00a3${railcardSaving}/mo.`;
-          moves.push({
-            action: `Optimise your commute to save \u00a3${railcardSaving}/month`,
-            annualImpact: railcardSaving * 12,
-            monthlyImpact: railcardSaving,
-            effort: 'low',
-            category: 'spending',
-            merchants: transportMerchants.filter((m) => isCommuteMerchant(m)),
-            strategy: `\u00a3${commuteMonthly}/month on commuting. Your commute is essential but the method can be optimised.`,
-            steps: ['Check if a railcard (26-30, Two Together, etc.) applies to you', 'Compare annual vs monthly season ticket cost', 'Look into cycle-to-work scheme for some days', 'Check if your employer offers travel loan for annual tickets'],
-            effect: `Saves \u00a3${railcardSaving}/month without changing your commute.`,
-            proof,
-            subGoals: [{
-              type: 'spending_reduce',
-              target: 'Transport',
-              startValue: commuteMonthly,
-              targetValue: Math.round(commuteMonthly - railcardSaving),
-            }],
-          });
-        }
-      }
     }
 
-    // Emergency buffer — months of expenses to hold in reserve, scaled by
-    // income stability: self-employed need 6 months (irregular income),
-    // parents need 3 months (higher unexpected costs), others need 1 month minimum.
+    // Emergency buffer — adjusted for life situation
     if (m.savingsRate < T.bufferSavingsRateThreshold && p.surplus > 0) {
       const autoSave = Math.round(p.surplus * T.bufferAutoSavePct);
       const bufferMonths = isSelfEmployed ? 6 : (isSingleParent || hasChildren) ? 3 : 1;
@@ -1780,11 +1239,8 @@ const EnrichmentEngine = {
         : isSingleParent
           ? 'As a single parent, a bigger buffer protects your family from surprises.'
           : hasChildren
-            ? 'With children, unexpected costs come up so a solid buffer is essential.'
+            ? 'With children, unexpected costs come up — a solid buffer is essential.'
             : '';
-      const bufferProof = `Spending: \u00a3${Math.round(p.spending)}/mo. Buffer target: ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} = \u00a3${bufferTarget}. `
-        + `Surplus: \u00a3${Math.round(p.surplus)}/mo \u00d7 ${Math.round(T.bufferAutoSavePct * 100)}% = \u00a3${autoSave}/mo auto-save. `
-        + `\u00a3${bufferTarget} \u00f7 \u00a3${autoSave} = ${monthsToTarget} months.`;
       moves.push({
         action: `Auto-save \u00a3${autoSave}/month to build \u00a3${bufferTarget} buffer in ${monthsToTarget} months`,
         annualImpact: autoSave * 12,
@@ -1793,9 +1249,8 @@ const EnrichmentEngine = {
         category: 'buffer',
         merchants: [],
         strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Monthly surplus is \u00a3${Math.round(p.surplus)}.${reason ? ' ' + reason : ''} Target: ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses.`,
-        steps: ['Set aside this amount on payday and I\'ll track it', `Target ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses (\u00a3${bufferTarget})`, 'I\'ll update your progress each month'],
+        steps: ['Set aside this amount on payday — I\'ll track it', `Target ${bufferMonths} month${bufferMonths > 1 ? 's' : ''} of expenses (\u00a3${bufferTarget})`, 'I\'ll update your progress each month'],
         effect: `\u00a3${bufferTarget} safety net in ${monthsToTarget} months.`,
-        proof: bufferProof,
         subGoals: [{
           type: 'buffer_build',
           target: 'Emergency buffer',
@@ -1809,8 +1264,6 @@ const EnrichmentEngine = {
     if (m.savingsRate >= T.highSaverThreshold) {
       const surplusAnnual = Math.round(p.surplus * 12);
       const interestGain = Math.round(surplusAnnual * T.highSaverInterestRate);
-      const savingsProof = `Surplus: \u00a3${Math.round(p.surplus)}/mo \u00d7 12 = \u00a3${surplusAnnual}/yr. `
-        + `At ${(T.highSaverInterestRate * 100).toFixed(1)}% AER = \u00a3${interestGain}/yr passive interest.`;
       moves.push({
         action: `Put \u00a3${Math.round(p.surplus)}/month surplus to work in a savings account`,
         annualImpact: interestGain,
@@ -1821,7 +1274,6 @@ const EnrichmentEngine = {
         strategy: `Savings rate is ${Math.round(m.savingsRate)}%. Surplus is \u00a3${Math.round(p.surplus)}/month.`,
         steps: ['Put surplus into a savings account on payday', 'Automate the transfer so it\'s hands-free', 'I\'ll flag when it\'s time to review your rate'],
         effect: `\u00a3${interestGain}/year in passive interest.`,
-        proof: savingsProof,
         subGoals: [{
           type: 'savings_reach',
           target: 'Savings',
@@ -1831,391 +1283,10 @@ const EnrichmentEngine = {
       });
     }
 
-    // ── Savings optimization moves (mathematical, no product advice) ──
-
-    // 1. Undeployed surplus — idle cash accumulating beyond buffer needs
-    // Triggers when user has surplus, buffer target is met, and no high-utilisation debt
-    if (p.surplus >= T.idleCashMinSurplus && m.savingsRate >= T.bufferSavingsRateThreshold && !isHighUtil) {
-      const monthlySurplus = Math.round(p.surplus);
-      const annualIdle = monthlySurplus * 12;
-      const opportunityCost = Math.round(annualIdle * T.boeBaseRate);
-      const idleProof = `Monthly surplus: £${monthlySurplus}. Annual accumulation: £${annualIdle}. `
-        + `Bank of England base rate: ${(T.boeBaseRate * 100).toFixed(1)}%. `
-        + `Theoretical yield on idle cash: £${annualIdle} × ${(T.boeBaseRate * 100).toFixed(1)}% = £${opportunityCost}/year. `
-        + `This is the mathematical cost of cash sitting in a non-interest-bearing account.`;
-      moves.push({
-        action: `Move £${monthlySurplus}/month surplus into a savings account to earn £${opportunityCost}/year`,
-        annualImpact: opportunityCost,
-        monthlyImpact: Math.round(opportunityCost / 12),
-        effort: 'low',
-        category: 'savings',
-        merchants: [],
-        strategy: `Your surplus of £${monthlySurplus}/month exceeds your buffer needs. Cash beyond your buffer earns nothing in a current account. At the base rate of ${(T.boeBaseRate * 100).toFixed(1)}%, the mathematical cost of inaction is £${opportunityCost}/year.`,
-        steps: [
-          `You accumulate £${monthlySurplus}/month beyond buffer requirements`,
-          'Move surplus to one of your existing savings accounts on payday',
-          'I\'ll track whether your surplus is being deployed each month',
-        ],
-        effect: `£${opportunityCost}/year in theoretical yield currently uncaptured.`,
-        proof: idleProof,
-        subGoals: [{
-          type: 'savings_reach',
-          target: 'Deployed savings',
-          startValue: 0,
-          targetValue: annualIdle,
-        }],
-      });
-    }
-
-    // 2. Subscription duplicate detection — same-category recurring charges
-    if (discretionarySubs.length >= 2) {
-      const subsByCategory: Record<string, typeof discretionarySubs> = {};
-      for (const sub of discretionarySubs) {
-        const cat = sub.category || 'Other';
-        if (!subsByCategory[cat]) subsByCategory[cat] = [];
-        subsByCategory[cat].push(sub);
-      }
-      const duplicateGroups = Object.entries(subsByCategory)
-        .filter(([_, subs]) => subs.length >= 2)
-        .map(([cat, subs]) => ({
-          category: cat,
-          count: subs.length,
-          total: Math.round(subs.reduce((s, sub) => s + sub.averageAmount, 0)),
-          names: subs.map((s) => s.merchant).filter(Boolean),
-        }))
-        .filter((g) => g.total >= T.duplicateSubMinSavings);
-
-      if (duplicateGroups.length > 0) {
-        const totalDupSpend = duplicateGroups.reduce((s, g) => s + g.total, 0);
-        // Estimate: keeping one per category saves all but the cheapest in each group
-        const potentialSaving = duplicateGroups.reduce((s, g) => {
-          const sorted = subsByCategory[g.category].sort((a, b) => a.averageAmount - b.averageAmount);
-          // Keep cheapest, the rest is potential saving
-          return s + sorted.slice(1).reduce((ss, sub) => ss + Math.round(sub.averageAmount), 0);
-        }, 0);
-        const dupDescription = duplicateGroups.map((g) => `${g.count} ${g.category} (${g.names.join(', ')}: £${g.total}/mo)`).join('; ');
-        const dupProof = duplicateGroups.map((g) => {
-          const sorted = subsByCategory[g.category].sort((a, b) => a.averageAmount - b.averageAmount);
-          return `${g.category}: ${sorted.map(s => `${s.merchant} £${Math.round(s.averageAmount)}/mo`).join(' + ')} = £${g.total}/mo total`;
-        }).join('. ') + `. Potential saving if consolidated: £${potentialSaving}/mo (£${potentialSaving * 12}/year).`;
-
-        moves.push({
-          action: `Consolidate overlapping subscriptions in ${duplicateGroups.length} categor${duplicateGroups.length === 1 ? 'y' : 'ies'} to save £${potentialSaving}/month`,
-          annualImpact: potentialSaving * 12,
-          monthlyImpact: potentialSaving,
-          effort: 'low',
-          category: 'spending',
-          merchants: duplicateGroups.flatMap((g) => g.names),
-          strategy: `Detected multiple active subscriptions in the same category: ${dupDescription}. You decide which to keep.`,
-          steps: [
-            `Review your ${duplicateGroups.map(g => g.category).join(' and ')} subscriptions`,
-            'Decide which you actually use and cancel the rest',
-            'I\'ll confirm when the charges stop appearing',
-          ],
-          effect: `Up to £${potentialSaving}/month (£${potentialSaving * 12}/year) freed if consolidated.`,
-          proof: dupProof,
-          subGoals: duplicateGroups.flatMap((g) => {
-            const sorted = subsByCategory[g.category].sort((a, b) => b.averageAmount - a.averageAmount);
-            // Suggest cancelling all but the cheapest as sub-goals
-            return sorted.slice(0, -1).map((sub) => ({
-              type: 'sub_cancel' as const,
-              target: sub.merchant,
-              startValue: Math.round(sub.averageAmount),
-              targetValue: 0,
-            }));
-          }),
-        });
-      }
-    }
-
-    // 3. Savings rate acceleration — gap to next meaningful tier
-    // Shows the exact £ delta needed to reach the next savings rate milestone
-    if (p.surplus > 0 && p.income > 0 && m.savingsRate < T.savingsRateTarget) {
-      const currentRate = m.savingsRate;
-      const targetRate = T.savingsRateTarget;
-      // £ needed per month to reach target rate: (targetRate/100 × income) - current surplus
-      const targetSurplus = (targetRate / 100) * p.income;
-      const delta = Math.round(targetSurplus - p.surplus);
-      if (delta > 0 && delta < p.spending * 0.5) { // Only if achievable (less than halving spending)
-        const annualGain = delta * 12;
-        const rateProof = `Current savings rate: ${Math.round(currentRate)}% (UK median: ${UK_BENCHMARKS.savingsRate}%). £${Math.round(p.surplus)}/mo surplus on £${Math.round(p.income)}/mo income. `
-          + `Target: ${targetRate}% = £${Math.round(targetSurplus)}/mo surplus. `
-          + `Gap: £${Math.round(targetSurplus)} - £${Math.round(p.surplus)} = £${delta}/mo additional savings needed. `
-          + `Annual impact: £${delta} × 12 = £${annualGain}.`;
-        moves.push({
-          action: `Increase monthly savings by £${delta} to reach ${targetRate}% savings rate`,
-          annualImpact: annualGain,
-          monthlyImpact: delta,
-          effort: 'medium',
-          category: 'savings',
-          merchants: [],
-          strategy: `Savings rate is ${Math.round(currentRate)}% (UK median: ${UK_BENCHMARKS.savingsRate}%). At ${targetRate}%, compound effects accelerate: buffer builds faster, debt clears sooner, surplus compounds. Gap is £${delta}/month.`,
-          steps: [
-            `Find £${delta}/month in discretionary spending or income growth`,
-            'Automate the additional amount on payday',
-            'I\'ll track your rate each month against the target',
-          ],
-          effect: `Savings rate moves from ${Math.round(currentRate)}% to ${targetRate}%.`,
-          proof: rateProof,
-          subGoals: [{
-            type: 'savings_reach',
-            target: `${targetRate}% savings rate`,
-            startValue: Math.round(currentRate),
-            targetValue: targetRate,
-          }],
-        });
-      }
-    }
-
-    // 4. Savings consistency — coefficient of variation across months
-    // Measures how stable the user's savings behaviour is
-    if (txs.length > 0) {
-      // Bucket transactions by calendar month to compute per-month surplus
-      const monthBuckets: Record<string, { income: number; spending: number }> = {};
-      for (const tx of txs) {
-        const d = new Date(tx.date);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        if (!monthBuckets[key]) monthBuckets[key] = { income: 0, spending: 0 };
-        if (tx.isIncome && !tx.isRefund && !tx.isTransfer && !tx.isDebt) {
-          monthBuckets[key].income += tx.amount;
-        } else if (tx.amount < 0 && !tx.isTransfer && !tx.isRefund && !tx.isSavings) {
-          monthBuckets[key].spending += Math.abs(tx.amount);
-        }
-      }
-      const monthKeys = Object.keys(monthBuckets).sort();
-      if (monthKeys.length >= T.savingsConsistencyMinMonths) {
-        const monthlySurpluses = monthKeys.map((k) => monthBuckets[k].income - monthBuckets[k].spending);
-        const meanSurplus = monthlySurpluses.reduce((a, b) => a + b, 0) / monthlySurpluses.length;
-        const variance = monthlySurpluses.reduce((s, v) => s + Math.pow(v - meanSurplus, 2), 0) / monthlySurpluses.length;
-        const sd = Math.sqrt(variance);
-        const cv = meanSurplus > 0 ? sd / meanSurplus : 0;
-        // Detect trend: compare first half avg to second half avg
-        const half = Math.floor(monthlySurpluses.length / 2);
-        const firstHalf = monthlySurpluses.slice(0, half);
-        const secondHalf = monthlySurpluses.slice(half);
-        const firstAvg = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
-        const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
-        const trend = secondAvg - firstAvg;
-        const trendPct = firstAvg !== 0 ? Math.round((trend / Math.abs(firstAvg)) * 100) : 0;
-        // CV > 0.5 means standard deviation exceeds half the mean — highly unpredictable
-        // Deceleration > 15% means savings trajectory is meaningfully worsening
-        const isErratic = cv > 0.5;
-        const isDecelerating = trendPct < -15;
-        const monthlyValues = monthKeys.map((k, i) => `${k}: £${Math.round(monthlySurpluses[i])}`).join(', ');
-
-        // Only generate move if there's something actionable (erratic or decelerating)
-        if ((isErratic || isDecelerating) && meanSurplus > 0) {
-          const stabilityScore = Math.max(0, Math.round((1 - Math.min(cv, 1)) * 100));
-          const consistencyProof = `Monthly surplus over ${monthKeys.length} months: ${monthlyValues}. `
-            + `Mean: £${Math.round(meanSurplus)}/mo. SD: £${Math.round(sd)}. CV: ${(cv * 100).toFixed(0)}%. `
-            + `Trend: ${trendPct > 0 ? '+' : ''}${trendPct}% (${trendPct > 0 ? 'accelerating' : trendPct < 0 ? 'decelerating' : 'flat'}). `
-            + `Stability score: ${stabilityScore}/100.`;
-
-          const actionText = isDecelerating && !isErratic
-            ? `Set a fixed £${Math.round(meanSurplus * 0.7)}/month savings amount to reverse ${Math.abs(trendPct)}% decline`
-            : isErratic && isDecelerating
-              ? `Lock in £${Math.round(meanSurplus * 0.7)}/month on payday to stabilise declining savings`
-              : `Automate £${Math.round(meanSurplus * 0.7)}/month on payday to smooth out erratic savings`;
-
-          const strategyText = isDecelerating
-            ? `Your surplus has fallen from ~£${Math.round(firstAvg)}/mo to ~£${Math.round(secondAvg)}/mo. ${isErratic ? `Variability is also high (CV: ${(cv * 100).toFixed(0)}%). ` : ''}Identify what changed: spending increase or income drop.`
-            : `Your monthly surplus swings between £${Math.round(Math.min(...monthlySurpluses))} and £${Math.round(Math.max(...monthlySurpluses))}. High variability makes budgeting unreliable. A fixed savings amount on payday smooths this out.`;
-
-          const targetSaving = Math.round(meanSurplus * 0.2); // Stabilising saves ~20% of mean surplus through consistency
-          moves.push({
-            action: actionText,
-            annualImpact: targetSaving * 12,
-            monthlyImpact: targetSaving,
-            effort: 'medium',
-            category: 'savings',
-            merchants: [],
-            strategy: strategyText,
-            steps: [
-              'Set a fixed savings amount on payday (even if less than your average surplus)',
-              `Target £${Math.round(meanSurplus * 0.7)}/month as a consistent baseline`,
-              'I\'ll track your consistency score each month',
-            ],
-            effect: `Consistency score from ${stabilityScore}/100 toward 70+. Predictable saving compounds faster than erratic surpluses.`,
-            proof: consistencyProof,
-          });
-        }
-      }
-    }
-
-    // ── Investment awareness moves (data-driven, no product advice) ──
-
-    // 5. Investment scatter — multiple savings/investment platforms detected
-    // Groups outbound savings + investment transactions by merchant to show the breakdown
-    const investTxs = txs.filter((t) => t.isSavings && t.amount < 0 && !t.isTransfer);
-    const investByPlatform: Record<string, { total: number; count: number; merchant: string }> = {};
-    for (const t of investTxs) {
-      const key = t.merchant || t.description;
-      if (!investByPlatform[key]) investByPlatform[key] = { total: 0, count: 0, merchant: key };
-      investByPlatform[key].total += Math.abs(t.amount);
-      investByPlatform[key].count++;
-    }
-    const platforms = Object.values(investByPlatform)
-      .map((p) => ({ ...p, monthly: Math.round(p.total / Math.max(1, ANALYSIS_MONTHS)) }))
-      .filter((p) => p.monthly >= 10) // ignore sub-£10/mo noise
-      .sort((a, b) => b.monthly - a.monthly);
-    const totalInvestMonthly = platforms.reduce((s, p) => s + p.monthly, 0);
-
-    if (platforms.length >= T.investScatterMinPlatforms && totalInvestMonthly >= T.investScatterMinMonthly) {
-      const breakdown = platforms.map((p) => `${p.merchant}: £${p.monthly}/mo`).join(', ');
-      const annualTotal = totalInvestMonthly * 12;
-      const scatterProof = `${platforms.length} savings/investment destinations detected over ${ANALYSIS_MONTHS} months. `
-        + `Total outflow: £${totalInvestMonthly}/mo (£${annualTotal.toLocaleString()}/yr). `
-        + `Breakdown: ${breakdown}.`;
-      moves.push({
-        action: `Review £${totalInvestMonthly}/month going to ${platforms.length} platforms for fee overlap`,
-        annualImpact: 0, // Awareness move — no direct saving, but enables fee/ISA optimisation
-        monthlyImpact: 0,
-        effort: 'low',
-        category: 'invest',
-        merchants: platforms.map((p) => p.merchant),
-        strategy: `You're deploying capital across ${platforms.length} platforms. Total: £${totalInvestMonthly}/month (£${annualTotal.toLocaleString()}/year). Use this to check your ISA allowance, platform fees, and whether each account is earning its keep.`,
-        steps: [
-          'Review whether each platform serves a distinct purpose (ISA, LISA, crypto, pension)',
-          'Check whether you\'re duplicating ISA wrappers across platforms',
-          'I\'ll track your outflow to each platform monthly',
-        ],
-        effect: `Visibility across ${platforms.length} accounts. No action required unless fees or tax wrappers overlap.`,
-        proof: scatterProof,
-      });
-    }
-
-    // 6. LISA bonus math — detect LISA contributions and calculate government bonus capture
-    if (platforms.length > 0) {
-      // Detect LISA contributions from transaction descriptions
-      const lisaTxs = investTxs.filter((t) => {
-        const desc = t.description.toLowerCase();
-        return desc.includes('lisa') || desc.includes('lifetime isa') || desc.includes('lifetime savings');
-      });
-      const lisaTotal = lisaTxs.reduce((s, t) => s + Math.abs(t.amount), 0);
-      const lisaMonthly = Math.round(lisaTotal / Math.max(1, ANALYSIS_MONTHS));
-      const lisaAnnualised = lisaMonthly * 12;
-      const lisaLimit = T.lisaAnnualLimit;
-      const lisaBonus = Math.round(Math.min(lisaAnnualised, lisaLimit) * T.lisaBonusRate);
-      const lisaGap = Math.max(0, lisaLimit - lisaAnnualised);
-      const lisaGapMonthly = Math.round(lisaGap / 12);
-
-      if (lisaTxs.length > 0 && lisaGap > 0) {
-        // User has a LISA but isn't maxing it — show the unclaimed bonus
-        const lisaProof = `LISA contributions detected: £${lisaMonthly}/mo (£${lisaAnnualised}/yr annualised). `
-          + `LISA annual limit: £${lisaLimit.toLocaleString()}. Gap: £${lisaGap.toLocaleString()}/yr (£${lisaGapMonthly}/mo). `
-          + `Government bonus at ${T.lisaBonusRate * 100}%: currently claiming £${lisaBonus}/yr. `
-          + `Missing: £${Math.round(lisaGap * T.lisaBonusRate)}/yr in free money.`;
-        moves.push({
-          action: `Increase LISA by £${lisaGapMonthly}/month to claim £${Math.round(lisaGap * T.lisaBonusRate)}/year in government bonus`,
-          annualImpact: Math.round(lisaGap * T.lisaBonusRate),
-          monthlyImpact: Math.round(lisaGap * T.lisaBonusRate / 12),
-          effort: 'low',
-          category: 'invest',
-          merchants: [],
-          strategy: `You're contributing £${lisaMonthly}/month to your LISA but the annual limit is £${lisaLimit.toLocaleString()}. Every £1 in gets a 25p government bonus up to £${lisaLimit.toLocaleString()}/year. You're leaving £${Math.round(lisaGap * T.lisaBonusRate)}/year on the table.`,
-          steps: [
-            `Increase LISA contributions by £${lisaGapMonthly}/month to max £${Math.round(lisaLimit / 12)}/month`,
-            'The 25% bonus is added automatically by your LISA provider',
-            'I\'ll track your annual LISA total against the £4,000 limit',
-          ],
-          effect: `£${Math.round(lisaGap * T.lisaBonusRate)}/year in government bonus, a guaranteed 25% return.`,
-          proof: lisaProof,
-          subGoals: [{
-            type: 'savings_reach',
-            target: 'LISA annual limit',
-            startValue: lisaAnnualised,
-            targetValue: lisaLimit,
-          }],
-        });
-      } else if (lisaTxs.length === 0 && (buyingHome || (p.surplus > 200 && p.income > 0 && p.income <= 4167))) {
-        // £4,167/month ≈ £50k/year — LISA property bonus only usable on homes ≤£450k,
-        // so it's most relevant for incomes where that price range is realistic.
-        const maxBonus = Math.round(lisaLimit * T.lisaBonusRate);
-        const monthlyNeeded = Math.round(lisaLimit / 12);
-        moves.push({
-          action: `A LISA would add £${maxBonus}/year in government bonus on up to £${lisaLimit.toLocaleString()}/year`,
-          annualImpact: maxBonus,
-          monthlyImpact: Math.round(maxBonus / 12),
-          effort: 'medium',
-          category: 'invest',
-          merchants: [],
-          strategy: `${buyingHome ? 'You\'re saving for a first home. ' : ''}A Lifetime ISA adds a 25% government bonus on contributions up to £${lisaLimit.toLocaleString()}/year. That's £${maxBonus}/year in free money. Eligible for first-time buyers (property ≤£450k) or retirement (age 60+). Penalty for early withdrawal: 25% of total (you lose bonus + 6.25% of your money).`,
-          steps: [
-            `Contribute up to £${monthlyNeeded}/month (£${lisaLimit.toLocaleString()}/year)`,
-            'The 25% bonus is applied within 4-9 weeks of each contribution',
-            'This counts toward your overall £20,000 ISA allowance',
-          ],
-          effect: `£${maxBonus}/year guaranteed return on contributions.`,
-          proof: `LISA limit: £${lisaLimit.toLocaleString()}/yr. Bonus: ${T.lisaBonusRate * 100}% = £${maxBonus}/yr. `
-            + `Monthly equivalent: £${monthlyNeeded}/mo. Counts toward £${T.isaAnnualLimit.toLocaleString()} total ISA allowance.`,
-        });
-      }
-    }
-
-    // 7. Platform fee awareness — compare fees across detected platforms
-    if (platforms.length >= 2) {
-      // Calculate annual fee cost for each detected platform
-      const platformCosts = platforms
-        .map((p) => {
-          const feeData = PLATFORM_FEES[p.merchant];
-          if (!feeData) return null;
-          // Estimate holdings from monthly contributions × 12 months (conservative floor)
-          // In reality holdings grow over time, but we use 1 year of flow as minimum estimate
-          const estimatedHoldings = p.monthly * 12;
-          const annualFee = Math.round(estimatedHoldings * feeData.annualPct);
-          return {
-            merchant: p.merchant,
-            monthly: p.monthly,
-            estimatedHoldings,
-            annualPct: feeData.annualPct,
-            label: feeData.label,
-            annualFee,
-            notes: feeData.notes,
-          };
-        })
-        .filter(Boolean) as { merchant: string; monthly: number; estimatedHoldings: number; annualPct: number; label: string; annualFee: number; notes: string }[];
-
-      // Only surface if there's a meaningful fee difference between platforms
-      const hasFees = platformCosts.filter((p) => p.annualPct > 0);
-      const noFees = platformCosts.filter((p) => p.annualPct === 0);
-      const totalFees = hasFees.reduce((s, p) => s + p.annualFee, 0);
-
-      if (hasFees.length > 0 && noFees.length > 0 && totalFees > 0) {
-        const feeBreakdown = platformCosts.map((p) =>
-          `${p.merchant}: ${p.label} on ~£${p.estimatedHoldings.toLocaleString()} = £${p.annualFee}/yr`
-        ).join('. ');
-        const feeProof = `Platform fees based on ${ANALYSIS_MONTHS}-month contribution flow (conservative estimate of holdings). `
-          + feeBreakdown + `. `
-          + `Total annual platform fees: £${totalFees}. `
-          + `Note: actual fees depend on total holdings, not just recent contributions. Real cost may be higher.`;
-
-        moves.push({
-          action: `Platform fees costing ~£${totalFees}/year across ${hasFees.length} platform${hasFees.length > 1 ? 's' : ''}`,
-          annualImpact: totalFees,
-          monthlyImpact: Math.round(totalFees / 12),
-          effort: 'medium',
-          category: 'invest',
-          merchants: platformCosts.map((p) => p.merchant),
-          strategy: `You're using platforms with different fee structures. ${hasFees.map(p => `${p.merchant} charges ${p.label}`).join('; ')}. ${noFees.map(p => `${p.merchant} charges ${p.label}`).join('; ')}. The same investments on a cheaper platform cost less.`,
-          steps: [
-            'Compare what each platform holds (ISA, GIA, pension) as not all are portable',
-            'Check if the fee difference justifies a transfer (some charge exit fees)',
-            'I\'ll surface the fee comparison each time your contributions change',
-          ],
-          effect: `~£${totalFees}/year in platform fees. Whether to consolidate depends on what each account holds.`,
-          proof: feeProof,
-        });
-      }
-    }
-
     // Coffee
     if (m.coffeeAndCafes > T.coffeeMin) {
-      const { cutPct: coffeeCutPct, cv: coffeeCV } = this._dataDrivenCutPct(txs, 'Coffee & Cafes', T.coffeeCutPct);
-      const saving = Math.round(m.coffeeAndCafes * coffeeCutPct);
+      const saving = Math.round(m.coffeeAndCafes * T.coffeeCutPct);
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
-      const coffeeProof = `\u00a3${Math.round(m.coffeeAndCafes)}/mo on caf\u00e9s (${ANALYSIS_MONTHS}-month avg). `
-        + `${Math.round(coffeeCutPct * 100)}% reduction (data-driven) = \u00a3${saving}/mo. `
-        + `Target: \u00a3${Math.round(m.coffeeAndCafes - saving)}/mo.`;
       moves.push({
         action: `Halve caf\u00e9 spending from \u00a3${Math.round(m.coffeeAndCafes)} to \u00a3${Math.round(m.coffeeAndCafes - saving)}/month`,
         annualImpact: saving * 12,
@@ -2226,8 +1297,6 @@ const EnrichmentEngine = {
         strategy: `\u00a3${Math.round(m.coffeeAndCafes)}/month on coffee and caf\u00e9s.`,
         steps: ['Make coffee at home 3 mornings per week', 'Keep one treat coffee day', 'I\'ll track your weekly café spend'],
         effect: `Saves \u00a3${saving}/month.`,
-        proof: coffeeProof,
-        spendingCV: coffeeCV,
         subGoals: [{
           type: 'spending_reduce',
           target: 'Coffee & Cafes',
@@ -2243,7 +1312,7 @@ const EnrichmentEngine = {
       const monthsToDeposit = p.surplus > 0 ? Math.ceil(depositTarget * 0.1 / p.surplus) : 0;
       const depositAmount = Math.round(depositTarget * 0.1);
       moves.push({
-        action: `Save \u00a3${Math.round(p.surplus * 0.6)}/month toward a \u00a3${depositAmount} house deposit`,
+        action: `Build a house deposit — save \u00a3${Math.round(p.surplus * 0.6)}/month toward \u00a3${depositAmount}`,
         annualImpact: Math.round(p.surplus * 0.6 * 12),
         monthlyImpact: Math.round(p.surplus * 0.6),
         effort: 'medium',
@@ -2262,101 +1331,22 @@ const EnrichmentEngine = {
     }
 
     if (havingBaby && p.surplus > 0) {
-      // Timeline-scaled parental runway: urgency increases as due date approaches.
-      // UK statutory maternity pay is ~£172/week — most families face a significant
-      // income drop, so the runway target scales with available lead time.
-      let runwayMonths: number;
-      let effort: 'low' | 'medium' | 'high';
-      let urgencyNote: string;
-      if (babyMonths != null && babyMonths <= 3) {
-        runwayMonths = 1; effort = 'low'; urgencyNote = `You have ~${Math.round(babyMonths)} months — focus on building a minimum runway.`;
-      } else if (babyMonths != null && babyMonths <= 6) {
-        runwayMonths = 2; effort = 'medium'; urgencyNote = `~${Math.round(babyMonths)} months to go — good time to build a solid buffer.`;
-      } else {
-        runwayMonths = 3; effort = 'medium'; urgencyNote = 'With time on your side, aim for a full 3-month runway.';
-      }
-      const parentalRunway = Math.round(p.spending * runwayMonths);
+      const parentalRunway = Math.round(p.spending * 3);
       moves.push({
         action: `Build a \u00a3${parentalRunway.toLocaleString()} parental leave runway`,
         annualImpact: Math.round(parentalRunway),
         monthlyImpact: Math.round(parentalRunway / 12),
-        effort,
+        effort: 'medium',
         category: 'buffer',
         merchants: [],
-        strategy: `${urgencyNote} Target: ${runwayMonths} month${runwayMonths > 1 ? 's' : ''} of expenses saved to cover reduced income during parental leave.`,
+        strategy: 'With a baby on the way, you\'ll want 3 months of expenses saved to cover reduced income during parental leave.',
         steps: ['Calculate your expected statutory/employer maternity/paternity pay', 'Work out the monthly shortfall vs current spending', 'Set aside the difference now while you can', 'I\'ll model the income change for you'],
-        effect: `\u00a3${parentalRunway.toLocaleString()} runway covers ${runwayMonths} month${runwayMonths > 1 ? 's' : ''} of expenses.`,
+        effect: `\u00a3${parentalRunway.toLocaleString()} runway covers 3 months of expenses.`,
         subGoals: [{
           type: 'buffer_build',
           target: 'Parental leave runway',
           startValue: 0,
           targetValue: parentalRunway,
-        }],
-      });
-    }
-
-    if (isMoving && p.surplus > 0) {
-      // Timeline-scaled moving fund
-      // Typical moving costs: deposit (1-2 months rent) + agency fees + removal costs
-      let depositMultiplier: number;
-      let effort: 'low' | 'medium' | 'high';
-      let urgencyNote: string;
-      if (movingMonths != null && movingMonths <= 3) {
-        depositMultiplier = 1.5; effort = 'low'; urgencyNote = `You have ~${Math.round(movingMonths)} months — focus on deposit + immediate moving costs.`;
-      } else if (movingMonths != null && movingMonths <= 6) {
-        depositMultiplier = 2; effort = 'medium'; urgencyNote = `~${Math.round(movingMonths)} months to go — good time to build a full moving fund.`;
-      } else {
-        depositMultiplier = 3; effort = 'medium'; urgencyNote = 'With time on your side, aim for a comfortable moving fund including furnishing.';
-      }
-      const movingTarget = Math.round(p.spending * depositMultiplier);
-      moves.push({
-        action: `Build a \u00a3${movingTarget.toLocaleString()} moving fund`,
-        annualImpact: Math.round(movingTarget),
-        monthlyImpact: Math.round(movingTarget / 12),
-        effort,
-        category: 'buffer',
-        merchants: [],
-        strategy: `${urgencyNote} Covers deposit, agency fees, removals${depositMultiplier >= 3 ? ', and initial furnishing costs' : ''}.`,
-        steps: ['Calculate expected deposit (usually 4-6 weeks rent)', 'Budget for agency fees and removal costs', 'Set aside funds for utility setup and initial furnishing', 'I\'ll track your moving fund progress'],
-        effect: `\u00a3${movingTarget.toLocaleString()} covers ~${depositMultiplier} months of expenses for the move.`,
-        subGoals: [{
-          type: 'buffer_build',
-          target: 'Moving fund',
-          startValue: 0,
-          targetValue: movingTarget,
-        }],
-      });
-    }
-
-    if (hasWedding && p.surplus > 0) {
-      // Timeline-scaled wedding fund
-      // UK average wedding: ~£20k, but scale to user's income level
-      let targetMultiplier: number;
-      let effort: 'low' | 'medium' | 'high';
-      let urgencyNote: string;
-      if (weddingMonths != null && weddingMonths <= 3) {
-        targetMultiplier = 2; effort = 'low'; urgencyNote = `You have ~${Math.round(weddingMonths)} months — focus on covering the remaining deposit payments.`;
-      } else if (weddingMonths != null && weddingMonths <= 6) {
-        targetMultiplier = 4; effort = 'medium'; urgencyNote = `~${Math.round(weddingMonths)} months to go — good time to build towards your wedding budget.`;
-      } else {
-        targetMultiplier = 6; effort = 'medium'; urgencyNote = 'With time on your side, build a comfortable wedding fund to avoid debt.';
-      }
-      const weddingTarget = Math.round(p.spending * targetMultiplier);
-      moves.push({
-        action: `Build a \u00a3${weddingTarget.toLocaleString()} wedding fund`,
-        annualImpact: Math.round(weddingTarget),
-        monthlyImpact: Math.round(weddingTarget / 12),
-        effort,
-        category: 'savings',
-        merchants: [],
-        strategy: `${urgencyNote} Target: \u00a3${weddingTarget.toLocaleString()} to cover wedding costs without going into debt.`,
-        steps: ['Set a realistic total budget and track vendor deposits', 'Prioritise non-negotiable costs (venue, catering) first', 'Set up a dedicated wedding savings account', 'I\'ll track your wedding fund progress'],
-        effect: `\u00a3${weddingTarget.toLocaleString()} covers ~${targetMultiplier} months of expenses for wedding costs.`,
-        subGoals: [{
-          type: 'savings_reach',
-          target: 'Wedding fund',
-          startValue: 0,
-          targetValue: weddingTarget,
         }],
       });
     }
@@ -2383,8 +1373,6 @@ const EnrichmentEngine = {
     }
 
     if (isSelfEmployed && p.surplus > 0) {
-      // 25% tax reserve: covers basic rate income tax (20%) + Class 4 NI (~6%)
-      // minus personal allowance effect. Conservative enough to avoid underpayment.
       const taxSetAside = Math.round(p.income * 0.25);
       moves.push({
         action: `Set aside \u00a3${taxSetAside}/month for tax (25% of income)`,
@@ -2395,16 +1383,15 @@ const EnrichmentEngine = {
         merchants: [],
         strategy: 'As self-employed, your tax isn\'t deducted automatically. Setting aside 25% prevents a January surprise.',
         steps: ['Open a separate savings account for tax', 'Transfer 25% of every payment received', 'I\'ll track your tax reserve vs estimated liability'],
-        effect: 'No tax bill shock. Always prepared for self-assessment.',
+        effect: 'No tax bill shock — always prepared for self-assessment.',
       });
     }
 
     // ── Mathematical insights for financially healthy users ──
     // These surface tax and return facts — not product recommendations.
-    // Only shown to users with 20%+ savings rate and minimal/no debt,
-    // because spending cuts and debt payoff are higher-priority for others.
+    // The user sees the numbers; the ranking reflects the tax math.
     if (m.savingsRate >= 20 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
-      // UK ISA allowance: £20,000/year tax-free wrapper (2024-25 tax year)
+      // ISA allowance utilisation
       const isaLimit = 20000;
       const annualSurplus = Math.round(p.surplus * 12);
       if (annualSurplus > 3000) {
@@ -2423,9 +1410,7 @@ const EnrichmentEngine = {
         });
       }
 
-      // Pension tax relief arithmetic — shows the net cost after relief.
-      // UK higher rate threshold is ~£50,270/year (£4,189/month). Higher rate
-      // taxpayers get 40% relief vs 20% for basic rate.
+      // Pension tax relief arithmetic
       if (p.income > 2500) {
         const pensionExtra = Math.round(p.surplus * 0.15);
         const isHigherRate = p.income > 4167; // ~£50k/year
@@ -2440,14 +1425,12 @@ const EnrichmentEngine = {
           category: 'invest',
           merchants: [],
           strategy: `At your income level, each \u00a3100 directed to a pension has a net cost of \u00a3${netCostPer100} after ${reliefRate}% tax relief. Via salary sacrifice, NI savings reduce this further.`,
-          steps: [`Tax relief is ${reliefRate}% at your marginal rate`, `Salary sacrifice also saves ${isHigherRate ? 2 : 8}% in National Insurance`, 'Annual pension allowance is \u00a360,000 (including employer contributions)'],
+          steps: ['Tax relief is ${reliefRate}% at your marginal rate', 'Salary sacrifice also saves ${isHigherRate ? 2 : 8}% in National Insurance', 'Annual pension allowance is \u00a360,000 (including employer contributions)'],
           effect: `\u00a3${annualRelief.toLocaleString()}/year in tax relief on \u00a3${(pensionExtra * 12).toLocaleString()}/year of contributions.`,
         });
       }
 
-      // Personal Savings Allowance (PSA): basic rate taxpayers get £1,000/year
-      // of interest tax-free; higher rate get £500. Above this, interest is
-      // taxed at the marginal rate. ISA interest doesn't count against PSA.
+      // Tax-free savings threshold
       if (p.surplus > 200) {
         const annualSavingsInterest = Math.round(p.surplus * 12 * 0.04);
         const isHigherRate = p.income > 4167;
@@ -2464,7 +1447,7 @@ const EnrichmentEngine = {
           merchants: [],
           strategy: taxOnInterest > 0
             ? `At 4% interest, your surplus generates ~\u00a3${annualSavingsInterest}/year. Your personal savings allowance is \u00a3${psa} (${isHigherRate ? 'higher' : 'basic'} rate). Interest above this is taxed at ${isHigherRate ? 40 : 20}%. Tax-free wrappers avoid this.`
-            : `At 4% interest, your surplus generates ~\u00a3${annualSavingsInterest}/year, within your \u00a3${psa} personal savings allowance, so no tax is due.`,
+            : `At 4% interest, your surplus generates ~\u00a3${annualSavingsInterest}/year — within your \u00a3${psa} personal savings allowance, so no tax is due.`,
           steps: [`Your personal savings allowance is \u00a3${psa} as a ${isHigherRate ? 'higher' : 'basic'} rate taxpayer`, 'Interest from ISAs and Premium Bonds does not count against this', 'This allowance is separate from the ISA allowance'],
           effect: taxOnInterest > 0
             ? `\u00a3${taxOnInterest}/year in tax on savings interest above the allowance.`
@@ -2488,8 +1471,7 @@ const EnrichmentEngine = {
         });
       }
 
-      // Spending efficiency: 1.5% is a conservative UK cashback/rewards estimate
-      // (Amex Platinum Cashback gives 1.25-5%, but most cards offer 0.5-1%)
+      // Spending efficiency
       const cashbackEstimate = Math.round(p.spending * 12 * 0.015);
       moves.push({
         action: `1-2% back on \u00a3${Math.round(p.spending * 12).toLocaleString()}/year spending = \u00a3${cashbackEstimate}/year`,
@@ -2502,284 +1484,6 @@ const EnrichmentEngine = {
         steps: ['Cashback is typically treated as a discount, not taxable income', 'Stacking cashback sources can increase the effective rate', 'The value depends on whether you pay balances in full each month'],
         effect: `\u00a3${cashbackEstimate}/year from spending that already happens.`,
       });
-    }
-
-    // ── Mortgage overpayment ──
-    // For mortgage holders: the amortisation math shows exact interest saved
-    // and years shaved off. Uses same calcPayoffMonths/calcInterestSaved as debt.
-    if (hasMortgage && p.surplus > 100) {
-      // Detect mortgage from connected debt accounts or estimate from transactions
-      const mortgageAccount = activeDebts.find((d: DebtAccount) => d.account_type === 'mortgage');
-      const mortgageBalance = mortgageAccount?.outstanding_balance || 0;
-      const mortgageRate = mortgageAccount?.interest_rate || DEFAULT_APR.mortgage;
-      const mortgageMin = mortgageAccount?.minimum_payment || 0;
-      // Use rent/mortgage category transactions as fallback for payment amount
-      const mortgageTxs = txs.filter((t) => t.category === 'Mortgage' && t.amount < 0);
-      const monthlyMortgage = mortgageMin > 0
-        ? mortgageMin
-        : mortgageTxs.length > 0
-          ? Math.round(Math.abs(mortgageTxs.reduce((s, t) => s + t.amount, 0)) / Math.max(mortgageTxs.length, 1))
-          : 0;
-
-      if (monthlyMortgage > 0) {
-        // Overpay with 20% of surplus (conservative — leaves buffer for other goals)
-        const overpayment = Math.round(p.surplus * 0.2);
-        const newPayment = monthlyMortgage + overpayment;
-        // Estimate balance if not connected: 25-year term assumption
-        const estimatedBalance = mortgageBalance > 0 ? mortgageBalance : monthlyMortgage * 12 * 20;
-        const currentMonths = calcPayoffMonths(estimatedBalance, mortgageRate, monthlyMortgage);
-        const newMonths = calcPayoffMonths(estimatedBalance, mortgageRate, newPayment);
-        const monthsSaved = Math.max(0, currentMonths - newMonths);
-        const yearsSaved = Math.round(monthsSaved / 12 * 10) / 10;
-        const interestSaved = calcInterestSaved(estimatedBalance, mortgageRate, monthlyMortgage, newPayment);
-        const annualInterestSaved = Math.round(interestSaved / Math.max(1, newMonths / 12));
-
-        if (yearsSaved > 0 && overpayment >= 50) {
-          const proof = `Mortgage: £${estimatedBalance.toLocaleString()} at ${Math.round(mortgageRate * 100 * 10) / 10}%. `
-            + `Current payment: £${monthlyMortgage}/mo → ${Math.round(currentMonths / 12)} years remaining. `
-            + `Overpay £${overpayment}/mo → ${Math.round(newMonths / 12)} years remaining. `
-            + `${yearsSaved} years saved. Lifetime interest saved: £${interestSaved.toLocaleString()}.`;
-          moves.push({
-            action: `Overpay mortgage by £${overpayment}/month to save £${interestSaved.toLocaleString()} and clear ${yearsSaved} years early`,
-            annualImpact: annualInterestSaved,
-            monthlyImpact: overpayment,
-            effort: 'low',
-            category: 'debt',
-            merchants: [],
-            strategy: `At ${Math.round(mortgageRate * 100 * 10) / 10}% APR, every £1 overpaid saves £${Math.round((mortgageRate / 0.045) * 1.5 * 10) / 10} in interest over the term. Most UK lenders allow 10% overpayment per year without early repayment charges.`,
-            steps: ['Check your lender\'s overpayment allowance (typically 10%/year)', `Set up £${overpayment}/month overpayment on top of your regular payment`, 'I\'ll track the impact as your balance reduces'],
-            effect: `Clears mortgage ${yearsSaved} years early. Saves £${interestSaved.toLocaleString()} in lifetime interest.`,
-            proof,
-          });
-        }
-      }
-    }
-
-    // ── Car finance intelligence ──
-    // Detect car finance accounts and provide PCP/HP-specific advice:
-    // voluntary termination rights, balloon payment awareness, refinancing.
-    const carFinanceAccounts = activeDebts.filter((d: DebtAccount) => d.account_type === 'car_finance');
-    if (carFinanceAccounts.length > 0) {
-      for (const car of carFinanceAccounts) {
-        const carName = debtDisplayName(car);
-        const carBalance = car.outstanding_balance || 0;
-        const carRate = getAPR(car);
-        const carMin = estimateMinimum(car);
-        // Total paid estimate: assume 48-month PCP deal, balance is remaining
-        const monthsPaid = carMin > 0 ? Math.round((carBalance / carMin) * 0.5) : 12;
-        // CCA 1974 voluntary termination: once you've paid 50% of total amount payable,
-        // you can hand the car back with nothing more to pay
-        const totalAmountPayable = carBalance + (carMin * monthsPaid); // rough: paid so far + remaining
-        const halfTAP = Math.round(totalAmountPayable / 2);
-        const paidSoFar = Math.round(carMin * monthsPaid);
-        const vtGap = Math.max(0, halfTAP - paidSoFar);
-
-        const proof = `${carName}: £${carBalance.toLocaleString()} remaining at ${Math.round(carRate * 100)}% APR. `
-          + `Monthly payment: £${Math.round(carMin)}. `
-          + `Estimated total payable: £${totalAmountPayable.toLocaleString()}. `
-          + `50% threshold (VT right): £${halfTAP.toLocaleString()}. `
-          + `${vtGap > 0 ? `£${vtGap.toLocaleString()} away from voluntary termination eligibility.` : 'You may already be eligible for voluntary termination.'}`;
-
-        if (vtGap <= 0) {
-          // Already eligible for VT
-          moves.push({
-            action: `You can voluntarily terminate your ${carName} agreement and owe nothing more`,
-            annualImpact: Math.round(carMin * 12),
-            monthlyImpact: Math.round(carMin),
-            effort: 'medium',
-            category: 'debt',
-            merchants: [],
-            strategy: `Under the Consumer Credit Act 1974 (Section 99-100), once you've paid 50% of the total amount payable on a HP or PCP agreement, you can hand the car back with nothing more owed. You appear to have passed this threshold.`,
-            steps: ['Confirm your total amount payable with the finance company', 'Ensure the car is in good condition (you may be charged for excess damage)', 'Send a written voluntary termination notice to the lender', 'Return the car — no balloon payment, no further obligation'],
-            effect: `Frees up £${Math.round(carMin)}/month. No balloon payment required.`,
-            proof,
-          });
-        } else if (vtGap < carMin * 6) {
-          // Within 6 months of VT eligibility
-          moves.push({
-            action: `£${vtGap.toLocaleString()} away from voluntary termination on ${carName} — eligible in ~${Math.round(vtGap / carMin)} months`,
-            annualImpact: Math.round(carMin * 12 * 0.5),
-            monthlyImpact: 0,
-            effort: 'low',
-            category: 'debt',
-            merchants: [],
-            strategy: `Under CCA 1974, once you've paid 50% of the total amount payable, you can hand the car back. You're £${vtGap.toLocaleString()} away. Keep making regular payments and this becomes an option in ~${Math.round(vtGap / carMin)} months.`,
-            steps: ['Keep making your regular £' + Math.round(carMin) + '/month payments', 'Request a settlement statement showing total amount payable', 'Once 50% is reached, decide: keep the car or terminate', 'If PCP: compare balloon payment vs car value at that point'],
-            effect: `Option to end the agreement with no balloon payment in ~${Math.round(vtGap / carMin)} months.`,
-            proof,
-          });
-        }
-
-        // PCP balloon payment warning — if car finance detected, alert about end-of-term
-        if (carBalance > 3000 && carRate > 0) {
-          const refinanceSaving = carRate > 0.07
-            ? Math.round(calcInterestSaved(carBalance, carRate, carMin, carMin) * 0.3)
-            : 0;
-          if (refinanceSaving > 200) {
-            moves.push({
-              action: `Refinancing ${carName} at a lower rate could save ~£${refinanceSaving.toLocaleString()} in interest`,
-              annualImpact: Math.round(refinanceSaving / Math.max(1, carBalance / (carMin * 12))),
-              monthlyImpact: 0,
-              effort: 'medium',
-              category: 'debt',
-              merchants: [],
-              strategy: `Your car finance is at ${Math.round(carRate * 100)}% APR. Personal loans from high-street banks currently start at 3-5% for good credit. Refinancing the remaining £${carBalance.toLocaleString()} could reduce total interest.`,
-              steps: ['Check your credit score (free via ClearScore, Experian, or Credit Karma)', 'Compare personal loan rates from 3+ lenders', 'Ensure no early settlement penalty exceeds the interest saving', 'If switching, request a settlement figure from your current lender'],
-              effect: `Could save ~£${refinanceSaving.toLocaleString()} in total interest on the remaining balance.`,
-            });
-          }
-        }
-      }
-    }
-
-    // ── Debt consolidation / balance transfer ──
-    // For users with 2+ high-interest debts: suggest consolidation via personal
-    // loan or 0% balance transfer. Only when total interest burn justifies it.
-    if (actualDebtCount >= 2 && !isGoodDebt) {
-      const highRateDebts = activeDebts.filter((d: DebtAccount) => getAPR(d) > 0.15);
-      if (highRateDebts.length >= 2) {
-        const consolidateBalance = highRateDebts.reduce((s: number, d: DebtAccount) => s + (d.outstanding_balance || 0), 0);
-        const weightedAPR = highRateDebts.reduce((s: number, d: DebtAccount) => s + getAPR(d) * (d.outstanding_balance || 0), 0) / Math.max(1, consolidateBalance);
-        const currentAnnualInterest = Math.round(consolidateBalance * weightedAPR);
-        // Personal loan at 7.9% or 0% balance transfer (assume 3% fee)
-        const consolidatedAPR = 0.079;
-        const consolidatedAnnualInterest = Math.round(consolidateBalance * consolidatedAPR);
-        const annualSaving = currentAnnualInterest - consolidatedAnnualInterest;
-        // Balance transfer: 0% for 24 months with ~3% fee
-        const btFee = Math.round(consolidateBalance * 0.03);
-        const btSaving = currentAnnualInterest - btFee; // First year saving (0% vs current rate minus fee)
-
-        if (annualSaving > 200) {
-          const bestOption = btSaving > annualSaving ? 'balance transfer' : 'personal loan';
-          const bestSaving = Math.max(annualSaving, btSaving);
-          const proof = `${highRateDebts.length} debts totalling £${consolidateBalance.toLocaleString()} at weighted ${Math.round(weightedAPR * 100)}% APR. `
-            + `Current annual interest: £${currentAnnualInterest.toLocaleString()}. `
-            + `Personal loan at 7.9%: £${consolidatedAnnualInterest.toLocaleString()}/year (saves £${annualSaving.toLocaleString()}). `
-            + `0% balance transfer (3% fee = £${btFee}): saves £${btSaving.toLocaleString()} in year one.`;
-          moves.push({
-            action: `Consolidate £${consolidateBalance.toLocaleString()} across ${highRateDebts.length} debts via ${bestOption} to save £${bestSaving.toLocaleString()}/year`,
-            annualImpact: bestSaving,
-            monthlyImpact: Math.round(bestSaving / 12),
-            effort: 'medium',
-            category: 'debt',
-            merchants: highRateDebts.map((d: DebtAccount) => debtDisplayName(d)),
-            strategy: `You're paying ~£${currentAnnualInterest.toLocaleString()}/year in interest across ${highRateDebts.length} high-rate debts. ${bestOption === 'balance transfer'
-              ? `A 0% balance transfer card (typically 24-29 months) with a 3% fee (£${btFee}) beats a personal loan here.`
-              : `A personal loan at ~7.9% APR reduces annual interest from £${currentAnnualInterest.toLocaleString()} to £${consolidatedAnnualInterest.toLocaleString()}.`}`,
-            steps: ['Check eligibility with a soft-search tool (no credit score impact)', `Apply for a ${bestOption} to cover £${consolidateBalance.toLocaleString()}`, 'Pay off all existing high-rate debts immediately on approval', bestOption === 'balance transfer' ? 'Set up a direct debit to clear the balance before the 0% period ends' : 'Set up a fixed monthly payment to clear within the loan term'],
-            effect: `Saves £${bestSaving.toLocaleString()}/year in interest. Single payment instead of ${highRateDebts.length}.`,
-            proof,
-          });
-        }
-      }
-    }
-
-    // ── Salary sacrifice NI saving ──
-    // Salary sacrifice pension contributions save both income tax AND National
-    // Insurance (employee NI: 8% on earnings £12,570-£50,270, 2% above).
-    // This is on top of the pension tax relief already shown above.
-    if (p.income > 2500 && p.surplus > 100 && !isSelfEmployed && !isStudent) {
-      const pensionExtra = Math.round(p.surplus * 0.15);
-      const isHigherRate = p.income > 4167; // ~£50k/year
-      const niRate = isHigherRate ? 0.02 : 0.08; // 2% above UEL, 8% below
-      const annualNISaving = Math.round(pensionExtra * 12 * niRate);
-      const incomeTaxRate = isHigherRate ? 0.40 : 0.20;
-      const annualTaxSaving = Math.round(pensionExtra * 12 * incomeTaxRate);
-      const totalAnnualSaving = annualNISaving + annualTaxSaving;
-      // Net cost: what £100 actually costs via salary sacrifice
-      const netCostPer100 = Math.round(100 * (1 - incomeTaxRate - niRate));
-
-      if (annualNISaving > 50) {
-        moves.push({
-          action: `Salary sacrifice £${pensionExtra}/month into pension — costs £${Math.round(pensionExtra * netCostPer100 / 100)} net (saves £${annualNISaving}/year in NI)`,
-          annualImpact: totalAnnualSaving,
-          monthlyImpact: Math.round(totalAnnualSaving / 12),
-          effort: 'low',
-          category: 'invest',
-          merchants: [],
-          strategy: `Via salary sacrifice, £${pensionExtra}/month pension contribution saves ${Math.round(incomeTaxRate * 100)}% income tax AND ${Math.round(niRate * 100)}% NI. Net cost: £${netCostPer100} per £100 contributed. Regular pension contributions only get the tax relief — salary sacrifice gets both.`,
-          steps: ['Ask your employer if salary sacrifice is available (most large employers offer it)', 'Request a salary sacrifice increase through HR/payroll', 'Your take-home drops by £' + Math.round(pensionExtra * netCostPer100 / 100) + ' but pension gets the full £' + pensionExtra, 'Employer also saves NI — some pass this on as an additional contribution'],
-          effect: `£${totalAnnualSaving}/year in combined tax and NI savings. Your employer may also contribute their NI saving.`,
-        });
-      }
-    }
-
-    // ── Marriage allowance ──
-    // If in a couple and one partner earns below the personal allowance (£12,570),
-    // they can transfer £1,260 to the higher earner, saving £252/year (20% of £1,260).
-    // Only available to basic rate taxpayers (not higher rate).
-    const isCouple = id.household === 'couple_shared' || id.household === 'couple_separate' || id.household === 'family';
-    if (isCouple && p.income > 0) {
-      const isBasicRate = p.income <= 4167; // Up to ~£50k/year
-      if (isBasicRate) {
-        const marriageAllowanceSaving = 252; // Fixed: 20% × £1,260
-        moves.push({
-          action: `Marriage allowance could save £${marriageAllowanceSaving}/year if your partner earns below £12,570`,
-          annualImpact: marriageAllowanceSaving,
-          monthlyImpact: Math.round(marriageAllowanceSaving / 12),
-          effort: 'low',
-          category: 'savings',
-          merchants: [],
-          strategy: 'If one partner earns below the personal allowance (£12,570) and the other is a basic rate taxpayer, £1,260 of unused allowance can be transferred. This reduces the higher earner\'s tax by £252/year. You can backdate up to 4 years.',
-          steps: ['Check if your partner earns below £12,570/year', 'Apply online at gov.uk/marriage-allowance', 'You can backdate claims for up to 4 tax years (up to £1,008 total)', 'The allowance renews automatically each year'],
-          effect: '£252/year tax reduction. Up to £1,008 if backdated 4 years.',
-        });
-      }
-    }
-
-    // ── Capital Gains Tax annual exemption ──
-    // The CGT annual exempt amount is £3,000 (2024-25). For investment optimisers
-    // with significant holdings outside ISAs, this affects sell/rebalance decisions.
-    if (m.savingsRate >= 20 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
-      const investmentTxs = txs.filter((t) => t.category === 'Investments' && t.amount < 0);
-      const monthlyInvestments = investmentTxs.length > 0
-        ? Math.round(Math.abs(investmentTxs.reduce((s, t) => s + t.amount, 0)) / Math.max(ANALYSIS_MONTHS, 1))
-        : 0;
-      if (monthlyInvestments > 100 || wantsGrowth) {
-        const cgtExemption = 3000;
-        moves.push({
-          action: `Use your £${cgtExemption.toLocaleString()} CGT annual exemption before 5 April`,
-          annualImpact: Math.round(cgtExemption * 0.20), // 20% basic rate CGT on gains
-          monthlyImpact: 0,
-          effort: 'low',
-          category: 'invest',
-          merchants: [],
-          strategy: `The capital gains tax annual exempt amount is £${cgtExemption.toLocaleString()} (2024-25). Gains up to this amount are tax-free. For holdings outside ISAs, you can crystallise up to £${cgtExemption.toLocaleString()} in gains each tax year by selling and rebuying (known as "bed and ISA" if moved into an ISA wrapper).`,
-          steps: ['Review non-ISA holdings for unrealised gains before 5 April', 'Sell up to £' + cgtExemption.toLocaleString() + ' of gains tax-free', 'Rebuy inside an ISA wrapper to shelter future growth', 'Unused CGT exemption cannot be carried forward'],
-          effect: `Saves up to £${Math.round(cgtExemption * 0.20)}/year in capital gains tax (at 20% basic rate).`,
-        });
-      }
-    }
-
-    // ── Cash ISA vs Stocks & Shares ISA comparison ──
-    // For users with surplus: show the mathematical difference between cash
-    // and investing over 5-10 year horizons using historical UK returns.
-    if (m.savingsRate >= 10 && p.surplus > 200 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
-      const monthlyISA = Math.round(Math.min(p.surplus * 0.5, T.isaAnnualLimit / 12));
-      const cashRate = 0.045; // Best easy-access cash ISA rate
-      const equityReturn = 0.07; // Long-term UK equity average (nominal)
-      const years = 10;
-      // Compound: FV = PMT × ((1+r)^n - 1) / r, where r = monthly rate, n = months
-      const cashMonthlyRate = cashRate / 12;
-      const equityMonthlyRate = equityReturn / 12;
-      const months10y = years * 12;
-      const cashFV = Math.round(monthlyISA * ((Math.pow(1 + cashMonthlyRate, months10y) - 1) / cashMonthlyRate));
-      const equityFV = Math.round(monthlyISA * ((Math.pow(1 + equityMonthlyRate, months10y) - 1) / equityMonthlyRate));
-      const difference = equityFV - cashFV;
-
-      if (difference > 1000) {
-        moves.push({
-          action: `£${monthlyISA}/month in S&S ISA could grow to £${equityFV.toLocaleString()} vs £${cashFV.toLocaleString()} in Cash ISA over ${years} years`,
-          annualImpact: Math.round(difference / years),
-          monthlyImpact: 0,
-          effort: 'medium',
-          category: 'invest',
-          merchants: [],
-          strategy: `At £${monthlyISA}/month over ${years} years: Cash ISA at ${cashRate * 100}% → £${cashFV.toLocaleString()}. S&S ISA at ${equityReturn * 100}% average → £${equityFV.toLocaleString()}. Difference: £${difference.toLocaleString()}. Past performance isn't guaranteed, but over ${years}+ year horizons, equities have historically outperformed cash in the UK.`,
-          steps: ['Cash ISA: guaranteed return, instant access, no risk to capital', 'S&S ISA: higher expected return over 5+ years, but value can fall', 'Both are tax-free wrappers (no CGT, no income tax on gains/dividends)', 'You can hold one of each per tax year within the £' + T.isaAnnualLimit.toLocaleString() + ' total allowance'],
-          effect: `£${difference.toLocaleString()} potential difference over ${years} years (£${Math.round(difference / years).toLocaleString()}/year average).`,
-        });
-      }
     }
 
     // Break-even move if in deficit
@@ -2810,7 +1514,7 @@ const EnrichmentEngine = {
    * transactions into proper categories — the profile, archetype, score,
    * and moves all recompute with the improved data.
    */
-  rebuild(enriched: EnrichedTransaction[], debtAccounts?: DebtAccount[], identity?: UserIdentity | null): EnrichmentResult {
+  rebuild(enriched: EnrichedTransaction[], debtAccounts?: any[], identity?: any): EnrichmentResult {
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
     const archetype = this.determineArchetype(profile);
@@ -2831,12 +1535,12 @@ const EnrichmentEngine = {
     return {
       profile,
       archetype,
-      traits: traits.map((t) => ({ name: t.name, insight: t.insight })),
-      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })),
-      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })),
+      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
+      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
+      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
       decisionScore: score,
       decisionStack: stack,
-      behavioralPatterns: patterns.map((p: string | { pattern: string }) => typeof p === 'string' ? p : p.pattern),
+      behavioralPatterns: patterns.map((p: any) => p.pattern || p),
       enrichedTransactions: enriched,
       enrichmentMetrics,
       essentialGaps,
@@ -2864,70 +1568,6 @@ const EnrichmentEngine = {
   },
 
   /**
-   * Detect internal transfers among person-name (P2P) transactions.
-   *
-   * Strategy: if the same normalised person name appears in BOTH credits and
-   * debits, it's very likely a transfer between the user's own accounts (e.g.
-   * "FASTER PAYMENT TO JOHN SMITH" + "FASTER PAYMENT FROM JOHN SMITH").
-   *
-   * Transactions where the person name only appears in one direction are left
-   * alone — these are real spending (rent to flatmate) or real income (bill
-   * split refund) and should be visible in totals.
-   */
-  _detectInternalTransfers(enriched: EnrichedTransaction[]): void {
-    // Build sets of normalised person names seen in credits vs debits
-    const creditNames = new Set<string>();
-    const debitNames = new Set<string>();
-
-    for (const tx of enriched) {
-      if (!tx.isPersonTransfer) continue;
-      // Normalise: lowercase, strip bank prefixes/refs
-      const name = (tx.merchant || tx.description).toLowerCase()
-        .replace(/^(mobile-|bgc-?|fpo-?|sto-?|dd-?|so-?|tfr-?|cr-?|dr-?)\s*/i, '')
-        .replace(/\b(faster payment|bank transfer|transfer)\s*(to|from)\b/gi, '')
-        .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b|\bfpo\b|\bbgc\b|\bsto\b/g, '')
-        .replace(/\s+(ref|reference|no|id)[\s:]*[a-z0-9]+$/i, '')
-        .replace(/\s+\d[\w-]*$/i, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (!name) continue;
-
-      if (tx.amount > 0) creditNames.add(name);
-      else debitNames.add(name);
-    }
-
-    // Names appearing in BOTH directions are internal transfers
-    const internalNames = new Set<string>();
-    for (const name of creditNames) {
-      if (debitNames.has(name)) internalNames.add(name);
-    }
-
-    if (internalNames.size === 0) return;
-
-    // Reclassify matching transactions
-    for (const tx of enriched) {
-      if (!tx.isPersonTransfer) continue;
-      // Skip user-overridden transactions
-      if (tx.classifiedBy === 'user_override') continue;
-
-      const name = (tx.merchant || tx.description).toLowerCase()
-        .replace(/^(mobile-|bgc-?|fpo-?|sto-?|dd-?|so-?|tfr-?|cr-?|dr-?)\s*/i, '')
-        .replace(/\b(faster payment|bank transfer|transfer)\s*(to|from)\b/gi, '')
-        .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b|\bfpo\b|\bbgc\b|\bsto\b/g, '')
-        .replace(/\s+(ref|reference|no|id)[\s:]*[a-z0-9]+$/i, '')
-        .replace(/\s+\d[\w-]*$/i, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      if (internalNames.has(name)) {
-        tx.isTransfer = true;
-        tx.isIncome = false;
-        tx.category = 'Internal Transfer';
-      }
-    }
-  },
-
-  /**
    * Detect credit card full-payers and reclassify their payoff transactions.
    *
    * Problem: users who use credit cards for points/rewards and pay off in full
@@ -2945,7 +1585,7 @@ const EnrichmentEngine = {
    * transfers (isTransfer=true, isDebt=false) so they don't inflate spending
    * or create a false negative surplus.
    */
-  _reclassifyCreditCardPayoffs(enriched: EnrichedTransaction[], debtAccounts?: DebtAccount[]): void {
+  _reclassifyCreditCardPayoffs(enriched: EnrichedTransaction[], debtAccounts?: any[]): void {
     // Known credit card issuer merchants (must match merchant-db entries)
     const CC_ISSUERS = new Set([
       'American Express', 'Barclaycard', 'MBNA', 'Capital One', 'Vanquis',
@@ -2960,9 +1600,7 @@ const EnrichmentEngine = {
         if (acct.account_type !== 'credit_card' && acct.account_type !== 'credit') continue;
         const balance = acct.outstanding_balance ?? 0;
         const limit = acct.credit_limit ?? 0;
-        // 15% utilisation threshold: a card paid off in full would typically show
-        // 0-15% utilisation at any snapshot (some pending charges may exist).
-        // Users carrying real debt almost always exceed 30%.
+        // If we have a credit limit and utilization is under 15%, this is a full-payer card
         if (limit > 0 && (balance / limit) < 0.15) {
           fullPayerIssuers.add((acct.account_name || '').toLowerCase());
         }
@@ -2998,10 +1636,9 @@ const EnrichmentEngine = {
 
     const totalCCPayments = Object.values(ccPayments).reduce((s, v) => s + v, 0);
 
-    // Payment-to-spend ratio: a full-payer's CC payments should roughly equal
-    // their total card spending (ratio ≈ 1.0). Range of 0.5-1.5 accounts for
-    // timing mismatches (payments crossing month boundaries) and partial card use.
-    // Below 0.5 → not paying enough (carrying debt). Above 1.5 → paying down old debt.
+    // Heuristic: if total CC payments are within 30% of total other spending,
+    // this strongly suggests the user routes most spending through cards and
+    // pays them off. The payments are duplicates of the card spending.
     const paymentToSpendRatio = totalSpending > 0 ? totalCCPayments / totalSpending : 0;
     const isLikelyFullPayer = paymentToSpendRatio >= 0.5 && paymentToSpendRatio <= 1.5;
 
@@ -3048,41 +1685,6 @@ const EnrichmentEngine = {
       /\bremittance\b/,
     ];
     return patterns.some((rx) => rx.test(lower));
-  },
-
-  /** Compute a realistic spending reduction target for a category using the
-   *  user's own spending history, not arbitrary percentages.
-   *
-   *  Approach: bucket spending by calendar month, find the 25th percentile
-   *  month (P25), and use the gap between P25 and the mean as the achievable
-   *  cut. P25 is used instead of the minimum to avoid zero-month anomalies
-   *  (e.g. user was on holiday and didn't order delivery that month).
-   *
-   *  Also returns the coefficient of variation (CV) for downstream Monte Carlo
-   *  confidence intervals on the recommendation. */
-  _dataDrivenCutPct(txs: EnrichedTransaction[], category: string, fallbackPct: number): { cutPct: number; cv: number | undefined } {
-    const byMonth: Record<string, number> = {};
-    for (const t of txs) {
-      if (t.category === category && !t.isIncome && !t.isTransfer && !t.isRefund && t.amount < 0) {
-        const month = t.date.slice(0, 7); // 'YYYY-MM'
-        byMonth[month] = (byMonth[month] || 0) + Math.abs(t.amount);
-      }
-    }
-    const sorted = Object.values(byMonth).sort((a, b) => a - b);
-    if (sorted.length < 3) return { cutPct: fallbackPct, cv: undefined }; // insufficient data
-    const avg = sorted.reduce((s, v) => s + v, 0) / sorted.length;
-    if (avg <= 0) return { cutPct: fallbackPct, cv: undefined };
-    // Compute per-category CV (coefficient of variation) for Monte Carlo follow-through
-    const variance = sorted.reduce((s, v) => s + (v - avg) ** 2, 0) / sorted.length;
-    const cv = Math.sqrt(variance) / avg;
-    // Use P25 (25th percentile) as achievable floor instead of min
-    // This avoids zero-month anomalies and single-spike distortion
-    const p25Idx = Math.floor(sorted.length * 0.25);
-    const p25 = sorted[p25Idx];
-    const achievable = 1 - (p25 / avg);
-    // Floor 5% (always suggest something), cap 50% (never suggest halving — unrealistic)
-    const cutPct = Math.min(0.5, Math.max(0.05, achievable));
-    return { cutPct, cv };
   },
 
   _getMerchantsByCategory(txs: EnrichedTransaction[], category: string): string[] {
