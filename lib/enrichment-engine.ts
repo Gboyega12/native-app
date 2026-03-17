@@ -5,13 +5,8 @@ import {
 } from './merchant-db.js';
 import { classifyTransaction } from './classifier.js';
 import { normaliseDescription } from './normalise.js';
-import { extractLearnedPatterns, matchLearnedPattern } from './learned-patterns.js';
-import { buildFrequencyMap, classifyByAmountHeuristic } from './amount-heuristics.js';
-import type { FrequencyMap } from './amount-heuristics.js';
-import { trainEnsemble, predictWithEnsemble, shouldAcceptPrediction } from './bayesian-ensemble.js';
 import { extractSignals } from './signal-engine.js';
 import type { FinancialSignal } from './types.js';
-import type { LearnedPattern } from './types.js';
 import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes.js';
 import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS, PLATFORM_FEES, DEFAULT_APR, defaultMinimumPayment } from './constants.js';
 import { calcInterestSaved, calcPayoffMonths, calcTotalInterest } from './amortisation.js';
@@ -90,32 +85,7 @@ const EnrichmentEngine = {
   // ═══════════════════════════════════════════════════════════════════
   enrich(rawCSV: string, overrides?: TransactionOverride[], debtAccounts?: DebtAccount[], identity?: UserIdentity | null): EnrichmentResult {
     const transactions = this.parseCSV(rawCSV);
-    const frequencyMap = buildFrequencyMap(transactions);
-    const learnedPatterns = overrides?.length ? extractLearnedPatterns(overrides) : [];
-    const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides, learnedPatterns, frequencyMap));
-
-    // ── Pass 2: Bayesian Ensemble re-classification ──
-    // Train on confident Pass 1 results, then re-classify unresolved transactions.
-    const confidentTraining = enriched.filter(
-      (t) => t.confidence !== 'low' && t.category !== 'Other',
-    );
-    const ensemble = trainEnsemble(confidentTraining);
-    if (ensemble) {
-      for (let i = 0; i < enriched.length; i++) {
-        if (enriched[i].classifiedBy === 'default' && enriched[i].confidence === 'low' && !enriched[i].isTransfer && !enriched[i].isPersonTransfer) {
-          const prediction = predictWithEnsemble(ensemble, transactions[i], enriched);
-          if (prediction && shouldAcceptPrediction(prediction)) {
-            enriched[i] = {
-              ...enriched[i],
-              category: prediction.category,
-              isEssential: prediction.isEssential,
-              confidence: 'medium' as const,
-              classifiedBy: 'bayesian_ensemble' as const,
-            };
-          }
-        }
-      }
-    }
+    const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides));
 
     // ── Pass 3: Internal transfer detection ──
     // Person-name transactions where the SAME name appears in both credits
@@ -257,17 +227,15 @@ const EnrichmentEngine = {
   // Transaction Classification Pipeline
   // Classifies each raw transaction through a priority cascade:
   //   1. User overrides (highest confidence — user explicitly set category)
-  //   2. Learned patterns (keywords extracted from prior overrides)
-  //   3. Exact merchant DB match (curated merchant → category mapping)
-  //   4. Fuzzy merchant match (Levenshtein distance for typos/variations)
-  //   5. Keyword classifier (regex patterns for common spending categories)
-  //   6. Amount/frequency heuristics (recurring bills, ATM, rent patterns)
-  //   7. Person-transfer heuristic (1-3 word names → likely P2P transfer)
-  //   8. Default fallback ("Other", low confidence)
+  //   2. Exact merchant DB match (curated merchant → category mapping)
+  //   3. Fuzzy merchant match (Levenshtein distance for typos/variations)
+  //   4. Keyword classifier (regex patterns for common spending categories)
+  //   5. Person-transfer heuristic (1-3 word names → likely P2P transfer)
+  //   6. Default fallback ("Other", low confidence)
   // Each tier sets confidence level so downstream logic can prioritise
   // high-confidence data and flag low-confidence for AI re-classification.
   // ═══════════════════════════════════════════════════════════════════
-  enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[], learnedPatterns?: LearnedPattern[], frequencyMap?: FrequencyMap): EnrichedTransaction {
+  enrichTransaction(tx: RawTransaction, overrides?: TransactionOverride[]): EnrichedTransaction {
     // Check user overrides first — try both raw and normalised descriptions
     if (overrides?.length) {
       const descLower = tx.description.toLowerCase();
@@ -310,30 +278,6 @@ const EnrichmentEngine = {
     }
 
     const normalised = normaliseDescription(tx.description);
-
-    // ── Layer 2: Learned patterns from user overrides ──
-    if (learnedPatterns?.length) {
-      const match = matchLearnedPattern(tx.description, normalised, learnedPatterns, tx.amount);
-      if (match) {
-        const isTransferCat = match.category === 'Transfers' || match.category === 'Internal Transfer' || match.category === 'Household Contribution';
-        const isRefundCat = match.category === 'Refund';
-        return {
-          ...tx,
-          merchant: tx.description,
-          category: match.category,
-          isEssential: match.isEssential,
-          isSubscription: false,
-          isBNPL: match.category === 'BNPL',
-          isDebt: match.category === 'Debt Payments',
-          isIncome: tx.amount > 0 && !isTransferCat && !isRefundCat,
-          isTransfer: isTransferCat,
-          isRefund: isRefundCat,
-          isSavings: match.category === 'Savings' || match.category === 'Investments',
-          confidence: 'medium' as const,
-          classifiedBy: 'learned_pattern' as const,
-        };
-      }
-    }
 
     const merchantMatch = matchMerchant(tx.description, normalised);
     let isPerson = isPersonTransfer(tx.description);
@@ -473,19 +417,9 @@ const EnrichmentEngine = {
         // reclassify genuine self-transfers. Users can override category.
         category = 'Person-to-Person';
       } else {
-        // ── Amount/frequency heuristic ──
-        // Last chance before default: check amount patterns and recurrence
-        const amountResult = classifyByAmountHeuristic(tx, normalised, frequencyMap);
-        if (amountResult) {
-          category = amountResult.category;
-          isEssential = amountResult.isEssential;
-          confidence = 'medium';
-          classifiedBy = 'amount_heuristic';
-        } else {
-          category = classification.category;
-          isEssential = classification.isEssential;
-          confidence = classification.confidence;
-        }
+        category = classification.category;
+        isEssential = classification.isEssential;
+        confidence = classification.confidence;
       }
     }
 
@@ -2600,8 +2534,8 @@ const EnrichmentEngine = {
     // Reclassify matching transactions
     for (const tx of enriched) {
       if (!tx.isPersonTransfer) continue;
-      // Skip user-overridden or learned-pattern transactions
-      if (tx.classifiedBy === 'user_override' || tx.classifiedBy === 'learned_pattern') continue;
+      // Skip user-overridden transactions
+      if (tx.classifiedBy === 'user_override') continue;
 
       const name = (tx.merchant || tx.description).toLowerCase()
         .replace(/^(mobile-|bgc-?|fpo-?|sto-?|dd-?|so-?|tfr-?|cr-?|dr-?)\s*/i, '')
@@ -2815,12 +2749,9 @@ const EnrichmentEngine = {
 
     const bySource = {
       userOverride: enriched.filter((t) => t.classifiedBy === 'user_override').length,
-      learnedPattern: enriched.filter((t) => t.classifiedBy === 'learned_pattern').length,
       merchantDb: enriched.filter((t) => t.classifiedBy === 'merchant_db').length,
       fuzzyMatch: enriched.filter((t) => t.classifiedBy === 'fuzzy_match').length,
       keyword: enriched.filter((t) => t.classifiedBy === 'keyword').length,
-      amountHeuristic: enriched.filter((t) => t.classifiedBy === 'amount_heuristic').length,
-      bayesianEnsemble: enriched.filter((t) => t.classifiedBy === 'bayesian_ensemble').length,
       unresolved: enriched.filter((t) => t.classifiedBy === 'default' || !t.classifiedBy).length,
     };
 

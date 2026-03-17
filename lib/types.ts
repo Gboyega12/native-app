@@ -22,17 +22,7 @@ export interface EnrichedTransaction extends RawTransaction {
   isSavings: boolean;
   confidence: 'high' | 'medium' | 'low';
   /** Which classification layer resolved this transaction */
-  classifiedBy?: 'user_override' | 'learned_pattern' | 'merchant_db' | 'fuzzy_match' | 'keyword' | 'amount_heuristic' | 'bayesian_ensemble' | 'claude_ai' | 'default';
-}
-
-// ── Learned Patterns ──
-
-export interface LearnedPattern {
-  /** Significant words extracted from the override description */
-  keywords: string[];
-  category: string;
-  isEssential: boolean;
-  direction?: 'credit' | 'debit';
+  classifiedBy?: 'user_override' | 'merchant_db' | 'fuzzy_match' | 'keyword' | 'claude_ai' | 'default';
 }
 
 // ── Recurring ──
@@ -59,7 +49,7 @@ export interface TransactionDetail {
   amount: number;
   /** Preserved from enrichment so the dashboard can filter truly unclassifiable items */
   confidence?: 'high' | 'medium' | 'low';
-  classifiedBy?: 'user_override' | 'learned_pattern' | 'merchant_db' | 'fuzzy_match' | 'keyword' | 'amount_heuristic' | 'bayesian_ensemble' | 'claude_ai' | 'default';
+  classifiedBy?: 'user_override' | 'merchant_db' | 'fuzzy_match' | 'keyword' | 'claude_ai' | 'default';
 }
 
 export interface BudgetCategory {
@@ -408,12 +398,9 @@ export interface EnrichmentMetrics {
   /** Which classification layer resolved each transaction */
   bySource: {
     userOverride: number;
-    learnedPattern: number;
     merchantDb: number;
     fuzzyMatch: number;
     keyword: number;
-    amountHeuristic: number;
-    bayesianEnsemble: number;
     unresolved: number;
   };
 }
