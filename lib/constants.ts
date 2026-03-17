@@ -20,7 +20,7 @@ export const MOVE_THRESHOLDS = {
   coffeeMin: 40,
   coffeeCutPct: 0.5,
   subscriptionCutPct: 0.3,
-  defaultDebtAPR: 0.079,            // Fallback APR when interest rate unknown (personal loan floor)
+  defaultDebtAPR: 0.399,            // Fallback APR when interest rate unknown — conservative to push aggressive payoff
   singleDebtOverpayPct: 0.1,
   singleDebtOverpayMaxSurplusPct: 0.5,
   singleDebtOverpayCap: 200,
@@ -53,10 +53,10 @@ export const INCOME_THRESHOLDS = {
 // until the user updates them manually.
 
 export const DEFAULT_APR: Record<string, number> = {
-  credit_card: 0.219,       // UK average credit card APR
+  credit_card: 0.399,       // Conservative: assume worst-case to bias toward aggressive payoff
   overdraft: 0.399,         // Typical arranged overdraft EAR
   overdraft_facility: 0.399,
-  personal_loan: 0.079,     // Average personal loan rate
+  personal_loan: 0.399,     // Conservative: assume worst-case until user confirms rate
 };
 
 /** Estimate minimum payment from account type and balance */
