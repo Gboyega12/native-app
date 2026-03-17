@@ -875,6 +875,84 @@ function OverrideCard({ action }: { action: ChatAction }) {
   );
 }
 
+function IncomeCard({ action, onAddSource, onEditSource, onRemoveSource }: {
+  action: ChatAction;
+  onAddSource: () => void;
+  onEditSource: (source: string) => void;
+  onRemoveSource: (source: string) => void;
+}) {
+  const { colors } = useTheme();
+  const s = useMemo(() => createStyles(colors), [colors]);
+  const d = action.data;
+  const sources = d.income_sources || [];
+  const income = d.monthly_income || 0;
+  const essentials = d.essentials_total || 0;
+  const lifestyle = d.lifestyle_total || 0;
+  const surplus = d.surplus || 0;
+
+  return (
+    <Card
+      variant="action"
+      borderColor={colors.accent}
+      noShadow
+      style={{ borderRadius: radius.lg, padding: spacing.md, marginBottom: 0 }}
+    >
+      <Text style={s.actionCardLabel}>INCOME BREAKDOWN</Text>
+
+      {/* Income sources */}
+      {sources.map((src: any, idx: number) => (
+        <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[s.actionCardTitle, { marginBottom: 0, fontSize: 14 }]}>
+              {src.source}{src.isSalary ? ' \u2713' : ''}
+            </Text>
+            <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted, letterSpacing: 0.3 }}>
+              {src.frequency} {'\u00b7'} {'\u00a3'}{src.monthly}/mo
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity onPress={() => onEditSource(src.source)} activeOpacity={0.7}>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>Edit</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => onRemoveSource(src.source)} activeOpacity={0.7}>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>Remove</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ))}
+
+      {/* Add source button */}
+      <TouchableOpacity
+        onPress={onAddSource}
+        activeOpacity={0.7}
+        style={{ borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, borderStyle: 'dashed' as any, paddingVertical: 8, alignItems: 'center', marginBottom: spacing.md }}
+      >
+        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.muted }}>+ Add income source</Text>
+      </TouchableOpacity>
+
+      {/* Summary row */}
+      <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing.sm }}>
+        <View style={s.actionCardStats}>
+          <View style={s.actionStat}>
+            <Text style={s.actionStatValue}>{'\u00a3'}{income}</Text>
+            <Text style={s.actionStatLabel}>income</Text>
+          </View>
+          <View style={s.actionStat}>
+            <Text style={s.actionStatValue}>{'\u00a3'}{essentials}</Text>
+            <Text style={s.actionStatLabel}>essentials</Text>
+          </View>
+          <View style={s.actionStat}>
+            <Text style={[s.actionStatValue, surplus > 0 ? { color: colors.green } : surplus < 0 ? { color: colors.coral } : {}]}>
+              {'\u00a3'}{surplus}
+            </Text>
+            <Text style={s.actionStatLabel}>surplus</Text>
+          </View>
+        </View>
+      </View>
+    </Card>
+  );
+}
+
 const GOAL_LABELS: Record<string, string> = {
   in_debt: 'In debt', breaking_even: 'Breaking even', saving_slowly: 'Saving slowly',
   saving_well: 'Saving well', other: 'Other',
@@ -1269,6 +1347,33 @@ export default function Chat() {
       ctx.recent_transfers = transferItems.slice(0, 15);
     }
 
+    // Collect uncategorized ("Other") transactions so user can review them in chat
+    const uncatMap: Record<string, { amount: number; date: string; count: number }> = {};
+    for (const section of [a?.non_discretionary, a?.discretionary]) {
+      if (!section?.items) continue;
+      for (const item of section.items) {
+        if (item.category !== 'Other') continue;
+        for (const tx of (item.transactions || [])) {
+          const key = (tx.merchant || tx.description || '').toLowerCase().trim();
+          if (!key) continue;
+          if (!uncatMap[key]) {
+            uncatMap[key] = { amount: Math.abs(tx.amount), date: tx.date, count: 1 };
+          } else {
+            uncatMap[key].amount += Math.abs(tx.amount);
+            uncatMap[key].count += 1;
+            if (tx.date > uncatMap[key].date) uncatMap[key].date = tx.date;
+          }
+        }
+      }
+    }
+    const uncatItems = Object.entries(uncatMap)
+      .map(([desc, data]) => ({ description: desc, ...data }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 20);
+    if (uncatItems.length > 0) {
+      ctx.uncategorized_transactions = uncatItems;
+    }
+
     // Add recent transactions (last 7 days) so Claude can answer "how much did I spend today/this week?"
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -1305,7 +1410,7 @@ export default function Chat() {
     try {
       const { data: debtData } = await supabase
         .from('debt_accounts')
-        .select('account_name, account_type, outstanding_balance, credit_limit')
+        .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment')
         .eq('user_id', user.id);
       if (debtData && debtData.length > 0) {
         ctx.debt_accounts = debtData.map((d: any) => ({
@@ -1313,6 +1418,8 @@ export default function Chat() {
           type: d.account_type,
           balance: d.outstanding_balance,
           limit: d.credit_limit,
+          interest_rate: d.interest_rate ?? null,
+          minimum_payment: d.minimum_payment ?? null,
         }));
       }
     } catch {}
@@ -2367,6 +2474,13 @@ export default function Chat() {
                     <OverrideCard action={action} />
                   ) : action.type === 'budget_item_saved' ? (
                     <BudgetItemCard action={action} onDelete={() => handleDeleteBudgetItem(i, j)} />
+                  ) : action.type === 'income_summary' ? (
+                    <IncomeCard
+                      action={action}
+                      onAddSource={() => sendMessage('I want to add an income source')}
+                      onEditSource={(src) => sendMessage(`I want to update my ${src} income`)}
+                      onRemoveSource={(src) => sendMessage(`Remove ${src} from my income sources`)}
+                    />
                   ) : action.type === 'goal_update_proposed' ? (
                     <GoalUpdateCard
                       action={action}
@@ -2598,7 +2712,6 @@ function analysisToProfile(a: Analysis): FinancialProfile | null {
       discretionary: a.discretionary ?? { total: 0, items: [] },
     },
     incomeSources: a.income_sources ?? [],
-    transfers: [],
     subscriptions: [],
     metrics: {
       savingsRate: a.monthly_income > 0 ? ((a.surplus ?? 0) / a.monthly_income) * 100 : 0,
@@ -2892,13 +3005,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   assistantBubble: {
     backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: c.border,
+    borderWidth: 0,
     alignSelf: 'flex-start',
-    borderBottomLeftRadius: 4,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderBottomRightRadius: 18,
+    paddingHorizontal: 0,
+    paddingVertical: 4,
+    borderRadius: 0,
   },
   gifBubble: {
     width: '80%',

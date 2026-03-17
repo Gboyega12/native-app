@@ -393,7 +393,7 @@ export interface EnrichmentResult {
 // ── Chat ──
 
 export interface ChatAction {
-  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed' | 'plan_error' | 'budget_item_saved';
+  type: 'plan_proposed' | 'override_saved' | 'goal_update_proposed' | 'plan_error' | 'budget_item_saved' | 'income_summary';
   data: {
     id?: string;
     action?: string;
@@ -414,6 +414,12 @@ export interface ChatAction {
     new_one_year_goal?: string;
     new_two_year_goal?: string;
     new_target_amount?: number | null;
+    // income summary fields
+    income_sources?: { source: string; frequency: string; monthly: number; isSalary: boolean }[];
+    essentials_total?: number;
+    lifestyle_total?: number;
+    surplus?: number;
+    monthly_income?: number;
   };
   status?: 'pending' | 'approved' | 'dismissed' | 'deleted';
 }
@@ -451,7 +457,9 @@ export interface ChatContext {
   spending_by_category?: { category: string; monthly: number }[];
   recent_transfers?: { description: string; amount: number; date: string }[];
   recent_transactions?: { description: string; amount: number; date: string; category: string; essential: boolean }[];
-  debt_accounts?: { name: string; type: string; balance: number | null; limit: number | null }[];
+  debt_accounts?: { name: string; type: string; balance: number | null; limit: number | null; interest_rate?: number | null; minimum_payment?: number | null }[];
+  /** Transactions the enrichment engine could not categorize — surfaced for user review */
+  uncategorized_transactions?: { description: string; amount: number; date: string; count: number }[];
   budget_adjustments?: { description: string; category: string; amount: number; essential: boolean }[];
   behavioral_patterns?: string[];
   payday_context?: {

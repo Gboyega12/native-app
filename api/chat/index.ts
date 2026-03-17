@@ -127,6 +127,16 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'show_income_summary',
+    description:
+      'Show the user an interactive income breakdown card with their income sources, essentials, and surplus. Use this when: (1) The user asks about their income, earnings, or pay. (2) The user asks "how much do I earn" or "show me my income". (3) The user wants to review or edit their income sources. The card lets them add, edit, or remove income sources directly.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: 'suggest_goal_update',
     description:
       'Suggest the user update their financial goals when their situation has clearly changed. Use this when: (1) The user says their circumstances changed (got a raise, paid off debt, new expense, job loss). (2) Their financial data shows they\'ve achieved or outgrown their current goal (e.g. debt is nearly cleared but goal is still "clear debt"). (3) They explicitly ask to change their goals. Do NOT use this for minor progress updates \u2014 only for genuine goal shifts.',
@@ -430,6 +440,9 @@ async function executeTool(name: string, input: Record<string, unknown>, userId:
   if (name === 'search_gif') {
     return executeGifSearch(input);
   }
+  if (name === 'show_income_summary') {
+    return executeIncomeSummary(userId);
+  }
   return { response: { error: 'Unknown tool' }, action: null };
 }
 
@@ -682,6 +695,66 @@ interface ChatContext {
   recent_transactions?: Array<Record<string, unknown>>;
   behavioral_patterns?: string[];
   payday_context?: Record<string, unknown>;
+  uncategorized_transactions?: Array<{ description: string; amount: number; date: string; count: number }>;
+}
+
+async function executeIncomeSummary(userId: string | null): Promise<ToolResult> {
+  if (!userId) {
+    return { response: { success: false, error: 'No user session' }, action: null };
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    return { response: { success: false, error: 'Server misconfigured' }, action: null };
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+  const { data: analysis } = await admin
+    .from('analyses')
+    .select('monthly_income, income_sources, non_discretionary, discretionary, surplus')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!analysis) {
+    return { response: { success: false, error: 'No analysis data yet' }, action: null };
+  }
+
+  const incomeSources = (analysis.income_sources || []).map((s: any) => ({
+    source: s.source,
+    frequency: s.frequency || 'monthly',
+    monthly: Math.round(s.monthly || 0),
+    isSalary: !!s.isSalary,
+  }));
+
+  const essentialsTotal = Math.round(analysis.non_discretionary?.total || 0);
+  const lifestyleTotal = Math.round(analysis.discretionary?.total || 0);
+  const monthlyIncome = Math.round(analysis.monthly_income || 0);
+  const surplus = Math.round(analysis.surplus || (monthlyIncome - essentialsTotal - lifestyleTotal));
+
+  return {
+    response: {
+      success: true,
+      message: 'Income summary card displayed.',
+      income_sources: incomeSources,
+      monthly_income: monthlyIncome,
+      essentials_total: essentialsTotal,
+      lifestyle_total: lifestyleTotal,
+      surplus,
+    },
+    action: {
+      type: 'income_summary',
+      data: {
+        income_sources: incomeSources,
+        monthly_income: monthlyIncome,
+        essentials_total: essentialsTotal,
+        lifestyle_total: lifestyleTotal,
+        surplus,
+      },
+    },
+  };
 }
 
 function buildSystemPrompt(ctx: ChatContext | undefined): string {
@@ -921,6 +994,18 @@ Tools:
     prompt += `\nIf the user mentions a payment that matches one of these, use save_transaction_override with the exact description above as match_description.`;
   }
 
+  // ── Uncategorized transactions (need user review) ──
+  if (ctx.uncategorized_transactions?.length) {
+    prompt += `\n\n⚠ UNCATEGORIZED TRANSACTIONS — These could not be auto-categorised. The user should confirm what they are:`;
+    for (const tx of ctx.uncategorized_transactions) {
+      const t = tx as Record<string, unknown>;
+      prompt += `\n- "${t.description}" — £${Math.abs(t.amount as number).toFixed(2)} total (${t.count} transaction${(t.count as number) > 1 ? 's' : ''})`;
+    }
+    prompt += `\nIMPORTANT: When the user first opens chat and there are uncategorized transactions, proactively mention them. Example: "I've got **${ctx.uncategorized_transactions.length} transaction${ctx.uncategorized_transactions.length > 1 ? 's' : ''}** I couldn't categorise. want to sort them?"`;
+    prompt += `\nWhen the user identifies what a transaction is, use save_transaction_override to categorise it. NEVER guess or auto-assign categories for these — always ask the user first.`;
+    prompt += `\nDo NOT hide these from the user. Transparency about what you don't know builds trust.`;
+  }
+
   // ── Manual budget items ──
   if (ctx.budget_adjustments?.length) {
     prompt += `\n\nManual budget items (already added by user \u2014 don't re-add these):`;
@@ -941,7 +1026,9 @@ Tools:
       const util = (debt.balance != null && debt.limit != null && (debt.limit as number) > 0)
         ? ` (${Math.round(((debt.balance as number) / (debt.limit as number)) * 100)}% utilised)`
         : '';
-      prompt += `\n- ${debt.name} (${debt.type}): ${bal}${lim}${util}`;
+      const apr = debt.interest_rate != null ? `, APR: ${((debt.interest_rate as number) * 100).toFixed(1)}%` : ', APR: unknown';
+      const minPay = debt.minimum_payment != null ? `, min payment: \u00a3${Math.round(debt.minimum_payment as number)}` : '';
+      prompt += `\n- ${debt.name} (${debt.type}): ${bal}${lim}${util}${apr}${minPay}`;
       if (debt.balance != null) totalDebt += debt.balance as number;
     }
     if (totalDebt > 0) {
@@ -955,6 +1042,19 @@ Tools:
       prompt += `\nOverall utilisation: ${overallUtilisation}% \u2014 high utilisation. Interest costs are significant at this level.`;
     } else if (overallUtilisation > 30) {
       prompt += `\nOverall utilisation: ${overallUtilisation}% \u2014 moderate utilisation. Suggest bringing it below 30% for credit score benefits.`;
+    }
+    // Flag debt accounts with missing details
+    const missingApr = ctx.debt_accounts.filter(d => (d as Record<string, unknown>).interest_rate == null);
+    const missingMinPay = ctx.debt_accounts.filter(d => (d as Record<string, unknown>).minimum_payment == null);
+    if (missingApr.length > 0 || missingMinPay.length > 0) {
+      prompt += `\n⚠ MISSING DEBT DETAILS:`;
+      if (missingApr.length > 0) {
+        prompt += `\n- APR unknown for: ${missingApr.map(d => (d as Record<string, unknown>).name).join(', ')}. Ask the user for their interest rate when discussing debt strategy.`;
+      }
+      if (missingMinPay.length > 0) {
+        prompt += `\n- Minimum payment unknown for: ${missingMinPay.map(d => (d as Record<string, unknown>).name).join(', ')}. Ask when discussing repayment plans.`;
+      }
+      prompt += `\nDon't guess these numbers — always ask the user. Getting the real APR matters for accurate payoff timelines.`;
     }
     prompt += `\nUse these actual balances when discussing debt strategy. Be specific \u2014 "Pay down your \u00a3${Math.round(totalDebt)} across ${ctx.debt_accounts.length} account(s)" not "attack your debts."`;
   }
