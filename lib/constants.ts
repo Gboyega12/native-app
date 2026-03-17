@@ -48,6 +48,31 @@ export const INCOME_THRESHOLDS = {
   windfallMin: 1000,        // One-off credits above this → windfall, not income
 } as const;
 
+// ── Default APRs for debt accounts ──
+// TrueLayer does not provide interest rates, so we use these defaults
+// until the user updates them manually.
+
+export const DEFAULT_APR: Record<string, number> = {
+  credit_card: 0.219,       // UK average credit card APR
+  overdraft: 0.399,         // Typical arranged overdraft EAR
+  overdraft_facility: 0.399,
+  personal_loan: 0.079,     // Average personal loan rate
+};
+
+/** Estimate minimum payment from account type and balance */
+export function defaultMinimumPayment(type: string, balance: number): number {
+  if (type === 'credit_card') {
+    // Typical UK minimum: max(£25, 2.5% of balance)
+    return Math.max(25, Math.round(balance * 0.025));
+  }
+  if (type === 'overdraft' || type === 'overdraft_facility') {
+    // Overdrafts typically require full repayment but charge monthly fees
+    return Math.max(15, Math.round(balance * 0.05));
+  }
+  // Personal loan: assume 36-month term
+  return Math.round(balance / 36);
+}
+
 // ── Trajectory display cap ──
 // Months-to-goal beyond this are shown as "50+ years"
 

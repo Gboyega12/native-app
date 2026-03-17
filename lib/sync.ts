@@ -377,6 +377,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
               account_type: card.type || 'credit_card',
               outstanding_balance: card.balance,
               credit_limit: card.limit,
+              interest_rate: defaultApr,
+              is_default_apr: true,
+              provider_name: row.provider_name || undefined,
             });
           }
         }
@@ -393,7 +396,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     const [debtRes, idRes] = await Promise.all([
       supabase
         .from('debt_accounts')
-        .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, is_default_apr')
+        .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, is_default_apr, provider_name')
         .eq('user_id', userId),
       supabase
         .from('user_identity')

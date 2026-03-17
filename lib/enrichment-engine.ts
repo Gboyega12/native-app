@@ -1192,9 +1192,13 @@ const EnrichmentEngine = {
           effect: `Earn more from spending you're already doing.`,
         });
       } else {
-        // Determine if we have interest rate data to use avalanche (highest interest first)
-        const hasRates = connectedDebts.some((d: any) => d.interest_rate && d.interest_rate > 0);
-        const useAvalanche = hasRates;
+        // Determine if we have REAL interest rate data (not default guesses) for avalanche
+        // TrueLayer doesn't provide APR, so is_default_apr=true means the rate is estimated.
+        // Only use avalanche when at least one debt has a user-confirmed or provider-supplied rate,
+        // OR when debts have different default rates (e.g. credit card vs overdraft).
+        const hasRealRates = connectedDebts.some((d: any) => d.interest_rate && d.interest_rate > 0 && !d.is_default_apr);
+        const hasDifferentRates = new Set(connectedDebts.map((d: any) => d.interest_rate || 0)).size > 1;
+        const useAvalanche = hasRealRates || hasDifferentRates;
         const fallbackAPR = T.defaultDebtAPR;
 
         // Sort: avalanche = highest interest first; snowball fallback = smallest balance first
@@ -1227,20 +1231,41 @@ const EnrichmentEngine = {
             targetValue: 0,
           }));
 
-        const strategyName = useAvalanche ? 'highest interest first' : 'snowball method';
-        const stepsAvalanche = ['List all debts by interest rate, highest first', 'Pay minimums on all except the highest-rate debt', 'Direct your surplus at the highest-interest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'];
-        const stepsSnowball = ['List all debts smallest to largest', 'Pay minimums on all but smallest', 'Direct your surplus at the smallest debt first', 'When it\'s cleared, I\'ll roll payments into the next one'];
+        // Build per-debt breakdown string: "Barclaycard £2,400 (22.9%), Amex £1,100"
+        // Only show APR when it's a real rate, not a default estimate
+        const debtBreakdown = sortedDebts
+          .map((d: any) => {
+            const name = d.account_name || d.institution || d.provider_name || 'Debt';
+            const bal = Math.round(d.outstanding_balance || 0);
+            const hasRealRate = d.interest_rate && !d.is_default_apr;
+            return hasRealRate
+              ? `${name} \u00a3${bal.toLocaleString()} (${(d.interest_rate * 100).toFixed(1)}%)`
+              : `${name} \u00a3${bal.toLocaleString()}`;
+          })
+          .join(', ');
+
+        const strategyName = useAvalanche ? 'highest interest first' : 'smallest balance first';
+        const stepsBase = sortedDebts.map((d: any, i: number) => {
+          const name = d.account_name || d.institution || d.provider_name || `Debt ${i + 1}`;
+          const bal = Math.round(d.outstanding_balance || 0);
+          const hasRealRate = d.interest_rate && !d.is_default_apr;
+          const prefix = i === 0 ? 'Target first' : `Then`;
+          return hasRealRate
+            ? `${prefix}: ${name} \u2014 \u00a3${bal.toLocaleString()} at ${(d.interest_rate * 100).toFixed(1)}%`
+            : `${prefix}: ${name} \u2014 \u00a3${bal.toLocaleString()}`;
+        });
+        stepsBase.push('Pay minimums on everything else', 'When one is cleared, I\'ll roll payments into the next');
 
         moves.push({
-          action: `Attack ${actualDebtCount} debts, ${strategyName}`,
+          action: `Clear ${actualDebtCount} debts (\u00a3${totalDebtBalance.toLocaleString()} total), ${strategyName}`,
           annualImpact: debtSaving * 12,
           monthlyImpact: debtSaving,
           effort: 'high',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `${actualDebtCount} debt accounts costing \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}${useAvalanche ? ' Targeting highest interest rate first to minimise total cost.' : ''}`,
-          steps: useAvalanche ? stepsAvalanche : stepsSnowball,
-          effect: `Saves \u00a3${debtSaving * 12}/year in interest.`,
+          strategy: `${debtBreakdown}. Currently paying \u00a3${Math.round(p.debtPayments)}/month across ${actualDebtCount} debts.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}${useAvalanche ? ' Targeting highest interest rate first to minimise total cost.' : ' Pay off the smallest balance first for quick wins and momentum.'}`,
+          steps: stepsBase,
+          effect: `Saves \u00a3${debtSaving * 12}/year in interest across all debts.`,
           subGoals: debtSubGoals.length > 0 ? debtSubGoals : undefined,
         });
       }
@@ -1265,22 +1290,24 @@ const EnrichmentEngine = {
         const singleDebt = connectedDebts[0];
         const singleAPR = (singleDebt as any)?.interest_rate || T.defaultDebtAPR;
         const singleBal = singleDebt?.outstanding_balance || 0;
+        const singleName = singleDebt?.account_name || singleDebt?.institution || singleDebt?.provider_name || 'debt';
         // Dynamic overpay cap: higher APR = more aggressive (up to 70% of surplus)
         const overpayCap = singleAPR > 0.15 ? 500 : singleAPR > 0.08 ? 350 : T.singleDebtOverpayCap;
         const overpayPct = singleAPR > 0.15 ? 0.7 : T.singleDebtOverpayMaxSurplusPct;
         const overpay = claimSurplus(Math.round(Math.min(p.surplus * overpayPct, overpayCap)));
         const interestSaved = calcInterestSaved(singleBal, singleAPR, p.debtPayments, p.debtPayments + overpay);
         const debtSaving = Math.round(interestSaved / 12) || Math.round(p.debtPayments * T.singleDebtOverpayPct);
+        const aprStr = singleDebt?.is_default_apr ? '' : ` at ${(singleAPR * 100).toFixed(1)}%`;
         moves.push({
-          action: `Overpay debt by \u00a3${overpay}/month to clear faster`,
+          action: `Overpay ${singleName} (\u00a3${singleBal.toLocaleString()}${aprStr}) by \u00a3${overpay}/month`,
           annualImpact: debtSaving * 12,
           monthlyImpact: debtSaving,
           effort: 'medium',
           category: 'debt',
           merchants: debtMerchants,
-          strategy: `1 debt account with \u00a3${Math.round(p.debtPayments)}/month in payments.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''}`,
-          steps: ['Check if overpayments are allowed without penalty', 'Set up a monthly overpayment standing order', 'I\'ll redirect savings from other moves into this automatically'],
-          effect: `Reduces total interest paid and clears debt sooner.`,
+          strategy: `${singleName}: \u00a3${singleBal.toLocaleString()} balance${aprStr}, currently paying \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''} Adding \u00a3${overpay}/month extra accelerates payoff.`,
+          steps: [`${singleName}: \u00a3${singleBal.toLocaleString()} outstanding${aprStr}`, 'Check if overpayments are allowed without penalty', `Set up \u00a3${overpay}/month overpayment standing order`, 'I\'ll redirect savings from other moves into this automatically'],
+          effect: `Clears ${singleName} faster and saves \u00a3${debtSaving * 12}/year in interest.`,
           subGoals: singleDebt ? [{
             type: 'debt_clear',
             target: singleDebt.account_name || singleDebt.institution || 'Debt',
@@ -1310,6 +1337,25 @@ const EnrichmentEngine = {
           effect: `Saves \u00a3${netSaving}/year in interest — every pound goes to clearing the balance instead.`,
         });
       }
+    }
+
+    // ── Connect debt accounts prompt ──
+    // When we detect debt payments in transactions but have no connected debt accounts,
+    // prompt the user to connect them so we can provide accurate balances and rates.
+    if (m.debtAccountCount >= 1 && connectedDebts.length === 0) {
+      const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
+      const merchantList = debtMerchants.length > 0 ? debtMerchants.join(', ') : 'your lenders';
+      moves.push({
+        action: `Connect your ${m.debtAccountCount} debt account${m.debtAccountCount > 1 ? 's' : ''} for a personalised payoff plan`,
+        annualImpact: Math.round(p.debtPayments * 12 * 0.1), // estimate 10% savings from optimised strategy
+        monthlyImpact: Math.round(p.debtPayments * 0.1),
+        effort: 'low',
+        category: 'debt',
+        merchants: debtMerchants,
+        strategy: `I can see payments to ${merchantList} in your transactions (\u00a3${Math.round(p.debtPayments)}/month), but without your debt accounts connected I can't see your balances or interest rates. Connecting them lets me build an exact payoff timeline and find the fastest route to debt-free.`,
+        steps: ['Go to Settings \u2192 Connected Accounts', `Connect: ${merchantList}`, 'I\'ll immediately recalculate your plan with real balances and rates', 'This unlocks debt-free timeline tracking'],
+        effect: 'Unlocks accurate debt payoff strategy with real balances and interest rates.',
+      });
     }
 
     // Transport — adjusted for work setup
