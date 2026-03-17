@@ -187,6 +187,12 @@ async function handleClassify(req: VercelRequest, res: VercelResponse) {
         }),
       });
 
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        console.error(`[classify] Claude API error ${response.status}: ${errorBody.slice(0, 200)}`);
+        throw new Error(`Claude API returned ${response.status}`);
+      }
+
       const data = await response.json();
       let text: string = data.content?.[0]?.text || '';
       text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -304,7 +310,11 @@ Return exactly ${transactions.length} objects in index order.`;
 export async function classifyTransactionsBatch(
   transactions: Array<{ description: string; amount: number }>,
 ): Promise<Array<Classification & { index: number }>> {
-  if (!transactions.length || !process.env.CLAUDE_API_KEY) return [];
+  if (!transactions.length) return [];
+  if (!process.env.CLAUDE_API_KEY) {
+    console.warn('[classifyBatch] CLAUDE_API_KEY not set — skipping AI classification');
+    return [];
+  }
 
   const batch = transactions.slice(0, 50);
   const results: Array<(Classification & { index: number }) | null> = new Array(batch.length).fill(null);
@@ -338,12 +348,21 @@ export async function classifyTransactionsBatch(
         body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: 'user', content: prompt }] }),
       });
 
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        console.error(`[classifyBatch] Claude API error ${response.status}: ${errorBody.slice(0, 200)}`);
+        throw new Error(`Claude API returned ${response.status}`);
+      }
+
       const data = await response.json();
       let text: string = data.content?.[0]?.text || '';
       text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
       const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) return [];
+      if (!Array.isArray(parsed)) {
+        console.warn('[classifyBatch] Claude returned non-array response');
+        return [];
+      }
 
       parsed.forEach((item: Record<string, unknown>, i: number) => {
         const entry = uncached[i];
@@ -367,10 +386,13 @@ export async function classifyTransactionsBatch(
 
       return results.filter(Boolean) as Array<Classification & { index: number }>;
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[classifyBatch] Attempt ${attempt + 1}/${MAX_RETRIES + 1} failed: ${msg}`);
       if (attempt < MAX_RETRIES) await sleep(RETRY_DELAY_MS * (attempt + 1));
     }
   }
 
+  console.error('[classifyBatch] All retries exhausted — returning empty classifications');
   return [];
 }
 
@@ -424,6 +446,12 @@ async function handleEnrich(req: VercelRequest, res: VercelResponse) {
         }),
       });
 
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        console.error(`[enrich] Claude API error ${response.status}: ${errorBody.slice(0, 200)}`);
+        throw new Error(`Claude API returned ${response.status}`);
+      }
+
       const data = await response.json();
       let text: string = data.content?.[0]?.text || '';
       text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -436,6 +464,7 @@ async function handleEnrich(req: VercelRequest, res: VercelResponse) {
       }
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
+      console.error(`[enrich] Attempt ${attempt + 1}/3 failed: ${lastError.message}`);
       if (attempt < 2) {
         await sleep(RETRY_DELAY_MS * (attempt + 1));
       }
