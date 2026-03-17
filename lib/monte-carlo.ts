@@ -521,9 +521,7 @@ function buildScenarios(
   vol: VolatilityProfile,
 ): CashflowScenario[] {
   const scenarios: CashflowScenario[] = [];
-  const rawEvts: UpcomingEvent[] = identity?.upcoming_events || [];
-  const evtTypes = rawEvts.map((e: UpcomingEvent) => typeof e === 'string' ? e : e?.type || '');
-  const events = evtTypes; // backwards-compatible: array of event type strings
+  const events: string[] = identity?.upcoming_events || [];
   const deps = identity?.dependents || [];
   const household = identity?.household || 'single';
 
