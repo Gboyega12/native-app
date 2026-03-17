@@ -317,7 +317,7 @@ const EnrichmentEngine = {
           date: tx.date,
           description: tx.description,
           amount: tx.amount,
-          merchant: tx.description,
+          merchant: this._titleCase(normaliseDescription(tx.description)) || tx.description,
           category: override.category,
           isEssential: override.is_essential,
           isSubscription: false,
@@ -487,7 +487,7 @@ const EnrichmentEngine = {
 
     return {
       ...tx,
-      merchant: tx.description,
+      merchant: this._titleCase(normaliseDescription(tx.description)) || tx.description,
       category,
       isEssential,
       isSubscription: false,
@@ -675,16 +675,17 @@ const EnrichmentEngine = {
     // an internal transfer between own accounts — not income.
     const outboundRecipients = new Set(
       spending.filter((t) => t.isPersonTransfer)
-        .map((t) => (t.merchant || t.description).toLowerCase().trim())
+        .map((t) => normaliseDescription(t.merchant || t.description))
     );
 
     const incomeGroups: Record<string, EnrichedTransaction[]> = {};
     for (const tx of income) {
-      const key = tx.merchant || tx.description;
+      const key = normaliseDescription(tx.merchant || tx.description);
       if (!incomeGroups[key]) incomeGroups[key] = [];
       incomeGroups[key].push(tx);
     }
-    const incomeSources = Object.entries(incomeGroups).map(([source, txs]) => {
+    const incomeSources = Object.entries(incomeGroups).map(([rawKey, txs]) => {
+      const source = this._titleCase(rawKey);
       const totalForSource = txs.reduce((s, t) => s + t.amount, 0);
       const avgAmount = totalForSource / txs.length;
       const isSalary = matchesSalaryKeywords(source);
