@@ -1,15 +1,13 @@
-# Income Card & Missing Transfer Transactions
+# Decision Engine MVP — Phase 2
 
 **Date:** 2026-03-17
 **Status:** In Progress
 
-## Problem
-1. No persistent income card on Home Screen — income only shows contextually during payday
-2. Partner rent transfers (£250-£400 weekly) flagged as `isTransfer: true`, excluded from spending view, can't be seen or recategorized
-
 ## Tasks
 
-- [ ] 1. Add persistent Income Card section before Spending Details on Home Screen
-- [ ] 2. Include transfer-flagged transactions in analysis output for UI access
-- [ ] 3. Add "Transfers" subsection in Spending Details with long-press recategorize support
-- [ ] 4. Verify — no type errors, income card and transfers render correctly
+- [x] 1. Income card: add editable Income / Essentials / Surplus variables
+- [x] 2. Group transfer-to-people transactions by name (collapse same-name payments)
+- [x] 3. Transaction overrides update budget (no duplicates), batch recategorize groups
+- [x] 4. Fix debt showing "Debt 1/Debt 2" instead of merchant names
+- [x] 5. Fix "Clear 2 debts" not updating after connecting debt account
+- [x] 6. Verify & commit

@@ -228,12 +228,39 @@ function ProcessingInner() {
       try {
         const { data: { user: idUser } } = await supabase.auth.getUser();
         if (idUser) {
-          const [idRes, debtRes] = await Promise.all([
+          const [idRes, debtRes, bankRes] = await Promise.all([
             supabase.from('user_identity').select('*').eq('user_id', idUser.id).maybeSingle(),
-            supabase.from('debt_accounts').select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment').eq('user_id', idUser.id),
+            supabase.from('debt_accounts').select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, is_default_apr, source').eq('user_id', idUser.id),
+            // Also fetch card_balances from bank_data to hydrate debt accounts before enrichment
+            supabase.from('bank_data').select('card_balances').eq('user_id', idUser.id).not('card_balances', 'is', null).order('created_at', { ascending: false }).limit(1).maybeSingle(),
           ]);
           if (idRes.data) identityData = idRes.data;
           if (debtRes.data) debtAccountsData = debtRes.data;
+
+          // Merge TrueLayer card balances into debt accounts (so enrichment has fresh data)
+          if (bankRes.data?.card_balances && Array.isArray(bankRes.data.card_balances)) {
+            const existingNames = new Set(debtAccountsData.map((d: any) => d.account_name));
+            for (const card of bankRes.data.card_balances) {
+              const cardName = card.name || card.display_name || card.provider || 'Card';
+              if (!existingNames.has(cardName)) {
+                debtAccountsData.push({
+                  account_name: cardName,
+                  account_type: card.type || 'credit_card',
+                  outstanding_balance: card.balance,
+                  credit_limit: card.limit,
+                  source: 'truelayer',
+                });
+                existingNames.add(cardName);
+              } else {
+                // Update existing entry with latest balance from TrueLayer
+                const existing = debtAccountsData.find((d: any) => d.account_name === cardName);
+                if (existing && card.balance != null) {
+                  existing.outstanding_balance = card.balance;
+                  if (card.limit != null) existing.credit_limit = card.limit;
+                }
+              }
+            }
+          }
         }
       } catch (e) {
         console.warn('[processing] Failed to load identity/debt data:', e);
@@ -531,7 +558,7 @@ function ProcessingInner() {
               for (const card of bankRows.card_balances) {
                 await supabase.from('debt_accounts').upsert({
                   user_id: user.id,
-                  account_name: card.name || 'Card',
+                  account_name: card.name || card.display_name || card.provider || 'Card',
                   account_type: card.type || 'credit_card',
                   outstanding_balance: card.balance,
                   credit_limit: card.limit,

@@ -283,6 +283,9 @@ export default function Home() {
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
   const [incomeExpanded, setIncomeExpanded] = useState(false);
+  // Editable income card overrides
+  const [editingIncomeField, setEditingIncomeField] = useState<'income' | 'essentials' | 'surplus' | null>(null);
+  const [incomeEditValue, setIncomeEditValue] = useState('');
   const [showAllMoves, setShowAllMoves] = useState(false);
   const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
   const userIdRef = useRef<string | null>(null);
@@ -673,6 +676,7 @@ export default function Home() {
         await supabase.from('analyses').update({
           non_discretionary: cleanNonDisc,
           discretionary: cleanDisc,
+          monthly_income: updatedAnalysis.monthly_income ?? null,
           monthly_spending: (updatedAnalysis.monthly_spending || 0) - manualSpend,
           surplus: (updatedAnalysis.surplus || 0) + manualSpend,
           person_transfers: (updatedAnalysis as any).person_transfers ?? null,
@@ -862,7 +866,7 @@ export default function Home() {
         });
       }
 
-      // Optimistic UI update: move transaction between categories
+      // Optimistic UI update: move transaction(s) between categories
       if (analysis) {
         const updated = { ...analysis };
         const fromKey = recatTx.section === 'essential' ? 'non_discretionary' : 'discretionary';
@@ -872,33 +876,61 @@ export default function Home() {
         fromSection.items = [...(fromSection.items || [])];
         if (fromKey !== toKey) toSection.items = [...(toSection.items || [])];
 
-        // Remove tx from source category
+        // For transfers, collect ALL transactions with matching merchant name (batch move)
+        const matchDesc = recatTx.tx.merchant || recatTx.tx.description;
+        const normalizedMatch = normalizeMerchant(matchDesc);
+        let txsToMove: any[] = [recatTx.tx];
+
+        if (recatTx.catKey === 'Transfers' && Array.isArray((updated as any).person_transfers)) {
+          // Find all transfers with same normalized merchant name
+          txsToMove = (updated as any).person_transfers.filter(
+            (t: any) => normalizeMerchant(t?.merchant || t?.description || '') === normalizedMatch
+          );
+          if (txsToMove.length === 0) txsToMove = [recatTx.tx]; // fallback
+        }
+
+        // Remove tx(s) from source category
         const srcCatIdx = fromSection.items.findIndex((i: BudgetCategory) => i.category === recatTx.catKey);
         if (srcCatIdx >= 0) {
           const srcCat = { ...fromSection.items[srcCatIdx] };
-          const txAmt = Math.abs(recatTx.tx.amount);
-          srcCat.transactions = (srcCat.transactions || []).filter(
-            (t: TransactionDetail) => !(t.description === recatTx.tx.description && t.date === recatTx.tx.date && t.amount === recatTx.tx.amount)
-          );
-          srcCat.monthly = Math.max(0, srcCat.monthly - txAmt);
-          srcCat.txs = Math.max(0, srcCat.txs - 1);
+          for (const tx of txsToMove) {
+            const txAmt = Math.abs(tx.amount);
+            srcCat.transactions = (srcCat.transactions || []).filter(
+              (t: TransactionDetail) => !(t.description === tx.description && t.date === tx.date && t.amount === tx.amount)
+            );
+            srcCat.monthly = Math.max(0, srcCat.monthly - txAmt);
+            srcCat.txs = Math.max(0, srcCat.txs - 1);
+          }
           if (srcCat.txs === 0) fromSection.items.splice(srcCatIdx, 1);
           else fromSection.items[srcCatIdx] = srcCat;
         }
 
-        // Add tx to target category (skip for non-spending categories like Refund/Internal Transfer)
+        // Add tx(s) to target category (skip for non-spending categories like Refund/Internal Transfer)
         const NON_SPENDING_CATS = new Set(['Refund', 'Internal Transfer']);
         if (!NON_SPENDING_CATS.has(recatTarget)) {
           const destCatIdx = toSection.items.findIndex((i: BudgetCategory) => i.category === recatTarget);
-          const txAmt = Math.abs(recatTx.tx.amount);
+          let totalAmt = 0;
+          const newTxs: any[] = [];
+
+          for (const tx of txsToMove) {
+            const txAmt = Math.abs(tx.amount);
+            totalAmt += txAmt;
+            // Duplicate guard: check if tx already exists in destination
+            const existingTxs = destCatIdx >= 0 ? (toSection.items[destCatIdx].transactions || []) : [];
+            const isDuplicate = existingTxs.some(
+              (t: TransactionDetail) => t.description === tx.description && t.date === tx.date && t.amount === tx.amount
+            );
+            if (!isDuplicate) newTxs.push(tx);
+          }
+
           if (destCatIdx >= 0) {
             const destCat = { ...toSection.items[destCatIdx] };
-            destCat.transactions = [...(destCat.transactions || []), recatTx.tx];
-            destCat.monthly += txAmt;
-            destCat.txs += 1;
+            destCat.transactions = [...(destCat.transactions || []), ...newTxs];
+            destCat.monthly += totalAmt;
+            destCat.txs += newTxs.length;
             toSection.items[destCatIdx] = destCat;
-          } else {
-            toSection.items.push({ category: recatTarget, monthly: txAmt, txs: 1, transactions: [recatTx.tx] });
+          } else if (newTxs.length > 0) {
+            toSection.items.push({ category: recatTarget, monthly: totalAmt, txs: newTxs.length, transactions: newTxs });
           }
         }
 
@@ -908,10 +940,10 @@ export default function Home() {
         (updated as any)[fromKey] = fromSection;
         if (fromKey !== toKey) (updated as any)[toKey] = toSection;
 
-        // Remove from person_transfers if this tx came from there
+        // Remove ALL matching transfers from person_transfers (batch removal)
         if (recatTx.catKey === 'Transfers' && Array.isArray((updated as any).person_transfers)) {
           (updated as any).person_transfers = (updated as any).person_transfers.filter(
-            (t: any) => !(t?.description === recatTx.tx.description && t?.date === recatTx.tx.date && t?.amount === recatTx.tx.amount)
+            (t: any) => normalizeMerchant(t?.merchant || t?.description || '') !== normalizedMatch
           );
         }
 
@@ -919,7 +951,6 @@ export default function Home() {
         setAnalysis(updated);
 
         // Track recategorised merchant so stale sync results are rejected
-        const matchDesc = recatTx.tx.merchant || recatTx.tx.description;
         const normalizedKey = normalizeMerchant(matchDesc);
         overriddenMerchants.current.add(normalizedKey);
         setSavedOverrideKeys((prev) => new Set(prev).add(normalizedKey));
@@ -945,6 +976,44 @@ export default function Home() {
       console.warn('[home] Recategorize failed:', err?.message);
     }
     setSavingRecat(false);
+  };
+
+  // Save income card override (income, essentials, or surplus)
+  const saveIncomeOverride = (field: 'income' | 'essentials' | 'surplus', rawValue: string) => {
+    const value = parseFloat(rawValue);
+    if (isNaN(value) || value < 0 || !analysis) {
+      setEditingIncomeField(null);
+      return;
+    }
+
+    const updated = { ...analysis };
+    const currentIncome = analysis.monthly_income ?? 0;
+    const currentNonDiscTotal = (analysis.non_discretionary as any)?.total ?? 0;
+    const currentDiscTotal = (analysis.discretionary as any)?.total ?? 0;
+
+    if (field === 'income') {
+      (updated as any).monthly_income = value;
+    } else if (field === 'essentials') {
+      // Scale non_discretionary total
+      const nonDisc = { ...(updated as any).non_discretionary };
+      const ratio = currentNonDiscTotal > 0 ? value / currentNonDiscTotal : 1;
+      nonDisc.total = value;
+      nonDisc.items = (nonDisc.items || []).map((item: BudgetCategory) => ({
+        ...item,
+        monthly: Math.round(item.monthly * ratio),
+      }));
+      (updated as any).non_discretionary = nonDisc;
+    } else if (field === 'surplus') {
+      // Adjust income to achieve desired surplus: income = surplus + essentials + lifestyle
+      const newIncome = value + currentNonDiscTotal + currentDiscTotal;
+      (updated as any).monthly_income = newIncome;
+    }
+
+    LayoutAnimation.configureNext(SMOOTH_ANIM);
+    setAnalysis(updated);
+    persistAnalysis(updated);
+    setEditingIncomeField(null);
+    trackEvent('Income Override Saved', { field });
   };
 
   const doRemoveIncomeSource = async (sourceName: string) => {
@@ -3136,21 +3205,58 @@ export default function Home() {
 
             {incomeExpanded && (
               <Card style={{ marginBottom: spacing.md }}>
-                {/* Total income */}
-                <View style={s.periodTotalRow}>
-                  <Text style={[s.periodTotalAmount, { fontSize: 28, color: colors.text }]}>
-                    {'\u00a3'}{Math.round(income).toLocaleString()}
-                  </Text>
-                  <Text style={s.periodTotalOf}>per month</Text>
-                  {isVariableIncome && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.amber }} />
-                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.amber, letterSpacing: 0.3 }}>
-                        Variable — budget against {'\u00a3'}{Math.round(incomeFloor).toLocaleString()}/mo
-                      </Text>
-                    </View>
-                  )}
-                </View>
+                {/* Editable summary: Income / Essentials / Surplus */}
+                {[
+                  { key: 'income' as const, label: 'Income', value: income, color: colors.text },
+                  { key: 'essentials' as const, label: 'Essentials', value: nonDiscTotal, color: colors.coral },
+                  { key: 'surplus' as const, label: 'Surplus', value: leftToDecide, color: colors.green },
+                ].map((row) => (
+                  <TouchableOpacity
+                    key={row.key}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      setEditingIncomeField(row.key);
+                      setIncomeEditValue(String(Math.round(row.value)));
+                    }}
+                    style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: row.key === 'surplus' ? 0 : StyleSheet.hairlineWidth, borderBottomColor: colors.border }}
+                  >
+                    <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text }}>{row.label}</Text>
+                    {editingIncomeField === row.key ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 16, color: row.color }}>{'\u00a3'}</Text>
+                        <TextInput
+                          style={{ fontFamily: fonts.mono, fontSize: 16, color: row.color, minWidth: 60, textAlign: 'right', padding: 0, borderBottomWidth: 1, borderBottomColor: colors.accent }}
+                          value={incomeEditValue}
+                          onChangeText={setIncomeEditValue}
+                          keyboardType="numeric"
+                          autoFocus
+                          selectTextOnFocus
+                          onBlur={() => saveIncomeOverride(row.key, incomeEditValue)}
+                          onSubmitEditing={() => saveIncomeOverride(row.key, incomeEditValue)}
+                          returnKeyType="done"
+                        />
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>/mo</Text>
+                      </View>
+                    ) : (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 16, color: row.color }}>
+                          {'\u00a3'}{Math.round(row.value).toLocaleString()}
+                        </Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>/mo</Text>
+                        <Text style={{ fontSize: 10, color: colors.dim, marginLeft: 4 }}>{'\u270E'}</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+
+                {isVariableIncome && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.amber }} />
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.amber, letterSpacing: 0.3 }}>
+                      Variable — budget against {'\u00a3'}{Math.round(incomeFloor).toLocaleString()}/mo
+                    </Text>
+                  </View>
+                )}
 
                 {/* Income sources */}
                 {incomeSources.length > 0 && (
@@ -3459,12 +3565,26 @@ export default function Home() {
                       </>
                     );
                   })()}
-                  {/* ── Person transfers (excluded from spending — surface for recategorisation) ── */}
+                  {/* ── Person transfers (excluded from spending — grouped by name for easy sorting) ── */}
                   {(() => {
                     const transfers = Array.isArray((analysis as any)?.person_transfers) ? (analysis as any).person_transfers : [];
                     if (transfers.length === 0) return null;
                     const transfersExpanded = expandedCategories.has('__transfers__');
                     const transferTotal = transfers.reduce((s2: number, t: any) => s2 + Math.abs(t?.amount ?? 0), 0);
+
+                    // Group transfers by person name
+                    const transferGroups = new Map<string, { name: string; txs: any[]; total: number }>();
+                    for (const tx of transfers) {
+                      if (!tx) continue;
+                      const raw = tx.merchant || tx.description || 'Unknown';
+                      const key = normalizeMerchant(raw);
+                      if (!transferGroups.has(key)) transferGroups.set(key, { name: raw, txs: [], total: 0 });
+                      const g = transferGroups.get(key)!;
+                      g.txs.push(tx);
+                      g.total += Math.abs(tx.amount ?? 0);
+                    }
+                    const groupedTransfers = Array.from(transferGroups.entries()).sort((a, b) => b[1].total - a[1].total);
+
                     return (
                       <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
                         <TouchableOpacity activeOpacity={0.7} onPress={() => toggleCategory('__transfers__')} style={s.dataRow}>
@@ -3477,27 +3597,50 @@ export default function Home() {
                           </View>
                           <Text style={[s.dataValue, { color: colors.amber }]}>{'\u00a3'}{Math.round(transferTotal).toLocaleString()}</Text>
                         </TouchableOpacity>
-                        {transfersExpanded && transfers.map((tx: any, j: number) => (
-                          <TouchableOpacity
-                            key={`transfer-${j}`}
-                            style={s.txRow}
-                            onLongPress={() => {
-                              setRecatTx({ tx: { ...tx, confidence: 'low' }, catKey: 'Transfers', section: 'lifestyle' as const });
-                              setRecatTarget('');
-                              setRecatEssential(true);
-                            }}
-                            activeOpacity={0.7}
-                          >
-                            <View style={s.txLeft}>
-                              <Text style={s.txMerchant}>{tx.merchant || tx.description}</Text>
-                              <Text style={s.txDate}>{formatDate(tx.date)}</Text>
+                        {transfersExpanded && groupedTransfers.map(([key, group]) => {
+                          const groupExpanded = expandedCategories.has(`__transfer_${key}__`);
+                          return (
+                            <View key={`tg-${key}`}>
+                              <TouchableOpacity
+                                style={[s.txRow, { paddingVertical: 10 }]}
+                                activeOpacity={0.7}
+                                onPress={() => group.txs.length > 1 ? toggleCategory(`__transfer_${key}__`) : undefined}
+                                onLongPress={() => {
+                                  // Recategorize entire group — override applies to merchant name
+                                  setRecatTx({ tx: { ...group.txs[0], confidence: 'low' }, catKey: 'Transfers', section: 'lifestyle' as const });
+                                  setRecatTarget('');
+                                  setRecatEssential(true);
+                                }}
+                              >
+                                <View style={s.txLeft}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    {group.txs.length > 1 && (
+                                      <Text style={{ fontSize: 8, color: colors.amber }}>{groupExpanded ? '\u25BC' : '\u25B6'}</Text>
+                                    )}
+                                    <Text style={s.txMerchant}>{group.name}</Text>
+                                    {group.txs.length > 1 && (
+                                      <View style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.amberDim }}>
+                                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.amber }}>{group.txs.length}x</Text>
+                                      </View>
+                                    )}
+                                  </View>
+                                  <Text style={s.txRecatHint}>hold to move</Text>
+                                </View>
+                                <View style={s.txRightCol}>
+                                  <Text style={[s.txAmount, { color: colors.amber }]}>{'\u00a3'}{Math.round(group.total).toLocaleString()}</Text>
+                                </View>
+                              </TouchableOpacity>
+                              {groupExpanded && group.txs.map((tx: any, j: number) => (
+                                <View key={`tg-${key}-tx-${j}`} style={[s.txRow, { paddingLeft: 28 }]}>
+                                  <View style={s.txLeft}>
+                                    <Text style={[s.txDate, { fontSize: 12 }]}>{formatDate(tx.date)}</Text>
+                                  </View>
+                                  <Text style={[s.txAmount, { color: colors.amber, fontSize: 12 }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
+                                </View>
+                              ))}
                             </View>
-                            <View style={s.txRightCol}>
-                              <Text style={[s.txAmount, { color: colors.amber }]}>{'\u00a3'}{Math.abs(tx.amount).toFixed(2)}</Text>
-                              <Text style={s.txRecatHint}>hold to move</Text>
-                            </View>
-                          </TouchableOpacity>
-                        ))}
+                          );
+                        })}
                         {transfersExpanded && (
                           <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, marginTop: 8, lineHeight: 16 }}>
                             These look like payments to people and aren't counted in your budget. If any are regular expenses (e.g. rent), hold to re-categorise.

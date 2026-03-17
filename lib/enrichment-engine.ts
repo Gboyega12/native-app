@@ -1188,9 +1188,21 @@ const EnrichmentEngine = {
     // This ensures manually-added debts (without matching transactions) are counted
     const actualDebtCount = Math.max(m.debtAccountCount, connectedDebts.length);
 
+    // Extract debt payment merchants for name fallback when account_name is missing
+    const debtMerchantNames = this._getMerchantsByCategory(txs, 'Debt Payments');
+    // Helper: resolve the best name for a debt account, using merchant names as fallback
+    const resolveDebtName = (d: any, index: number): string => {
+      if (d.account_name && d.account_name !== 'Card') return d.account_name;
+      if (d.institution) return d.institution;
+      if (d.provider_name) return d.provider_name;
+      // Use debt payment merchant name as fallback (matched by index)
+      if (debtMerchantNames[index]) return debtMerchantNames[index];
+      return `Debt ${index + 1}`;
+    };
+
     // Debt snowball — only for bad/medium debt, not for good debt users
     if (actualDebtCount >= 2) {
-      const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
+      const debtMerchants = debtMerchantNames;
       if (isGoodDebt) {
         // Low utilization, paying on time — good debt for points
         moves.push({
@@ -1237,9 +1249,9 @@ const EnrichmentEngine = {
         const debtSaving = Math.round(totalInterestSaved / 12); // monthly equivalent
 
         const debtSubGoals: MoveSubGoal[] = sortedDebts
-          .map((d: any) => ({
+          .map((d: any, i: number) => ({
             type: 'debt_clear' as const,
-            target: d.account_name || d.institution || 'Debt',
+            target: resolveDebtName(d, i),
             startValue: Math.round(d.outstanding_balance || 0),
             targetValue: 0,
           }));
@@ -1247,8 +1259,8 @@ const EnrichmentEngine = {
         // Build per-debt breakdown string: "Barclaycard £2,400 (22.9%), Amex £1,100"
         // Only show APR when it's a real rate, not a default estimate
         const debtBreakdown = sortedDebts
-          .map((d: any) => {
-            const name = d.account_name || d.institution || d.provider_name || 'Debt';
+          .map((d: any, i: number) => {
+            const name = resolveDebtName(d, i);
             const bal = Math.round(d.outstanding_balance || 0);
             const hasRealRate = d.interest_rate && !d.is_default_apr;
             return hasRealRate
@@ -1259,7 +1271,7 @@ const EnrichmentEngine = {
 
         const strategyName = useAvalanche ? 'highest interest first' : 'smallest balance first';
         const stepsBase = sortedDebts.map((d: any, i: number) => {
-          const name = d.account_name || d.institution || d.provider_name || `Debt ${i + 1}`;
+          const name = resolveDebtName(d, i);
           const bal = Math.round(d.outstanding_balance || 0);
           const hasRealRate = d.interest_rate && !d.is_default_apr;
           const prefix = i === 0 ? 'Target first' : `Then`;
@@ -1286,7 +1298,7 @@ const EnrichmentEngine = {
 
     // Single debt account
     if (actualDebtCount === 1) {
-      const debtMerchants = this._getMerchantsByCategory(txs, 'Debt Payments');
+      const debtMerchants = debtMerchantNames;
       if (isGoodDebt) {
         moves.push({
           action: 'Keep using your credit card strategically for rewards',
@@ -1303,7 +1315,7 @@ const EnrichmentEngine = {
         const singleDebt = connectedDebts[0];
         const singleAPR = (singleDebt as any)?.interest_rate || T.defaultDebtAPR;
         const singleBal = singleDebt?.outstanding_balance || 0;
-        const singleName = singleDebt?.account_name || singleDebt?.institution || singleDebt?.provider_name || 'debt';
+        const singleName = resolveDebtName(singleDebt, 0);
         // Dynamic overpay cap: higher APR = more aggressive (up to 70% of surplus)
         const overpayCap = singleAPR > 0.15 ? 500 : singleAPR > 0.08 ? 350 : T.singleDebtOverpayCap;
         const overpayPct = singleAPR > 0.15 ? 0.7 : T.singleDebtOverpayMaxSurplusPct;
@@ -1323,7 +1335,7 @@ const EnrichmentEngine = {
           effect: `Clears ${singleName} faster and saves \u00a3${debtSaving * 12}/year in interest.`,
           subGoals: singleDebt ? [{
             type: 'debt_clear',
-            target: singleDebt.account_name || singleDebt.institution || 'Debt',
+            target: resolveDebtName(singleDebt, 0),
             startValue: Math.round(singleDebt.outstanding_balance || 0),
             targetValue: 0,
           }] : undefined,

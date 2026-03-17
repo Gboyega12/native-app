@@ -63,7 +63,7 @@ export default function AppDataProvider({ children }: { children: React.ReactNod
         // Debt accounts
         supabase
           .from('debt_accounts')
-          .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source')
+          .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source, is_default_apr')
           .eq('user_id', user.id),
         // Active user plans
         supabase
