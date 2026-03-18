@@ -1,14 +1,302 @@
 # Implementation Plan: Enrichment Intelligence & UX Fixes
 
-**Date:** 2026-03-17
+**Date:** 2026-03-17 (Updated 2026-03-18)
 **Status:** Planning
 
 ---
 
 ## Overview
 
-Six workstreams covering debt UX fixes, transaction embedding, self-transfer detection,
-global learning, and the income recategorization bug.
+Holistic plan covering the full pipeline from onboarding to homepage, with UKPF flowchart
+removed and replaced by profile-signals-driven decision engine.
+
+---
+
+## Holistic Flow: Onboarding → Engine → Homepage
+
+### The New Architecture (UKPF Removed)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                     ONBOARDING                           │
+│                                                          │
+│  welcome.tsx → identity.tsx → goals.tsx → connect.tsx     │
+│       │              │             │           │          │
+│       │         8 identity     1-yr goal    TrueLayer    │
+│       │         questions +    2-yr goal    bank link     │
+│       │         NEW: income    target amt     OR          │
+│       │         band (15g)     NEW: goal    CSV upload    │
+│       │                        timeline                   │
+│       │                        (15f)                      │
+│       ▼              ▼             ▼           ▼          │
+│  ┌─────────────────────────────────────────────────┐     │
+│  │           Supabase: user_identity + goals        │     │
+│  │  risk_appetite, experience, priorities,           │     │
+│  │  work_setup, household, upcoming_events,          │     │
+│  │  income_band (NEW), goal_timeline (NEW)           │     │
+│  └─────────────────────────────────────────────────┘     │
+└──────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│              PROCESSING (processing.tsx)                  │
+│                                                          │
+│  Step 1: Fetch transactions (TrueLayer / CSV)            │
+│  Step 2: Enrichment Engine                               │
+│          ├── User overrides (layer 1)                    │
+│          ├── Merchant-db exact (layer 2)                 │
+│          ├── Global crowd consensus (layer 3) [NEW §5]   │
+│          ├── Claude AI Sonnet 4.6 (layer 4)              │
+│          ├── Fuzzy/keyword match (layer 5)               │
+│          └── "Other" fallback (layer 6)                  │
+│          Self-transfers excluded at layer 0 [NEW §4]     │
+│                                                          │
+│  Step 3: Build Profile                                   │
+│          ├── Monthly income/spending/surplus              │
+│          ├── Budget reality (disc vs non-disc)           │
+│          ├── Income sources + embedded txns [NEW §3]     │
+│          ├── Debt accounts + APR analysis                │
+│          ├── Account balances by bucket [NEW §14a]       │
+│          └── Savings detection                           │
+│                                                          │
+│  Step 4: Profile Signals [NEW §15 — replaces UKPF]      │
+│          ├── detectCohort() → crisis|debt_focus|         │
+│          │   foundation|accumulator|optimizer|coasting    │
+│          ├── calcSophisticationLevel() → 0-1 scale      │
+│          ├── calcCategoryAffinity() → per-category       │
+│          │   multipliers from risk/priorities/events     │
+│          └── riskGammaShift for CRRA adjustment          │
+│                                                          │
+│  Step 5: Move Generation (genDecisionStack)              │
+│          ├── Cohort-aware gating [NEW §15e]              │
+│          │   crisis: suppress invest, tiny cuts           │
+│          │   optimizer: suppress small spending cuts      │
+│          │   coasting: protection moves                   │
+│          ├── Sophistication gating [NEW §15b]            │
+│          │   beginner: no salary sacrifice/PA taper       │
+│          │   advanced: full tax optimization              │
+│          ├── Essential protection [NEW §13]               │
+│          │   Never recommend cutting council tax/TFL      │
+│          ├── Capital allocation moves [NEW §14d-k]       │
+│          │   UHE: idle capital, ISA fill, pension         │
+│          │   SHE: debt vs invest, rebalancing             │
+│          ├── Debt moves with interest-cost framing [§1]  │
+│          │   £0 impact fix + surplus pre-reservation      │
+│          └── Income deduplication [§12]                   │
+│                                                          │
+│  Step 6: Move Ranking (rankMoves)                        │
+│          ├── Base: annualImpact / 100                    │
+│          ├── Effort: low 1.3×, high 0.8×                │
+│          ├── CRRA marginal utility (liquidity-engine)    │
+│          ├── Opportunity cost (APR comparison)           │
+│          ├── Category affinity [NEW — replaces UKPF      │
+│          │   1.15× tiebreaker with identity-driven       │
+│          │   multipliers 0.5×–2.0×]                      │
+│          ├── Goal alignment: 1.3× if matches 1-yr goal  │
+│          └── Monte Carlo consistency: 0.7 + 0.3 × score │
+│                                                          │
+│          Result: RankedMove[] sorted by `score`          │
+│          (field renamed from `ukpfScore`)                │
+│                                                          │
+│  Step 7: Claude Enrichment (optional)                    │
+│          ├── Top 3 moves → Claude for natural language   │
+│          ├── Context: income, spending, surplus, goals   │
+│          │   cohort (NEW), priority category (NEW)       │
+│          └── Returns polished action text + strategy     │
+│                                                          │
+│  Step 8: Save to Supabase → analyses table              │
+└──────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│              BANK SYNC (sync.ts — recurring)             │
+│                                                          │
+│  Triggered: pull-to-refresh, background sync,            │
+│             sync-coordinator (30s dedup)                  │
+│                                                          │
+│  Same pipeline as processing (steps 2-8) plus:           │
+│                                                          │
+│  Step 9: Reactive Engine (reactive-engine.ts)            │
+│          ├── Auto-verify plan steps from tx data         │
+│          │   (debt cleared, sub cancelled, spend down)   │
+│          ├── Detect reactive events                      │
+│          │   (debt payment, savings detected, etc.)      │
+│          ├── Suggest next priority move                  │
+│          │   ├── In-progress moves: 1.5× boost          │
+│          │   ├── Chain matches: 2.0× (same category)    │
+│          │   ├── Goal alignment: 1.3× [NEW — replaces   │
+│          │   │   UKPF 1.2× priority boost]              │
+│          │   └── CRRA + Monte Carlo scoring              │
+│          └── Achievement detection                       │
+│                                                          │
+│  Step 10: Broadcast via sync-coordinator                 │
+│           onSyncComplete() → all subscribers notified    │
+└──────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────┐
+│              HOMEPAGE (app/(main)/(tabs)/index.tsx)       │
+│                                                          │
+│  Data source: AppDataProvider (single fetch, shared)     │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  REVIEW BANNER (if items to confirm)               │  │
+│  │  "X items to confirm" [§7a language reframe]       │  │
+│  │  Single sorted list by confidence [§7f]            │  │
+│  │  High-conf pre-checked, low-conf needs input       │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  HERO CAROUSEL                                     │  │
+│  │  Page 1: #1 Move card                              │  │
+│  │    - NOW personalized by cohort + identity [§15]   │  │
+│  │    - Action, £/mo impact, progress bar             │  │
+│  │    - Proof string (THE MATH box)                   │  │
+│  │    - Sub-goals with progress                       │  │
+│  │  Page 2: Income card                               │  │
+│  │    - Sources with embedded transactions [§3]       │  │
+│  │    - Self-transfers excluded [§4]                  │  │
+│  │    - Deduplicated sources [§12]                    │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  MOVE LIST (moves 2-N)                             │  │
+│  │  - Ranked by profile-signals engine [§15]          │  │
+│  │  - Gated by sophistication level [§15b]            │  │
+│  │  - Essential-protected [§13]                       │  │
+│  │  - Expandable: strategy, proof, timeline, steps    │  │
+│  │  - Capital allocation moves for UHE/SHE [§14]     │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  INSIGHT MODALS (reactive events)                  │  │
+│  │  - Income arrival (payday detected)                │  │
+│  │  - Debt payment confirmed                          │  │
+│  │  - Achievement unlocked                            │  │
+│  │  - Subscription cancelled                          │  │
+│  │  - "Less to review this month" [§7c]               │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  COMPLETED MOVES (archive section)                 │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                          │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  NET WORTH CARD (UHE/SHE only) [§14m]             │  │
+│  │  - Account buckets: cash/savings/ISA/pension       │  │
+│  │  - Allocation breakdown                            │  │
+│  │  - ISA/Pension allowance tracker                   │  │
+│  └────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────┘
+```
+
+### What Changed vs. Old Architecture
+
+| Before (UKPF) | After (Profile Signals) |
+|----------------|------------------------|
+| `determineFlowchartPosition()` maps to level 0-9 | `detectCohort()` maps to 6 financial stages |
+| Static priority from level alone | Dynamic affinity from risk + priorities + events + goals |
+| 1.15× tiebreaker in `rankMoves()` | `categoryAffinity` multiplier 0.5×–2.0× from identity |
+| 1.2× priority boost in reactive engine | Goal alignment 1.3× (what user actually said they want) |
+| `flowchartLabel` on next move suggestion | Removed — reason string is self-explanatory |
+| `ukpf_priority`/`ukpf_label` sent to Claude | `cohort`/`priority_category` sent to Claude |
+| `ukpfScore` field on RankedMove | `score` field (cleaner name) |
+| `FlowchartPosition` type | Removed entirely |
+| Every user at same level gets identical ranking | Same cohort, different identity → different ranking |
+| Level 9 is dead end | Optimizer/coasting get capital allocation moves |
+
+---
+
+## 16. Remove UKPF Flowchart (Prerequisite for §15)
+
+**Date added:** 2026-03-18
+**Status:** Awaiting approval
+
+### Changes
+
+| File | Change |
+|------|--------|
+| `lib/move-engine.ts` | Delete `determineFlowchartPosition()`. Remove UKPF 1.15× tiebreaker from `rankMoves()`. Rename `ukpfScore` → `score` on `RankedMove`. Remove UKPF comments. |
+| `lib/reactive-engine.ts` | Remove import + call of `determineFlowchartPosition`. Remove `flowchartLabel`/`priority` from `NextMoveSuggestion`. Replace UKPF 1.2× priority matching with goal-alignment 1.3× boost. |
+| `lib/sync.ts` | Remove dead `const ukpf = determineFlowchartPosition(...)` call + import. |
+| `app/(main)/processing.tsx` | Remove dead `determineFlowchartPosition` import + call. |
+| `api/enrich.ts` | Remove dead `determineFlowchartPosition` import + call. |
+| `api/verify.ts` | Remove dead `determineFlowchartPosition` import + call. |
+| `api/claude/index.ts` | Remove `ukpf_priority`/`ukpf_label` from `EnrichContext` + prompt. Replace with `cohort`/`priority_category` (wired in §15). |
+| `lib/types.ts` | Delete `FlowchartPosition` interface. |
+| `__tests__/move-engine.test.ts` | Remove `determineFlowchartPosition` test suite. Update ranking tests for renamed `score` field. |
+
+### Checklist
+
+- [ ] Delete `determineFlowchartPosition()` from `lib/move-engine.ts`
+- [ ] Remove UKPF tiebreaker (lines 181-185) from `rankMoves()`
+- [ ] Rename `ukpfScore` → `score` in `RankedMove` interface + all references
+- [ ] Update `rankMoves()` sort to use `.score` instead of `.ukpfScore`
+- [ ] Remove `FlowchartPosition` import from `move-engine.ts`
+- [ ] Delete `FlowchartPosition` interface from `lib/types.ts`
+- [ ] Remove dead code in `lib/sync.ts` (line 478: `const ukpf = ...`)
+- [ ] Remove dead import in `lib/sync.ts` (line 8: `determineFlowchartPosition`)
+- [ ] Remove dead code in `app/(main)/processing.tsx` (line 318: `determineFlowchartPosition(...)`)
+- [ ] Remove dead import in `app/(main)/processing.tsx` (line 195)
+- [ ] Remove dead code in `api/enrich.ts` (line 252)
+- [ ] Remove dead import in `api/enrich.ts` (line 10)
+- [ ] Remove dead code in `api/verify.ts` (line 233)
+- [ ] Remove dead import in `api/verify.ts` (line 13)
+- [ ] Remove `ukpf_priority`/`ukpf_label` from `EnrichContext` in `api/claude/index.ts`
+- [ ] Remove UKPF line from `buildEnrichPrompt()` (line 506)
+- [ ] Update `reactive-engine.ts`: remove import of `determineFlowchartPosition`
+- [ ] Update `reactive-engine.ts`: remove `flowchartLabel` and `priority` from `NextMoveSuggestion`
+- [ ] Update `reactive-engine.ts`: replace UKPF priority matching with goal alignment boost
+- [ ] Update `__tests__/move-engine.test.ts`: remove flowchart test suite, update field names
+- [ ] Run tests + verify build
+
+---
+
+## Implementation Order (Updated — Full Holistic Plan)
+
+### Sprint 0: Cleanup & Foundation
+1. **§16 — Remove UKPF** — prerequisite for §15, clears the path
+2. **§7a — Trust UX copy rewrite** — immediate feel improvement, zero logic changes
+3. **§7d — Dead code removal** — clean codebase before new features
+
+### Sprint 1: Critical Bugs
+4. **§11 — Debt Free modal false positive** — simple fix, high annoyance
+5. **§1a+1b — Debt move £0 impact** — users see broken data
+6. **§2 — Income recategorization bug** — UX trust issue
+7. **§12 — Duplicate income sources** — inflated numbers
+8. **§10 — Surplus/left-to-spend/categorization bugs** — ✅ done
+
+### Sprint 2: Decision Engine (§15 — core intelligence)
+9. **§15h — Types** — `IncomeBand`, `GoalTimeline`, `UpcomingEventWithTimeline`
+10. **§15a — `detectCohort()`** — replaces UKPF flowchart positioning
+11. **§15b — `calcSophisticationLevel()`** — gates complex moves
+12. **§15c — `calcCategoryAffinity()`** — identity-driven ranking multipliers
+13. **§15d — Event timeline fix** — bug in `.includes()` for object events
+14. **§15e — Cohort-aware move generation** — crisis/optimizer/coasting gating
+15. **§15f + §15g — Onboarding additions** — goal timeline + income band
+
+### Sprint 3: UX & Data Quality
+16. **§9 — AI review modal decision engine** — ✅ done
+17. **§7f — Review flow merge** — single confidence-sorted list
+18. **§7b — Confidence styling** — subtle visual trust signals
+19. **§7e — Fix leaked implementation detail** — "(using cached data)"
+20. **§7c — Invisible learning signal** — "less to review this month"
+21. **§13 Phase 1 — Essential protection** — stop recommending cutting council tax
+
+### Sprint 4: Data Enrichment Features
+22. **§3 — Transaction embedding in Income card** — transparency
+23. **§4 — Self-transfer detection** — cleaner data
+24. **§5 — Global learning state** — cross-user enrichment
+25. **§1c — Debt-first surplus allocation** — correct financial advice
+26. **§13 Phase 2 — Archetype-aware filtering** — savings optimizer fixes
+
+### Sprint 5: Capital Allocation (§14)
+27. **§14a-c — Account intelligence + cohort detection** — UHE/SHE
+28. **§14d-f — UHE moves** — idle capital, ISA fill, misallocation
+29. **§14h-k — SHE moves** — debt vs invest, net yield, tax structure
+30. **§14l-n — Integration + UI** — net worth card, chat context
+
+---
 
 ---
 
@@ -557,7 +845,7 @@ Transform BOCY from a spending tracker into a **capital allocation engine** for 
 | Investment merchants (merchant-db) | Freetrade, Vanguard, HL etc. detected | **Not differentiated** by account type (ISA vs GIA vs SIPP) |
 | Move generation | Threshold-based cuts only | **No capital reallocation moves** — no idle cash, no ISA fill, no pension optimize |
 | Archetype system | 10 archetypes, none for high earners | **No UHE/SHE detection** |
-| UKPF flowchart | Levels 0-9, tops out at "Long-term wealth" | **Level 9 is a dead end** — no guidance once you're there |
+| ~~UKPF flowchart~~ | ~~Levels 0-9, topped out at "Long-term wealth"~~ | **Removed** — replaced by profile-signals cohort engine (§15+§16) |
 | Debt detection | Credit card, overdraft, mortgage | **No distinction** between strategic credit use and problem debt |
 
 ---
@@ -731,10 +1019,7 @@ Transform BOCY from a spending tracker into a **capital allocation engine** for 
   - UHE/SHE moves get `1.3x` boost when user matches cohort
   - Suppress discretionary cut moves for UHE/SHE users when annualImpact < £500 (noise)
   - Capital allocation moves rank above spending cuts for these cohorts
-- [ ] **New UKPF flowchart level 9 expansion:**
-  - Level 9a: "Optimize tax wrappers" (ISA/pension fill)
-  - Level 9b: "Reduce idle capital drag"
-  - Level 9c: "System-level optimization" (cross-account rebalancing)
+- [ ] **Cohort-aware move ordering** — optimizer/coasting cohorts prioritize capital allocation moves over spending cuts
 - [ ] **`genDecisionStack()` integration** — When cohort is UHE/SHE, call new capital allocation move generators alongside existing spending moves. Existing moves still generated but filtered by relevance
 
 #### 14m. Dashboard UI for capital allocation
@@ -850,16 +1135,16 @@ export interface ProfileSignals {
 
 **Function: `detectCohort(profile, identity, goals, debtAccounts)`**
 
-Six cohorts aligned with UKPF flowchart, enriched with identity:
+Six cohorts (replaces UKPF flowchart levels entirely), enriched with identity:
 
-| Cohort | Detection | UKPF Level |
-|--------|-----------|------------|
-| `crisis` | surplus < 0 OR (debt_count ≥ 3 AND situation='in_debt') | 0-1 |
-| `debt_focus` | has expensive debt (APR > 8%) AND balance > 0 | 2-4 |
-| `foundation` | savingsRate < 15% AND surplus > 0 AND no expensive debt | 2-5 |
-| `accumulator` | savingsRate 15-30% AND debt_count ≤ 1 | 7 |
-| `optimizer` | savingsRate > 30% AND surplus > 500 AND minimal debt | 9 |
-| `coasting` | savingsRate > 30% AND all UKPF levels met AND no urgency | 9+ |
+| Cohort | Detection |
+|--------|-----------|
+| `crisis` | surplus < 0 OR (debt_count ≥ 3 AND situation='in_debt') |
+| `debt_focus` | has expensive debt (APR > 8%) AND balance > 0 |
+| `foundation` | savingsRate < 15% AND surplus > 0 AND no expensive debt |
+| `accumulator` | savingsRate 15-30% AND debt_count ≤ 1 |
+| `optimizer` | savingsRate > 30% AND surplus > 500 AND minimal debt |
+| `coasting` | savingsRate > 30% AND no debt AND no urgency |
 
 Evaluated in order, first match wins. Uses existing data only.
 
