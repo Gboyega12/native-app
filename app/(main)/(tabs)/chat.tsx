@@ -1278,10 +1278,17 @@ export default function Chat() {
         target_amount: g.target_amount,
       } : undefined,
       top_move: a?.top_move ? { action: a.top_move.action, monthlyImpact: a.top_move.monthlyImpact } : undefined,
-      all_moves: a?.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string }) => ({
+      all_moves: a?.all_moves?.map((m: any) => ({
         action: m.action,
         monthlyImpact: m.monthlyImpact,
+        annualImpact: m.annualImpact,
         effort: m.effort,
+        category: m.category,
+        merchants: m.merchants,
+        strategy: m.strategy,
+        steps: m.steps,
+        effect: m.effect,
+        subGoals: m.subGoals,
       })),
       income_sources: a?.income_sources?.map((s: any) => ({
         source: s.source,
@@ -1507,14 +1514,17 @@ export default function Chat() {
         ctx.income_cv = freshA.income_cv;
         ctx.archetype = freshA.archetype;
         ctx.decision_score = freshA.decision_score;
-        ctx.all_moves = freshA.all_moves?.map((m: { action: string; monthlyImpact: number; effort: string; category?: string; strategy?: string; proof?: string; effect?: string }) => ({
+        ctx.all_moves = freshA.all_moves?.map((m: any) => ({
           action: m.action,
           monthlyImpact: m.monthlyImpact,
+          annualImpact: m.annualImpact,
           effort: m.effort,
           category: m.category,
+          merchants: m.merchants,
           strategy: m.strategy,
-          proof: m.proof,
+          steps: m.steps,
           effect: m.effect,
+          subGoals: m.subGoals,
         }));
         ctx.top_move = freshA.top_move ? { action: freshA.top_move.action, monthlyImpact: freshA.top_move.monthlyImpact } : undefined;
         ctx.behavioral_patterns = freshA.behavioral_patterns;
@@ -2510,8 +2520,8 @@ export default function Chat() {
           </TouchableOpacity>
         )}
 
-        {/* Follow-up suggestion chips after last assistant response */}
-        {!isEmptyState && !loading && !error && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
+        {/* Follow-up suggestion chips — only after first assistant reply, hidden once conversation flows */}
+        {!isEmptyState && !loading && !error && messages.length > 0 && messages.length <= 4 && messages[messages.length - 1]?.role === 'assistant' && (
           <View style={s.followUpContainer}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.followUpScroll}>
               {suggestedQuestions.slice(0, 3).map((q, qi) => (
@@ -2609,15 +2619,25 @@ export default function Chat() {
 
 // ── Helpers ──
 
-function buildSpendingBreakdown(a: Analysis | null): { category: string; monthly: number }[] | undefined {
+function buildSpendingBreakdown(a: Analysis | null): { category: string; monthly: number; txCount: number; topMerchants: { name: string; amount: number }[] }[] | undefined {
   if (!a) return undefined;
-  const items: { category: string; monthly: number }[] = [];
+  const items: { category: string; monthly: number; txCount: number; topMerchants: { name: string; amount: number }[] }[] = [];
 
   const sections = [a.non_discretionary, a.discretionary];
   for (const section of sections) {
     if (!section?.items) continue;
     for (const item of section.items) {
-      items.push({ category: item.category, monthly: item.monthly });
+      // Aggregate top merchants by spend within each category
+      const merchantTotals: Record<string, number> = {};
+      for (const tx of (item.transactions || [])) {
+        const name = tx.merchant || tx.description || 'Unknown';
+        merchantTotals[name] = (merchantTotals[name] || 0) + Math.abs(tx.amount);
+      }
+      const topMerchants = Object.entries(merchantTotals)
+        .map(([name, amount]) => ({ name, amount: Math.round(amount) }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 5);
+      items.push({ category: item.category, monthly: item.monthly, txCount: (item.transactions || []).length, topMerchants });
     }
   }
 
@@ -2996,7 +3016,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 20,
-    marginBottom: 12,
+    marginBottom: 20,
   },
   userBubble: {
     backgroundColor: c.accent,
@@ -3354,8 +3374,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 6,
-    marginTop: 16,
+    marginBottom: 8,
+    marginTop: 24,
   },
   bocyLabelDot: {
     width: 5,

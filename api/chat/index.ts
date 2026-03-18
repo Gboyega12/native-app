@@ -931,7 +931,16 @@ Tools:
   if (ctx.spending_by_category?.length) {
     prompt += `\n\nSpending by category (MONTHLY AVERAGES \u2014 these are per-month figures, not totals):`;
     for (const c of ctx.spending_by_category) {
-      prompt += `\n- ${c.category}: \u00a3${Math.round(c.monthly)}/month`;
+      const cat = c as Record<string, unknown>;
+      let line = `\n- ${cat.category}: \u00a3${Math.round(cat.monthly as number)}/month`;
+      if (cat.txCount) line += ` (${cat.txCount} transactions)`;
+      if ((cat.topMerchants as unknown[])?.length) {
+        const merchants = (cat.topMerchants as Array<{ name: string; amount: number }>)
+          .map(m => `${m.name} \u00a3${m.amount}`)
+          .join(', ');
+        line += `\n  Top merchants: ${merchants}`;
+      }
+      prompt += line;
     }
   }
 
@@ -974,15 +983,21 @@ Tools:
 
   // ── All moves ──
   if (ctx.all_moves?.length) {
-    prompt += `\n\nInsights from analysis (ranked by mathematical impact):`;
+    prompt += `\n\nFinancial moves (ranked by impact, shown on user's home screen):`;
     for (const m of ctx.all_moves) {
-      let line = `\n- [${m.category || 'general'}] ${m.action} \u2192 \u00a3${Math.round(m.monthlyImpact as number)}/month (effort: ${m.effort})`;
-      if (m.proof) line += `\n  Proof: ${m.proof}`;
-      if (m.strategy) line += `\n  Context: ${m.strategy}`;
+      let line = `\n- [${m.category || 'general'}] ${m.action} \u2192 \u00a3${Math.round(m.monthlyImpact as number)}/month (\u00a3${Math.round((m.annualImpact as number) || (m.monthlyImpact as number) * 12)}/year, effort: ${m.effort})`;
+      if ((m.merchants as string[])?.length) line += `\n  Merchants: ${(m.merchants as string[]).join(', ')}`;
+      if (m.strategy) line += `\n  Strategy: ${m.strategy}`;
+      if ((m.steps as string[])?.length) line += `\n  Steps: ${(m.steps as string[]).join(' \u2192 ')}`;
       if (m.effect) line += `\n  Effect: ${m.effect}`;
+      if ((m.subGoals as unknown[])?.length) {
+        for (const sg of m.subGoals as Array<Record<string, unknown>>) {
+          line += `\n  Sub-goal: ${sg.type} ${sg.target} from \u00a3${sg.startValue} to \u00a3${sg.targetValue}`;
+        }
+      }
       prompt += line;
     }
-    prompt += `\nWhen the user asks about savings, investments, fees, LISA, idle cash, or platform costs, reference the specific numbers from the proof field above. Always show your working.`;
+    prompt += `\nThese moves are shown on the user's home screen. When they ask about a specific move, reference the exact merchants, steps, and amounts. When they want to act on a move, use the appropriate tool (save_transaction_override for reclassifications, save_budget_item for adding expenses, propose_plan for savings targets).`;
   }
 
   // ── Recent transfers ──
