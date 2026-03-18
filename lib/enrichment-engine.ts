@@ -1382,21 +1382,19 @@ const EnrichmentEngine = {
           effect: `Earn more from spending you're already doing.`,
         });
       } else {
-        // Determine if we have REAL interest rate data (not default guesses) for avalanche
-        // TrueLayer doesn't provide APR, so is_default_apr=true means the rate is estimated.
-        // Only use avalanche when at least one debt has a user-confirmed or provider-supplied rate,
-        // OR when debts have different default rates (e.g. credit card vs overdraft).
-        const hasRealRates = connectedDebts.some((d: any) => d.interest_rate && d.interest_rate > 0 && !d.is_default_apr);
-        const hasDifferentRates = new Set(connectedDebts.map((d: any) => d.interest_rate || 0)).size > 1;
-        const useAvalanche = hasConnectedDebtData && (hasRealRates || hasDifferentRates);
+        // Always use avalanche strategy: highest interest rate first (mathematically optimal).
+        // When APR is unknown (is_default_apr=true), use default APR as placeholder —
+        // the user will be prompted to provide their real rates.
+        // Tiebreaker: when APR is equal, largest balance first (clears more interest faster).
         const fallbackAPR = T.defaultDebtAPR;
+        const needsRateData = connectedDebts.some((d: any) => !d.interest_rate || d.is_default_apr);
 
-        // Sort: avalanche = highest interest first; snowball fallback = smallest balance first
+        // Sort: highest APR first, then largest balance as tiebreaker
         const sortedDebts = [...connectedDebts].sort((a: any, b: any) => {
-          if (useAvalanche) {
-            return (b.interest_rate || fallbackAPR) - (a.interest_rate || fallbackAPR);
-          }
-          return (a.outstanding_balance || 0) - (b.outstanding_balance || 0);
+          const aprA = a.interest_rate || fallbackAPR;
+          const aprB = b.interest_rate || fallbackAPR;
+          if (aprB !== aprA) return aprB - aprA; // highest APR first
+          return (b.outstanding_balance || 0) - (a.outstanding_balance || 0); // largest balance first
         });
 
         // Calculate real interest savings using amortisation math
@@ -1452,11 +1450,10 @@ const EnrichmentEngine = {
             })
             .join(', ');
 
-          const strategyName = useAvalanche ? 'highest interest first' : 'smallest balance first';
-          strategyText = `${debtBreakdown}. Currently paying \u00a3${Math.round(p.debtPayments)}/month across ${actualDebtCount} debts.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''}${useAvalanche ? ' Targeting highest interest rate first to minimise total cost.' : ' Pay off the smallest balance first for quick wins and momentum.'}`;
+          strategyText = `${debtBreakdown}. Currently paying \u00a3${Math.round(p.debtPayments)}/month across ${actualDebtCount} debts.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — this is hurting your credit score.` : ''} Targeting highest interest rate first to minimise total cost.${needsRateData ? ' Some rates are estimated — tell me your actual APRs and I\'ll refine the plan.' : ''}`;
         } else {
           const merchantList = debtMerchants.length > 0 ? debtMerchants.join(', ') : 'your lenders';
-          strategyText = `Payments to ${merchantList} detected, totalling \u00a3${Math.round(p.debtPayments)}/month across ${actualDebtCount} debts. Pay off the smallest balance first for quick wins and momentum.`;
+          strategyText = `Payments to ${merchantList} detected, totalling \u00a3${Math.round(p.debtPayments)}/month across ${actualDebtCount} debts. Targeting highest interest rate first to minimise total cost. Tell me your APRs and I'll build an exact payoff timeline.`;
         }
 
         const stepsBase = hasConnectedDebtData
@@ -1475,12 +1472,8 @@ const EnrichmentEngine = {
             });
         stepsBase.push('Pay minimums on everything else', 'When one is cleared, I\'ll roll payments into the next');
 
-        const strategyName = hasConnectedDebtData
-          ? (useAvalanche ? 'highest interest first' : 'smallest balance first')
-          : 'smallest balance first';
-
         moves.push({
-          action: `Clear ${actualDebtCount} debts${hasConnectedDebtData ? ` (\u00a3${totalDebtBalance.toLocaleString()} total)` : ''}, ${strategyName}`,
+          action: `Clear ${actualDebtCount} debts${hasConnectedDebtData ? ` (\u00a3${totalDebtBalance.toLocaleString()} total)` : ''}, highest interest first`,
           annualImpact: debtSaving * 12,
           monthlyImpact: debtSaving,
           effort: 'high',

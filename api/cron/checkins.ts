@@ -108,6 +108,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // ── Determine check-in message ──
         let message: string | null = null;
 
+        // 0. Missing APR data — prompt user to provide interest rates for accurate debt strategy
+        const { data: debtAccounts } = await admin
+          .from('debt_accounts')
+          .select('account_name, interest_rate, is_default_apr')
+          .eq('user_id', pref.user_id);
+
+        const missingRateDebts = (debtAccounts || []).filter(
+          (d: any) => !d.interest_rate || d.is_default_apr
+        );
+        if (missingRateDebts.length > 0) {
+          // Only send this once — check if we already sent a missing-APR prompt
+          const { data: aprPrompt } = await admin
+            .from('notification_log')
+            .select('id')
+            .eq('user_id', pref.user_id)
+            .eq('notification_type', 'missing_apr')
+            .limit(1);
+
+          if (!aprPrompt || aprPrompt.length === 0) {
+            const names = missingRateDebts.map((d: any) => d.account_name).join(' and ');
+            message = `I'm building your debt payoff plan but I need one thing — the interest rate on ${names}. Check your latest statement or banking app for the APR. Just tell me in chat and I'll optimise which debt to tackle first.`;
+          }
+        }
+
         // 1. Surplus drop
         if (previous && previous.surplus > 0 && current.surplus < previous.surplus * 0.7) {
           const drop = Math.round(previous.surplus - current.surplus);
@@ -198,11 +222,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
           body: JSON.stringify({
             to: recipientEmail,
-            subject: 'Bocy has a suggestion for you',
+            subject: missingRateDebts.length > 0 && message?.includes('interest rate') ? 'Bocy needs one thing from you' : 'Bocy has a suggestion for you',
             html,
             push_body: message,
             user_id: pref.user_id,
-            notification_type: 'checkin',
+            notification_type: missingRateDebts.length > 0 && message?.includes('interest rate') ? 'missing_apr' : 'checkin',
           }),
         });
 

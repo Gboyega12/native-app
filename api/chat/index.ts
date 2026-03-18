@@ -1076,7 +1076,9 @@ Tools:
         prompt += `\n- Minimum payment unknown for: ${missingMinPay.map(d => (d as Record<string, unknown>).name).join(', ')}. Ask when discussing repayment plans.`;
       }
       prompt += `\nDon't guess these numbers — always ask the user. Getting the real APR matters for accurate payoff timelines.`;
+      prompt += `\nIMPORTANT: Proactively ask the user for their APR on each debt account with missing rates. Say something like: "I'm currently using estimated rates for [account names]. Could you check your latest statement or app for the actual APR? It'll help me optimise which debt to target first."`;
     }
+    prompt += `\nDebt strategy: ALWAYS use avalanche method (highest interest rate first). This saves the most money mathematically. When rates are equal, target the largest balance first. Never recommend snowball (smallest balance first).`;
     prompt += `\nUse these actual balances when discussing debt strategy. Be specific \u2014 "Pay down your \u00a3${Math.round(totalDebt)} across ${ctx.debt_accounts.length} account(s)" not "attack your debts."`;
   }
 
