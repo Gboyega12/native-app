@@ -1289,6 +1289,13 @@ export default function Chat() {
         steps: m.steps,
         effect: m.effect,
         subGoals: m.subGoals,
+        proof: m.proof,
+        trajectory: m.trajectory ? {
+          currentMonths: m.trajectory.currentMonths,
+          newMonths: m.trajectory.newMonths,
+          monthsSaved: m.trajectory.monthsSaved,
+          confidence: m.trajectory.confidence,
+        } : undefined,
       })),
       income_sources: a?.income_sources?.map((s: any) => ({
         source: s.source,

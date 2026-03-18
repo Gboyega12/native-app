@@ -2548,6 +2548,24 @@ export default function Home() {
                                 <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2, lineHeight: 18 }}>{move.proof}</Text>
                               </View>
                             )}
+                            {/* Trajectory confidence band — shows Monte Carlo timeline */}
+                            {(move as any).trajectory?.confidence?.p50 > 0 && (move as any).trajectory?.confidence?.p50 < 120 && (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16, paddingHorizontal: 2 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 1, color: colors.dim, textTransform: 'uppercase' }}>TIMELINE</Text>
+                                <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.accent }}>
+                                  {(move as any).trajectory.confidence.p50}mo
+                                </Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>
+                                  ({(move as any).trajectory.confidence.p10}{'\u2013'}{(move as any).trajectory.confidence.p90})
+                                </Text>
+                                {(move as any).trajectory.confidence.hitRate12m > 0 && (move as any).trajectory.confidence.hitRate12m < 100 && (
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.green }}>
+                                    {(move as any).trajectory.confidence.hitRate12m}% in 12mo
+                                  </Text>
+                                )}
+                              </View>
+                            )}
                             {(() => {
                               // Show sub-goal progress bars when available, otherwise legacy steps
                               const sgs: MoveSubGoal[] = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];

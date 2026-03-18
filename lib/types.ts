@@ -182,6 +182,8 @@ export interface Move {
   merchants?: string[];
   /** Structured sub-goals derived from real data at generation time */
   subGoals?: MoveSubGoal[];
+  /** Mathematical proof string showing the calculation behind the impact */
+  proof?: string;
 }
 
 /**

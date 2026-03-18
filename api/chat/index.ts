@@ -995,9 +995,15 @@ Tools:
           line += `\n  Sub-goal: ${sg.type} ${sg.target} from \u00a3${sg.startValue} to \u00a3${sg.targetValue}`;
         }
       }
+      if (m.proof) line += `\n  Proof: ${(m.proof as string).replace(/\n/g, '; ')}`;
+      if ((m as any).trajectory?.confidence) {
+        const t = (m as any).trajectory;
+        const conf = t.confidence;
+        line += `\n  Trajectory: ${t.currentMonths}mo \u2192 ${conf.p50}mo (p10=${conf.p10}, p90=${conf.p90}, 12mo hit rate=${conf.hitRate12m}%)`;
+      }
       prompt += line;
     }
-    prompt += `\nThese moves are shown on the user's home screen. When they ask about a specific move, reference the exact merchants, steps, and amounts. When they want to act on a move, use the appropriate tool (save_transaction_override for reclassifications, save_budget_item for adding expenses, propose_plan for savings targets).`;
+    prompt += `\nThese moves are shown on the user's home screen. When they ask about a specific move, reference the exact merchants, steps, and amounts. When they want to act on a move, use the appropriate tool (save_transaction_override for reclassifications, save_budget_item for adding expenses, propose_plan for savings targets). Each move includes a mathematical proof showing how the impact was calculated — reference this when users question the numbers.`;
   }
 
   // ── Recent transfers ──

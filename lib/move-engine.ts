@@ -207,8 +207,13 @@ export function rankMoves(
     // Calculate trajectory for this move (with Monte Carlo if profile available)
     const trajectory = calcGoalTrajectory(profile, goals, move, identity);
 
+    // ── Generate proof string ──
+    // Concise mathematical explanation of the impact calculation
+    const proof = buildProofString(move, trajectory, marginal, opportunityCost, liquidityTier, consistencyScore);
+
     return {
       ...move,
+      proof,
       rank: 0,
       trajectory,
       ukpfScore: score,
@@ -314,4 +319,71 @@ export function calcGoalTrajectory(
   }
 
   return result;
+}
+
+// ── Proof String Generator ──
+// Creates a concise mathematical explanation of the move's impact.
+// Displayed in the "THE MATH" box on move cards.
+
+function buildProofString(
+  move: Move,
+  trajectory: GoalTrajectory | null,
+  marginalMultiplier: number,
+  opportunityCost: number,
+  liquidityTier: LiquidityTier | undefined,
+  consistencyScore: number | undefined,
+): string {
+  const parts: string[] = [];
+  const cat = move.category || 'spending';
+
+  // Line 1: Core calculation
+  if (cat === 'debt') {
+    // Debt moves: show interest cost math
+    const monthlyPayment = move.monthlyImpact;
+    if (move.annualImpact > 0) {
+      parts.push(`\u00a3${move.annualImpact}/yr in interest saved`);
+    }
+    if (opportunityCost > 1.5) {
+      parts.push(`debt APR is ${Math.round(opportunityCost * 4.5)}% vs 4.5% base rate \u2192 ${opportunityCost.toFixed(1)}x priority`);
+    }
+  } else if (cat === 'spending') {
+    // Spending moves: show reduction math
+    const subGoal = move.subGoals?.[0];
+    if (subGoal && subGoal.startValue > 0) {
+      const pctCut = Math.round(((subGoal.startValue - subGoal.targetValue) / subGoal.startValue) * 100);
+      parts.push(`\u00a3${subGoal.startValue}/mo \u2192 \u00a3${subGoal.targetValue}/mo (${pctCut}% reduction)`);
+    }
+    parts.push(`\u00a3${move.monthlyImpact}/mo \u00d7 12 = \u00a3${move.annualImpact}/yr freed up`);
+  } else if (cat === 'buffer' || cat === 'savings') {
+    parts.push(`\u00a3${move.monthlyImpact}/mo \u00d7 12 = \u00a3${move.annualImpact}/yr toward your goal`);
+  } else {
+    parts.push(`\u00a3${move.monthlyImpact}/mo \u00d7 12 = \u00a3${move.annualImpact}/yr impact`);
+  }
+
+  // Line 2: Marginal utility context (only when noteworthy)
+  if (marginalMultiplier > 1.5) {
+    parts.push(`high marginal value: each \u00a31 here delivers ${marginalMultiplier.toFixed(1)}x utility`);
+  } else if (marginalMultiplier < 0.5) {
+    parts.push(`diminishing returns: already well-optimised in this area`);
+  }
+
+  // Line 3: Trajectory impact
+  if (trajectory && trajectory.currentMonths > 0 && trajectory.monthsSaved > 0) {
+    const conf = trajectory.confidence;
+    if (conf && conf.p50 > 0 && conf.p50 < 120) {
+      parts.push(`goal timeline: ${trajectory.currentMonths}mo \u2192 ${conf.p50}mo (${conf.p10}\u2013${conf.p90} range)`);
+      if (conf.hitRate12m > 0 && conf.hitRate12m < 100) {
+        parts.push(`${conf.hitRate12m}% chance of reaching goal within 12 months`);
+      }
+    } else {
+      parts.push(`goal timeline: ${trajectory.currentMonths}mo \u2192 ${trajectory.newMonths}mo (${trajectory.monthsSaved}mo faster)`);
+    }
+  }
+
+  // Line 4: Consistency (only if Monte Carlo ran)
+  if (consistencyScore != null && consistencyScore < 0.7) {
+    parts.push(`consistency: ${Math.round(consistencyScore * 100)}% \u2014 this one takes discipline`);
+  }
+
+  return parts.join('\n');
 }
