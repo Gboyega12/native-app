@@ -437,3 +437,99 @@ to the review modal regardless of confidence. ~90% are already correct — wasti
 
 ### 10d. Income card surplus simplification
 - [x] `app/(main)/(tabs)/index.tsx`: Use `analysis.surplus` directly instead of recalculating
+
+---
+
+## 11. "Debt Free" Modal Fires for Every New User
+
+**Date added:** 2026-03-18
+
+### Root Cause
+`reactive-engine.ts:573` **hardcodes** `debt_account_count: 0` in the `ScoreSnapshot`, ignoring the actual debt data. `achievements.ts:124` awards `debt_free` when `debt_account_count === 0`. Result: every new user with no debt data triggers the celebration modal on first analysis.
+
+### Fix
+- [ ] **`reactive-engine.ts:573`** — Populate `debt_account_count` from the `debtAccounts` parameter instead of hardcoding 0
+- [ ] **`achievements.ts:124`** — Only award `debt_free` as a **transition**: require a previous analysis where `debt_account_count > 0` before awarding. "Never had debt data" ≠ "debt free". Guard: `previous.debt_account_count > 0 && current.debt_account_count === 0`
+- [ ] **Consider `data_completeness` guard** — Don't fire milestone achievements until the user has completed at least one full analysis cycle with connected data
+
+---
+
+## 12. Duplicate Income Sources (Same Paycheck, Different Names)
+
+**Date added:** 2026-03-18
+
+### Root Cause
+`enrichment-engine.ts:670-676` groups income by `tx.merchant || tx.description`. The same paycheck can match via two paths:
+- **Path A:** Merchant DB match → `merchant = "Net Ltd"` (company name)
+- **Path B:** Salary keyword match → `merchant = "Salary"` (generic label)
+
+Both have the same amount and date but different merchant names → separate income groups → totals inflated (£3000 + £3000 = £6000).
+
+### Fix
+- [ ] **Dedup pass after income grouping in `buildProfile()`** — For each pair of income groups, check if they have overlapping transaction dates (±2 days) AND similar amounts (within 5%). If overlap ≥ 50% of transactions, merge into the group with the more specific name (company name beats "Salary")
+- [ ] **Merchant enrichment priority** — When a transaction matches a merchant DB entry with `isIncome: true`, skip the salary keyword fallback path entirely. The generic "Salary" label should only apply when NO specific merchant match exists
+- [ ] **Fuzzy name merge** — Before final grouping, normalize income merchant names: if two groups share significant tokens (e.g., "Net Ltd" vs "NET TRANSFER FROM NET LTD"), merge them using token overlap (Jaccard > 0.4)
+
+---
+
+## 13. Savings Optimizer Recommendation Quality
+
+**Date added:** 2026-03-18
+
+### Root Causes
+
+**A. No archetype-aware move filtering**
+- `genDecisionStack()` only checks `isHighSaver` (25%+ savings rate) to suppress discretionary cuts
+- No concept of user sophistication or archetype — a 22% saver still gets "cut £84 discretionary"
+- `archetypes.ts` has no `savings_optimizer` archetype (closest is `quiet_builder` at 20%+ savings rate)
+
+**B. Essential services recommended for cutting**
+- `merchant-db.ts` marks TFL, council tax, utilities as `isEssential: true`
+- `genDecisionStack()` **never checks this flag** — transport/subscription cut moves can include essentials
+- Result: "Cancel your council tax subscription" or "Cut TFL transport spend"
+
+**C. Credit card optimizers get debt recommendations**
+- System detects "good debt" via TrueLayer balance (<15% utilization) or spending-ratio (50-150%)
+- Without connected accounts, detection fails → rewards users get "pay off your credit card" moves
+- No concept of "uses cards strategically for points and pays in full"
+
+**D. No confidence/quality scoring on moves**
+- `Move` type has no `confidence` or `relevance` field
+- Ranking uses impact/effort but not appropriateness for the user's profile
+
+### Fix — Phase 1: Essential Protection (Quick Win)
+- [ ] **`enrichment-engine.ts` move generation** — Filter `isEssential` transactions from ALL cut/reduce recommendations. Before building subscription, transport, or discretionary cut moves, exclude any items where the underlying transactions are from essential merchants
+- [ ] **`merchant-db.ts` audit** — Verify council tax, TFL, all utilities, insurance are `isEssential: true`
+
+### Fix — Phase 2: Archetype-Aware Move Filtering
+- [ ] **Add `savings_optimizer` archetype** to `archetypes.ts` — Trigger: savings rate ≥ 15%, no problematic debt (or utilization < 30%), surplus > 0. Distinguishes from `quiet_builder` (passive) — savings optimizers are active/intentional
+- [ ] **Pass archetype into `genDecisionStack()`** — Use it to gate move categories
+- [ ] **Archetype-specific suppression for savings optimizers:**
+  - Suppress discretionary cuts with `annualImpact < £500`
+  - Suppress generic subscription cut moves
+  - Suppress debt recommendations when credit utilization is healthy or full-payer pattern detected
+  - Lower `isHighSaver` threshold to 15% for this archetype
+- [ ] **Add `confidence` field to `Move` type** — Score 0-100 based on data quality and archetype relevance. Moves below threshold (e.g., 40) are hidden
+
+### Fix — Phase 3: Predictive/Mathematical Recommendations
+- [ ] **Credit card rewards detection** — Detect high CC spend + full monthly payoff pattern → `creditCardOptimizer: true`. Replace "pay off debt" with "maximize rewards categories" or "you're earning ~£X/year in cashback"
+- [ ] **Trajectory projections** — New move types:
+  - "At your savings rate, you'll have £X emergency fund in Y months"
+  - "Switching savings account from X% to Y% APR = £Z more per year"
+  - "ISA allowance usage: X% — contribute £Y more before April"
+  - "At current trajectory, you'll reach £X net worth by [date]"
+- [ ] **Pattern-based insights** — Detect spending variance and seasonal patterns:
+  - "Your transport spend is 30% above your 3-month average"
+  - "Your grocery spend drops £X in summer months — expect increase in autumn"
+  - Anomaly detection: flag individual transactions that are 2σ+ above category average
+- [ ] **Rate optimization** — Compare detected savings APR against best available rates (could use static table initially). "Your £X in savings at Y% could earn £Z more at Z%"
+
+---
+
+## Priority Order (New Items)
+
+1. **Bug 11 (Debt Free modal)** — Simple fix, high annoyance, ship first
+2. **Bug 12 (Income duplication)** — Moderate complexity, directly inflates key numbers
+3. **Bug 13 Phase 1 (Essential protection)** — Quick win, stops embarrassing recommendations
+4. **Bug 13 Phase 2 (Archetype filtering)** — Core architectural improvement for savings optimizers
+5. **Bug 13 Phase 3 (Predictive recommendations)** — Highest value but most complex, differentiator for the platform
