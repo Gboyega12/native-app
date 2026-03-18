@@ -800,3 +800,302 @@ Transform BOCY from a spending tracker into a **capital allocation engine** for 
 4. **Balance history:** New table vs JSONB snapshots on existing `bank_data`? Need monthly snapshots for trend detection
 5. **Rate comparison source:** Static UK savings rate table (updated monthly) vs API? Start static?
 6. **ISA detection accuracy:** Rely on account name matching + investment platform transactions. Will miss some. Acceptable for MVP?
+
+---
+
+## 15. Decision Engine — Intelligent Capital Allocation (Profile Signals)
+
+**Date added:** 2026-03-18
+**Status:** Awaiting approval
+
+### Problem
+
+The app collects premium identity data (8 questions + 3 goals) but wastes most of it:
+- `risk_appetite` — only used in budget-solver. **Not used in move ranking.**
+- `financial_experience` — collected but **never referenced** in any engine.
+- `priorities` — used in budget-solver weights only. **Not used in move scoring.**
+- `upcoming_events` — timelines saved to DB as `{type, months_away}` but **never consumed** (`.includes('first_home')` only does string matching — bug).
+
+Every user gets identical move generation and ranking regardless of financial stage, risk profile, or experience level. A conservative beginner in debt sees the same salary sacrifice move as an advanced growth-focused optimizer.
+
+### Architecture: One New File
+
+**Create `lib/profile-signals.ts`** — pure functions, zero side effects, fully testable.
+
+Dependency graph:
+```
+types.ts ← profile-signals.ts
+               ↑               ↑
+         move-engine.ts   enrichment-engine.ts
+```
+
+**No stored `cohort` in Supabase.** Computed at runtime from fresh data — always current.
+
+### Core Interface
+
+```typescript
+export interface ProfileSignals {
+  cohort: FinancialCohort;
+  sophisticationLevel: number;                    // 0-1
+  categoryAffinity: Record<string, number>;       // move category → ranking multiplier
+  timePressure: { event: string; monthsAway: number; urgency: number }[];
+  riskGammaShift: number;                         // CRRA adjustment
+  incomeBand: IncomeBand | null;                  // from new onboarding Q
+}
+```
+
+---
+
+### 15a. Cohort Detection
+
+**Function: `detectCohort(profile, identity, goals, debtAccounts)`**
+
+Six cohorts aligned with UKPF flowchart, enriched with identity:
+
+| Cohort | Detection | UKPF Level |
+|--------|-----------|------------|
+| `crisis` | surplus < 0 OR (debt_count ≥ 3 AND situation='in_debt') | 0-1 |
+| `debt_focus` | has expensive debt (APR > 8%) AND balance > 0 | 2-4 |
+| `foundation` | savingsRate < 15% AND surplus > 0 AND no expensive debt | 2-5 |
+| `accumulator` | savingsRate 15-30% AND debt_count ≤ 1 | 7 |
+| `optimizer` | savingsRate > 30% AND surplus > 500 AND minimal debt | 9 |
+| `coasting` | savingsRate > 30% AND all UKPF levels met AND no urgency | 9+ |
+
+Evaluated in order, first match wins. Uses existing data only.
+
+- [ ] Implement `detectCohort()` in `lib/profile-signals.ts`
+
+---
+
+### 15b. Sophistication Level
+
+**Function: `calcSophisticationLevel(experience)`**
+
+| experience | level | Effect |
+|------------|-------|--------|
+| `beginner` | 0.25 | Suppress salary sacrifice, PA taper, PSA moves. Simpler language. |
+| `basics` | 0.50 | Show ISA/pension but with explanatory steps. |
+| `confident` | 0.75 | Show all moves, moderate detail. |
+| `advanced` | 1.00 | PA taper, salary sacrifice vs SIPP, full math in proof strings. |
+
+**Wires into enrichment-engine.ts:**
+- Lines 1798-1875 (tax optimization moves): gate behind `sophisticationLevel >= 0.5`
+- Line 1974 (PA taper): gate behind `sophisticationLevel >= 0.75`
+- Line 2022 (salary sacrifice comparison): gate behind `sophisticationLevel >= 0.75`
+- Currently only gated by `isAdvanced` boolean — replace with continuous scale
+
+**Wires into move-engine.ts:**
+- Post-sort filter: suppress complex moves for `sophisticationLevel < 0.5`
+
+- [ ] Implement `calcSophisticationLevel()` in `lib/profile-signals.ts`
+
+---
+
+### 15c. Category Affinity Multipliers
+
+**Function: `calcCategoryAffinity(identity, goals, cohort, events)`**
+
+Core innovation. Produces `Record<MoveCategory, number>` that feeds into `rankMoves()` as one multiplication.
+
+**Risk appetite:**
+| Signal | buffer | debt | spending | savings | invest |
+|--------|--------|------|----------|---------|--------|
+| conservative | ×1.3 | ×1.1 | ×1.0 | ×1.1 | ×0.7 |
+| balanced | ×1.0 | ×1.0 | ×1.0 | ×1.0 | ×1.0 |
+| growth | ×0.8 | ×1.0 | ×1.0 | ×1.0 | ×1.3 |
+
+**Priorities:**
+| Signal | buffer | debt | spending | savings | invest |
+|--------|--------|------|----------|---------|--------|
+| security | ×1.3 | ×1.2 | ×1.0 | ×1.0 | ×0.9 |
+| freedom | ×1.2 | ×1.3 | ×0.8 | ×1.0 | ×1.0 |
+| growth | ×0.9 | ×1.0 | ×1.0 | ×1.2 | ×1.4 |
+| experiences | ×1.0 | ×1.0 | ×0.7 | ×1.0 | ×1.0 |
+| family | ×1.3 | ×1.1 | ×1.0 | ×1.1 | ×0.9 |
+
+**Upcoming events (with time urgency):**
+| Event | Category boost | Formula |
+|-------|---------------|---------|
+| first_home | savings | ×(1 + 0.5 × max(0, 1 - monthsAway/24)) |
+| baby | buffer | ×(1 + 0.4 × max(0, 1 - monthsAway/24)) |
+| retirement | invest | ×(1 + 0.4 × max(0, 1 - monthsAway/36)) |
+| career_change | buffer | ×(1 + 0.3 × max(0, 1 - monthsAway/12)) |
+
+**Work setup:**
+| Signal | Effect |
+|--------|--------|
+| self_employed | buffer ×1.2 |
+| multiple_jobs | buffer ×1.1 |
+
+All multipliers combined multiplicatively, floored at 0.5, capped at 2.0.
+
+**Integration into move-engine.ts** — after line 192 (goal alignment boost), before Monte Carlo consistency:
+
+```typescript
+const affinity = signals?.categoryAffinity[moveCategory] ?? 1.0;
+score *= affinity;
+```
+
+`signals` computed once before the `.map()` loop. One line of multiplication inside.
+
+- [ ] Implement `calcCategoryAffinity()` in `lib/profile-signals.ts`
+- [ ] Wire into `rankMoves()` in `lib/move-engine.ts` (after line 192)
+
+---
+
+### 15d. Event Timeline Fix (Bug)
+
+The identity screen saves events as `string | {type, months_away}` objects. The enrichment engine reads them with `.includes('first_home')` — only works for string entries.
+
+```typescript
+export function normalizeUpcomingEvents(
+  events: (string | { type: string; months_away: number })[]
+): { type: string; monthsAway: number | null }[] {
+  return events.map(e =>
+    typeof e === 'string'
+      ? { type: e, monthsAway: null }
+      : { type: e.type, monthsAway: e.months_away }
+  );
+}
+```
+
+- [ ] Implement `normalizeUpcomingEvents()` in `lib/profile-signals.ts`
+- [ ] Replace `.includes()` event checks in enrichment-engine.ts lines 1232-1234
+- [ ] Use `months_away` for deposit timeline calculation (line 1705)
+
+---
+
+### 15e. Cohort-Aware Move Generation
+
+Changes to `genDecisionStack()` in enrichment-engine.ts:
+
+**crisis cohort:**
+- Suppress all invest moves (currently still appear in deficit)
+- Suppress coffee/eating out moves when monthlyImpact < £20
+- New move: "Get free debt advice" when debt_count ≥ 3 with high APR
+
+**foundation cohort:**
+- If `priorities: security`, boost buffer target from 1→2 months essential expenses
+- If `baby` within 12 months, merge buffer + parental runway into single move
+
+**accumulator cohort:**
+- Risk-appetite-aware investment move:
+  - conservative: "Open a Cash ISA"
+  - balanced: "Start a Stocks & Shares ISA with a global tracker"
+  - growth: "Maximize ISA allowance with equity-heavy allocation"
+
+**optimizer cohort:**
+- Income-band-aware pension optimization:
+  - >£50k: "Higher-rate pension relief saves you 40p per £1"
+  - >£100k: "Pension contributions recover your personal allowance"
+- Order "investment ladder" steps by risk_appetite
+
+**coasting cohort:**
+- Suppress most spending cut moves
+- New move: "Protect what you've built" — insurance review when dependents includes young_children or elderly_parents
+
+- [ ] Add cohort-aware gating to `genDecisionStack()` in enrichment-engine.ts
+- [ ] Add 3 new move variants (debt advice, risk-aware ISA, protection review)
+
+---
+
+### 15f. Onboarding: Goals Timeline Picker
+
+**File: `app/(main)/goals.tsx`**
+
+After selecting 1-year and 2-year goals, add "When do you want to achieve this?":
+
+```typescript
+const TIMELINES = [
+  { key: '6_months', label: '6 months' },
+  { key: '1_year', label: '1 year' },
+  { key: '2_years', label: '2 years' },
+  { key: '3_5_years', label: '3-5 years' },
+];
+```
+
+- [ ] Add timeline step to goals.tsx (step 3, after 2-year goal)
+- [ ] Add `goal_timeline` field to goals Supabase upsert
+- [ ] Add `GoalTimeline` type and `goal_timeline` field to `Goals` interface in types.ts
+
+---
+
+### 15g. Onboarding: Income Band Question
+
+**File: `app/(main)/identity.tsx`**
+
+Add as screen 4 (after financial experience, before priorities):
+
+```typescript
+{
+  question: "What's your annual income?",
+  hint: 'This unlocks precise tax and pension recommendations',
+  options: [
+    { key: 'under_30k', label: 'Under £30k', desc: 'Below the higher-rate threshold', icon: '.' },
+    { key: '30k_50k', label: '£30k – £50k', desc: 'Approaching higher-rate tax', icon: '..' },
+    { key: '50k_100k', label: '£50k – £100k', desc: 'Higher-rate taxpayer', icon: '...' },
+    { key: 'over_100k', label: 'Over £100k', desc: 'Personal allowance taper zone', icon: ':::' },
+  ],
+}
+```
+
+- [ ] Add income band screen to identity.tsx
+- [ ] Add `IncomeBand` type and `income_band` field to `UserIdentity` in types.ts
+- [ ] Add `income_band` column to `user_identity` Supabase table
+
+---
+
+### 15h. Types Changes
+
+**File: `lib/types.ts`**
+
+```typescript
+export type IncomeBand = 'under_30k' | '30k_50k' | '50k_100k' | 'over_100k';
+export type GoalTimeline = '6_months' | '1_year' | '2_years' | '3_5_years';
+export type UpcomingEventWithTimeline = { type: string; monthsAway: number | null };
+```
+
+- [ ] Add all 3 new types to types.ts
+- [ ] Add `income_band?` to UserIdentity
+- [ ] Add `goal_timeline?` to Goals
+
+---
+
+### Implementation Order
+
+| Phase | What | Files | ~Lines |
+|-------|------|-------|--------|
+| 1 | Foundation: `profile-signals.ts` | New file | ~200 |
+| 2 | Types + onboarding | types.ts, identity.tsx, goals.tsx | ~55 |
+| 3 | Wire into move ranking | move-engine.ts | ~15 |
+| 4 | Wire into move generation | enrichment-engine.ts | ~80 |
+| 5 | Verify with test personas | — | — |
+
+### Test Personas
+
+| Persona | Identity | Expected #1 Move | Expected Suppression |
+|---------|----------|-------------------|---------------------|
+| A | beginner, conservative, security+family, in_debt, baby 6mo | Debt clearance | No invest, no salary sacrifice |
+| B | advanced, growth, growth+freedom, saving_well, 30% SR | ISA/pension optimization | Spending cuts suppressed |
+| C | basics, balanced, security+experiences, foundation | Buffer building | No complex tax moves |
+| D | confident, conservative, security+family, optimizer, young children | Protection review | Spending cuts deprioritized |
+
+### What We're NOT Doing
+
+- **No new dashboard cards.** Everything flows through Move[] → RankedMove[] → existing display.
+- **No stored cohort.** Runtime-computed, always fresh.
+- **No investment API integration.** Keyword detection from transactions is v1.
+- **No ML/AI.** Rules-based, deterministic, testable.
+- **No new infrastructure.** One `.ts` file with pure functions.
+- **No over-engineering.** Multipliers are simple floats. Cohort detection is ordered conditionals.
+
+### Home Screen After Change
+
+```
+[Weekly Budget card]           — "How much can I spend?"
+[Income card]                  — "Where's my money from?"
+[Move #1 — hero card]         — NOW personalized by cohort + identity
+[Your Insights — moves 2-3]   — NOW ranked by affinity, gated by sophistication
+```
+
+Same UI. Different intelligence underneath. Every user feels like the app was built for them.
