@@ -400,8 +400,9 @@ export default function Home() {
     return Array.from(groups.values()).sort((a, b) => b.total - a.total);
   }, [analysis, savedOverrideKeys]);
 
-  // AI-classified transactions: enrichment engine already classified these via Claude,
-  // but they need user confirmation before being persisted as overrides.
+  // AI-classified transactions: only surface genuinely uncertain ones for review.
+  // Medium/high confidence in a real category = auto-accepted (no review needed).
+  // Only low-confidence or "Other" category AI classifications need user confirmation.
   const aiSuggestedGroups = useMemo(() => {
     if (!analysis) return [];
     const txs: TransactionDetail[] = [];
@@ -413,6 +414,11 @@ export default function Home() {
         const sectionTxs: TransactionDetail[] = Array.isArray(item.transactions) ? item.transactions : [];
         for (const tx of sectionTxs) {
           if (!tx || (tx as any).classifiedBy !== 'claude_ai') continue;
+          // Auto-accept: medium/high confidence in a real (non-Other) category
+          // These are already correctly placed in the analysis — no review needed
+          const isLowConfidence = tx.confidence === 'low' || tx.confidence === undefined;
+          const isOtherCategory = item.category === 'Other';
+          if (!isLowConfidence && !isOtherCategory) continue;
           const key = `${tx.date}|${tx.description}|${tx.amount}`;
           if (seen.has(key)) continue;
           seen.add(key);
@@ -449,6 +455,72 @@ export default function Home() {
   );
 
   const totalReviewCount = unresolvedGroups.length + aiSuggestedGroups.length;
+
+  // Auto-persist high-confidence AI classifications as overrides so the learning loop
+  // kicks in immediately. These are transactions Claude classified with medium+ confidence
+  // into a real category — they don't need user review, but they DO need to be saved
+  // so future syncs don't re-classify the same merchant.
+  useEffect(() => {
+    if (!analysis) return;
+    let cancelled = false;
+
+    const persistConfidentAI = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || cancelled) return;
+
+      const toPersist: { merchant: string; category: string; isEssential: boolean }[] = [];
+      for (const section of [analysis.discretionary, analysis.non_discretionary]) {
+        const items = (section as any)?.items;
+        if (!Array.isArray(items)) continue;
+        const isEssentialSection = section === analysis.non_discretionary;
+        for (const item of items) {
+          if (item.category === 'Other') continue; // Only real categories
+          const sectionTxs: TransactionDetail[] = Array.isArray(item.transactions) ? item.transactions : [];
+          for (const tx of sectionTxs) {
+            if (!tx || (tx as any).classifiedBy !== 'claude_ai') continue;
+            if (tx.confidence === 'low' || tx.confidence === undefined) continue;
+            const normalized = normalizeMerchant(tx.merchant || tx.description || '');
+            if (savedOverrideKeys.has(normalized)) continue;
+            if (!toPersist.find((p) => normalizeMerchant(p.merchant) === normalized)) {
+              toPersist.push({ merchant: tx.merchant || tx.description || '', category: item.category, isEssential: isEssentialSection });
+            }
+          }
+        }
+      }
+
+      if (toPersist.length === 0 || cancelled) return;
+
+      const newKeys = new Set<string>();
+      for (const item of toPersist) {
+        if (cancelled) break;
+        const name = item.merchant;
+        try {
+          await supabase.from('transaction_overrides')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('match_description', name);
+          await supabase.from('transaction_overrides').insert({
+            user_id: user.id,
+            match_description: name,
+            category: item.category,
+            is_essential: item.isEssential,
+          });
+          newKeys.add(normalizeMerchant(name));
+        } catch {}
+      }
+
+      if (!cancelled && newKeys.size > 0) {
+        setSavedOverrideKeys((prev) => {
+          const next = new Set(prev);
+          for (const k of newKeys) next.add(k);
+          return next;
+        });
+      }
+    };
+
+    persistConfidentAI();
+    return () => { cancelled = true; };
+  }, [analysis]);
 
   // Auto-suggest categories using Claude AI when modal opens
   useEffect(() => {

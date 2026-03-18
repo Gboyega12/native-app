@@ -358,26 +358,51 @@ Self-transfers (name match) are detected at step 0 and excluded from all downstr
 
 ---
 
+## 9. AI Review Modal Decision Engine
+
+**Date added:** 2026-03-18
+**Problem:** `aiSuggestedGroups` filter sends ALL `classifiedBy === 'claude_ai'` transactions
+to the review modal regardless of confidence. ~90% are already correct — wasting user effort.
+
+### 9a. Add confidence gate to aiSuggestedGroups
+- [x] Only show AI-classified transactions in review modal when:
+  - `confidence === 'low'`, OR
+  - `category === 'Other'` (Claude wasn't sure enough to assign a real category)
+- [x] Medium/high confidence in a real category = auto-accepted, skip review modal
+
+### 9b. Auto-persist high-confidence AI classifications
+- [x] When Claude classifies with medium+ confidence into a known (non-Other) category,
+  automatically save to `transaction_overrides` so the learning loop kicks in
+- [x] This means next sync won't re-classify the same merchant — it'll match the override
+
+### 9c. Ensure manual review persists and cascades
+- [x] Verify saveReview writes to `transaction_overrides` (confirmed: lines 607-622)
+- [x] Verify optimistic UI updates all cards (confirmed: lines 625-707, recalcs surplus)
+- [x] Verify savedOverrideKeys prevents re-showing (confirmed: lines 722-733)
+
+---
+
 ## Implementation Order
 
 **Priority 1 (Critical bugs + trust):**
 1. Trust UX copy rewrite (7a) — immediate feel improvement, zero logic changes
 2. Debt move £0 impact fix (1a + 1b) — users see broken data
 3. Income recategorization bug (2) — UX trust issue
+4. AI review modal decision engine (9) — 90% of review items are noise
 
 **Priority 2 (UX refinement):**
-4. Review flow merge (7f) — single sorted list, fewer decisions
-5. Noise removal (7d + 7e) — dead code cleanup, leaked implementation detail
-6. Confidence styling (7b) — subtle visual trust signals
+5. Review flow merge (7f) — single sorted list, fewer decisions
+6. Noise removal (7d + 7e) — dead code cleanup, leaked implementation detail
+7. Confidence styling (7b) — subtle visual trust signals
 
 **Priority 3 (High-impact features):**
-7. Debt-first surplus allocation (1c) — correct financial advice
-8. Self-transfer detection (4) — cleaner data, less manual work
-9. Transaction embedding in Income card (3) — user transparency
+8. Debt-first surplus allocation (1c) — correct financial advice
+9. Self-transfer detection (4) — cleaner data, less manual work
+10. Transaction embedding in Income card (3) — user transparency
 
 **Priority 4 (Platform features):**
-10. Global learning state (5) — scales enrichment across user base
-11. Invisible learning signal (7c) — "less to review this month"
+11. Global learning state (5) — scales enrichment across user base
+12. Invisible learning signal (7c) — "less to review this month"
 
 ---
 
