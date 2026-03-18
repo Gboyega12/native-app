@@ -533,3 +533,270 @@ Both have the same amount and date but different merchant names → separate inc
 3. **Bug 13 Phase 1 (Essential protection)** — Quick win, stops embarrassing recommendations
 4. **Bug 13 Phase 2 (Archetype filtering)** — Core architectural improvement for savings optimizers
 5. **Bug 13 Phase 3 (Predictive recommendations)** — Highest value but most complex, differentiator for the platform
+
+---
+
+## 14. Silent High Earner Cohorts — Capital Allocation Engine
+
+**Date added:** 2026-03-18
+**Status:** Planning
+
+### Vision
+Transform BOCY from a spending tracker into a **capital allocation engine** for Silent High Earners. Two cohorts:
+
+- **Unstructured High Earners (UHE):** £70k–£250k+ income, cash-heavy, under-optimized, decision-fatigued. Problem = lack of capital direction
+- **Structured High Earners (SHE):** Same income band, but active — mortgages, investments, credit cards for points. Locally efficient, globally suboptimal
+
+### What Exists Today
+
+| Component | Status | Gap |
+|-----------|--------|-----|
+| `account_balances` (TrueLayer) | Fetched & stored in `bank_data` JSONB | **Never queried or displayed** — idle cash invisible |
+| Account types (current/savings/isa) | Raw `account_type` from TrueLayer stored | **Not classified** into cash/savings/ISA/pension buckets |
+| Tax engine (`surplus-engine.ts`) | UK_TAX constants, marginal rate calc, pension return calc | **ISA/pension allowance tracking = 0** — `existingIsaUsed: 0` hardcoded |
+| Investment merchants (merchant-db) | Freetrade, Vanguard, HL etc. detected | **Not differentiated** by account type (ISA vs GIA vs SIPP) |
+| Move generation | Threshold-based cuts only | **No capital reallocation moves** — no idle cash, no ISA fill, no pension optimize |
+| Archetype system | 10 archetypes, none for high earners | **No UHE/SHE detection** |
+| UKPF flowchart | Levels 0-9, tops out at "Long-term wealth" | **Level 9 is a dead end** — no guidance once you're there |
+| Debt detection | Credit card, overdraft, mortgage | **No distinction** between strategic credit use and problem debt |
+
+---
+
+### Phase 1: Cohort Detection & Account Intelligence
+
+#### 14a. Surface account balances from `bank_data`
+- [ ] **`api/truelayer/sync.ts`** — Already stores `account_balances` JSONB. No change needed in sync
+- [ ] **`lib/enrichment-engine.ts` `buildProfile()`** — Accept `accountBalances` parameter. Add to `FinancialProfile`:
+  ```
+  accounts: {
+    cash: { total: number; accounts: AccountSnapshot[] }
+    savings: { total: number; accounts: AccountSnapshot[] }
+    isa: { total: number; accounts: AccountSnapshot[] }
+    pension: { total: number; estimated: boolean }
+    investments: { total: number; accounts: AccountSnapshot[] }
+  }
+  ```
+- [ ] **`lib/types.ts`** — Add `AccountSnapshot` type: `{ name, type, balance, provider }`
+- [ ] **`lib/types.ts`** — Add `accounts` field to `FinancialProfile`
+- [ ] **Dashboard query** — Fetch `account_balances` from `bank_data` and pass to `buildProfile()`
+
+#### 14b. Classify account types
+- [ ] **New function: `classifyAccounts()`** in enrichment-engine or new `lib/account-classifier.ts`
+- [ ] Map TrueLayer raw `account_type` to buckets:
+  - `"SAVINGS"`, `"savings"` → savings bucket
+  - Account name contains "ISA", "Stocks & Shares", "Cash ISA" → isa bucket
+  - Account name contains "SIPP", "Pension" → pension bucket
+  - `"CURRENT"`, `"current"` → cash bucket
+  - Investment platform transactions (Freetrade, Vanguard, HL) → investments bucket
+- [ ] Pension: estimate from detected pension contribution transactions × months employed (no balance data from TrueLayer, so flag `estimated: true`)
+- [ ] Mortgage: already in `debt_accounts` — surface as `liabilities.mortgage`
+
+#### 14c. Detect cohort: UHE vs SHE vs Other
+- [ ] **New: `lib/cohort-engine.ts`** — Cohort detection function:
+  ```typescript
+  function detectCohort(profile, accounts, debtAccounts, identity): Cohort
+  ```
+- [ ] **Income gate:** Monthly income ≥ £4,000 (≈ £58k+ gross). Below this = existing archetype system
+- [ ] **UHE triggers** (must meet income gate + 2 of 3):
+  1. Cash-to-income ratio > 3x monthly income sitting in current accounts
+  2. Savings rate < 15% despite high income (under-deployed)
+  3. No detected ISA/pension/investment contributions
+- [ ] **SHE triggers** (must meet income gate + 2 of 3):
+  1. Active investment platform transactions (Freetrade, Vanguard, HL, etc.)
+  2. Mortgage present
+  3. Credit card full-payer pattern detected (already exists in enrichment engine)
+- [ ] **Cohort stored** in `Analysis` table alongside `archetype`
+- [ ] Cohort takes precedence over archetype for move generation but archetype still used for behavioral insights
+
+---
+
+### Phase 2: Capital Allocation Moves — Unstructured High Earners
+
+#### 14d. Idle Capital Drag (UHE Primary Insight)
+- [ ] **New move type: `category: 'allocate'`** — Add to Move.category union
+- [ ] **Detection:** Sum `accounts.cash.total` across current accounts. If > 3× monthly spending → idle capital detected
+- [ ] **Calculation:**
+  - Idle amount = `cashTotal - (monthlySpending × 3)` (keep 3 months buffer)
+  - Opportunity cost = `idleAmount × (achievableRate - currentRate)` where `achievableRate = 0.045` (best easy-access savings) and `currentRate ≈ 0.01` (typical current account)
+  - Annual drag = `idleAmount × 0.035`
+- [ ] **Move output:**
+  ```
+  action: "£46,000 of your cash is earning <1%. Reallocating £30,000 would generate ~£1,050/year without increasing risk."
+  annualImpact: 1050
+  effort: 'low'
+  category: 'allocate'
+  strategy: 'Move excess cash to high-yield savings'
+  ```
+- [ ] **Proof string:** `"£46,000 cash across 2 accounts | 3-month buffer = £16,000 | £30,000 idle × (4.5% - 1%) = £1,050/yr"`
+
+#### 14e. Tax Shield Underutilization
+- [ ] **Detection:** Estimate ISA contributions this tax year from savings/ISA transactions. Compare against £20,000 allowance
+- [ ] **ISA tracking:** Sum transactions to ISA-classified accounts or investment platforms with ISA keyword in description. `remainingIsaAllowance = 20000 - detectedIsaContributions`
+- [ ] **Move output (if remaining > £5,000):**
+  ```
+  action: "You have £X of ISA allowance remaining. Using it protects future gains from tax."
+  annualImpact: calculatedTaxSaving
+  ```
+- [ ] **Annual impact calc:** `remainingAllowance × expectedReturn × marginalTaxRate`
+  - E.g., £15,000 × 5% return × 20% tax = £150/year protected; over 10 years with growth ≈ significant
+- [ ] **Pension optimization:** Use existing `calcPensionEffectiveReturn()` from surplus-engine. If gross income > £50,270 (higher rate), show: "£1 pension contribution saves you 40p in tax"
+- [ ] **Move output:**
+  ```
+  action: "Increase pension contribution by £500/month → captures ~£2,400/year in tax relief"
+  proof: "£500/mo × 12 = £6,000/yr | marginal rate 40% | tax relief = £2,400/yr"
+  ```
+
+#### 14f. Structural Misallocation
+- [ ] **Detection:** Calculate allocation percentages across buckets:
+  ```
+  cashPct = accounts.cash.total / totalAssets × 100
+  investPct = (accounts.isa.total + accounts.investments.total) / totalAssets × 100
+  pensionPct = accounts.pension.total / totalAssets × 100
+  ```
+- [ ] **Benchmark:** Optimal allocation by age/risk profile (from identity.risk_appetite):
+  - Conservative: 30% cash / 40% invested / 30% pension
+  - Balanced: 20% cash / 50% invested / 30% pension
+  - Growth: 10% cash / 60% invested / 30% pension
+- [ ] **Move output (if cashPct > benchmark + 15%):**
+  ```
+  action: "Your allocation is 62% cash vs 18% invested. Rebalancing could improve long-term outcome by ~£84,000 over 10 years."
+  proof: "£62k cash × 1% vs invested × 7% avg = 6% drag on £44k excess = ~£2,640/yr | compounded 10yr ≈ £84k"
+  ```
+
+#### 14g. Timing-Based Loss (Delayed Deployment)
+- [ ] **Detection:** Track cash balance trend across syncs. If cash has been growing for 3+ months without investment outflow → delayed deployment
+- [ ] **Requires:** New `balance_history` tracking — snapshot account balances monthly (store in new JSONB field or separate table)
+- [ ] **Move output:**
+  ```
+  action: "Your cash has grown £X over 3 months without investment. Historical data suggests delaying costs ~£Y in missed returns."
+  proof: "£X undeployed × 7% avg market return × 0.25yr = £Y opportunity cost"
+  ```
+- [ ] **Defer to Phase 3** — requires balance history which needs multiple syncs to build
+
+---
+
+### Phase 3: Capital Allocation Moves — Structured High Earners
+
+#### 14h. Debt vs Investment Trade-off (SHE Core Insight)
+- [ ] **Detection:** User has mortgage AND investment activity. Mortgage overpayments detected (payment > expected minimum)
+- [ ] **Calculation:**
+  - Mortgage rate from debt_accounts (or inferred from surplus-engine: defaults to 4.5%)
+  - Expected investment return: 7% nominal long-term
+  - If mortgage rate < investment return × 0.7 (tax-adjusted): overpaying mortgage is suboptimal
+- [ ] **Move output:**
+  ```
+  action: "You're overpaying your mortgage by £900/month at 4.5%. Redirecting to ISA at ~7% would net ~£41,000 more over 10 years."
+  proof: "£900/mo × 12 = £10,800/yr | mortgage saves 4.5% = £486/yr | ISA earns ~7% = £756/yr | net gain £270/yr | compounded 10yr ≈ £41k"
+  ```
+- [ ] **Important:** Only surface when mortgage rate < 5% (threshold where investment edge is meaningful after tax)
+
+#### 14i. Net Yield Mismatch
+- [ ] **Detection:** User holds cash (accounts.cash.total > £10k) AND has debt with APR > savings rate
+- [ ] **Calculation:** `mismatchCost = min(cashExcess, debtBalance) × (debtAPR - cashRate)`
+- [ ] **Move output:**
+  ```
+  action: "You hold £18,000 in low-yield cash while paying 5.2% on car finance → costing ~£936/year net."
+  proof: "min(£18k, £12k debt) = £12k × (5.2% - 1%) = £504/yr guaranteed return"
+  ```
+- [ ] **Guard:** Don't recommend depleting below 3-month buffer
+
+#### 14j. Liquidity Inefficiency
+- [ ] **Detection:** Cash across all accounts > recommended buffer (from Monte Carlo `simulateBufferNeed`)
+- [ ] **Excess calc:** `excessLiquidity = totalCash - bufferRecommendation.amount`
+- [ ] **Move output (if excess > £5,000):**
+  ```
+  action: "You're holding ~£22,000 excess liquidity beyond your risk-adjusted buffer → reducing long-term returns by ~£17,000 over 10 years."
+  proof: "buffer need = £8k (from Monte Carlo) | excess = £22k | drag at 5% = £1,100/yr | 10yr compounded ≈ £17k"
+  ```
+
+#### 14k. Tax Structure Optimization
+- [ ] **Detection:** Compare current ISA vs GIA vs pension allocation against tax-optimal split
+- [ ] **Uses existing:** `calcMarginalRate()`, `calcPensionEffectiveReturn()` from surplus-engine
+- [ ] **Logic:**
+  - If gross > £50,270 AND pension contribution < £500/mo: pension move (40% relief)
+  - If gross > £100,000 AND pension contribution could bring below PA taper: "£1 pension saves you 60p" (60% effective rate in taper zone)
+  - If investments in GIA AND ISA allowance remaining: move to ISA wrapper
+- [ ] **Move output:**
+  ```
+  action: "Shifting £X from GIA to ISA wrapper saves ~£Y/year in capital gains tax"
+  proof: "£X × 7% return × 20% CGT = £Y/yr | plus dividend tax savings"
+  ```
+
+---
+
+### Phase 4: Integration & UI
+
+#### 14l. Move engine integration
+- [ ] **`move-engine.ts` `rankMoves()`** — Add cohort-aware scoring:
+  - UHE/SHE moves get `1.3x` boost when user matches cohort
+  - Suppress discretionary cut moves for UHE/SHE users when annualImpact < £500 (noise)
+  - Capital allocation moves rank above spending cuts for these cohorts
+- [ ] **New UKPF flowchart level 9 expansion:**
+  - Level 9a: "Optimize tax wrappers" (ISA/pension fill)
+  - Level 9b: "Reduce idle capital drag"
+  - Level 9c: "System-level optimization" (cross-account rebalancing)
+- [ ] **`genDecisionStack()` integration** — When cohort is UHE/SHE, call new capital allocation move generators alongside existing spending moves. Existing moves still generated but filtered by relevance
+
+#### 14m. Dashboard UI for capital allocation
+- [ ] **Net Worth card** — New dashboard card showing:
+  - Total across all account buckets (cash, savings, ISA, pension, investments)
+  - Allocation pie/bar (cash% / invested% / pension%)
+  - Trend arrow (from balance history)
+- [ ] **Move cards for allocation moves** — Same card format but with:
+  - Blue/purple accent (vs green for spending cuts)
+  - "THE MATH" proof string showing compound growth calculations
+  - "Rebalance" CTA instead of "Cut"
+- [ ] **ISA/Pension tracker** — Small widget showing allowance usage:
+  - "ISA: £4,200 / £20,000 used" with progress bar
+  - "Tax year ends 5 April — X weeks remaining"
+
+#### 14n. Cohort-specific chat context
+- [ ] **`ChatContext`** — Add fields:
+  ```
+  cohort?: 'unstructured_high_earner' | 'structured_high_earner' | null
+  account_summary?: { cash: number; savings: number; isa: number; pension: number; investments: number }
+  idle_capital?: number
+  isa_remaining?: number
+  pension_allowance_remaining?: number
+  allocation_vs_benchmark?: { cashPct: number; investPct: number; pensionPct: number }
+  ```
+- [ ] **Chat system prompt** — When cohort is UHE/SHE, inject capital allocation context so Bocy can answer "where should I put my money?" intelligently
+
+---
+
+### Implementation Order
+
+**Sprint 1: Foundation (Account Intelligence)**
+1. 14a — Surface account balances from bank_data
+2. 14b — Classify accounts into buckets
+3. 14c — Cohort detection (UHE vs SHE)
+
+**Sprint 2: UHE Moves (Capital Direction)**
+4. 14d — Idle Capital Drag
+5. 14e — Tax Shield (ISA + Pension)
+6. 14f — Structural Misallocation
+
+**Sprint 3: SHE Moves (System Optimization)**
+7. 14h — Debt vs Investment Trade-off
+8. 14i — Net Yield Mismatch
+9. 14j — Liquidity Inefficiency
+10. 14k — Tax Structure Optimization
+
+**Sprint 4: Integration & UI**
+11. 14l — Move engine integration + cohort scoring
+12. 14m — Dashboard UI (Net Worth card, allocation, ISA tracker)
+13. 14n — Chat context enrichment
+
+**Deferred:**
+- 14g — Timing-Based Loss (requires balance history across multiple syncs)
+
+---
+
+### Key Design Decisions Needed
+
+1. **Income threshold for cohort:** £4,000/mo net (≈£58k gross) — or should it be £5,000/mo (≈£70k gross) to match the spec?
+2. **Pension estimation:** Without TrueLayer pension data, estimate from contribution transactions × employment months. Flag as estimated. Acceptable?
+3. **Investment return assumption:** 7% nominal for equity benchmarks. Conservative enough?
+4. **Balance history:** New table vs JSONB snapshots on existing `bank_data`? Need monthly snapshots for trend detection
+5. **Rate comparison source:** Static UK savings rate table (updated monthly) vs API? Start static?
+6. **ISA detection accuracy:** Rely on account name matching + investment platform transactions. Will miss some. Acceptable for MVP?
