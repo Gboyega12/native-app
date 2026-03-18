@@ -583,7 +583,9 @@ const EnrichmentEngine = {
     const totalSpending = Math.max(0, rawSpending - totalRefunds);
     const monthlyIncome = totalIncome / months;
     const monthlySpending = totalSpending / months;
-    const surplus = monthlyIncome - monthlySpending;
+    // grossSurplus = income minus spending (before savings deductions)
+    // Used for savingsRate so it reflects total non-spending rate
+    const grossSurplus = monthlyIncome - monthlySpending;
 
     // Group spending by category for budget card display
     const catTotals: Record<string, { total: number; count: number; transactions: { date: string; merchant: string; description: string; amount: number }[] }> = {};
@@ -636,6 +638,9 @@ const EnrichmentEngine = {
       transactions: d.transactions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     }));
     const monthlySavings = savingsItems.reduce((s, i) => s + i.monthly, 0);
+    // surplus = actual unallocated money (income - spending - savings)
+    // This is what the user genuinely has available for moves/recommendations.
+    const surplus = grossSurplus - monthlySavings;
 
     // ── Essential vs discretionary split ──
     // Uses per-transaction isEssential flag (description-first, category-fallback)
@@ -736,7 +741,7 @@ const EnrichmentEngine = {
     const subMonthly = subscriptions.reduce((s, r) => s + r.averageAmount, 0);
 
     const metrics = {
-      savingsRate: monthlyIncome > 0 ? (surplus / monthlyIncome) * 100 : 0,
+      savingsRate: monthlyIncome > 0 ? (grossSurplus / monthlyIncome) * 100 : 0,
       creditCardCount: spending.filter((t) => t.isDebt && t.merchant === 'Credit Card').length > 0 ? 1 : 0,
       bnplCount: spending.filter((t) => t.isBNPL).length,
       debtAccountCount: new Set(spending.filter((t) => t.isDebt).map((t) => t.merchant)).size,

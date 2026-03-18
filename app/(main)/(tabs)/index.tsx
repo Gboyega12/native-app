@@ -711,6 +711,9 @@ export default function Home() {
         // Collect transactions that need to move (from any category, not just "Other")
         // Phase 3: match by normalized merchant key so ALL variants get moved
         const removedTxs: { tx: TransactionDetail; target: { category: string; isEssential: boolean } }[] = [];
+        // Analysis window in months — needed to maintain monthly normalization
+        // (category monthly values = total / months, not raw totals)
+        const analysisMonths = (updated as any).analysis_months || 1;
 
         for (const section of [disc, nonDisc]) {
           for (let catIdx = section.items.length - 1; catIdx >= 0; catIdx--) {
@@ -730,7 +733,7 @@ export default function Home() {
             if (cat.txs === 0) {
               section.items.splice(catIdx, 1);
             } else {
-              cat.monthly = kept.reduce((s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0);
+              cat.monthly = kept.reduce((s: number, tx: TransactionDetail) => s + Math.abs(tx.amount), 0) / analysisMonths;
             }
           }
         }
@@ -743,7 +746,7 @@ export default function Home() {
           if (NON_SPENDING_CATS.has(target.category)) continue;
           const destSection = target.isEssential ? nonDisc : disc;
           const destIdx = destSection.items.findIndex((i: BudgetCategory) => i.category === target.category);
-          const txAmt = Math.abs(tx.amount);
+          const txAmt = Math.abs(tx.amount) / analysisMonths;
           if (destIdx >= 0) {
             destSection.items[destIdx].transactions.push(tx);
             destSection.items[destIdx].monthly += txAmt;
@@ -1106,8 +1109,11 @@ export default function Home() {
       // The shared context has the raw analysis; the Home screen merges budget adjustments.
       const rawAnalysis = snapshot.analysis;
       const lastResult = getLastResult();
-      const recentOverride = overridesSavedAt.current && Date.now() - overridesSavedAt.current < 120_000;
-      if (rawAnalysis && !recentOverride) {
+      // Guard: if an override was saved but no post-override sync has completed yet,
+      // prefer the in-memory result (which has the optimistic update).
+      // The guard is cleared when a sync started after the override is accepted (line 1343).
+      const pendingOverride = !!overridesSavedAt.current;
+      if (rawAnalysis && !pendingOverride) {
         setAnalysis(mergeAdjustments(rawAnalysis, adjustments));
         // Track verification status and start polling if not verified yet
         const status = (rawAnalysis as any).verification_status || 'verified';
@@ -1717,7 +1723,8 @@ export default function Home() {
   const nonDiscItems: BudgetCategory[] = Array.isArray(nonDisc?.items) ? nonDisc.items : [];
   const discItems: BudgetCategory[] = Array.isArray(disc?.items) ? disc.items : [];
   const savingsTotal = analysis?.monthly_savings ?? 0;
-  const surplusTotal = Math.max(0, income - nonDiscTotal - discTotal - savingsTotal);
+  // Use analysis.surplus directly — it already subtracts spending AND savings
+  const surplusTotal = Math.max(0, analysis?.surplus ?? 0);
   const leftToDecide = savingsTotal + surplusTotal; // combined for bar/percentage calculations
 
   // Bar segment proportions
@@ -1774,8 +1781,8 @@ export default function Home() {
     (item: BudgetCategory) => Array.isArray(item?.transactions) ? item.transactions : []
   );
   const spentThisWeek = allDiscTxs
-    .filter((tx) => tx?.date && new Date(tx.date) >= weekStart)
-    .reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
+    .filter((tx) => tx?.date && new Date(tx.date) >= weekStart && (tx?.amount ?? 0) < 0)
+    .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
 
   // Apply custom limit if set (capped at calculated budget — user can lower, not inflate)
   const weeklyBudget = customWeeklyLimit !== null
@@ -1799,8 +1806,8 @@ export default function Home() {
       if (dayDate > today) break;
       const dayStr = dayDate.toISOString().split('T')[0];
       const total = allDiscTxs
-        .filter((tx) => tx?.date?.startsWith(dayStr))
-        .reduce((sum, tx) => sum + Math.abs(tx?.amount ?? 0), 0);
+        .filter((tx) => tx?.date?.startsWith(dayStr) && (tx?.amount ?? 0) < 0)
+        .reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
       result.push({ label: dayLabels[d], amount: total });
     }
     return result;

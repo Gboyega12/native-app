@@ -529,6 +529,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       creditCardCount: result.profile.metrics.creditCardCount,
       bnplCount: result.profile.metrics.bnplCount,
     },
+    analysis_months: (result.profile as any).months || 1,
   };
 
   // ── 6. Upsert to Supabase ──
@@ -555,6 +556,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     monthly_savings: rawAnalysis.monthly_savings,
     incoming_transfers: rawAnalysis.incoming_transfers,
     enrichment_metrics: rawAnalysis.enrichment_metrics,
+    analysis_months: rawAnalysis.analysis_months,
   };
 
   try {

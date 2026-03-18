@@ -415,3 +415,25 @@ to the review modal regardless of confidence. ~90% are already correct — wasti
 5. **Review modal**: Merge AI + Uncategorised into single confidence-sorted list (recommended)
 6. **Learning signal**: Show "less to review" line once/month when corrections reduce review count by 30%+ (recommended)
 7. **Confidence display**: Never show labels, only subtle styling differences (recommended)
+
+---
+
+## 10. Critical Bug Fixes: Surplus, Left-to-Spend, Categorization Persistence
+
+**Date added:** 2026-03-18
+
+### 10a. Surplus doesn't subtract detected savings
+- [x] `lib/enrichment-engine.ts` `buildProfile()`: Change `surplus = monthlyIncome - monthlySpending - monthlySavings`
+- [x] Keep `savingsRate` using gross surplus (pre-savings): `(monthlyIncome - monthlySpending) / monthlyIncome * 100`
+- [x] This makes `analysis.surplus` consistent with income card display
+
+### 10b. Left-to-spend counts refunds/credits as spending
+- [x] `app/(main)/(tabs)/index.tsx`: Filter weekly spend to `amount < 0` only
+- [x] Prevents `Math.abs` from inflating spend with positive transactions in discretionary categories
+
+### 10c. Categorization persistence: 120s guard timeout
+- [x] `app/(main)/(tabs)/index.tsx`: Remove 120s timeout from `recentOverride` check in `loadData`
+- [x] Guard should persist until cleared by successful post-override sync acceptance
+
+### 10d. Income card surplus simplification
+- [x] `app/(main)/(tabs)/index.tsx`: Use `analysis.surplus` directly instead of recalculating

@@ -326,6 +326,8 @@ export interface Analysis {
     creditCardCount: number;
     bnplCount: number;
   };
+  /** Analysis window in months — needed for optimistic UI to maintain monthly normalization */
+  analysis_months?: number;
 }
 
 // ── Goal Trajectory ──
