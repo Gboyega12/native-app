@@ -9,8 +9,6 @@ import { supabase } from '@/lib/supabase';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
-import { useSubscription } from '@/lib/subscription';
-import Paywall from '@/components/Paywall';
 import { useWebPush } from '@/lib/web-push';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { AnimGlyph, BreathingBar } from '@/components/Card';
@@ -45,19 +43,15 @@ function getProviderInitial(name: string) {
 
 export default function Profile() {
   const router = useRouter();
-  const { connected, upgraded } = useLocalSearchParams<{ connected?: string; upgraded?: string }>();
-  const { isActive, isTrial, isSubscribed, trialDaysLeft, billingInterval, currentPeriodEnd, cancelAtPeriodEnd, refresh: refreshTier } = useSubscription();
+  const { connected } = useLocalSearchParams<{ connected?: string }>();
   const { colors, isDark, toggleTheme } = useTheme();
   const { maxContentWidth, isTablet, horizontalPadding } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
-  const [showPaywall, setShowPaywall] = useState(false);
-  const [portalLoading, setPortalLoading] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [connectedBanks, setConnectedBanks] = useState<BankConnection[]>([]);
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
   const [showSuccess, setShowSuccess] = useState(connected === 'true');
-  const [showUpgradeSuccess, setShowUpgradeSuccess] = useState(upgraded === 'true');
   const [notifPrefs, setNotifPrefs] = useState({
     weekly_digest: true,
     checkin_prompts: true,
@@ -86,11 +80,6 @@ export default function Profile() {
     { value: 'bnpl', label: 'Buy now pay later' },
     { value: 'other', label: 'Other' },
   ];
-
-  // Refresh tier after returning from Stripe Checkout
-  useEffect(() => {
-    if (upgraded === 'true') refreshTier();
-  }, [upgraded]);
 
   useEffect(() => {
     trackScreen('Profile');
@@ -261,30 +250,6 @@ export default function Profile() {
     setAddDebtSaving(false);
   };
 
-  const handleManageSubscription = async () => {
-    trackEvent('Manage Subscription Tapped');
-    setPortalLoading(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const res = await fetch('/api/stripe/portal', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      }
-    } catch (err) {
-      console.warn('[Profile] Portal error:', err);
-    }
-    setPortalLoading(false);
-  };
-
   const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
     const newVal = !notifPrefs[key];
     trackEvent('Notification Toggled', { type: key, enabled: newVal });
@@ -359,12 +324,6 @@ export default function Profile() {
       </View>
 
       {/* ── Banners ── */}
-      {showUpgradeSuccess && (
-        <TouchableOpacity style={s.successBanner} onPress={() => setShowUpgradeSuccess(false)} activeOpacity={0.8}>
-          <Text style={s.successText}>Welcome to Bocy Pro!</Text>
-          <Text style={s.successDismiss}>{'\u2715'}</Text>
-        </TouchableOpacity>
-      )}
       {showSuccess && (
         <TouchableOpacity style={s.successBanner} onPress={() => setShowSuccess(false)} activeOpacity={0.8}>
           <Text style={s.successText}>Account connected successfully</Text>
@@ -380,32 +339,8 @@ export default function Profile() {
           </View>
           <Text style={s.userName}>{name.split(' ')[0] || 'User'}</Text>
           <Text style={s.userEmail}>{email}</Text>
-          <View style={s.tierRow}>
-            <View style={[s.tierBadge, isSubscribed ? s.tierBadgePro : isTrial ? s.tierBadgeTrial : undefined]}>
-              <Text style={[s.tierBadgeText, isSubscribed ? s.tierBadgeTextPro : isTrial ? s.tierBadgeTextTrial : undefined]}>
-                {isSubscribed ? 'PRO' : isTrial ? 'TRIAL' : 'EXPIRED'}
-              </Text>
-            </View>
-            {isTrial && (
-              <Text style={s.tierMeta}>
-                {trialDaysLeft} day{trialDaysLeft !== 1 ? 's' : ''} left
-              </Text>
-            )}
-            {isSubscribed && currentPeriodEnd && !cancelAtPeriodEnd && (
-              <Text style={s.tierMeta}>
-                renews {currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-              </Text>
-            )}
-            {isSubscribed && cancelAtPeriodEnd && (
-              <Text style={[s.tierMeta, { color: colors.amber }]}>
-                cancels {currentPeriodEnd ? currentPeriodEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'soon'}
-              </Text>
-            )}
-          </View>
         </View>
       </AnimGlyph>
-
-      <Paywall visible={showPaywall} onClose={() => setShowPaywall(false)} />
 
       {/* ── Connected accounts ── */}
       <Text style={s.sectionLabel}>ACCOUNTS</Text>
@@ -675,22 +610,6 @@ export default function Profile() {
         )}
       </View>
 
-      {/* ── Subscription management ── */}
-      {!isSubscribed && (
-        <TouchableOpacity style={s.upgradeBtn} onPress={() => { trackEvent('Upgrade Tapped'); setShowPaywall(true); }} activeOpacity={0.8} testID="profile-upgrade-button" accessibilityRole="button" accessibilityLabel="Subscribe">
-          <Text style={s.upgradeBtnText}>{isTrial ? 'Subscribe now' : 'Subscribe'}</Text>
-        </TouchableOpacity>
-      )}
-      {isSubscribed && (
-        <TouchableOpacity style={s.manageSubBtn} onPress={handleManageSubscription} disabled={portalLoading} activeOpacity={0.7}>
-          {portalLoading ? (
-            <ActivityIndicator size="small" color={colors.accent} />
-          ) : (
-            <Text style={s.manageSubBtnText}>Manage subscription</Text>
-          )}
-        </TouchableOpacity>
-      )}
-
       {/* ── Feedback + account ── */}
       <Text style={s.sectionLabel}>SUPPORT</Text>
 
@@ -759,18 +678,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   avatarText: { fontFamily: fonts.semibold, fontSize: 22, color: c.bg },
   userName: { fontFamily: fonts.semibold, fontSize: 20, color: c.text, marginBottom: 4 },
   userEmail: { fontFamily: fonts.regular, fontSize: 13, color: c.dim, marginBottom: 12 },
-  tierRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  tierBadge: {
-    backgroundColor: c.accentDim, borderWidth: 1, borderColor: c.border,
-    borderRadius: 100, paddingVertical: 3, paddingHorizontal: 10,
-  },
-  tierBadgePro: { backgroundColor: c.greenDim, borderColor: c.green + '40' },
-  tierBadgeTrial: { backgroundColor: c.accentDim, borderColor: c.accent + '40' },
-  tierBadgeText: { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: c.dim },
-  tierBadgeTextPro: { color: c.green },
-  tierBadgeTextTrial: { color: c.accent },
-  tierMeta: { fontFamily: fonts.regular, fontSize: 12, color: c.dim },
-
   // ── Section labels ──
   sectionLabel: {
     fontFamily: fonts.mono, fontSize: 11, letterSpacing: 2, color: c.dim,
@@ -837,18 +744,6 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   notifUpgrade: { paddingVertical: 12, alignItems: 'center' },
   notifUpgradeText: { fontFamily: fonts.medium, fontSize: 12, color: c.green },
-
-  // ── Subscription buttons ──
-  upgradeBtn: {
-    backgroundColor: c.accent, borderRadius: 100, paddingVertical: 14,
-    alignItems: 'center', marginBottom: 24,
-  },
-  upgradeBtnText: { fontFamily: fonts.semibold, fontSize: 15, color: c.bg },
-  manageSubBtn: {
-    borderWidth: 1, borderColor: c.border, borderRadius: 100,
-    paddingVertical: 12, alignItems: 'center', marginBottom: 24,
-  },
-  manageSubBtnText: { fontFamily: fonts.medium, fontSize: 13, color: c.accent },
 
   // ── Modal ──
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },

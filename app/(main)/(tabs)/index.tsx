@@ -19,7 +19,6 @@ import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals } from '@/lib/types';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType } from '@/lib/types';
-import { useSubscription } from '@/lib/subscription';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { DashboardSkeleton } from '@/components/Skeleton';
@@ -207,7 +206,6 @@ export default function Home() {
     });
   };
 
-  const { isTrial, trialDaysLeft } = useSubscription();
   const [showInsightModal, setShowInsightModal] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [infoCard, setInfoCard] = useState<string | null>(null);
