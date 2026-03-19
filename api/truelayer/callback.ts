@@ -348,10 +348,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // real data when it runs immediately after the processing screen.
       if (postUserId && allBalances.length > 0) {
         for (const card of allBalances) {
-          if (!card.balance || card.balance <= 0) continue;
+          if (!card || !card.balance || card.balance <= 0) continue;
           const acctType = card.type || 'credit_card';
           const defaultApr = DEFAULT_APR[acctType] ?? DEFAULT_APR.credit_card;
-          const defaultMin = defaultMinimumPayment(acctType, card.balance || 0);
+          const defaultMin = defaultMinimumPayment(acctType, card.balance);
           await admin.from('debt_accounts').upsert({
             user_id: postUserId,
             account_name: card.name || 'Card',

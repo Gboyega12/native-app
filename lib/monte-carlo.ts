@@ -521,7 +521,7 @@ function buildScenarios(
   vol: VolatilityProfile,
 ): CashflowScenario[] {
   const scenarios: CashflowScenario[] = [];
-  const events: string[] = identity?.upcoming_events || [];
+  const events = identity?.upcoming_events || [];
   const deps = identity?.dependents || [];
   const household = identity?.household || 'single';
 
