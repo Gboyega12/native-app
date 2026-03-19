@@ -52,3 +52,20 @@
 - **Simplicity First**: Make every change as simple as possible. Impact minimal code.
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards.
 - **Minimal Impact**: Changes should only touch what's necessary. Avoid introducing bugs.
+
+
+## Skills Files (MUST be strictly adhered to)
+
+All skills files in `skills/` define BOCY's institutional-grade financial system behaviour.
+Every skill file is mandatory and must be followed without exception:
+
+- `skills/bocy-philosophy.md` — Core philosophy and capital allocation principles
+- `skills/financial-models.md` — LAMU model, Monte Carlo, decision layers
+- `skills/insight-engine.md` — Insight detection and generation pipeline
+- `skills/recommendation-engine.md` — Recommendation generation and prioritisation
+- `skills/debt-intelligence.md` — Debt evaluation framework
+- `skills/transaction-enrichment.md` — Transaction enrichment pipeline (9 layers, confidence model, validation)
+- `skills/chat-engine.md` — Chat engine architecture (4 layers, memory system, proactive engine)
+- `skills/app-behaviour.md` — User-facing app behaviour and UX rules
+- `skills/tone.md` — Communication style and language rules
+- `skills/user-cohorts.md` — Target user segmentation
