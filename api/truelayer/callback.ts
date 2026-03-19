@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { DEFAULT_APR, defaultMinimumPayment } from '../../lib/constants.js';
 
 const postBodySchema = z.object({
   code: z.string().optional(),
@@ -341,6 +342,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await admin.from('bank_data')
           .update(updatePayload)
           .eq('connection_id', connectionId);
+      }
+      // Also persist card balances directly to debt_accounts so /api/verify
+      // (which only reads debt_accounts, not bank_data.card_balances) has
+      // real data when it runs immediately after the processing screen.
+      if (postUserId && allBalances.length > 0) {
+        for (const card of allBalances) {
+          if (!card.balance || card.balance <= 0) continue;
+          const acctType = card.type || 'credit_card';
+          const defaultApr = DEFAULT_APR[acctType] ?? DEFAULT_APR.credit_card;
+          const defaultMin = defaultMinimumPayment(acctType, card.balance || 0);
+          await admin.from('debt_accounts').upsert({
+            user_id: postUserId,
+            account_name: card.name || 'Card',
+            account_type: acctType,
+            outstanding_balance: card.balance,
+            credit_limit: card.limit || null,
+            interest_rate: defaultApr,
+            minimum_payment: defaultMin,
+            is_default_apr: true,
+            source: 'truelayer',
+            last_updated: new Date().toISOString(),
+          }, { onConflict: 'user_id,account_name' });
+        }
       }
     } catch (debtErr: unknown) {
       const msg = debtErr instanceof Error ? debtErr.message : String(debtErr);
