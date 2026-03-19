@@ -1396,8 +1396,15 @@ export default function Home() {
           count += ((a as any)?.person_transfers?.length || 0);
           return count;
         };
+        // Check if moves changed (top move action or move count)
+        const prevMoves = Array.isArray(prev?.all_moves) ? prev.all_moves : [];
+        const freshMoves = Array.isArray(fresh.all_moves) ? fresh.all_moves : [];
+        const movesChanged = prevMoves.length !== freshMoves.length ||
+          prevMoves[0]?.action !== freshMoves[0]?.action;
+
         if (
           prev &&
+          !movesChanged &&
           prev.monthly_income === fresh.monthly_income &&
           prev.monthly_spending === fresh.monthly_spending &&
           prev.surplus === fresh.surplus &&

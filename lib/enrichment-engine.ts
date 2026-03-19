@@ -870,8 +870,8 @@ const EnrichmentEngine = {
     const ordered = [
       'debt_juggler', 'edge_walker', 'subscription_collector',
       'impulse_surfer', 'convenience_seeker', 'comfort_spender',
-      'lifestyle_investor', 'side_hustler', 'quiet_builder',
-      'balanced_realist',
+      'lifestyle_investor', 'side_hustler', 'savings_optimizer',
+      'quiet_builder', 'balanced_realist',
     ];
     for (const key of ordered) {
       const arch = ARCHETYPES[key];
@@ -1873,7 +1873,7 @@ const EnrichmentEngine = {
     // ── Mathematical insights for financially healthy users ──
     // These surface tax and return facts — not product recommendations.
     // The user sees the numbers; the ranking reflects the tax math.
-    if (m.savingsRate >= 20 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
+    if (m.savingsRate >= 15 && m.debtAccountCount <= 1 && (isGoodDebt || m.debtAccountCount === 0)) {
       // ISA allowance utilisation
       const isaLimit = 20000;
       const annualSurplus = Math.round(p.surplus * 12);
