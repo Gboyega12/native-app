@@ -307,7 +307,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── 8. Update the analysis with verified data ──
     const fields = {
-      archetype: result.archetype.key,
+      segment: result.segment,
       decision_score: result.decisionScore.score,
       monthly_income: Math.round(result.profile.monthly.income),
       monthly_spending: Math.round(result.profile.monthly.spending),

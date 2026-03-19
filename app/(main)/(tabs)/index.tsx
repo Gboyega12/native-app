@@ -1048,7 +1048,7 @@ export default function Home() {
       try {
         const { data: row } = await supabase
           .from('analyses')
-          .select('verification_status, archetype, decision_score, monthly_income, monthly_spending, surplus, non_discretionary, discretionary, income_sources, top_move, all_moves, behavioral_patterns, goal_context')
+          .select('verification_status, segment, decision_score, monthly_income, monthly_spending, surplus, non_discretionary, discretionary, income_sources, top_move, all_moves, behavioral_patterns, goal_context')
           .eq('user_id', userId)
           .order('created_at', { ascending: false })
           .limit(1)

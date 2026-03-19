@@ -51,6 +51,14 @@
 - **Don't add signal boosting to move ranking.** The CRRA utility × opportunity cost × UKPF priority × goal alignment × Monte Carlo consistency ranking is mathematically sound. Adding signal-weighted boosting (1.05-1.20x per signal) and impact distributions (P10/P50/P90) made weak generic moves float to top. The existing ranking already accounts for all relevant factors.
 - **Recommendations must be mathematical, not motivational.** "Freeze non-essential spending for 30 days" and "cancel unnecessary subscriptions" are weak. Good moves show specific numbers: "Cut 3 lowest-value subscriptions (Netflix £11, Spotify £10, Audible £8) = £348/year". Data-driven cut percentages via P25 of monthly distribution are already in genDecisionStack.
 
+## Archetype → Segment Migration
+
+- **Archetypes were never the right abstraction.** The 11 archetype system (subscription_collector, debt_juggler, etc.) was a behavioural classification that didn't drive any meaningful downstream decisions. Replaced with 3 segments: `structured` (SHE), `unstructured` (UHE), `default` — aligned with account-classifier.ts cohort detection.
+- **DB column renames require matching all Supabase queries.** When renaming `archetype` → `segment`, every `.select()`, `.insert()`, `.update()` touching the `analyses` and `score_history` tables must be updated.
+- **Income dedup must catch same-paycheck-different-name.** Transaction-overlap dedup (±2 days, 5% amount) misses when the same salary appears under two different merchant names (e.g. "NET MEDIA PLANET L MONTHLY PAY BGC" vs "Salary"). Added a salary-specific amount-based dedup pass that runs first: if both sources have `isSalary=true` and monthly amounts are within 15%, merge them.
+- **Never use "Debt 1" as a display name.** The `resolveDebtName()` fallback chain should exhaust: account_name → institution → provider_name → merchant payment name → account type → "Debt account". Generic indexed names confuse users.
+- **Double income inflates surplus and cascades into bad recommendations.** When salary appears twice, surplus doubles → debt payment suggestions use inflated surplus → nonsensical recommendations. Fixing dedup at the root fixes everything downstream.
+
 ## Workflow Compliance
 
 - **Always write plan to `tasks/todo.md` BEFORE implementing.** Even when using inline TodoWrite for progress tracking, the spec should live in `tasks/todo.md` with checkable items.

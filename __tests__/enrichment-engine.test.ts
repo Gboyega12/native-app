@@ -309,10 +309,7 @@ describe('EnrichmentEngine.enrich (full pipeline)', () => {
 
   it('returns an EnrichmentResult with all required top-level keys', () => {
     expect(result).toHaveProperty('profile');
-    expect(result).toHaveProperty('archetype');
-    expect(result).toHaveProperty('traits');
-    expect(result).toHaveProperty('strengths');
-    expect(result).toHaveProperty('blindSpots');
+    expect(result).toHaveProperty('segment');
     expect(result).toHaveProperty('decisionScore');
     expect(result).toHaveProperty('decisionStack');
     expect(result).toHaveProperty('behavioralPatterns');
@@ -348,14 +345,8 @@ describe('EnrichmentEngine.enrich (full pipeline)', () => {
     expect(result.profile.monthly.spending).toBeGreaterThan(0);
   });
 
-  it('archetype has required fields', () => {
-    expect(result.archetype).toHaveProperty('key');
-    expect(result.archetype).toHaveProperty('name');
-    expect(result.archetype).toHaveProperty('emoji');
-    expect(result.archetype).toHaveProperty('color');
-    expect(result.archetype).toHaveProperty('description');
-    expect(typeof result.archetype.key).toBe('string');
-    expect(typeof result.archetype.name).toBe('string');
+  it('segment is a valid segment type', () => {
+    expect(['structured', 'unstructured', 'default']).toContain(result.segment);
   });
 
   it('decision score is within 0-100 range', () => {
@@ -724,7 +715,7 @@ describe('EnrichmentEngine.rebuild', () => {
     const rebuilt = EnrichmentEngine.rebuild(original.enrichedTransactions);
 
     expect(rebuilt).toHaveProperty('profile');
-    expect(rebuilt).toHaveProperty('archetype');
+    expect(rebuilt).toHaveProperty('segment');
     expect(rebuilt).toHaveProperty('decisionScore');
     expect(rebuilt).toHaveProperty('enrichedTransactions');
     expect(rebuilt).toHaveProperty('enrichmentMetrics');

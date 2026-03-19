@@ -272,7 +272,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── 5. Build analysis ──
     const rawAnalysis = {
       user_id: userId,
-      archetype: result.archetype.key,
+      segment: result.segment,
       decision_score: result.decisionScore.score,
       monthly_income: Math.round(result.profile.monthly.income),
       monthly_spending: Math.round(result.profile.monthly.spending),
@@ -291,7 +291,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── 6. Upsert to Supabase ──
     const fields = {
-      archetype: rawAnalysis.archetype,
+      segment: rawAnalysis.segment,
       decision_score: rawAnalysis.decision_score,
       monthly_income: rawAnalysis.monthly_income,
       monthly_spending: rawAnalysis.monthly_spending,
@@ -336,7 +336,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       savings_rate: savingsRate,
       subscription_count: result.profile.metrics.subscriptionCount || 0,
       debt_account_count: result.profile.metrics.debtAccountCount || 0,
-      archetype: rawAnalysis.archetype,
+      segment: rawAnalysis.segment,
     });
 
     // ── 8. Latest transaction date ──

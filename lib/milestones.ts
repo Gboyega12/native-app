@@ -93,13 +93,9 @@ function buildDay3(a: Analysis): MilestoneContent | null {
   }
 
   const detail = buildDetail(() => {
-    const arch = a.archetype ? formatArchetype(a.archetype) : null;
     const pattern = a.behavioral_patterns?.[0]?.trim();
-    if (!arch && !pattern) return null;
-    const bits: string[] = [];
-    if (arch) bits.push(`Your spending archetype is \u201c${arch}\u201d.`);
-    if (pattern) bits.push(pattern);
-    return bits.join(' ');
+    if (!pattern) return null;
+    return pattern;
   });
 
   return {
@@ -279,12 +275,7 @@ function countSubscriptions(a: Analysis): number {
   return merchants.size;
 }
 
-function formatArchetype(archetype: string | undefined): string {
-  if (!archetype) return '';
-  return archetype
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
+// formatArchetype removed — archetypes replaced by segments
 
 function stripMd(s: string): string {
   return (s || '').replace(/\*\*/g, '');

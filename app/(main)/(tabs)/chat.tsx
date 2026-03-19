@@ -1269,7 +1269,7 @@ export default function Chat() {
       monthly_income: a?.monthly_income,
       monthly_spending: a?.monthly_spending,
       surplus: a?.surplus,
-      archetype: a?.archetype,
+      segment: a?.segment,
       decision_score: a?.decision_score,
       goals: g ? {
         current_situation: g.current_situation,
@@ -1519,7 +1519,7 @@ export default function Chat() {
         ctx.is_variable_income = freshA.is_variable_income;
         ctx.income_floor = freshA.income_floor;
         ctx.income_cv = freshA.income_cv;
-        ctx.archetype = freshA.archetype;
+        ctx.segment = freshA.segment;
         ctx.decision_score = freshA.decision_score;
         ctx.all_moves = freshA.all_moves?.map((m: any) => ({
           action: m.action,

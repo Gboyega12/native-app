@@ -678,7 +678,7 @@ interface ChatContext {
   monthly_spending?: number;
   surplus?: number;
   decision_score?: number;
-  archetype?: string;
+  segment?: string;
   income_sources?: Array<Record<string, unknown>>;
   budget_line?: Record<string, unknown>;
   household_cashflow?: Record<string, unknown>;
@@ -849,7 +849,7 @@ Tools:
   if (ctx.monthly_spending) prompt += `\n- Monthly spending: \u00a3${Math.round(ctx.monthly_spending)}`;
   if (ctx.surplus != null) prompt += `\n- Monthly surplus: \u00a3${Math.round(ctx.surplus)}`;
   if (ctx.decision_score != null) prompt += `\n- Financial health score: ${ctx.decision_score}/100`;
-  if (ctx.archetype) prompt += `\n- Financial profile: ${ctx.archetype}`;
+  if (ctx.segment) prompt += `\n- Financial segment: ${ctx.segment}`;
 
   // ── Income sources with pay frequency ──
   if (ctx.income_sources?.length) {

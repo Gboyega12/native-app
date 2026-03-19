@@ -501,7 +501,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   // ── 5. Build raw analysis ──
   const rawAnalysis: Analysis = {
     user_id: userId,
-    archetype: result.archetype.key,
+    segment: result.segment,
     decision_score: result.decisionScore.score,
     monthly_income: Math.round(result.profile.monthly.income),
     monthly_spending: Math.round(result.profile.monthly.spending),
@@ -533,7 +533,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
 
   // ── 6. Upsert to Supabase ──
   const fields = {
-    archetype: rawAnalysis.archetype,
+    segment: rawAnalysis.segment,
     decision_score: rawAnalysis.decision_score,
     monthly_income: rawAnalysis.monthly_income,
     monthly_spending: rawAnalysis.monthly_spending,
@@ -590,7 +590,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       savings_rate: savingsRate,
       subscription_count: result.profile.metrics.subscriptionCount || 0,
       debt_account_count: result.profile.metrics.debtAccountCount || 0,
-      archetype: rawAnalysis.archetype,
+      segment: rawAnalysis.segment,
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);

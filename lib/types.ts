@@ -130,16 +130,12 @@ export interface FinancialProfile {
   };
 }
 
-// ── Archetype ──
+// ── Segment ──
+// Replaces the old archetype system. Only two meaningful segments:
+// 'structured' (SHE) and 'unstructured' (UHE) savings optimisers,
+// plus 'default' for everyone else.
 
-export interface Archetype {
-  key: string;
-  name: string;
-  emoji: string;
-  color: string;
-  description: string;
-  savingsOpportunity: string;
-}
+export type Segment = 'structured' | 'unstructured' | 'default';
 
 // ── Move Sub-Goals ──
 // Structured, typed sub-goals attached at move generation time.
@@ -187,6 +183,23 @@ export interface Move {
 }
 
 /**
+ * Resolve a human-readable name for a debt account.
+ * Tries: account_name → institution → provider_name → merchantFallback → type-based fallback.
+ * Never returns generic "Debt 1" style names.
+ */
+export function resolveDebtDisplayName(d: any, merchantFallback?: string): string {
+  if (d?.account_name && d.account_name !== 'Card' && d.account_name !== 'card') return d.account_name;
+  if (d?.institution) return d.institution;
+  if (d?.provider_name) return d.provider_name;
+  if (merchantFallback) return merchantFallback;
+  // Type-based fallback
+  const accType = d?.account_type || d?.type || '';
+  if (/credit/i.test(accType)) return 'Credit card';
+  if (/loan/i.test(accType)) return 'Loan';
+  return 'Debt account';
+}
+
+/**
  * Derive sub-goals from a Move. Returns the move's own subGoals if present,
  * otherwise synthesises them from the action text / merchants / debt accounts
  * for older analyses.
@@ -200,24 +213,28 @@ export function hydrateSubGoals(move: Move, debtAccounts?: any[]): MoveSubGoal[]
   // Debt moves — use real debt accounts when available
   if (cat === 'debt') {
     const activeDebts = (debtAccounts || []).filter((d: any) => (d.outstanding_balance || 0) > 0);
+    const merchants = move.merchants || [];
     if (activeDebts.length > 0) {
-      return activeDebts.map((d: any) => ({
+      return activeDebts.map((d: any, i: number) => ({
         type: 'debt_clear' as const,
-        target: d.account_name && d.account_name !== 'Card' ? d.account_name : 'Debt',
+        target: resolveDebtDisplayName(d, merchants[i]),
         startValue: Math.round(d.outstanding_balance || 0),
         targetValue: 0,
       }));
     }
-    // Fallback for when no debt accounts are connected
+    // Fallback for when no debt accounts are connected — use merchant names from move
     const countMatch = action.match(/(\d+)\s*debt/);
     if (countMatch) {
       const count = parseInt(countMatch[1], 10);
       return Array.from({ length: count }, (_, i) => ({
-        type: 'debt_clear' as const, target: `Debt ${i + 1}`, startValue: 0, targetValue: 0,
+        type: 'debt_clear' as const,
+        target: merchants[i] || `Debt account ${i + 1}`,
+        startValue: 0,
+        targetValue: 0,
       }));
     }
     if (action.includes('overpay') || action.includes('clear')) {
-      return [{ type: 'debt_clear' as const, target: 'Debt', startValue: 0, targetValue: 0 }];
+      return [{ type: 'debt_clear' as const, target: merchants[0] || 'Debt account', startValue: 0, targetValue: 0 }];
     }
   }
 
@@ -295,7 +312,7 @@ export function repairDebtSubGoals(sgs: MoveSubGoal[], debtAccounts: any[]): Mov
   const nonDebtSgs = sgs.filter((sg) => sg.type !== 'debt_clear');
   const repairedDebtSgs: MoveSubGoal[] = activeDebts.map((d: any) => ({
     type: 'debt_clear' as const,
-    target: d.account_name && d.account_name !== 'Card' ? d.account_name : 'Debt',
+    target: resolveDebtDisplayName(d),
     startValue: Math.round(d.outstanding_balance || 0),
     targetValue: 0,
   }));
@@ -333,7 +350,7 @@ export interface Goals {
 export interface Analysis {
   id?: string;
   user_id?: string;
-  archetype: string;
+  segment: string;
   decision_score: number;
   monthly_income: number;
   monthly_spending: number;
@@ -453,10 +470,7 @@ export interface VerifiedBill {
 
 export interface EnrichmentResult {
   profile: FinancialProfile;
-  archetype: Archetype;
-  traits: string[];
-  strengths: string[];
-  blindSpots: string[];
+  segment: Segment;
   decisionScore: DecisionScore;
   decisionStack: Move[];
   behavioralPatterns: string[];
@@ -518,7 +532,7 @@ export interface ChatContext {
   income_floor?: number;
   /** Income coefficient of variation */
   income_cv?: number;
-  archetype?: string;
+  segment?: string;
   decision_score?: number;
   goals?: {
     current_situation?: string;

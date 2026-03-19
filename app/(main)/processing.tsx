@@ -365,7 +365,7 @@ function ProcessingInner() {
       const topMove = allMoves[0] || null;
       const analysis: Analysis = {
         user_id: user?.id ?? undefined,
-        archetype: result.archetype.key,
+        segment: result.segment,
         decision_score: result.decisionScore.score,
         monthly_income: Math.round(result.profile.monthly.income),
         monthly_spending: Math.round(result.profile.monthly.spending + totalManualSpend),
@@ -383,7 +383,7 @@ function ProcessingInner() {
         try {
           const insertPayload = {
             user_id: user.id,
-            archetype: analysis.archetype,
+            segment: analysis.segment,
             decision_score: analysis.decision_score,
             monthly_income: analysis.monthly_income,
             monthly_spending: analysis.monthly_spending,
@@ -478,7 +478,7 @@ function ProcessingInner() {
               savings_rate: savingsRate,
               subscription_count: result.profile.metrics.subscriptionCount || 0,
               debt_account_count: result.profile.metrics.debtAccountCount || 0,
-              archetype: analysis.archetype,
+              segment: analysis.segment,
             });
           } catch (scoreErr: any) {
             console.warn('[processing] Non-critical: score history save failed:', scoreErr?.message);
@@ -587,7 +587,7 @@ function ProcessingInner() {
       _lastResult = {
         ...analysis,
         _enrichmentResult: result,
-        _archetype: result.archetype,
+        _segment: result.segment,
         _decisionScore: result.decisionScore,
         _enrichmentMetrics: result.enrichmentMetrics,
         _unresolvedCount: result.enrichedTransactions.filter(
@@ -601,7 +601,7 @@ function ProcessingInner() {
         monthly_spending: Math.round(result.profile.monthly.spending),
         surplus: Math.round(result.profile.monthly.surplus),
         move_count: allMoves.length,
-        archetype: result.archetype.key,
+        segment: result.segment,
       });
 
       // Show personalised first insight — user navigates manually

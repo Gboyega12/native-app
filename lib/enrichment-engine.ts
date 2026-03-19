@@ -4,7 +4,6 @@ import {
 } from './merchant-db';
 import { classifyTransaction } from './classifier';
 import { normaliseDescription } from './normalise';
-import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './archetypes';
 import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants';
 import { calcInterestSaved } from './amortisation';
 import { calcMarginalRate, inferTaxSituation, UK_TAX } from './surplus-engine';
@@ -15,7 +14,7 @@ import type {
   EnrichedTransaction,
   RecurringItem,
   FinancialProfile,
-  Archetype,
+  Segment,
   DecisionScore,
   Move,
   MoveSubGoal,
@@ -92,15 +91,11 @@ const EnrichmentEngine = {
 
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
-    const archetype = this.determineArchetype(profile);
+    const segment = this.determineSegment(profile);
     const patterns = this.detectBehavioralPatterns(profile);
     const score = this.calcDecisionScore(profile);
     const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
 
-    const metrics = profile.metrics;
-    const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
-    const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
-    const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
     const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
 
     // Verify bills from recognized merchants (exact amounts from transaction data)
@@ -113,10 +108,7 @@ const EnrichmentEngine = {
 
     return {
       profile,
-      archetype,
-      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
-      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
-      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
+      segment,
       decisionScore: score,
       decisionStack: stack,
       behavioralPatterns: patterns.map((p: any) => p.pattern || p),
@@ -127,7 +119,7 @@ const EnrichmentEngine = {
     };
   },
 
-  // Rebuild profile/archetype/patterns from already-enriched transactions
+  // Rebuild profile/segment/patterns from already-enriched transactions
   // Used after AI batch classification patches "Other" items in-place
   rebuildFromEnriched(
     enriched: EnrichedTransaction[],
@@ -139,15 +131,11 @@ const EnrichmentEngine = {
 
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
-    const archetype = this.determineArchetype(profile);
+    const segment = this.determineSegment(profile);
     const patterns = this.detectBehavioralPatterns(profile);
     const score = this.calcDecisionScore(profile);
     const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
 
-    const metrics = profile.metrics;
-    const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
-    const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
-    const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
     const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
 
     const verifiedBills = this.verifyBillsFromTransactions(enriched);
@@ -157,10 +145,7 @@ const EnrichmentEngine = {
 
     return {
       profile,
-      archetype,
-      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
-      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
-      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
+      segment,
       decisionScore: score,
       decisionStack: stack,
       behavioralPatterns: patterns.map((p: any) => p.pattern || p),
@@ -735,7 +720,35 @@ const EnrichmentEngine = {
     .sort((a, b) => b.monthly - a.monthly);
 
     // ── Dedup income sources ──
-    // The same paycheck can appear twice (e.g. "Net Ltd" via merchant-db AND "Salary" via keyword).
+    const genericKeywords = /^(salary|wages|income|pay|credit)$/i;
+
+    // Pass 1: Salary-specific dedup by amount similarity.
+    // The same paycheck often appears under the employer name AND a generic
+    // "Salary"/"Wages" label from different classification paths. These have
+    // identical amounts but may not share transaction objects, so the overlap
+    // check below would miss them. Merge when both are salary-flagged and
+    // monthly amounts are within 15%.
+    for (let i = 0; i < incomeSources.length; i++) {
+      for (let j = i + 1; j < incomeSources.length; j++) {
+        const a = incomeSources[i];
+        const b = incomeSources[j];
+        if (!a.isSalary || !b.isSalary) continue;
+        const maxMonthly = Math.max(a.monthly, b.monthly);
+        if (maxMonthly > 0 && Math.abs(a.monthly - b.monthly) / maxMonthly < 0.15) {
+          // Keep the more specific name (non-generic, longer)
+          const keepA = !genericKeywords.test(a.source) || genericKeywords.test(b.source);
+          if (keepA) {
+            incomeSources.splice(j, 1);
+          } else {
+            incomeSources.splice(i, 1);
+            i--;
+          }
+          break;
+        }
+      }
+    }
+
+    // Pass 2: Transaction-overlap dedup.
     // Merge sources with overlapping transaction dates (±2 days) AND similar amounts (within 5%).
     for (let i = 0; i < incomeSources.length; i++) {
       for (let j = i + 1; j < incomeSources.length; j++) {
@@ -761,7 +774,6 @@ const EnrichmentEngine = {
         const minLen = Math.min(aTxs.length, bTxs.length);
         if (minLen > 0 && overlap / minLen >= 0.5) {
           // Merge: keep the more specific source name (longer or non-generic)
-          const genericKeywords = /^(salary|wages|income|pay|credit)$/i;
           const keepA = !genericKeywords.test(a.source) || genericKeywords.test(b.source);
           if (keepA) {
             incomeSources.splice(j, 1);
@@ -865,36 +877,35 @@ const EnrichmentEngine = {
     };
   },
 
-  determineArchetype(profile: FinancialProfile): Archetype {
-    const m = profile.metrics;
-    const ordered = [
-      'debt_juggler', 'edge_walker', 'subscription_collector',
-      'impulse_surfer', 'convenience_seeker', 'comfort_spender',
-      'lifestyle_investor', 'side_hustler', 'savings_optimizer',
-      'quiet_builder', 'balanced_realist',
-    ];
-    for (const key of ordered) {
-      const arch = ARCHETYPES[key];
-      if (arch.triggers(m, profile)) {
-        return {
-          key: arch.key,
-          name: arch.name,
-          emoji: arch.emoji,
-          color: arch.color,
-          description: arch.genPlaybook(profile),
-          savingsOpportunity: '',
-        };
-      }
+  /**
+   * Determine the user's segment: structured or unstructured savings optimiser,
+   * or default. Uses profile metrics to approximate the cohort when full account
+   * data isn't available, or delegates to detectHighEarnerCohort when it is.
+   */
+  determineSegment(profile: FinancialProfile, accountBuckets?: any, debtAccounts?: any[], extraSignals?: { hasInvestmentTxs?: boolean; hasMortgage?: boolean; isFullPayer?: boolean }): Segment {
+    const income = profile.monthly.income;
+    const savingsRate = profile.metrics.savingsRate;
+
+    // If we have full account data, use the precise detection
+    if (accountBuckets) {
+      const cohort = detectHighEarnerCohort(
+        income, savingsRate, accountBuckets, profile.monthly.spending,
+        debtAccounts || [], extraSignals?.hasInvestmentTxs || false,
+        extraSignals?.hasMortgage || false, extraSignals?.isFullPayer || false,
+      );
+      if (cohort === 'structured_high_earner') return 'structured';
+      if (cohort === 'unstructured_high_earner') return 'unstructured';
+      return 'default';
     }
-    const fallback = ARCHETYPES.balanced_realist;
-    return {
-      key: fallback.key,
-      name: fallback.name,
-      emoji: fallback.emoji,
-      color: fallback.color,
-      description: fallback.genPlaybook(profile),
-      savingsOpportunity: '',
-    };
+
+    // Simplified heuristic from profile metrics alone:
+    // High income (≥£4k/mo) + low savings rate (< 15%) → unstructured
+    // High income (≥£4k/mo) + decent savings (≥ 15%) → structured
+    if (income >= 4000) {
+      if (savingsRate < 15) return 'unstructured';
+      return 'structured';
+    }
+    return 'default';
   },
 
   detectBehavioralPatterns(profile: FinancialProfile): { pattern: string; detail: string }[] {
@@ -1411,15 +1422,23 @@ const EnrichmentEngine = {
 
     // Extract debt payment merchants for name fallback when account_name is missing
     const debtMerchantNames = this._getMerchantsByCategory(txs, 'Debt Payments');
-    // Helper: resolve the best name for a debt account, using merchant names as fallback
+    // Helper: resolve the best name for a debt account, using merchant names as fallback.
+    // Never returns generic "Debt 1" / "Debt 2" — always uses merchant payment name or type.
     const resolveDebtName = (d: any, index: number): string => {
-      if (!d) return debtMerchantNames[index] || `Debt ${index + 1}`;
-      if (d.account_name && d.account_name !== 'Card') return d.account_name;
+      if (!d) return debtMerchantNames[index] || 'Debt account';
+      if (d.account_name && d.account_name !== 'Card' && d.account_name !== 'card') return d.account_name;
       if (d.institution) return d.institution;
       if (d.provider_name) return d.provider_name;
       // Use debt payment merchant name as fallback (matched by index)
       if (debtMerchantNames[index]) return debtMerchantNames[index];
-      return `Debt ${index + 1}`;
+      // Try any remaining merchant names not yet used
+      const unusedMerchant = debtMerchantNames.find((_: string, mi: number) => mi !== index && !connectedDebts[mi]);
+      if (unusedMerchant) return unusedMerchant;
+      // Type-based fallback
+      const accType = d.account_type || d.type || '';
+      if (/credit/i.test(accType)) return 'Credit card';
+      if (/loan/i.test(accType)) return 'Loan';
+      return 'Debt account';
     };
 
     // Connect hint: appended to debt move strategy when accounts aren't connected
@@ -2177,21 +2196,17 @@ const EnrichmentEngine = {
   /**
    * Rebuild the full analysis from updated enriched transactions.
    * Used after Claude AI verification upgrades low-confidence "Other"
-   * transactions into proper categories — the profile, archetype, score,
+   * transactions into proper categories — the profile, segment, score,
    * and moves all recompute with the improved data.
    */
   rebuild(enriched: EnrichedTransaction[], debtAccounts?: any[], identity?: any): EnrichmentResult {
     const recurring = this.detectRecurring(enriched);
     const profile = this.buildProfile(enriched, recurring);
-    const archetype = this.determineArchetype(profile);
+    const segment = this.determineSegment(profile);
     const patterns = this.detectBehavioralPatterns(profile);
     const score = this.calcDecisionScore(profile);
     const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
 
-    const metrics = profile.metrics;
-    const traits = Object.values(SUB_TRAITS).filter((t) => t.test(metrics, profile));
-    const strengths = STRENGTH_RULES.filter((r) => r.test(metrics));
-    const blindSpots = BLINDSPOT_RULES.filter((r) => r.test(metrics));
     const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
     const verifiedBills = this.verifyBillsFromTransactions(enriched);
     const essentialGaps = identity
@@ -2200,10 +2215,7 @@ const EnrichmentEngine = {
 
     return {
       profile,
-      archetype,
-      traits: traits.map((t) => ({ name: t.name, insight: t.insight })) as any,
-      strengths: strengths.map((s) => ({ label: s.label, detail: s.detail })) as any,
-      blindSpots: blindSpots.map((b) => ({ label: b.label, detail: b.detail })) as any,
+      segment,
       decisionScore: score,
       decisionStack: stack,
       behavioralPatterns: patterns.map((p: any) => p.pattern || p),
