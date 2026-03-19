@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import EnrichmentEngine from '../lib/enrichment-engine.js';
-import { rankMoves, determineFlowchartPosition } from '../lib/move-engine.js';
+import { rankMoves } from '../lib/move-engine.js';
 import { classifyTransactionsBatch } from './claude/index.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
@@ -249,7 +249,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── 4. Rank moves ──
-    determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
     const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
 
     // Filter dismissed moves

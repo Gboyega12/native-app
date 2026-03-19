@@ -5,7 +5,7 @@
 
 import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
-import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
+import { rankMoves } from '@/lib/move-engine';
 import { runReactiveEngine, type ReactiveResult } from '@/lib/reactive-engine';
 import type { Analysis, Goals, EnrichedTransaction, FinancialProfile, UserIdentity, DebtAccount, BudgetAdjustment, BudgetSection, Move } from '@/lib/types';
 import type { TransactionOverride } from '@/lib/enrichment-engine';
@@ -475,7 +475,6 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     console.warn('[sync] Failed to fetch goals:', message);
   }
 
-  const ukpf = determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
   const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
 
   // Filter dismissed moves

@@ -192,7 +192,7 @@ function ProcessingInner() {
       }
 
       // ── Layer 1: Enrichment Engine (lazy-loaded to reduce initial bundle) ──
-      const [{ default: EnrichmentEngine }, { rankMoves, determineFlowchartPosition, calcGoalTrajectory }] = await Promise.all([
+      const [{ default: EnrichmentEngine }, { rankMoves, calcGoalTrajectory }] = await Promise.all([
         import('@/lib/enrichment-engine'),
         import('@/lib/move-engine'),
       ]);
@@ -313,9 +313,8 @@ function ProcessingInner() {
       }
 
       // ── Layer 2: Move Engine ──
-      // UKPF flowchart priority + goal-aware ranking + trajectories
+      // Goal-aware ranking + trajectories
       setCurrentStep(4);
-      determineFlowchartPosition(result.profile, goals, debtAccountsData, identityData);
       const rankedMoves = rankMoves(result.decisionStack, result.profile, goals, identityData, debtAccountsData);
       const topRanked = rankedMoves[0] || null;
       const goalTrajectory = topRanked ? topRanked.trajectory : null;
@@ -673,7 +672,7 @@ function ProcessingInner() {
   return (
     <View style={styles.container}>
       <DotMatrix />
-      <Text style={styles.title}>Analysing your data</Text>
+      <Text style={styles.title}>Building your financial picture</Text>
 
       {/* Progress bar */}
       <View style={styles.progressBar}>

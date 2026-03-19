@@ -8,6 +8,8 @@ import { ARCHETYPES, SUB_TRAITS, STRENGTH_RULES, BLINDSPOT_RULES } from './arche
 import { UK_BENCHMARKS, MOVE_THRESHOLDS, INCOME_THRESHOLDS, ANALYSIS_MONTHS } from './constants';
 import { calcInterestSaved } from './amortisation';
 import { calcMarginalRate, inferTaxSituation, UK_TAX } from './surplus-engine';
+import { detectCohort, calcSophisticationLevel } from './profile-signals';
+import { classifyAccounts, generateCapitalMoves, detectHighEarnerCohort } from './account-classifier';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -732,6 +734,46 @@ const EnrichmentEngine = {
     })
     .sort((a, b) => b.monthly - a.monthly);
 
+    // ── Dedup income sources ──
+    // The same paycheck can appear twice (e.g. "Net Ltd" via merchant-db AND "Salary" via keyword).
+    // Merge sources with overlapping transaction dates (±2 days) AND similar amounts (within 5%).
+    for (let i = 0; i < incomeSources.length; i++) {
+      for (let j = i + 1; j < incomeSources.length; j++) {
+        const a = incomeSources[i];
+        const b = incomeSources[j];
+        const aTxs = a.transactions || [];
+        const bTxs = b.transactions || [];
+        if (aTxs.length === 0 || bTxs.length === 0) continue;
+        // Count overlapping transactions (date within 2 days AND amount within 5%)
+        let overlap = 0;
+        for (const at of aTxs) {
+          const aDate = new Date(at.date).getTime();
+          const aAmt = Math.abs(at.amount);
+          for (const bt of bTxs) {
+            const bDate = new Date(bt.date).getTime();
+            const bAmt = Math.abs(bt.amount);
+            if (Math.abs(aDate - bDate) <= 2 * 86400000 && aAmt > 0 && Math.abs(aAmt - bAmt) / aAmt < 0.05) {
+              overlap++;
+              break;
+            }
+          }
+        }
+        const minLen = Math.min(aTxs.length, bTxs.length);
+        if (minLen > 0 && overlap / minLen >= 0.5) {
+          // Merge: keep the more specific source name (longer or non-generic)
+          const genericKeywords = /^(salary|wages|income|pay|credit)$/i;
+          const keepA = !genericKeywords.test(a.source) || genericKeywords.test(b.source);
+          if (keepA) {
+            incomeSources.splice(j, 1);
+          } else {
+            incomeSources.splice(i, 1);
+            i--; // re-check from same index
+          }
+          break;
+        }
+      }
+    }
+
     if (incomeSources.length > 0 && !incomeSources.some((s) => s.isSalary)) {
       incomeSources[0].isSalary = true;
     }
@@ -1229,22 +1271,37 @@ const EnrichmentEngine = {
     const wantsGrowth = (id.priorities || []).includes('growth');
     const wantsFreedom = (id.priorities || []).includes('freedom');
     const wantsExperiences = (id.priorities || []).includes('experiences');
-    const buyingHome = (id.upcoming_events || []).includes('first_home');
-    const havingBaby = (id.upcoming_events || []).includes('baby');
-    const changingCareer = (id.upcoming_events || []).includes('career_change');
+    // Events can be strings OR {type, months_away} objects — check both forms
+    const hasEvent = (eventType: string) => (id.upcoming_events || []).some(
+      (e: any) => (typeof e === 'string' ? e : e?.type) === eventType,
+    );
+    const buyingHome = hasEvent('first_home');
+    const havingBaby = hasEvent('baby');
+    const changingCareer = hasEvent('career_change');
     const isAdvanced = id.financial_experience === 'confident' || id.financial_experience === 'advanced';
+    const cohort = detectCohort(profile, id, null, debtAccounts || []);
+    const sophistication = calcSophisticationLevel(id.financial_experience);
 
     // ── High saver gate ──
     // Users saving 25%+ of income don't need spending cut advice — they're already excellent.
     // Only show spending cuts if savings rate is below this threshold.
     const isHighSaver = m.savingsRate >= 25;
 
+    // §13p1: Essential protection — filter essential merchants from all cut recommendations
+    const essentialMerchants = new Set<string>();
+    for (const tx of txs) {
+      if (tx.isEssential) essentialMerchants.add(tx.merchant || tx.description);
+    }
+    const isEssentialMerchant = (name: string) => essentialMerchants.has(name);
+
     // Subscriptions — single consolidated recommendation (not per-merchant)
-    if (!isHighSaver && m.subscriptionCount >= T.subscriptionMinCount) {
-      const subNames = subs.map((s) => s.merchant).filter(Boolean);
-      const cutCount = Math.max(2, Math.round(m.subscriptionCount * T.subscriptionCutPct));
-      const saving = Math.round(p.subscriptions * T.subscriptionCutPct);
-      const topSubs = subs
+    const nonEssentialSubs = subs.filter((s) => !isEssentialMerchant(s.merchant));
+    if (!isHighSaver && nonEssentialSubs.length >= T.subscriptionMinCount) {
+      const subNames = nonEssentialSubs.map((s) => s.merchant).filter(Boolean);
+      const cutCount = Math.max(2, Math.round(nonEssentialSubs.length * T.subscriptionCutPct));
+      const nonEssentialTotal = nonEssentialSubs.reduce((s, sub) => s + sub.averageAmount, 0);
+      const saving = Math.round(nonEssentialTotal * T.subscriptionCutPct);
+      const topSubs = nonEssentialSubs
         .filter((s) => s.merchant && s.averageAmount >= 5)
         .sort((a, b) => b.averageAmount - a.averageAmount)
         .slice(0, 4);
@@ -1262,7 +1319,7 @@ const EnrichmentEngine = {
         effort: 'low',
         category: 'spending',
         merchants: subNames,
-        strategy: `${m.subscriptionCount} active subscriptions costing \u00a3${Math.round(p.subscriptions)}/month total. Biggest: ${subBreakdown}.`,
+        strategy: `${nonEssentialSubs.length} non-essential subscriptions costing \u00a3${Math.round(nonEssentialTotal)}/month total. Biggest: ${subBreakdown}.`,
         steps: ['Review your subscriptions — I\'ve listed them below', 'Cancel the ones you haven\'t used in 30 days', 'Rotate streaming services monthly — I\'ll remind you'],
         effect: `Saves \u00a3${saving}/month (\u00a3${saving * 12}/year).`,
         subGoals,
@@ -1524,7 +1581,10 @@ const EnrichmentEngine = {
         const interestSaved = hasConnectedDebtData
           ? calcInterestSaved(singleBal, singleAPR, p.debtPayments, p.debtPayments + overpay)
           : 0;
-        const debtSaving = Math.round(interestSaved / 12) || Math.round(p.debtPayments * T.singleDebtOverpayPct);
+        const monthlyInterestCost = hasConnectedDebtData ? Math.round(singleBal * singleAPR / 12) : Math.round(p.debtPayments * singleAPR / 12);
+        const debtSaving = Math.round(interestSaved / 12)
+          || Math.round(p.debtPayments * T.singleDebtOverpayPct)
+          || monthlyInterestCost;
         const aprStr = singleDebt && !singleDebt.is_default_apr ? ` at ${(singleAPR * 100).toFixed(1)}%` : '';
 
         const actionText = hasConnectedDebtData
@@ -2059,8 +2119,59 @@ const EnrichmentEngine = {
       });
     }
 
-    moves.sort((a, b) => b.annualImpact - a.annualImpact);
-    return moves;
+    // ── §14: Capital allocation moves ──
+    // For optimizer/coasting/accumulator cohorts, add capital allocation moves
+    if (cohort !== 'crisis' && cohort !== 'debt_focus' && p.income > 0) {
+      try {
+        const accounts = classifyAccounts((profile as any).accountBalances || []);
+        const hasMortgage = id?.housing === 'mortgage';
+        const hasInvestmentTxs = txs.some((t) =>
+          ['Freetrade', 'Vanguard', 'Hargreaves Lansdown', 'AJ Bell', 'Interactive Investor'].some(
+            (platform) => (t.merchant || t.description || '').includes(platform),
+          ),
+        );
+        const capitalMoves = generateCapitalMoves(
+          accounts, p.spending, p.income, m.savingsRate,
+          debtAccounts || [], id?.risk_appetite || 'balanced',
+        );
+        for (const cm of capitalMoves) {
+          moves.push({
+            action: cm.action,
+            annualImpact: cm.annualImpact,
+            monthlyImpact: cm.monthlyImpact,
+            effort: cm.effort,
+            category: cm.category,
+            merchants: [],
+            strategy: cm.strategy,
+            steps: cm.steps,
+            effect: cm.effect,
+          });
+        }
+      } catch (err) {
+        // Capital allocation is best-effort — don't break the pipeline
+      }
+    }
+
+    // ── Cohort-aware filtering (§15e) ──
+    // Filter moves based on financial cohort to avoid noise
+    const filtered = moves.filter((move) => {
+      const cat = move.category || 'spending';
+      // crisis: suppress invest moves and trivial spending cuts
+      if (cohort === 'crisis') {
+        if (cat === 'invest' || cat === 'allocate') return false;
+        if (cat === 'spending' && move.monthlyImpact < 20) return false;
+      }
+      // coasting: suppress most spending cuts
+      if (cohort === 'coasting' && cat === 'spending' && move.annualImpact < 500) return false;
+      // optimizer: suppress trivial spending cuts
+      if (cohort === 'optimizer' && cat === 'spending' && move.annualImpact < 300) return false;
+      // sophistication gate: suppress complex tax/pension moves for beginners
+      if (sophistication < 0.5 && cat === 'invest' && move.annualImpact < 500) return false;
+      return true;
+    });
+
+    filtered.sort((a, b) => b.annualImpact - a.annualImpact);
+    return filtered;
   },
 
   /**

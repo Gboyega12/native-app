@@ -35,6 +35,13 @@ const TWO_YEAR_GOALS = [
   { key: 'other', label: 'Other' },
 ];
 
+const TIMELINES = [
+  { key: '6_months', label: '6 months' },
+  { key: '1_year', label: '1 year' },
+  { key: '2_years', label: '2 years' },
+  { key: '3_5_years', label: '3-5 years' },
+];
+
 export default function Goals() {
   const router = useRouter();
   const { csvData } = useLocalSearchParams<{ csvData: string }>();
@@ -43,13 +50,15 @@ export default function Goals() {
   const [oneYearGoal, setOneYearGoal] = useState('');
   const [twoYearGoal, setTwoYearGoal] = useState('');
   const [targetAmount, setTargetAmount] = useState('');
+  const [goalTimeline, setGoalTimeline] = useState('');
   const [loading, setLoading] = useState(false);
+  const TOTAL_STEPS = 4;
 
   // Track page view on mount
   useEffect(() => { trackScreen('Goals'); }, []);
 
   const handleNext = async () => {
-    if (step < 2) {
+    if (step < TOTAL_STEPS - 1) {
       trackEvent('Goals Step Completed', { step: step + 1 });
       setStep(step + 1);
       return;
@@ -66,11 +75,12 @@ export default function Goals() {
           one_year_goal: oneYearGoal,
           two_year_goal: twoYearGoal,
           target_amount: targetAmount ? parseFloat(targetAmount) : null,
+          goal_timeline: goalTimeline || null,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
         if (error) console.warn('[goals] upsert failed:', error.message);
       }
-      trackEvent('Goals Completed', { situation, one_year_goal: oneYearGoal, two_year_goal: twoYearGoal });
+      trackEvent('Goals Completed', { situation, one_year_goal: oneYearGoal, two_year_goal: twoYearGoal, goal_timeline: goalTimeline });
       router.push({ pathname: '/(main)/processing', params: { csvData } });
     } catch {
       setLoading(false);
@@ -78,7 +88,7 @@ export default function Goals() {
     }
   };
 
-  const currentSelection = step === 0 ? situation : step === 1 ? oneYearGoal : twoYearGoal;
+  const currentSelection = step === 0 ? situation : step === 1 ? oneYearGoal : step === 2 ? twoYearGoal : goalTimeline;
   const canProceed = currentSelection !== '';
 
   const renderStep = () => {
@@ -114,26 +124,42 @@ export default function Goals() {
         </>
       );
     }
+    if (step === 2) {
+      return (
+        <>
+          <Text style={styles.question}>Where do you want to be in 2 years?</Text>
+          {TWO_YEAR_GOALS.map((item, i) => (
+            <OptionButton
+              key={item.key}
+              label={item.label}
+              selected={twoYearGoal === item.key}
+              onPress={() => setTwoYearGoal(item.key)}
+              index={i}
+            />
+          ))}
+          <TextInput
+            style={styles.input}
+            placeholder="Target amount (optional, e.g. 5000)"
+            placeholderTextColor={colors.muted}
+            keyboardType="numeric"
+            value={targetAmount}
+            onChangeText={setTargetAmount}
+          />
+        </>
+      );
+    }
     return (
       <>
-        <Text style={styles.question}>Where do you want to be in 2 years?</Text>
-        {TWO_YEAR_GOALS.map((item, i) => (
+        <Text style={styles.question}>When do you want to achieve this?</Text>
+        {TIMELINES.map((item, i) => (
           <OptionButton
             key={item.key}
             label={item.label}
-            selected={twoYearGoal === item.key}
-            onPress={() => setTwoYearGoal(item.key)}
+            selected={goalTimeline === item.key}
+            onPress={() => setGoalTimeline(item.key)}
             index={i}
           />
         ))}
-        <TextInput
-          style={styles.input}
-          placeholder="Target amount (optional, e.g. 5000)"
-          placeholderTextColor={colors.muted}
-          keyboardType="numeric"
-          value={targetAmount}
-          onChangeText={setTargetAmount}
-        />
       </>
     );
   };
@@ -141,12 +167,12 @@ export default function Goals() {
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <Text style={styles.progress}>Step {step + 1} of 3</Text>
+        <Text style={styles.progress}>Step {step + 1} of {TOTAL_STEPS}</Text>
         {/* Step progress bar */}
         <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginBottom: spacing.xl }}>
           <BreathingBar
             color={colors.accent}
-            width={`${Math.round(((step + 1) / 3) * 100)}%`}
+            width={`${Math.round(((step + 1) / TOTAL_STEPS) * 100)}%`}
             style={{ height: '100%', borderRadius: 1.5 }}
           />
         </View>
@@ -161,7 +187,7 @@ export default function Goals() {
             <ActivityIndicator color={colors.bg} />
           ) : (
             <Text style={styles.buttonText}>
-              {step < 2 ? 'Next' : 'Start analysis'}
+              {step < TOTAL_STEPS - 1 ? 'Next' : 'Start analysis'}
             </Text>
           )}
         </TouchableOpacity>

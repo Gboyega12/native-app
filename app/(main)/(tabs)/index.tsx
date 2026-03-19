@@ -454,6 +454,11 @@ export default function Home() {
 
   const totalReviewCount = unresolvedGroups.length + aiSuggestedGroups.length;
 
+  // §7c: Invisible learning signal — show when review count drops 30%+ from last month
+  const lastReviewCount = (analysis as any)?.review_count_last_month;
+  const showLearningSignal = lastReviewCount != null && lastReviewCount > 3
+    && totalReviewCount > 0 && totalReviewCount < lastReviewCount * 0.7;
+
   // Auto-persist high-confidence AI classifications as overrides so the learning loop
   // kicks in immediately. These are transactions Claude classified with medium+ confidence
   // into a real category — they don't need user review, but they DO need to be saved
@@ -768,6 +773,22 @@ export default function Home() {
         updated.monthly_spending = newSpending;
         updated.surplus = Math.round(income - newSpending - (updated.monthly_savings || 0));
 
+        // Recalculate income sources if any overrides affect income merchants
+        if (Array.isArray(updated.income_sources) && updated.income_sources.length > 0) {
+          const updatedSources = updated.income_sources.filter((s) => {
+            const sourceNorm = normalizeMerchant(s.source);
+            return !normalizedToTarget.has(sourceNorm);
+          });
+          if (updatedSources.length !== updated.income_sources.length) {
+            const removedIncome = updated.income_sources
+              .filter((s) => normalizedToTarget.has(normalizeMerchant(s.source)))
+              .reduce((sum, s) => sum + s.monthly, 0);
+            updated.income_sources = updatedSources;
+            updated.monthly_income = Math.max(0, (updated.monthly_income || 0) - removedIncome);
+            updated.surplus = Math.round((updated.monthly_income || 0) - newSpending - (updated.monthly_savings || 0));
+          }
+        }
+
         // Remove classified person transfers (using normalized matching)
         if (Array.isArray((updated as any).person_transfers)) {
           (updated as any).person_transfers = (updated as any).person_transfers.filter(
@@ -791,6 +812,17 @@ export default function Home() {
       setAiOverrides({});
       setAiExpandedKey(null);
       setSaveSuccess(false);
+
+      // §5: Fire-and-forget global merchant category votes
+      for (const item of allOverrides) {
+        for (const m of item.merchants) {
+          fetch('/api/global-overrides', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ merchant: m, category: item.category, is_essential: item.isEssential }),
+          }).catch(() => {}); // Best-effort, don't block save
+        }
+      }
 
       // Track which merchants were just categorised so unresolvedGroups/aiSuggestedGroups filter them
       setSavedOverrideKeys((prev) => {
@@ -2071,6 +2103,11 @@ export default function Home() {
                   ? `${aiSuggestedGroups.length} item${aiSuggestedGroups.length !== 1 ? 's' : ''} to confirm`
                   : `${unresolvedGroups.length} item${unresolvedGroups.length !== 1 ? 's' : ''} to confirm`}.{' '}
                 <Text style={s.reviewBannerLink}>Tap to review</Text>
+                {showLearningSignal && (
+                  <Text style={[s.reviewBannerText, { fontSize: 11, opacity: 0.7, marginTop: 2 }]}>
+                    {'\n'}Less to review this month — your corrections are working
+                  </Text>
+                )}
               </Text>
             </TouchableOpacity>
           )}

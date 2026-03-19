@@ -416,8 +416,8 @@ interface EnrichContext {
   monthly_spending?: number;
   surplus?: number;
   goals?: { one_year_goal?: string; target_amount?: number };
-  ukpf_priority?: string;
-  ukpf_label?: string;
+  cohort?: string;
+  priority_category?: string;
 }
 
 async function handleEnrich(req: VercelRequest, res: VercelResponse) {
@@ -475,7 +475,7 @@ async function handleEnrich(req: VercelRequest, res: VercelResponse) {
 }
 
 function buildEnrichPrompt(moves: Move[], context: EnrichContext | undefined): string {
-  const { monthly_income, monthly_spending, surplus, goals, ukpf_priority, ukpf_label } = context || {};
+  const { monthly_income, monthly_spending, surplus, goals, cohort, priority_category } = context || {};
 
   let prompt = `You are Bocy, an AI financial assistant. Rewrite these financial recommendations into specific, outcome-focused action plans.
 
@@ -503,7 +503,7 @@ MERCHANT CLEANUP RULES:
 - Remove generic entries like "Card Payment", "Direct Debit", or transaction descriptions that are not actual merchant names
 
 USER CONTEXT:
-- UKPF priority: ${sanitize(ukpf_label || 'unknown')} (${sanitize(ukpf_priority || 'unknown')})`;
+- Financial stage: ${sanitize(cohort || 'unknown')} (priority: ${sanitize(priority_category || 'unknown')})`;
 
   if (monthly_income) prompt += `\n- Monthly income: \u00a3${Math.round(monthly_income)}`;
   if (monthly_spending) prompt += `\n- Monthly spending: \u00a3${Math.round(monthly_spending)}`;

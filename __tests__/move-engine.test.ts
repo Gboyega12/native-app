@@ -1,6 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
 import {
-  determineFlowchartPosition,
   rankMoves,
   findMostMaterialMove,
   calcGoalTrajectory,
@@ -84,113 +83,6 @@ const defaultGoals = {
   two_year_goal: 'buy_home',
 };
 
-// ── determineFlowchartPosition ──
-
-describe('determineFlowchartPosition', () => {
-  it('returns level 0 (break_even) when surplus is negative', () => {
-    const profile = makeProfile({ monthly: { surplus: -200, income: 2000, spending: 2200, debtPayments: 0 } });
-    const result = determineFlowchartPosition(profile, null);
-    expect(result.level).toBe(0);
-    expect(result.priority).toBe('break_even');
-    expect(result.label).toBe('Break even');
-  });
-
-  it('returns buffer priority when savings rate is below 5%', () => {
-    const profile = makeProfile({
-      monthly: { surplus: 50, income: 2500, spending: 2450, debtPayments: 0 },
-      metrics: { savingsRate: 2, debtAccountCount: 0, debtPayments: 0 },
-    });
-    const result = determineFlowchartPosition(profile, null);
-    expect(result.level).toBe(2);
-    expect(result.priority).toBe('buffer');
-    expect(result.label).toBe('Build a buffer');
-  });
-
-  it('returns level 1 debt support when overwhelmed by debt (3+ accounts, in_debt situation)', () => {
-    const profile = makeProfile({
-      monthly: { surplus: 100, income: 2500, spending: 2400, debtPayments: 200 },
-      metrics: { savingsRate: 10, debtAccountCount: 3, debtPayments: 200 },
-    });
-    const goals = { current_situation: 'in_debt', one_year_goal: 'clear_debt', two_year_goal: 'save_target' };
-    const debtAccounts = [
-      { outstanding_balance: 3000, credit_limit: 3500, interest_rate: 0.199 },
-      { outstanding_balance: 1500, credit_limit: 2000, interest_rate: 0.249 },
-      { outstanding_balance: 800, credit_limit: 1000, interest_rate: 0.179 },
-    ];
-    const result = determineFlowchartPosition(profile, goals, debtAccounts);
-    expect(result.level).toBe(1);
-    expect(result.priority).toBe('debt');
-  });
-
-  it('returns level 4 (clear remaining debt) for users with non-expensive debt and payments > 100', () => {
-    const profile = makeProfile({
-      monthly: { surplus: 300, income: 2500, spending: 2200, debtPayments: 150 },
-      metrics: { savingsRate: 12, debtAccountCount: 1, debtPayments: 150 },
-    });
-    const goals = { current_situation: 'in_debt', one_year_goal: 'clear_debt', two_year_goal: 'save_target' };
-    const result = determineFlowchartPosition(profile, goals);
-    expect(result.level).toBe(4);
-    expect(result.priority).toBe('debt');
-    expect(result.label).toBe('Clear remaining debt');
-  });
-
-  it('returns level 3 (clear high-interest debt) when expensive debt exists', () => {
-    const profile = makeProfile({
-      monthly: { surplus: 300, income: 2500, spending: 2200, debtPayments: 150 },
-      metrics: { savingsRate: 12, debtAccountCount: 1, debtPayments: 150 },
-    });
-    const goals = { current_situation: 'in_debt', one_year_goal: 'clear_debt', two_year_goal: 'save_target' };
-    const debtAccounts = [{ outstanding_balance: 5000, interest_rate: 0.199, credit_limit: 5000 }];
-    const result = determineFlowchartPosition(profile, goals, debtAccounts);
-    expect(result.level).toBe(3);
-    expect(result.priority).toBe('debt');
-    expect(result.label).toBe('Clear high-interest debt');
-  });
-
-  it('returns level 5 (full emergency fund) when savings rate is between 5-15%', () => {
-    const profile = makeProfile({
-      monthly: { surplus: 250, income: 2500, spending: 2250, debtPayments: 0 },
-      metrics: { savingsRate: 10, debtAccountCount: 0, debtPayments: 0 },
-    });
-    const result = determineFlowchartPosition(profile, null);
-    expect(result.level).toBe(5);
-    expect(result.priority).toBe('buffer');
-  });
-
-  it('returns level 7 (short-term goals / savings) when savings rate is 15-25%', () => {
-    const profile = makeProfile({
-      monthly: { surplus: 500, income: 2500, spending: 2000, debtPayments: 0 },
-      metrics: { savingsRate: 20, debtAccountCount: 0, debtPayments: 0 },
-    });
-    const result = determineFlowchartPosition(profile, null);
-    expect(result.level).toBe(7);
-    expect(result.priority).toBe('savings');
-  });
-
-  it('returns level 9 (invest / long-term wealth) when savings rate >= 25%', () => {
-    const profile = makeProfile({
-      monthly: { surplus: 1000, income: 3000, spending: 2000, debtPayments: 0 },
-      metrics: { savingsRate: 33, debtAccountCount: 0, debtPayments: 0 },
-    });
-    const result = determineFlowchartPosition(profile, null);
-    expect(result.level).toBe(9);
-    expect(result.priority).toBe('invest');
-  });
-
-  it('treats low-utilization debt as good debt and skips debt levels', () => {
-    const profile = makeProfile({
-      monthly: { surplus: 300, income: 2500, spending: 2200, debtPayments: 80 },
-      metrics: { savingsRate: 20, debtAccountCount: 1, debtPayments: 80 },
-    });
-    const goals = { current_situation: 'in_debt', one_year_goal: 'clear_debt', two_year_goal: 'save_target' };
-    // Low utilization: 500 / 5000 = 10%
-    const debtAccounts = [{ outstanding_balance: 500, credit_limit: 5000, interest_rate: 0.049 }];
-    const result = determineFlowchartPosition(profile, goals, debtAccounts);
-    // Should skip level 1 and 4 because debt is "good debt"
-    expect(result.priority).not.toBe('debt');
-  });
-});
-
 // ── rankMoves ──
 
 describe('rankMoves', () => {
@@ -225,14 +117,14 @@ describe('rankMoves', () => {
     expect(result[1].action).toBe('Small saving');
   });
 
-  it('includes ukpfScore, trajectory, and rank on each result', () => {
+  it('includes score, trajectory, and rank on each result', () => {
     const profile = makeProfile();
     const moves = [makeMove()];
     const result = rankMoves(moves, profile, defaultGoals);
-    expect(result[0]).toHaveProperty('ukpfScore');
+    expect(result[0]).toHaveProperty('score');
     expect(result[0]).toHaveProperty('trajectory');
     expect(result[0]).toHaveProperty('rank');
-    expect(typeof result[0].ukpfScore).toBe('number');
+    expect(typeof result[0].score).toBe('number');
     expect(result[0].rank).toBe(1);
   });
 
@@ -258,7 +150,7 @@ describe('rankMoves', () => {
     const result = rankMoves([highEffort, lowEffort], profile, defaultGoals);
     const easyRank = result.find(m => m.action === 'Easy win')!;
     const hardRank = result.find(m => m.action === 'Hard change')!;
-    expect(easyRank.ukpfScore).toBeGreaterThan(hardRank.ukpfScore);
+    expect(easyRank.score).toBeGreaterThan(hardRank.score);
   });
 });
 

@@ -4,14 +4,14 @@
 // Gap 1: Auto-verify plan steps when matching transactions appear in sync data.
 // Gap 2: Detect reactive events (debt paid, subscription cancelled, etc.)
 //        and return insight triggers for the UI to show modals.
-// Gap 3: Suggest the next priority move using liquidity-adjusted marginal utility,
-//        Monte Carlo simulations, and UKPF flowchart waterfall.
+// Gap 3: Suggest the next priority move using liquidity-adjusted marginal utility
+//        and Monte Carlo simulations.
 // Gap 4: Wire plan completion counts back to the achievement engine.
 
 import { supabase } from '@/lib/supabase';
 import type { Analysis, Move, MoveSubGoal, EnrichedTransaction, FinancialProfile, Goals, UserIdentity, DebtAccount } from '@/lib/types';
 import type { RankedMove } from '@/lib/move-engine';
-import { rankMoves, determineFlowchartPosition } from '@/lib/move-engine';
+import { rankMoves } from '@/lib/move-engine';
 import { checkAchievements, type ScoreSnapshot } from '@/lib/achievements';
 import { estimateVolatility, simulateGoalTimeline, simulateBufferNeed, type VolatilityProfile } from '@/lib/monte-carlo';
 import { calcMoveMarginalUtility, type LiquidityTier } from '@/lib/liquidity-engine';
@@ -43,10 +43,6 @@ export interface NextMoveSuggestion {
   rank: number;
   /** Why this move is suggested — human-readable reason */
   reason: string;
-  /** UKPF flowchart level label */
-  flowchartLabel: string;
-  /** Flowchart priority category */
-  priority: string;
   /** Marginal utility multiplier */
   marginalMultiplier: number;
   /** Liquidity tier */
@@ -398,8 +394,6 @@ function suggestNextPriorityMove(
   const moves = analysis.all_moves || [];
   if (moves.length === 0 || !profile) return null;
 
-  const ukpf = determineFlowchartPosition(profile, goals, debtAccounts, identity);
-
   // Detect what was just completed to enable chaining
   const justCompletedCategory = justCompletedEvents
     .filter((e) => e.type === 'move_auto_completed' || e.type === 'debt_payment' || e.type === 'subscription_cancelled')
@@ -433,15 +427,24 @@ function suggestNextPriorityMove(
       // Chain: same category as what was just completed
       if (justCompletedCategory && cat === justCompletedCategory) {
         chainMatches.push({ move, index: i });
-      } else if (cat === ukpf.priority) {
-        unstartedMatching.push({ move, index: i });
       } else {
-        unstartedOther.push({ move, index: i });
+        // Goal alignment: moves matching user's 1-year goal category get priority
+        const goalCategory = goals?.one_year_goal === 'clear_debt' ? 'debt'
+          : goals?.one_year_goal === 'emergency_fund' ? 'buffer'
+          : goals?.one_year_goal === 'reduce_spending' ? 'spending'
+          : goals?.one_year_goal === 'save_target' ? 'savings'
+          : goals?.one_year_goal === 'invest' ? 'invest'
+          : null;
+        if (goalCategory && cat === goalCategory) {
+          unstartedMatching.push({ move, index: i });
+        } else {
+          unstartedOther.push({ move, index: i });
+        }
       }
     }
   }
 
-  // Priority order: in-progress > chain matches > flowchart matches > rest
+  // Priority order: in-progress > chain matches > goal-aligned matches > rest
   const candidates = [...startedIncomplete, ...chainMatches, ...unstartedMatching, ...unstartedOther];
   if (candidates.length === 0) return null;
 
@@ -475,7 +478,15 @@ function suggestNextPriorityMove(
     else if (c.move.effort === 'high') score *= 0.8;
 
     const cat = c.move.category || 'spending';
-    if (cat === ukpf.priority) score *= 1.2;
+
+    // Goal alignment boost — 1.3x for moves matching user's stated goal
+    const goalCategory = goals?.one_year_goal === 'clear_debt' ? 'debt'
+      : goals?.one_year_goal === 'emergency_fund' ? 'buffer'
+      : goals?.one_year_goal === 'reduce_spending' ? 'spending'
+      : goals?.one_year_goal === 'save_target' ? 'savings'
+      : goals?.one_year_goal === 'invest' ? 'invest'
+      : null;
+    if (goalCategory && cat === goalCategory) score *= 1.3;
 
     const isInProgress = startedIncomplete.some((s) => s.index === c.index);
     if (isInProgress) score *= 1.5;
@@ -492,8 +503,12 @@ function suggestNextPriorityMove(
       const done = prog?.completed_steps?.length || 0;
       const total = c.move.steps?.length || 0;
       reason = `${done}/${total} steps done — keep going`;
-    } else if (cat === ukpf.priority) {
-      reason = `Your priority: ${ukpf.label}`;
+    } else if (goalCategory && cat === goalCategory) {
+      const goalLabels: Record<string, string> = {
+        clear_debt: 'Clear debt', emergency_fund: 'Build emergency fund',
+        reduce_spending: 'Reduce spending', save_target: 'Hit savings target', invest: 'Start investing',
+      };
+      reason = `Matches your goal: ${goalLabels[goals!.one_year_goal!] || goals!.one_year_goal}`;
     } else if (c.move.effort === 'low') {
       reason = `Quick win — £${c.move.annualImpact}/yr`;
     } else {
@@ -529,8 +544,6 @@ function suggestNextPriorityMove(
     move: candidate.move,
     rank: candidate.index + 1,
     reason,
-    flowchartLabel: ukpf.label,
-    priority: ukpf.priority,
     marginalMultiplier: mu.multiplier,
     liquidityTier: mu.liquidityTier,
     trajectory,
@@ -570,7 +583,7 @@ async function detectReactiveAchievements(
     savings_rate: analysis.monthly_income > 0
       ? Math.round((analysis.surplus / analysis.monthly_income) * 100) : 0,
     subscription_count: 0, // Will be populated from profile data
-    debt_account_count: 0,
+    debt_account_count: debtAccounts.length,
   };
 
   // Use the PREVIOUS snapshot (not the one we just inserted)

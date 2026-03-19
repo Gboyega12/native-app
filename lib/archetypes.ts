@@ -84,6 +84,16 @@ export const ARCHETYPES: Record<string, ArchetypeConfig> = {
     genPlaybook: () =>
       "Your savings discipline is strong. The next step is making that money work harder \u2014 consider ISAs, index funds, or pension top-ups to beat inflation.",
   },
+  savings_optimizer: {
+    key: 'savings_optimizer',
+    name: 'Savings Optimizer',
+    emoji: '\u{1F4C8}',
+    color: '#6BA5E8',
+    vibe: 'You save intentionally and want to optimise where your money goes.',
+    triggers: (m) => m.savingsRate >= 15 && m.debtAccounts <= 1,
+    genPlaybook: () =>
+      "You're beyond the basics. Focus on tax-efficient wrappers (ISA, pension), rate optimisation, and making idle cash work harder. Spending cuts matter less than capital allocation.",
+  },
   edge_walker: {
     key: 'edge_walker',
     name: 'Edge Walker',

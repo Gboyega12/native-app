@@ -84,7 +84,19 @@ const SCREENS: ScreenDef[] = [
       { key: 'advanced', label: 'Advanced', desc: 'Multi-asset, tax optimisation', icon: ':::' },
     ],
   },
-  // 4: Priorities (multi-select, top 2)
+  // 4: Income band
+  {
+    question: "What's your annual income?",
+    hint: 'This unlocks precise tax and pension recommendations',
+    options: [
+      { key: 'under_30k', label: 'Under £30k', desc: 'Below the higher-rate threshold', icon: '.' },
+      { key: '30k_50k', label: '£30k – £50k', desc: 'Approaching higher-rate tax', icon: '..' },
+      { key: '50k_100k', label: '£50k – £100k', desc: 'Higher-rate taxpayer', icon: '...' },
+      { key: 'over_100k', label: 'Over £100k', desc: 'Personal allowance taper zone', icon: ':::' },
+    ],
+    skippable: true,
+  },
+  // 5: Priorities (multi-select, top 2)
   {
     question: 'What matters most right now?',
     hint: 'Pick your top 2 — this ranks every recommendation',
@@ -98,7 +110,7 @@ const SCREENS: ScreenDef[] = [
       { key: 'family', label: 'Family first', desc: "Children's future, partner goals", icon: '<3' },
     ],
   },
-  // 5: Upcoming events (multi-select, skippable)
+  // 6: Upcoming events (multi-select, skippable)
   {
     question: 'Anything big coming up?',
     hint: 'These create time-sensitive moves — skip if nothing planned',
@@ -115,7 +127,7 @@ const SCREENS: ScreenDef[] = [
       { key: 'none', label: 'Nothing specific', desc: 'Just optimising', icon: '--' },
     ],
   },
-  // 6: Risk appetite
+  // 7: Risk appetite
   {
     question: 'How do you feel about financial risk?',
     hint: 'Affects investment and savings recommendations',
@@ -125,7 +137,7 @@ const SCREENS: ScreenDef[] = [
       { key: 'growth', label: 'Grow it', desc: 'Happy to take risks for returns', icon: '[+]' },
     ],
   },
-  // 7: Dependents (multi-select, skippable)
+  // 8: Dependents (multi-select, skippable)
   {
     question: 'Any dependents?',
     hint: 'Affects buffer sizing and protection priorities',
@@ -155,6 +167,7 @@ export default function Identity() {
   const [household, setHousehold] = useState<string>('');
   const [housing, setHousing] = useState<string>('');
   const [experience, setExperience] = useState<string>('');
+  const [incomeBand, setIncomeBand] = useState<string>('');
   const [priorities, setPriorities] = useState<string[]>([]);
   const [events, setEvents] = useState<string[]>([]);
   const [eventTimelines, setEventTimelines] = useState<Record<string, number | null>>({});
@@ -164,8 +177,8 @@ export default function Identity() {
   // Track page view on mount
   useEffect(() => { trackScreen('Identity'); }, []);
 
-  const selections = [workSetup, household, housing, experience, priorities, events, risk, dependents];
-  const setters = [setWorkSetup, setHousehold, setHousing, setExperience, setPriorities, setEvents, setRisk, setDependents];
+  const selections = [workSetup, household, housing, experience, incomeBand, priorities, events, risk, dependents];
+  const setters = [setWorkSetup, setHousehold, setHousing, setExperience, setIncomeBand, setPriorities, setEvents, setRisk, setDependents];
 
   const isSummary = step === SCREENS.length;
   const currentScreen = !isSummary ? SCREENS[step] : null;
@@ -183,7 +196,7 @@ export default function Identity() {
 
   const handleSelect = (key: string) => {
     // Animate layout when toggling timeline-eligible events
-    if (step === 5 && ['baby', 'moving', 'wedding'].includes(key)) {
+    if (step === 6 && ['baby', 'moving', 'wedding'].includes(key)) {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     }
     if (isMulti) {
@@ -266,6 +279,7 @@ export default function Identity() {
             return months != null ? { type: e, months_away: months } : e;
           }),
           dependents: dependents.filter((d) => d !== 'none'),
+          income_band: incomeBand || null,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
 
@@ -440,7 +454,7 @@ export default function Identity() {
           </View>
 
           {/* Timeline picker: show for events that benefit from a timeline */}
-          {step === 5 && (() => {
+          {step === 6 && (() => {
             const TIMELINE_EVENTS = ['baby', 'moving', 'wedding'];
             const TIMELINE_OPTIONS = [
               { label: '1\u20132 months', value: 1.5 },

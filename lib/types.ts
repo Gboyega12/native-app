@@ -178,7 +178,7 @@ export interface Move {
   steps: string[];
   effect: string;
   timeline?: string;
-  category?: 'break_even' | 'buffer' | 'debt' | 'spending' | 'savings' | 'invest';
+  category?: 'break_even' | 'buffer' | 'debt' | 'spending' | 'savings' | 'invest' | 'allocate';
   merchants?: string[];
   /** Structured sub-goals derived from real data at generation time */
   subGoals?: MoveSubGoal[];
@@ -274,6 +274,12 @@ export interface DecisionScore {
 
 // ── Goals ──
 
+export type IncomeBand = 'under_30k' | '30k_50k' | '50k_100k' | 'over_100k';
+export type GoalTimeline = '6_months' | '1_year' | '2_years' | '3_5_years';
+export type UpcomingEventWithTimeline = { type: string; monthsAway: number | null };
+
+export type FinancialCohort = 'crisis' | 'debt_focus' | 'foundation' | 'accumulator' | 'optimizer' | 'coasting';
+
 export interface Goals {
   id?: string;
   user_id?: string;
@@ -281,6 +287,7 @@ export interface Goals {
   one_year_goal: string;
   two_year_goal: string;
   target_amount?: number;
+  goal_timeline?: GoalTimeline;
 }
 
 // ── Analysis (stored in Supabase) ──
@@ -554,14 +561,12 @@ export interface ChatContext {
       coverageRate: number;
     };
   } | null;
-}
-
-// ── Flowchart Position ──
-
-export interface FlowchartPosition {
-  level: number;
-  label: string;
-  priority: 'break_even' | 'buffer' | 'debt' | 'spending' | 'savings' | 'invest';
+  /** §14n: Capital allocation context for high-earner cohorts */
+  cohort?: 'crisis' | 'debt_focus' | 'foundation' | 'accumulator' | 'optimizer' | 'coasting';
+  high_earner_cohort?: 'unstructured_high_earner' | 'structured_high_earner' | null;
+  account_summary?: { cash: number; savings: number; isa: number; pension: number; investments: number };
+  idle_capital?: number;
+  isa_remaining?: number;
 }
 
 // ── User Identity (onboarding discovery) ──
@@ -583,8 +588,9 @@ export interface UserIdentity {
   financial_experience: FinancialExperience;
   risk_appetite: RiskAppetite;
   priorities: Priority[];
-  upcoming_events: UpcomingEvent[];
+  upcoming_events: (UpcomingEvent | { type: string; months_away: number })[];
   dependents: Dependent[];
+  income_band?: IncomeBand;
   created_at?: string;
   updated_at?: string;
 }

@@ -121,7 +121,8 @@ export function checkAchievements(
   if (context.streakDays >= 60) award('streak_60');
 
   // Milestones
-  if (current.debt_account_count === 0) award('debt_free');
+  // debt_free: only award as a transition — "never had debt data" ≠ "debt free"
+  if (current.debt_account_count === 0 && previous && previous.debt_account_count > 0) award('debt_free');
   if (current.savings_rate >= 10) award('savings_rate_10');
   if (current.savings_rate >= 20) award('savings_rate_20');
   if (current.decision_score >= 75) award('score_strong');
