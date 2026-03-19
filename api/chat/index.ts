@@ -696,6 +696,10 @@ interface ChatContext {
   behavioral_patterns?: string[];
   payday_context?: Record<string, unknown>;
   uncategorized_transactions?: Array<{ description: string; amount: number; date: string; count: number }>;
+  account_summary?: { cash: number; savings: number; isa: number; pension: number; investments: number };
+  idle_capital?: number;
+  isa_remaining?: number;
+  high_earner_cohort?: 'unstructured_high_earner' | 'structured_high_earner' | null;
 }
 
 async function executeIncomeSummary(userId: string | null): Promise<ToolResult> {
@@ -925,6 +929,28 @@ Tools:
       }
     }
     prompt += `\nIMPORTANT: When the user asks about financial resilience, "what if" scenarios, or whether they can afford a life change, reference these scenario probabilities. Make risk feel concrete: "There's a ${(hc.scenarios as Array<Record<string, unknown>>)?.[0]?.probability || 6}% chance of income disruption this year \u2014 your buffer ${(hc.buffer_adequacy as number) >= 70 ? 'covers that well' : 'would struggle with that'}."`;
+  }
+
+  // ── Capital allocation context (§14n) ──
+  if (ctx.account_summary) {
+    const acc = ctx.account_summary as Record<string, number>;
+    const total = (acc.cash || 0) + (acc.savings || 0) + (acc.isa || 0) + (acc.pension || 0) + (acc.investments || 0);
+    prompt += `\n\nAccount allocation (net worth £${Math.round(total).toLocaleString()}):`;
+    if (acc.cash) prompt += `\n- Cash: £${Math.round(acc.cash).toLocaleString()}`;
+    if (acc.savings) prompt += `\n- Savings: £${Math.round(acc.savings).toLocaleString()}`;
+    if (acc.isa) prompt += `\n- ISA: £${Math.round(acc.isa).toLocaleString()}`;
+    if (acc.pension) prompt += `\n- Pension: £${Math.round(acc.pension).toLocaleString()} (estimated)`;
+    if (acc.investments) prompt += `\n- Investments: £${Math.round(acc.investments).toLocaleString()}`;
+    if ((ctx.idle_capital as number) > 5000) {
+      prompt += `\n- Idle capital (cash beyond 3-month buffer): £${Math.round(ctx.idle_capital as number).toLocaleString()}`;
+    }
+    if (ctx.high_earner_cohort) {
+      const cohortLabel = ctx.high_earner_cohort === 'unstructured_high_earner'
+        ? 'Unstructured High Earner (cash-heavy, under-optimised)'
+        : 'Structured High Earner (active investor, locally efficient)';
+      prompt += `\n- Cohort: ${cohortLabel}`;
+    }
+    prompt += `\nIMPORTANT: When the user asks "where should I put my money?", use this allocation data. For UHE: focus on deploying idle cash. For SHE: focus on tax efficiency and rebalancing.`;
   }
 
   // ── Spending breakdown ──

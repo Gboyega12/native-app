@@ -19,6 +19,7 @@ import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals, repairDebtSubGoals } from '@/lib/types';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType } from '@/lib/types';
+import { classifyAccounts, type AccountBuckets } from '@/lib/account-classifier';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { DashboardSkeleton } from '@/components/Skeleton';
@@ -228,7 +229,9 @@ export default function Home() {
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [incomeExpanded, setIncomeExpanded] = useState(false);
+  const [expandedIncomeSource, setExpandedIncomeSource] = useState<string | null>(null);
   const [showAllMoves, setShowAllMoves] = useState(false);
+  const [accountBuckets, setAccountBuckets] = useState<AccountBuckets | null>(null);
   const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
   const userIdRef = useRef<string | null>(null);
 
@@ -1172,6 +1175,20 @@ export default function Home() {
           setHasBankConnection(false);
         }
       }
+
+      // Fetch account balances for Net Worth card (non-critical, swallow errors)
+      try {
+        const { data: bankRow } = await supabase
+          .from('bank_data')
+          .select('account_balances')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (bankRow?.account_balances && Array.isArray(bankRow.account_balances)) {
+          setAccountBuckets(classifyAccounts(bankRow.account_balances));
+        }
+      } catch {}
 
       // Trigger background sync if user has any data or a bank connection.
       // Force-sync when data was previously stale (fallback) to retry TrueLayer.
@@ -3074,27 +3091,64 @@ export default function Home() {
                     <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 12 }}>
                       SOURCES
                     </Text>
-                    {incomeSources.map((src: IncomeSource, i: number) => (
-                      <View key={`inc-src-${i}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 }}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text }}>{src.source}</Text>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 }}>
-                            <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, letterSpacing: 0.5 }}>
-                              {src.frequency}
-                            </Text>
-                            {src.isSalary && (
-                              <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: 'rgba(147,130,220,0.12)' }}>
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 8, color: '#9382DC', letterSpacing: 0.5 }}>SALARY</Text>
+                    {incomeSources.map((src: IncomeSource, i: number) => {
+                      const srcKey = `${src.source}-${i}`;
+                      const isExpanded = expandedIncomeSource === srcKey;
+                      const hasTxs = Array.isArray(src.transactions) && src.transactions.length > 0;
+                      return (
+                        <View key={`inc-src-${i}`}>
+                          <TouchableOpacity
+                            activeOpacity={hasTxs ? 0.6 : 1}
+                            onPress={() => {
+                              if (!hasTxs) return;
+                              LayoutAnimation.configureNext(SMOOTH_ANIM);
+                              setExpandedIncomeSource(isExpanded ? null : srcKey);
+                            }}
+                            style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 }}
+                          >
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text }}>{src.source}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, letterSpacing: 0.5 }}>
+                                  {src.frequency}
+                                </Text>
+                                {src.isSalary && (
+                                  <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: 'rgba(147,130,220,0.12)' }}>
+                                    <Text style={{ fontFamily: fonts.mono, fontSize: 8, color: '#9382DC', letterSpacing: 0.5 }}>SALARY</Text>
+                                  </View>
+                                )}
+                                {hasTxs && (
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.dim }}>
+                                    {src.transactions!.length} txn{src.transactions!.length !== 1 ? 's' : ''} {isExpanded ? '\u25B4' : '\u25BE'}
+                                  </Text>
+                                )}
                               </View>
-                            )}
-                          </View>
+                            </View>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.text2, letterSpacing: 0.3 }}>
+                              {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
+                              <Text style={{ fontSize: 10, color: colors.muted }}>/{src.frequency === 'weekly' ? 'wk' : src.frequency === 'fortnightly' ? '2wk' : 'mo'}</Text>
+                            </Text>
+                          </TouchableOpacity>
+                          {isExpanded && src.transactions && (
+                            <View style={{ marginLeft: 12, marginBottom: 8, paddingLeft: 10, borderLeftWidth: 1, borderLeftColor: colors.border }}>
+                              {src.transactions.map((tx, ti) => (
+                                <View key={`inc-tx-${ti}`} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 5 }}>
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2 }}>{tx.merchant || tx.description}</Text>
+                                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, marginTop: 1 }}>
+                                      {new Date(tx.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                    </Text>
+                                  </View>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.green }}>
+                                    {'\u00a3'}{Math.abs(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
                         </View>
-                        <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.text2, letterSpacing: 0.3 }}>
-                          {'\u00a3'}{Math.round(src.avgAmount).toLocaleString()}
-                          <Text style={{ fontSize: 10, color: colors.muted }}>/{src.frequency === 'weekly' ? 'wk' : src.frequency === 'fortnightly' ? '2wk' : 'mo'}</Text>
-                        </Text>
-                      </View>
-                    ))}
+                      );
+                    })}
                   </View>
                 )}
               </Card>
@@ -3102,6 +3156,63 @@ export default function Home() {
           </View>
           )}
 
+          {/* ══════════════════════════════════════════════
+              NET WORTH — account allocation breakdown (UHE/SHE only)
+              ══════════════════════════════════════════════ */}
+          {accountBuckets && (() => {
+            const totalAssets = accountBuckets.cash.total + accountBuckets.savings.total + accountBuckets.isa.total + accountBuckets.investments.total + accountBuckets.pension.total;
+            if (totalAssets <= 0) return null;
+            const bucketRows = [
+              { label: 'Cash', amount: accountBuckets.cash.total, color: colors.text2, count: accountBuckets.cash.accounts.length },
+              { label: 'Savings', amount: accountBuckets.savings.total, color: colors.green, count: accountBuckets.savings.accounts.length },
+              { label: 'ISA', amount: accountBuckets.isa.total, color: '#9382DC', count: accountBuckets.isa.accounts.length },
+              { label: 'Pension', amount: accountBuckets.pension.total, color: colors.amber, count: 0 },
+              { label: 'Investments', amount: accountBuckets.investments.total, color: colors.coral, count: accountBuckets.investments.accounts.length },
+            ].filter(r => r.amount > 0);
+            return (
+              <Card style={{ marginBottom: spacing.md }}>
+                <CardTitleRow
+                  title="Net Worth"
+                  right={
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 16, color: colors.text, letterSpacing: 0.3 }}>
+                      {'\u00a3'}{Math.round(totalAssets).toLocaleString()}
+                    </Text>
+                  }
+                />
+                {/* Allocation bar */}
+                <View style={{ flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', marginTop: 12, marginBottom: 16 }}>
+                  {bucketRows.map((r) => (
+                    <View key={r.label} style={{ flex: r.amount / totalAssets, backgroundColor: r.color, marginRight: 1 }} />
+                  ))}
+                </View>
+                {/* Bucket rows */}
+                {bucketRows.map((r, idx) => (
+                  <View key={r.label} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: idx === bucketRows.length - 1 ? 0 : StyleSheet.hairlineWidth, borderBottomColor: colors.border }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: r.color }} />
+                      <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text }}>{r.label}</Text>
+                      {r.count > 0 && (
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted }}>
+                          {r.count} acct{r.count !== 1 ? 's' : ''}
+                        </Text>
+                      )}
+                      {r.label === 'Pension' && accountBuckets.pension.estimated && (
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 8, color: colors.dim }}>est.</Text>
+                      )}
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: r.color }}>
+                        {'\u00a3'}{Math.round(r.amount).toLocaleString()}
+                      </Text>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>
+                        {Math.round((r.amount / totalAssets) * 100)}%
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </Card>
+            );
+          })()}
 
           {/* ── Unified review modal ── */}
           <Modal visible={reviewModalVisible} transparent animationType="none" onRequestClose={dismissReviewModal}>

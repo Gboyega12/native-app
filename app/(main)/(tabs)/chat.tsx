@@ -16,6 +16,7 @@ import { hapticLight, hapticSuccess } from '@/lib/haptics';
 import Card from '@/components/Card';
 import type { ChatMessage, ChatContext, ChatAction, Analysis, Goals, FinancialProfile, UserIdentity } from '@/lib/types';
 import { solveBudgetAllocation } from '@/lib/budget-solver';
+import { classifyAccounts, detectHighEarnerCohort } from '@/lib/account-classifier';
 import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo';
 import { useVoiceConversation, type VoiceState } from '@/lib/use-voice-conversation';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
@@ -1644,6 +1645,47 @@ export default function Chat() {
       ctx.budget_line = buildBudgetLine(latestAnalysis, prevSnapshot, identityForSolver);
       ctx.household_cashflow = buildHouseholdCashflow(latestAnalysis, identityForSolver);
     }
+
+    // ── Capital allocation context (§14n) ──
+    try {
+      const { data: bankData } = await supabase
+        .from('bank_data')
+        .select('account_balances')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (bankData?.account_balances && Array.isArray(bankData.account_balances)) {
+        const buckets = classifyAccounts(bankData.account_balances);
+        const totalAssets = buckets.cash.total + buckets.savings.total + buckets.isa.total + buckets.investments.total + buckets.pension.total;
+        if (totalAssets > 0) {
+          ctx.account_summary = {
+            cash: buckets.cash.total,
+            savings: buckets.savings.total,
+            isa: buckets.isa.total,
+            pension: buckets.pension.total,
+            investments: buckets.investments.total,
+          };
+          const bufferNeeded = (ctx.monthly_spending || 0) * 3;
+          ctx.idle_capital = Math.max(0, buckets.cash.total - bufferNeeded);
+          ctx.isa_remaining = 20000; // Requires historical tracking for precision
+          const debts = ctx.debt_accounts?.map((d) => ({
+            outstanding_balance: d.balance,
+            interest_rate: d.interest_rate,
+          } as any)) || [];
+          ctx.high_earner_cohort = detectHighEarnerCohort(
+            ctx.monthly_income || 0,
+            latestAnalysis?.monthly_income ? ((latestAnalysis.surplus || 0) / latestAnalysis.monthly_income) * 100 : 0,
+            buckets,
+            ctx.monthly_spending || 0,
+            debts,
+            false, // investment txn detection not available here
+            debts.some((d: any) => d.type === 'mortgage'),
+            false, // full-payer detection not available here
+          );
+        }
+      }
+    } catch {}
 
     setContext(ctx);
 
