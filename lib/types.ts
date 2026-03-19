@@ -6,6 +6,19 @@ export interface RawTransaction {
   amount: number;
 }
 
+/** Economic type: what role this transaction plays in the user's financial system */
+export type EconomicType =
+  | 'income'
+  | 'fixed_essential'
+  | 'variable_essential'
+  | 'discretionary'
+  | 'debt_repayment'
+  | 'asset_transfer'
+  | 'internal_transfer'
+  | 'investment'
+  | 'tax_related'
+  | 'anomalous';
+
 export interface EnrichedTransaction extends RawTransaction {
   merchant: string;
   category: string;
@@ -18,8 +31,16 @@ export interface EnrichedTransaction extends RawTransaction {
   isRefund: boolean;
   isSavings: boolean;
   confidence: 'high' | 'medium' | 'low';
+  /** Numeric confidence score 0-1 for gating (Phase 1B) — stamped after enrichment */
+  confidenceScore?: number;
   /** Which classification layer resolved this transaction */
   classifiedBy?: 'user_override' | 'merchant_db' | 'fuzzy_match' | 'keyword' | 'claude_ai' | 'default';
+  /** Economic classification: what financial role this transaction plays (Phase 1A) */
+  economicType?: EconomicType;
+  /** Whether this is a fixed/recurring expense vs variable (Phase 1D) */
+  isFixed?: boolean;
+  /** Financial system role (Phase 1D) */
+  financialRole?: 'obligation' | 'discretionary' | 'transfer' | 'investment' | 'income';
 }
 
 // ── Recurring ──
@@ -180,6 +201,20 @@ export interface Move {
   subGoals?: MoveSubGoal[];
   /** Mathematical proof string showing the calculation behind the impact */
   proof?: string;
+  /** Source account/bucket for reallocation moves (Phase 3B) */
+  source?: string;
+  /** Destination account/bucket for reallocation moves (Phase 3B) */
+  destination?: string;
+  /** Exact £ amount for the move (Phase 3B) */
+  amount?: number;
+  /** Type of recommendation (Phase 3B) */
+  recommendationType?: 'reallocation' | 'reduction' | 'optimization' | 'timing';
+  /** Whether this move was suppressed by a feasibility check (Phase 3A) */
+  suppressed?: boolean;
+  /** Reason for suppression (Phase 3A) */
+  suppressedReason?: string;
+  /** Scenario comparison: current vs recommended outcome (Phase 3C) */
+  scenario?: ScenarioComparison;
 }
 
 /**
@@ -319,6 +354,94 @@ export function repairDebtSubGoals(sgs: MoveSubGoal[], debtAccounts: any[]): Mov
   return [...repairedDebtSgs, ...nonDebtSgs];
 }
 
+// ── Scenario Comparison (Phase 3C) ──
+
+export interface ScenarioComparison {
+  current: { median: number; p10: number; p90: number };
+  recommended: { median: number; p10: number; p90: number };
+  netDifference: number;
+  /** % of simulations where recommended beats current */
+  probability: number;
+}
+
+// ── Insight Types (Phase 2) ──
+
+export type InsightType =
+  | 'idle_capital_drag'
+  | 'tax_leakage'
+  | 'debt_return_mismatch'
+  | 'liquidity_inefficiency'
+  | 'cross_system_distortion'
+  | 'time_based_loss';
+
+export interface Insight {
+  type: InsightType;
+  /** BOCY-level statement: "£X earning Y% is reducing your net outcome by ~£Z/year" */
+  statement: string;
+  /** Annual £ impact */
+  annualImpact: number;
+  /** Long-term compounding impact (5-year) */
+  longTermImpact?: number;
+  /** Root cause */
+  cause: string;
+  /** What happens if no action taken */
+  implication: string;
+  /** Which move category addresses this */
+  linkedMoveCategory?: string;
+  /** 0-1 confidence */
+  confidence: number;
+  /** Display priority (lower = more important) */
+  priority: number;
+}
+
+// ── System Map (Phase 2A) ──
+
+export interface SystemMap {
+  assets: {
+    cash: number;
+    savings: number;
+    isa: number;
+    pension: number;
+    investments: number;
+  };
+  liabilities: {
+    mortgage: number;
+    loans: number;
+    creditCards: number;
+    bnpl: number;
+  };
+  constraints: {
+    liquidityNeed: number;
+    taxWrapperCapacity: number;
+    incomeStability: number;
+  };
+}
+
+// ── Debt Tier (Phase 4A) ──
+
+export type DebtTier = 'tier1_high' | 'tier2_medium' | 'tier3_low';
+
+export interface TieredDebtAccount extends DebtAccount {
+  tier: DebtTier;
+  /** Tier-appropriate language for display */
+  tierLabel: string;
+}
+
+// ── Validation Result (Phase 1C) ──
+
+export interface ValidationResult {
+  flags: ValidationFlag[];
+  reclassified: number;
+  confidenceDowngrades: number;
+}
+
+export interface ValidationFlag {
+  type: 'consistency' | 'balance' | 'cross_account';
+  description: string;
+  transactionIndex?: number;
+  severity: 'info' | 'warning' | 'error';
+}
+
 // ── Decision Score ──
 
 export interface DecisionScore {
@@ -390,6 +513,8 @@ export interface Analysis {
   };
   /** Analysis window in months — needed for optimistic UI to maintain monthly normalization */
   analysis_months?: number;
+  /** Detected insights from the insight engine (Phase 2) */
+  insights?: Insight[];
 }
 
 // ── Goal Trajectory ──
@@ -613,6 +738,8 @@ export interface ChatContext {
       coverageRate: number;
     };
   } | null;
+  /** Phase 5D: Active insights for proactive injection into chat */
+  active_insights?: { statement: string; annualImpact: number; linkedMoveCategory?: string }[];
   /** §14n: Capital allocation context for high-earner cohorts */
   cohort?: 'crisis' | 'debt_focus' | 'foundation' | 'accumulator' | 'optimizer' | 'coasting';
   high_earner_cohort?: 'unstructured_high_earner' | 'structured_high_earner' | null;

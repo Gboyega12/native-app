@@ -1,4 +1,4 @@
-import type { Goals, Move, GoalTrajectory, FinancialProfile, UserIdentity, DebtAccount } from './types';
+import type { Goals, Move, GoalTrajectory, FinancialProfile, UserIdentity, DebtAccount, ScenarioComparison } from './types';
 import type { LiquidityTier } from './liquidity-engine';
 import { MAX_TRAJECTORY_MONTHS } from './constants';
 import { computeProfileSignals, type ProfileSignals } from './profile-signals';
@@ -32,6 +32,119 @@ const GOAL_DEFAULTS: Record<string, number> = {
   invest: 1000,
   clear_debt: 0,
 };
+
+// ── Phase 3A: Feasibility Gate ──
+// Checks whether a move can actually be executed given the user's constraints.
+
+export interface FeasibilityResult {
+  feasible: boolean;
+  reason?: string;
+}
+
+export function checkFeasibility(
+  move: Move,
+  profile: FinancialProfile,
+  bufferRec: { months: number; amount: number } | null,
+  debtAccounts?: DebtAccount[],
+): FeasibilityResult {
+  const surplus = profile.monthly.surplus;
+  const cat = move.category || 'spending';
+
+  // 1. Liquidity check: reject if executing move would drop buffer below minimum
+  if (cat === 'allocate' || cat === 'invest') {
+    const bufferMin = bufferRec?.amount ?? profile.monthly.spending * 3;
+    const liquidAssets = surplus * 3; // rough estimate
+    if (move.amount && move.amount > liquidAssets - bufferMin) {
+      return { feasible: false, reason: 'Executing this move would drop your buffer below the safety minimum' };
+    }
+  }
+
+  // 2. Hierarchy check: reject Tier 3/4 moves if Tier 1 opportunities exist
+  const hasExpensiveDebt = (debtAccounts || []).some(
+    (d) => (d.interest_rate || 0) > 0.15 && (d.outstanding_balance || 0) > 0,
+  );
+  if (hasExpensiveDebt && (cat === 'invest' || cat === 'allocate')) {
+    return { feasible: false, reason: 'High-interest debt should be prioritized before investing' };
+  }
+
+  // 3. Surplus check: can't execute if no surplus
+  if (surplus <= 0 && cat !== 'spending' && cat !== 'debt') {
+    return { feasible: false, reason: 'No surplus available — reduce spending first' };
+  }
+
+  return { feasible: true };
+}
+
+// ── Phase 3C: Scenario Comparison ──
+
+export function compareScenarios(
+  moveA: Move | null,
+  moveB: Move,
+  profile: FinancialProfile,
+  vol: VolatilityProfile,
+  targetAmount: number,
+): ScenarioComparison {
+  const currentImpact = moveA?.monthlyImpact || 0;
+  const recommendedImpact = moveB.monthlyImpact;
+
+  const current = simulateGoalTimeline(profile, targetAmount, currentImpact, vol, 42);
+  const recommended = simulateGoalTimeline(profile, targetAmount, recommendedImpact, vol, 42);
+
+  return {
+    current: { median: current.p50, p10: current.p10, p90: current.p90 },
+    recommended: { median: recommended.p50, p10: recommended.p10, p90: recommended.p90 },
+    netDifference: current.p50 - recommended.p50,
+    probability: recommended.hitRate24m,
+  };
+}
+
+// ── Phase 3D: Partial Allocation ──
+
+export interface AllocationSplit {
+  moveIndex: number;
+  action: string;
+  amount: number;
+  category: string;
+}
+
+export function computePartialAllocation(
+  rankedMoves: RankedMove[],
+  surplus: number,
+): AllocationSplit[] {
+  if (surplus <= 0 || rankedMoves.length === 0) return [];
+
+  const splits: AllocationSplit[] = [];
+  let remaining = surplus;
+
+  // Allocate proportionally by score to top moves
+  const topMoves = rankedMoves.slice(0, 5).filter((m) => m.monthlyImpact > 0);
+  const totalScore = topMoves.reduce((s, m) => s + m.score, 0);
+
+  if (totalScore <= 0) return [];
+
+  for (const move of topMoves) {
+    if (remaining <= 0) break;
+
+    const proportion = move.score / totalScore;
+    const amount = Math.min(
+      Math.round(surplus * proportion),
+      move.monthlyImpact,
+      remaining,
+    );
+
+    if (amount >= 10) { // minimum £10 allocation
+      splits.push({
+        moveIndex: move.rank - 1,
+        action: move.action,
+        amount,
+        category: move.category || 'spending',
+      });
+      remaining -= amount;
+    }
+  }
+
+  return splits;
+}
 
 // ── Move Ranking ──
 // Takes raw moves from enrichment engine + goals + identity signals.
@@ -89,6 +202,13 @@ export function rankMoves(
   }
 
   const scored: RankedMove[] = decisionStack.map((move, idx) => {
+    // Phase 3A: Feasibility gate — mark infeasible moves as suppressed
+    const feasibility = checkFeasibility(move, profile as FinancialProfile, bufferRec, debtAccounts);
+    if (!feasibility.feasible) {
+      move.suppressed = true;
+      move.suppressedReason = feasibility.reason;
+    }
+
     // Base score: annual impact normalised
     let score = move.annualImpact / 100;
 
@@ -143,8 +263,16 @@ export function rankMoves(
       score *= consistencyFactor;
     }
 
+    // Phase 3A: Heavily penalize suppressed moves (still shown but deprioritized)
+    if (move.suppressed) score *= 0.1;
+
     // Calculate trajectory for this move (with Monte Carlo if profile available)
     const trajectory = calcGoalTrajectory(profile, goals, move, identity);
+
+    // Phase 3C: Attach scenario comparison for moves with goal context
+    if (vol && goals?.target_amount && goals.target_amount > 0) {
+      move.scenario = compareScenarios(null, move, profile as FinancialProfile, vol, goals.target_amount);
+    }
 
     // ── Generate proof string ──
     // Concise mathematical explanation of the impact calculation

@@ -13,6 +13,74 @@ const bodySchema = z.object({
   user_id: z.string().nullable().optional(),
 });
 
+// ── Phase 5A: Context Enforcement ──
+// Validates that context contains the minimum required financial data.
+
+interface ContextValidation {
+  valid: boolean;
+  missing: string[];
+}
+
+function validateContext(context: Record<string, unknown> | undefined): ContextValidation {
+  if (!context) return { valid: false, missing: ['monthly_income', 'monthly_spending', 'surplus'] };
+
+  const required = ['monthly_income', 'monthly_spending'];
+  const missing = required.filter((key) => context[key] == null);
+
+  return { valid: missing.length === 0, missing };
+}
+
+// ── Phase 5C: Conversation Mode Detection ──
+
+type ConversationMode = 'query' | 'diagnostic' | 'decision' | 'execution' | 'general';
+
+function detectConversationMode(userMessage: string): ConversationMode {
+  const msg = userMessage.toLowerCase().trim();
+
+  // Query: factual questions
+  if (/^(how much|what is|what's|what are|show me|how many)/.test(msg)) return 'query';
+
+  // Diagnostic: causality analysis
+  if (/^(why (?:am|is|are|do)|what's wrong|what happened|explain)/.test(msg)) return 'diagnostic';
+
+  // Decision: comparison/choice
+  if (/^(should i|which is|compare|is it better|would it be)/.test(msg)) return 'decision';
+
+  // Execution: action requests
+  if (/^(do it|set up|create|start|cancel|save|add|remove)/.test(msg)) return 'execution';
+
+  return 'general';
+}
+
+// ── Phase 5B: Response Quality Validation ──
+
+interface ResponseValidation {
+  hasQuantification: boolean;
+  hasAction: boolean;
+  isFinancialQuestion: boolean;
+}
+
+function validateResponse(responseText: string, userMessage: string): ResponseValidation {
+  const isFinancialQuestion = /(?:how much|budget|spend|save|invest|debt|money|income|cost|afford|pay)/i.test(userMessage);
+  const hasQuantification = /£\d/.test(responseText);
+  const hasAction = /\b(consider|move|transfer|cancel|reduce|increase|start|open|switch|compare|check)\b/i.test(responseText);
+
+  return { hasQuantification, hasAction, isFinancialQuestion };
+}
+
+// ── Phase 5D: Proactive Insight Injection ──
+
+function buildInsightContext(context: Record<string, unknown>): string {
+  const insights = (context as any).active_insights as Array<{ statement: string; annualImpact: number; linkedMoveCategory?: string }> | undefined;
+  if (!insights || insights.length === 0) return '';
+
+  const lines = insights.slice(0, 3).map((i) =>
+    `- ${i.statement} (£${i.annualImpact}/yr impact)`,
+  );
+
+  return `\n\n## Active Insights (proactively surface when relevant)\n${lines.join('\n')}`;
+}
+
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 1000;
 
@@ -185,7 +253,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const { messages, context, stream, user_id } = parsed.data;
 
-  const systemPrompt = buildSystemPrompt(context);
+  // Phase 5A: Context enforcement — warn if critical financial data is missing
+  const ctxValidation = validateContext(context);
+
+  // Phase 5C: Detect conversation mode from latest user message
+  const lastUserMsg = messages.filter((m) => m.role === 'user').pop()?.content || '';
+  const conversationMode = detectConversationMode(lastUserMsg);
+
+  // Phase 5D: Build insight context for proactive injection
+  const insightContext = context ? buildInsightContext(context) : '';
+
+  const systemPrompt = buildSystemPrompt(context) +
+    (insightContext ? insightContext : '') +
+    (conversationMode !== 'general' ? `\n\n[Detected conversation mode: ${conversationMode}]` : '');
+
   const apiMessages = messages.map((m) => ({ role: m.role, content: m.content }));
 
   // ── Streaming mode ──

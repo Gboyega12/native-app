@@ -24,7 +24,65 @@ import type {
   EssentialGap,
   VerifiedBill,
   Analysis,
+  EconomicType,
+  ValidationResult,
+  ValidationFlag,
 } from './types';
+
+// ── Phase 1A: Economic Type Mapping ──
+// Maps enriched transaction properties to a financial system role.
+
+function deriveEconomicType(tx: EnrichedTransaction): EconomicType {
+  if (tx.isIncome) return 'income';
+  if (tx.isTransfer || tx.category === 'Internal Transfer') return 'internal_transfer';
+  if (tx.isSavings || tx.category === 'Savings') return 'asset_transfer';
+  if (tx.category === 'Investments' || tx.category === 'Pension') return 'investment';
+  if (tx.isDebt || tx.isBNPL || tx.category === 'Debt Payments') return 'debt_repayment';
+  if (tx.isRefund) return 'anomalous';
+
+  // Tax-related categories
+  const taxCats = ['council tax', 'tax', 'hmrc', 'student loan'];
+  if (taxCats.some((c) => (tx.category || '').toLowerCase().includes(c))) return 'tax_related';
+
+  // Essential vs discretionary spending
+  if (tx.isEssential) {
+    // Fixed essentials: rent, mortgage, insurance, council tax, broadband
+    const fixedCats = ['rent', 'mortgage', 'insurance', 'broadband', 'tv licence'];
+    if (fixedCats.some((c) => (tx.category || '').toLowerCase().includes(c))) return 'fixed_essential';
+    return 'variable_essential';
+  }
+
+  return 'discretionary';
+}
+
+// ── Phase 1B: Confidence Score Mapping ──
+
+function deriveConfidenceScore(tx: EnrichedTransaction): number {
+  // Base score from confidence level
+  const baseScores: Record<string, number> = { high: 0.95, medium: 0.7, low: 0.35 };
+  let score = baseScores[tx.confidence] ?? 0.35;
+
+  // Boost for user overrides and merchant DB matches
+  if (tx.classifiedBy === 'user_override') score = 1.0;
+  else if (tx.classifiedBy === 'merchant_db') score = Math.max(score, 0.9);
+  else if (tx.classifiedBy === 'claude_ai') score = Math.max(score, 0.8);
+  else if (tx.classifiedBy === 'fuzzy_match') score = Math.max(score, 0.65);
+
+  // Penalty for 'Other' category
+  if (tx.category === 'Other') score = Math.min(score, 0.3);
+
+  return Math.round(score * 100) / 100;
+}
+
+// ── Phase 1D: Contextual Enrichment ──
+
+function deriveFinancialRole(tx: EnrichedTransaction): 'obligation' | 'discretionary' | 'transfer' | 'investment' | 'income' {
+  if (tx.isIncome) return 'income';
+  if (tx.isTransfer || tx.category === 'Internal Transfer') return 'transfer';
+  if (tx.isSavings || tx.category === 'Investments' || tx.category === 'Pension') return 'investment';
+  if (tx.isEssential || tx.isDebt || tx.isBNPL) return 'obligation';
+  return 'discretionary';
+}
 
 function splitCSVLine(line: string): string[] {
   const parts: string[] = [];
@@ -83,6 +141,9 @@ const EnrichmentEngine = {
 
     const enriched = transactions.map((tx) => this.enrichTransaction(tx, overrides, regularPersonSenders, selfName));
 
+    // Phase 1A/1B/1D: Stamp economic type, confidence score, and contextual fields
+    this._stampDerivedFields(enriched);
+
     // Reclassify credit card payoffs for full-payers.
     // Users who use credit cards for points and pay off in full each month
     // should not have those payoffs counted as "Debt Payments" — they are
@@ -90,6 +151,10 @@ const EnrichmentEngine = {
     this._reclassifyCreditCardPayoffs(enriched, debtAccounts);
 
     const recurring = this.detectRecurring(enriched);
+
+    // Phase 1D: Stamp isFixed from recurrence detection
+    this._stampFixedFromRecurring(enriched, recurring);
+
     const profile = this.buildProfile(enriched, recurring);
     const segment = this.determineSegment(profile);
     const patterns = this.detectBehavioralPatterns(profile);
@@ -97,6 +162,9 @@ const EnrichmentEngine = {
     const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
 
     const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
+
+    // Phase 1C: Validate enrichment
+    const validation = this.validateEnrichment(enriched);
 
     // Verify bills from recognized merchants (exact amounts from transaction data)
     const verifiedBills = this.verifyBillsFromTransactions(enriched);
@@ -127,6 +195,8 @@ const EnrichmentEngine = {
     debtAccounts?: any[],
     identity?: any,
   ): Omit<EnrichmentResult, 'enrichedTransactions'> & { enrichedTransactions: EnrichedTransaction[] } {
+    // Phase 1A/1B/1D: Re-stamp derived fields after reclassification
+    this._stampDerivedFields(enriched);
     this._reclassifyCreditCardPayoffs(enriched, debtAccounts);
 
     const recurring = this.detectRecurring(enriched);
@@ -137,6 +207,9 @@ const EnrichmentEngine = {
     const stack = this.genDecisionStack(profile, enriched, debtAccounts, identity);
 
     const enrichmentMetrics = this._computeEnrichmentMetrics(enriched);
+
+    // Phase 1C: Validate enrichment
+    const validation = this.validateEnrichment(enriched);
 
     const verifiedBills = this.verifyBillsFromTransactions(enriched);
     const essentialGaps = identity
@@ -524,7 +597,8 @@ const EnrichmentEngine = {
     const recent = transactions.filter((t) => new Date(t.date) >= cutoff);
 
     const spending = recent.filter((t) => t.amount < 0 && !t.isTransfer && !t.isRefund && !t.isSavings);
-    const income = recent.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer && !t.isDebt);
+    // Phase 1B: Gate low-confidence transactions from income calculation
+    const income = recent.filter((t) => t.isIncome && !t.isRefund && !t.isTransfer && !t.isDebt && (t.confidenceScore ?? 1) >= 0.5);
 
     // ── Refunds: net against originating spending categories ──
     // Refunds are credits (amount > 0) that should reduce spend in their matched category.
@@ -1843,7 +1917,7 @@ const EnrichmentEngine = {
         category: 'buffer',
         merchants: [],
         strategy: 'A career change means potential income gaps. 6 months of expenses gives you freedom to transition without financial pressure.',
-        steps: ['Calculate 6 months of essential expenses', 'Redirect surplus into a dedicated transition fund', 'Consider freelance income during the transition', 'I\'ll track your runway and flag when you\'re ready'],
+        steps: ['Calculate 6 months of essential expenses', 'Redirect surplus into a dedicated transition fund', 'Factor in freelance income during the transition', 'I\'ll track your runway and flag when you\'re ready'],
         effect: `\u00a3${runwayTarget.toLocaleString()} gives you 6 months to transition.`,
         subGoals: [{
           type: 'buffer_build',
@@ -1884,7 +1958,7 @@ const EnrichmentEngine = {
         category: 'invest',
         merchants: [],
         strategy: `If your employer matches pension contributions (typically 3-5% of salary), contributing below the match threshold means leaving free money on the table. A 5% match is a guaranteed 100% return on your contribution.`,
-        steps: ['Check your employer\'s pension matching policy', 'Increase contributions to at least the match threshold', 'Consider salary sacrifice for additional NI savings', 'I\'ll factor the pension contribution into your surplus'],
+        steps: ['Check your employer\'s pension matching policy', 'Increase contributions to at least the match threshold', 'Switch to salary sacrifice for additional NI savings', 'I\'ll factor the pension contribution into your surplus'],
         effect: `Up to \u00a3${(matchAmount * 12).toLocaleString()}/year in free employer contributions.`,
       });
     }
@@ -2132,7 +2206,7 @@ const EnrichmentEngine = {
         effort: 'medium',
         category: 'invest',
         merchants: [],
-        strategy: `With a ${Math.round(m.savingsRate)}% savings rate and minimal debt, you're ready for a structured investment approach. Prioritise tax wrappers: employer match first, then ISA (£20k/year), then pension for higher-rate relief.`,
+        strategy: `${Math.round(m.savingsRate)}% savings rate and minimal debt — a structured investment approach maximises your surplus. Prioritise tax wrappers: employer match first, then ISA (£20k/year), then pension for higher-rate relief.`,
         steps: ['1. Max employer pension match (guaranteed 100% return)', '2. Fill ISA allowance (£20,000/year, tax-free growth)', '3. Additional pension for higher-rate tax relief', '4. General investment account for anything above allowances'],
         effect: `£${annualSurplus.toLocaleString()}/year invested at 7% could grow to ~£${(Math.round(p.surplus * 12 * 5 * 1.07)).toLocaleString()} over 5 years.`,
       });
@@ -2393,6 +2467,123 @@ const EnrichmentEngine = {
   },
 
   /** Compute enrichment confidence and source distribution metrics */
+  // ── Phase 1A/1B/1D: Stamp derived fields onto enriched transactions ──
+  _stampDerivedFields(enriched: EnrichedTransaction[]): void {
+    for (const tx of enriched) {
+      tx.economicType = deriveEconomicType(tx);
+      tx.confidenceScore = deriveConfidenceScore(tx);
+      tx.financialRole = deriveFinancialRole(tx);
+      // isFixed defaults to false; updated by _stampFixedFromRecurring after recurring detection
+      if (tx.isFixed == null) tx.isFixed = false;
+    }
+  },
+
+  // ── Phase 1D: Mark recurring transactions as fixed ──
+  _stampFixedFromRecurring(enriched: EnrichedTransaction[], recurring: RecurringItem[]): void {
+    const recurringMerchants = new Set(
+      recurring.filter((r) => r.frequency === 'monthly' || r.frequency === 'quarterly' || r.frequency === 'annual')
+        .map((r) => r.merchant.toLowerCase()),
+    );
+    for (const tx of enriched) {
+      if (recurringMerchants.has((tx.merchant || tx.description).toLowerCase())) {
+        tx.isFixed = true;
+      }
+    }
+  },
+
+  // ── Phase 1C: Validation Layer ──
+  validateEnrichment(enriched: EnrichedTransaction[]): ValidationResult {
+    const flags: ValidationFlag[] = [];
+    let reclassified = 0;
+    let confidenceDowngrades = 0;
+
+    // 1. Consistency check: same merchant classified differently
+    const merchantClassifications: Record<string, { category: string; count: number }[]> = {};
+    for (let i = 0; i < enriched.length; i++) {
+      const tx = enriched[i];
+      const key = (tx.merchant || tx.description).toLowerCase();
+      if (!merchantClassifications[key]) merchantClassifications[key] = [];
+      const existing = merchantClassifications[key].find((c) => c.category === tx.category);
+      if (existing) existing.count++;
+      else merchantClassifications[key].push({ category: tx.category, count: 1 });
+    }
+
+    for (const [merchant, cats] of Object.entries(merchantClassifications)) {
+      if (cats.length > 1) {
+        const dominant = cats.sort((a, b) => b.count - a.count)[0];
+        // Reclassify minority transactions to dominant category
+        for (let i = 0; i < enriched.length; i++) {
+          const tx = enriched[i];
+          if ((tx.merchant || tx.description).toLowerCase() === merchant && tx.category !== dominant.category) {
+            // Only reclassify low/medium confidence transactions
+            if (tx.confidence !== 'high' && tx.classifiedBy !== 'user_override') {
+              flags.push({
+                type: 'consistency',
+                description: `"${tx.merchant}" classified as "${tx.category}" but usually "${dominant.category}"`,
+                transactionIndex: i,
+                severity: 'warning',
+              });
+              tx.category = dominant.category;
+              tx.confidenceScore = Math.max(0.3, (tx.confidenceScore || 0.5) - 0.1);
+              reclassified++;
+              confidenceDowngrades++;
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Balance check: verify total inflows ≥ total outflows per month (within tolerance)
+    const monthlyFlows: Record<string, { inflows: number; outflows: number }> = {};
+    for (const tx of enriched) {
+      const month = tx.date.slice(0, 7); // YYYY-MM
+      if (!monthlyFlows[month]) monthlyFlows[month] = { inflows: 0, outflows: 0 };
+      if (tx.amount > 0) monthlyFlows[month].inflows += tx.amount;
+      else monthlyFlows[month].outflows += Math.abs(tx.amount);
+    }
+
+    for (const [month, flows] of Object.entries(monthlyFlows)) {
+      // Only flag if outflows significantly exceed inflows (>150%)
+      if (flows.inflows > 0 && flows.outflows > flows.inflows * 1.5) {
+        flags.push({
+          type: 'balance',
+          description: `${month}: outflows £${Math.round(flows.outflows)} significantly exceed inflows £${Math.round(flows.inflows)}`,
+          severity: 'info',
+        });
+      }
+    }
+
+    // 3. Cross-account check: detect matching amounts ±1 day as potential transfers
+    const credits = enriched.filter((tx) => tx.amount > 0 && !tx.isTransfer && !tx.isRefund);
+    const debits = enriched.filter((tx) => tx.amount < 0 && !tx.isTransfer);
+
+    for (const credit of credits) {
+      const creditDate = new Date(credit.date).getTime();
+      const creditAmt = credit.amount;
+
+      for (const debit of debits) {
+        const debitDate = new Date(debit.date).getTime();
+        const debitAmt = Math.abs(debit.amount);
+
+        // Match: same amount (within 1%) and within 1 day
+        if (
+          Math.abs(creditDate - debitDate) <= 86400000 &&
+          Math.abs(creditAmt - debitAmt) / Math.max(creditAmt, 1) < 0.01 &&
+          creditAmt > 50 // ignore small amounts
+        ) {
+          flags.push({
+            type: 'cross_account',
+            description: `Potential transfer: £${creditAmt.toFixed(2)} credit "${credit.merchant}" matches debit "${debit.merchant}"`,
+            severity: 'info',
+          });
+          break; // One match per credit is enough
+        }
+      }
+    }
+
+    return { flags, reclassified, confidenceDowngrades };
+  },
+
   _computeEnrichmentMetrics(enriched: EnrichedTransaction[]): EnrichmentMetrics {
     const total = enriched.length;
     const high = enriched.filter((t) => t.confidence === 'high').length;

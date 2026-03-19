@@ -129,6 +129,14 @@ export interface CapitalAllocationMove {
   strategy: string;
   steps: string[];
   effect: string;
+  /** Phase 3B: Source account/bucket */
+  source?: string;
+  /** Phase 3B: Destination account/bucket */
+  destination?: string;
+  /** Phase 3B: Exact £ amount */
+  amount?: number;
+  /** Phase 3B: Recommendation type */
+  recommendationType?: 'reallocation' | 'reduction' | 'optimization' | 'timing';
 }
 
 export function generateCapitalMoves(
@@ -158,6 +166,10 @@ export function generateCapitalMoves(
       strategy: `Move excess cash beyond your 3-month emergency buffer to a high-yield savings account.`,
       steps: ['Confirm your 3-month buffer amount', 'Open a high-yield savings account', 'Transfer the idle portion', 'Set up regular transfers for future excess'],
       effect: `~\u00a3${annualDrag.toLocaleString()}/year in additional interest.`,
+      source: 'Current account',
+      destination: 'High-yield savings',
+      amount: idleCapital,
+      recommendationType: 'reallocation',
     });
   }
 
@@ -176,8 +188,12 @@ export function generateCapitalMoves(
       category: 'allocate',
       proof: `\u00a3${remainingIsaAllowance.toLocaleString()} allowance \u00d7 ${(expectedReturn * 100).toFixed(0)}% return \u00d7 ${(marginalTaxRate * 100).toFixed(0)}% tax = \u00a3${annualTaxSaving}/yr protected`,
       strategy: `Use your remaining ISA allowance before the tax year ends. Every pound inside an ISA grows tax-free.`,
-      steps: ['Check your current ISA contributions this tax year', 'Transfer from savings to ISA', 'Consider stocks & shares ISA for long-term growth', 'Tax year ends 5 April'],
+      steps: ['Check your current ISA contributions this tax year', 'Transfer from savings to ISA', 'Use a stocks & shares ISA for long-term growth', 'Tax year ends 5 April'],
       effect: `~\u00a3${annualTaxSaving}/year in tax savings, compounding over time.`,
+      source: 'Savings',
+      destination: 'ISA',
+      amount: remainingIsaAllowance,
+      recommendationType: 'optimization',
     });
   }
 
@@ -192,9 +208,13 @@ export function generateCapitalMoves(
       effort: 'medium',
       category: 'allocate',
       proof: `\u00a3${pensionContribution}/mo \u00d7 12 = \u00a3${(pensionContribution * 12).toLocaleString()}/yr | marginal rate 40% | tax relief = \u00a3${taxRelief.toLocaleString()}/yr`,
-      strategy: `Higher-rate taxpayers get 40p back for every \u00a31 into a pension. Consider salary sacrifice for additional NI savings.`,
-      steps: ['Check current pension contribution rate', 'Increase to at least capture full employer match', 'Consider salary sacrifice vs net pay', 'Review annually as income changes'],
+      strategy: `Higher-rate taxpayers get 40p back for every £1 into a pension. Salary sacrifice saves additional NI.`,
+      steps: ['Check current pension contribution rate', 'Increase to at least capture full employer match', 'Switch to salary sacrifice for NI savings', 'Review annually as income changes'],
       effect: `\u00a3${taxRelief.toLocaleString()}/year in tax relief, plus employer contributions.`,
+      source: 'Salary',
+      destination: 'Pension',
+      amount: pensionContribution * 12,
+      recommendationType: 'optimization',
     });
   }
 
@@ -208,15 +228,19 @@ export function generateCapitalMoves(
       const excessCash = Math.round(accounts.cash.total - totalAssets * (benchmarkCash / 100));
       const annualDrag = Math.round(excessCash * 0.06); // 7% invested - 1% cash = ~6% drag
       moves.push({
-        action: `Your allocation is ${Math.round(cashPct)}% cash. Rebalancing could improve returns by ~\u00a3${annualDrag.toLocaleString()}/year.`,
+        action: `Your allocation is ${Math.round(cashPct)}% cash. Rebalancing improves returns by ~£${annualDrag.toLocaleString()}/year.`,
         annualImpact: annualDrag,
         monthlyImpact: Math.round(annualDrag / 12),
         effort: 'high',
         category: 'allocate',
         proof: `\u00a3${accounts.cash.total.toLocaleString()} cash (${Math.round(cashPct)}%) vs benchmark ${benchmarkCash}% | \u00a3${excessCash.toLocaleString()} excess \u00d7 6% drag = \u00a3${annualDrag}/yr`,
-        strategy: `Your cash allocation is ${Math.round(cashPct - benchmarkCash)}% above your risk-appropriate benchmark. Consider moving excess into ISA or investment wrappers.`,
+        strategy: `Your cash allocation is ${Math.round(cashPct - benchmarkCash)}% above your risk-appropriate benchmark. Move excess into ISA or investment wrappers.`,
         steps: ['Review your risk tolerance', 'Keep 3-month buffer in easy-access cash', 'Move excess to ISA or investment account', 'Rebalance annually'],
         effect: `~\u00a3${annualDrag.toLocaleString()}/year in improved returns through better allocation.`,
+        source: 'Cash',
+        destination: 'ISA / Investment account',
+        amount: excessCash,
+        recommendationType: 'reallocation',
       });
     }
   }
@@ -238,9 +262,13 @@ export function generateCapitalMoves(
         effort: 'medium',
         category: 'allocate',
         proof: `min(\u00a3${Math.round(accounts.cash.total - bufferNeeded).toLocaleString()} excess, \u00a3${Math.round(highestDebt.outstanding_balance || 0).toLocaleString()} debt) = \u00a3${matchedAmount.toLocaleString()} \u00d7 (${(debtAPR * 100).toFixed(1)}% - ${(cashRate * 100).toFixed(1)}%) = \u00a3${mismatchCost}/yr`,
-        strategy: `Holding low-yield cash while paying higher interest on debt costs you the difference. Consider using excess cash to reduce the debt.`,
+        strategy: `Holding low-yield cash while paying higher interest on debt costs you the difference. Use excess cash to reduce the debt.`,
         steps: ['Confirm your emergency buffer is covered', 'Use excess cash to pay down highest-rate debt', 'Keep minimum 3 months expenses in cash', 'Redirect freed-up debt payments to savings'],
         effect: `\u00a3${mismatchCost}/year guaranteed return by eliminating the yield mismatch.`,
+        source: 'Excess cash',
+        destination: `${(highestDebt as any).account_name || 'Highest-rate debt'}`,
+        amount: matchedAmount,
+        recommendationType: 'reallocation',
       });
     }
   }
