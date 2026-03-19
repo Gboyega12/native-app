@@ -523,7 +523,7 @@ describe('EnrichmentEngine.calcDecisionScore', () => {
         incomeCV: 0,
       },
       budgetReality: { nonDiscretionary: { total: 800, items: [] }, discretionary: { total: 700, items: [] } },
-      incomeSources: [{ source: 'SALARY', frequency: 'monthly', avgAmount: 3000, monthly: 3000, isSalary: true, count: 3, avgInterval: 30, recentAmounts: [3000], amountSD: 0, variability: 0 }],
+      incomeSources: [{ source: 'SALARY', frequency: 'monthly', avgAmount: 3000, monthly: 3000, isSalary: true, count: 3, avgInterval: 30, recentAmounts: [3000], variability: 0 }],
       transfers: [],
       subscriptions: [],
       metrics: {
@@ -599,7 +599,7 @@ describe('EnrichmentEngine.calcDecisionScore', () => {
     const extremeGood = {
       monthly: { income: 10000, spending: 1000, surplus: 9000, subscriptions: 0, foodDelivery: 0, transport: 0, groceries: 0, shopping: 0, eatingOut: 0, entertainment: 0, debtPayments: 0, incomeFloor: 10000, isVariableIncome: false, incomeCV: 0 },
       budgetReality: { nonDiscretionary: { total: 0, items: [] }, discretionary: { total: 0, items: [] } },
-      incomeSources: [{ source: 'SALARY', isSalary: true, count: 12, avgAmount: 10000, monthly: 10000, frequency: 'monthly', avgInterval: 30, recentAmounts: [], amountSD: 0, variability: 0 }],
+      incomeSources: [{ source: 'SALARY', isSalary: true, count: 12, avgAmount: 10000, monthly: 10000, frequency: 'monthly', avgInterval: 30, recentAmounts: [], variability: 0 }],
       transfers: [],
       subscriptions: [],
       metrics: { savingsRate: 90, creditCardCount: 0, bnplCount: 0, debtAccountCount: 0, subscriptionCount: 0, streamingCount: 0, foodDelivery: 0, transport: 0, groceries: 0, shopping: 0, eatingOut: 0, coffeeAndCafes: 0, entertainment: 0, debtPayments: 0 },
@@ -627,7 +627,7 @@ describe('EnrichmentEngine.calcDecisionScore', () => {
     const profile = {
       monthly: { income: 2000, spending: 1000, surplus: 1000, subscriptions: 50, foodDelivery: 30, transport: 50, groceries: 200, shopping: 50, eatingOut: 30, entertainment: 20, debtPayments: 0, incomeFloor: 2000, isVariableIncome: false, incomeCV: 0 },
       budgetReality: { nonDiscretionary: { total: 500, items: [] }, discretionary: { total: 500, items: [] } },
-      incomeSources: [{ source: 'SALARY', isSalary: true, count: 3, avgAmount: 2000, monthly: 2000, frequency: 'monthly', avgInterval: 30, recentAmounts: [], amountSD: 0, variability: 0 }],
+      incomeSources: [{ source: 'SALARY', isSalary: true, count: 3, avgAmount: 2000, monthly: 2000, frequency: 'monthly', avgInterval: 30, recentAmounts: [], variability: 0 }],
       transfers: [],
       subscriptions: [],
       metrics: { savingsRate: 50, creditCardCount: 0, bnplCount: 0, debtAccountCount: 0, subscriptionCount: 2, streamingCount: 1, foodDelivery: 30, transport: 50, groceries: 200, shopping: 50, eatingOut: 30, coffeeAndCafes: 5, entertainment: 20, debtPayments: 0 },
@@ -645,7 +645,7 @@ describe('EnrichmentEngine.calcDecisionScore', () => {
     const withSalary = {
       monthly: { income: 2000, spending: 1500, surplus: 500, subscriptions: 50, foodDelivery: 30, transport: 50, groceries: 200, shopping: 50, eatingOut: 30, entertainment: 20, debtPayments: 0, incomeFloor: 2000, isVariableIncome: false, incomeCV: 0 },
       budgetReality: { nonDiscretionary: { total: 800, items: [] }, discretionary: { total: 700, items: [] } },
-      incomeSources: [{ source: 'SALARY', isSalary: true, count: 3, avgAmount: 2000, monthly: 2000, frequency: 'monthly', avgInterval: 30, recentAmounts: [], amountSD: 0, variability: 0 }],
+      incomeSources: [{ source: 'SALARY', isSalary: true, count: 3, avgAmount: 2000, monthly: 2000, frequency: 'monthly', avgInterval: 30, recentAmounts: [], variability: 0 }],
       transfers: [],
       subscriptions: [],
       metrics: { savingsRate: 25, creditCardCount: 0, bnplCount: 0, debtAccountCount: 0, subscriptionCount: 2, streamingCount: 1, foodDelivery: 30, transport: 50, groceries: 200, shopping: 50, eatingOut: 30, coffeeAndCafes: 5, entertainment: 20, debtPayments: 0 },

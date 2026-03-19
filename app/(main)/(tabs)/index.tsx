@@ -22,7 +22,7 @@ import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, G
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
 import { DashboardSkeleton } from '@/components/Skeleton';
-import { SpendingRing, WeeklySparkline } from '@/components/Charts';
+import { WeeklySparkline } from '@/components/Charts';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
