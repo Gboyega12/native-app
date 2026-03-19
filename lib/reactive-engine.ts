@@ -152,16 +152,17 @@ async function verifySubGoalsFromData(
   }
 
   // Build debt balance lookup by account name — index by multiple possible names
-  // so sub-goals can match regardless of which naming path created them
+  // (all lowercased) so sub-goals can match regardless of which naming path created them
   const debtByName: Record<string, number> = {};
   for (const d of debtAccounts) {
     const bal = d.outstanding_balance || 0;
     // Primary: account_name as stored in DB (used by enrichment engine)
-    if (d.account_name) debtByName[d.account_name] = bal;
-    // Also index by institution and extracted brand for legacy sub-goals
-    if (d.institution) debtByName[d.institution] = bal;
+    if (d.account_name) debtByName[d.account_name.toLowerCase()] = bal;
+    // Also index by institution, provider_name, and extracted brand for fallback paths
+    if (d.institution) debtByName[d.institution.toLowerCase()] = bal;
+    if ((d as any).provider_name) debtByName[(d as any).provider_name.toLowerCase()] = bal;
     const brand = extractCreditCardBrand(d.account_name || '');
-    if (brand) debtByName[brand] = bal;
+    if (brand) debtByName[brand.toLowerCase()] = bal;
   }
 
   let completedCount = 0;
@@ -195,8 +196,8 @@ async function verifySubGoalsFromData(
         // Update currentValue from real data
         switch (sg.type) {
           case 'debt_clear': {
-            // Look up current balance by account name
-            const balance = debtByName[sg.target];
+            // Look up current balance by account name (case-insensitive)
+            const balance = debtByName[sg.target.toLowerCase()];
             sg.currentValue = balance != null ? Math.round(balance) : sg.currentValue ?? sg.startValue;
             if (sg.currentValue <= 0 && !sg.completedAt) {
               sg.completedAt = now.toISOString();

@@ -82,7 +82,7 @@ export default function Subscriptions() {
               if (seen.has(merchant)) continue;
               seen.add(merchant);
               items.push({
-                merchant: merchant.charAt(0).toUpperCase() + merchant.slice(1),
+                merchant: merchant.replace(/\b\w/g, (c) => c.toUpperCase()),
                 monthly: Math.round(data.total / data.count),
                 frequency: 'monthly',
                 category: cat.category,
