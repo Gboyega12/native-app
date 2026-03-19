@@ -15,7 +15,15 @@ import { rankMoves } from '@/lib/move-engine';
 import { checkAchievements, type ScoreSnapshot } from '@/lib/achievements';
 import { estimateVolatility, simulateGoalTimeline, simulateBufferNeed, type VolatilityProfile } from '@/lib/monte-carlo';
 import { calcMoveMarginalUtility, type LiquidityTier } from '@/lib/liquidity-engine';
-import { extractCreditCardBrand } from '@/lib/merchant-db';
+// extractCreditCardBrand: simple heuristic to pull card brand from account name
+function extractCreditCardBrand(name: string): string | null {
+  const brands = ['visa', 'mastercard', 'amex', 'american express', 'barclaycard', 'hsbc', 'natwest', 'lloyds', 'halifax', 'nationwide', 'monzo', 'starling', 'revolut', 'chase'];
+  const lower = name.toLowerCase();
+  for (const b of brands) {
+    if (lower.includes(b)) return b.charAt(0).toUpperCase() + b.slice(1);
+  }
+  return null;
+}
 
 // ── Types ──
 
@@ -143,11 +151,17 @@ async function verifySubGoalsFromData(
     spendingByCategory['Coffee & Cafes'] = pm.coffeeAndCafes || 0;
   }
 
-  // Build debt balance lookup by account name
+  // Build debt balance lookup by account name — index by multiple possible names
+  // so sub-goals can match regardless of which naming path created them
   const debtByName: Record<string, number> = {};
   for (const d of debtAccounts) {
-    const name = d.institution || extractCreditCardBrand(d.account_name || '') || (d.account_type === 'credit_card' ? 'Credit Card' : d.account_name || 'Debt');
-    debtByName[name] = d.outstanding_balance || 0;
+    const bal = d.outstanding_balance || 0;
+    // Primary: account_name as stored in DB (used by enrichment engine)
+    if (d.account_name) debtByName[d.account_name] = bal;
+    // Also index by institution and extracted brand for legacy sub-goals
+    if (d.institution) debtByName[d.institution] = bal;
+    const brand = extractCreditCardBrand(d.account_name || '');
+    if (brand) debtByName[brand] = bal;
   }
 
   let completedCount = 0;

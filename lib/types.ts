@@ -188,16 +188,27 @@ export interface Move {
 
 /**
  * Derive sub-goals from a Move. Returns the move's own subGoals if present,
- * otherwise synthesises them from the action text / merchants for older analyses.
+ * otherwise synthesises them from the action text / merchants / debt accounts
+ * for older analyses.
  */
-export function hydrateSubGoals(move: Move): MoveSubGoal[] | undefined {
+export function hydrateSubGoals(move: Move, debtAccounts?: any[]): MoveSubGoal[] | undefined {
   if (move.subGoals && move.subGoals.length > 0) return move.subGoals;
 
   const action = (move.action || '').toLowerCase();
   const cat = move.category;
 
-  // Debt moves
+  // Debt moves — use real debt accounts when available
   if (cat === 'debt') {
+    const activeDebts = (debtAccounts || []).filter((d: any) => (d.outstanding_balance || 0) > 0);
+    if (activeDebts.length > 0) {
+      return activeDebts.map((d: any) => ({
+        type: 'debt_clear' as const,
+        target: d.account_name && d.account_name !== 'Card' ? d.account_name : 'Debt',
+        startValue: Math.round(d.outstanding_balance || 0),
+        targetValue: 0,
+      }));
+    }
+    // Fallback for when no debt accounts are connected
     const countMatch = action.match(/(\d+)\s*debt/);
     if (countMatch) {
       const count = parseInt(countMatch[1], 10);
@@ -262,6 +273,33 @@ export function hydrateSubGoals(move: Move): MoveSubGoal[] | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Repair stale persisted sub-goals that have placeholder data (generic names,
+ * zero balances) by backfilling from real debt accounts. Returns the original
+ * sub-goals unchanged if they already have real data.
+ */
+export function repairDebtSubGoals(sgs: MoveSubGoal[], debtAccounts: any[]): MoveSubGoal[] {
+  const activeDebts = debtAccounts.filter((d: any) => (d.outstanding_balance || 0) > 0);
+  if (activeDebts.length === 0) return sgs;
+
+  const debtSgs = sgs.filter((sg) => sg.type === 'debt_clear');
+  // Only repair if ALL debt sub-goals have placeholder names and zero startValues
+  const allPlaceholder = debtSgs.length > 0 && debtSgs.every(
+    (sg) => sg.startValue === 0 && /^Debt(\s+\d+)?$/.test(sg.target),
+  );
+  if (!allPlaceholder) return sgs;
+
+  // Replace placeholder debt sub-goals with real account data
+  const nonDebtSgs = sgs.filter((sg) => sg.type !== 'debt_clear');
+  const repairedDebtSgs: MoveSubGoal[] = activeDebts.map((d: any) => ({
+    type: 'debt_clear' as const,
+    target: d.account_name && d.account_name !== 'Card' ? d.account_name : 'Debt',
+    startValue: Math.round(d.outstanding_balance || 0),
+    targetValue: 0,
+  }));
+  return [...repairedDebtSgs, ...nonDebtSgs];
 }
 
 // ── Decision Score ──

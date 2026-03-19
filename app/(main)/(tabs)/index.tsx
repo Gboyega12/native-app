@@ -17,7 +17,7 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
-import { hydrateSubGoals } from '@/lib/types';
+import { hydrateSubGoals, repairDebtSubGoals } from '@/lib/types';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType } from '@/lib/types';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
@@ -1873,7 +1873,7 @@ export default function Home() {
     const key = `move-${move._sortIdx}`;
     const prog = planProgress[key];
     if (!prog?.approved) return false;
-    const sgs = prog.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
+    const sgs = repairDebtSubGoals(prog.sub_goals || hydrateSubGoals(move, debtAccounts) || [], debtAccounts);
     if (sgs.length > 0) return sgs.every((sg) => sg.completedAt);
     const steps = move.steps || [];
     if (steps.length > 0) return (prog.completed_steps || []).length >= steps.length;
@@ -2161,7 +2161,7 @@ export default function Home() {
                   const heroKey = `move-${heroIdx}`;
                   const heroProgress = planProgress[heroKey];
                   const heroActive = !!heroProgress?.approved;
-                  const heroSgs = heroProgress?.sub_goals || hydrateSubGoals(heroMove, debtAccounts) || [];
+                  const heroSgs = repairDebtSubGoals(heroProgress?.sub_goals || hydrateSubGoals(heroMove, debtAccounts) || [], debtAccounts);
                   const heroSteps = heroMove.steps || [];
                   const heroHasSgs = heroSgs.length > 0;
                   const heroDoneCount = heroHasSgs
@@ -2617,7 +2617,7 @@ export default function Home() {
                     const moveKey = `move-${i}`;
                     const steps = move.steps || [];
                     const doneSteps = planProgress[moveKey]?.completed_steps || [];
-                    const moveSgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
+                    const moveSgs = repairDebtSubGoals(planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [], debtAccounts);
                     const hasSgs = moveSgs.length > 0;
                     const sgDoneCount = hasSgs ? moveSgs.filter((sg) => sg.completedAt).length : 0;
                     const stepProgress = hasSgs
@@ -2682,7 +2682,7 @@ export default function Home() {
                             )}
                             {(() => {
                               // Show sub-goal progress bars when available, otherwise legacy steps
-                              const sgs: MoveSubGoal[] = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
+                              const sgs: MoveSubGoal[] = repairDebtSubGoals(planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [], debtAccounts);
                               if (sgs.length > 0) {
                                 const doneSgs = sgs.filter((sg) => sg.completedAt);
                                 const sgProgress = sgs.length > 0 ? doneSgs.length / sgs.length : 0;
@@ -2702,7 +2702,7 @@ export default function Home() {
                                         : sg.type === 'spending_reduce'
                                           ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / (sg.startValue - sg.targetValue)) * 100)))
                                           : sg.type === 'debt_clear'
-                                            ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / sg.startValue) * 100)))
+                                            ? (sg.startValue > 0 ? Math.min(100, Math.max(0, Math.round(((sg.startValue - current) / sg.startValue) * 100))) : 0)
                                             : Math.min(100, Math.max(0, Math.round((current / sg.targetValue) * 100)));
                                       return (
                                         <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border }}>
@@ -2809,7 +2809,7 @@ export default function Home() {
                   {completedPlanMoves.map((move) => {
                     const i = move._sortIdx;
                     const moveKey = `move-${i}`;
-                    const sgs = planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [];
+                    const sgs = repairDebtSubGoals(planProgress[moveKey]?.sub_goals || hydrateSubGoals(move, debtAccounts) || [], debtAccounts);
                     const steps = move.steps || [];
                     const totalItems = sgs.length > 0 ? sgs.length : steps.length;
                     return (
