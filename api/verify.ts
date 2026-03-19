@@ -136,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select('match_description, category, is_essential, direction')
         .eq('user_id', userId),
       admin.from('debt_accounts')
-        .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment')
+        .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, is_default_apr, source')
         .eq('user_id', userId),
       admin.from('user_identity')
         .select('*')

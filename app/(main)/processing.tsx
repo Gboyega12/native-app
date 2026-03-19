@@ -413,8 +413,41 @@ function ProcessingInner() {
             localStorage.setItem('bocy_onboarding_done', 'true');
           }
 
+          // ── Persist debt accounts BEFORE triggering verify ──
+          // verify re-reads debt_accounts from DB, so card balances must be
+          // written first — otherwise verify overwrites the draft with fallback
+          // numbers (the "flash of real data then revert" bug).
+          try {
+            const { data: bankRows } = await supabase
+              .from('bank_data')
+              .select('card_balances')
+              .eq('user_id', user.id)
+              .not('card_balances', 'is', null)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (bankRows?.card_balances && Array.isArray(bankRows.card_balances)) {
+              for (const card of bankRows.card_balances) {
+                await supabase.from('debt_accounts').upsert({
+                  user_id: user.id,
+                  account_name: card.name || card.display_name || card.provider || 'Card',
+                  account_type: card.type || 'credit_card',
+                  outstanding_balance: card.balance,
+                  credit_limit: card.limit,
+                  source: 'truelayer',
+                  last_updated: new Date().toISOString(),
+                }, { onConflict: 'user_id,account_name' });
+              }
+            }
+          } catch (debtErr: any) {
+            console.warn('[processing] Non-critical: debt accounts save failed:', debtErr?.message);
+          }
+
           // ── Fire-and-forget: trigger background verification ──
           // Claude AI classify + refinement runs server-side without blocking the user.
+          // IMPORTANT: debt_accounts must be persisted above before this fires,
+          // because verify re-reads them from DB to generate moves.
           try {
             const { data: { session } } = await supabase.auth.getSession();
             if (session?.access_token) {
@@ -542,34 +575,7 @@ function ProcessingInner() {
             console.warn('[processing] Non-critical: notification preferences save failed:', prefErr?.message);
           }
 
-          // Save card + account balances to debt_accounts (from TrueLayer data)
-          try {
-            const { data: bankRows } = await supabase
-              .from('bank_data')
-              .select('card_balances')
-              .eq('user_id', user.id)
-              .not('card_balances', 'is', null)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-
-            if (bankRows?.card_balances && Array.isArray(bankRows.card_balances)) {
-              for (const card of bankRows.card_balances) {
-                await supabase.from('debt_accounts').upsert({
-                  user_id: user.id,
-                  account_name: card.name || card.display_name || card.provider || 'Card',
-                  account_type: card.type || 'credit_card',
-                  outstanding_balance: card.balance,
-                  credit_limit: card.limit,
-                  source: 'truelayer',
-                  last_updated: new Date().toISOString(),
-                }, { onConflict: 'user_id,account_name' }).then(() => {});
-              }
-              // debt accounts synced
-            }
-          } catch (debtErr: any) {
-            console.warn('[processing] Non-critical: debt accounts save failed:', debtErr?.message);
-          }
+          // debt_accounts already persisted above (before verify trigger)
         } catch (dbErr: any) {
           console.warn('[processing] Supabase insert threw:', dbErr?.message);
         }
