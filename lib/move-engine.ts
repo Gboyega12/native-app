@@ -1,4 +1,4 @@
-import type { Goals, Move, GoalTrajectory, FinancialProfile, UserIdentity, DebtAccount, ScenarioComparison } from './types';
+import type { Goals, Move, GoalTrajectory, FinancialProfile, UserIdentity, DebtAccount, ScenarioComparison, CommitmentLevel } from './types';
 import type { LiquidityTier } from './liquidity-engine';
 import { MAX_TRAJECTORY_MONTHS } from './constants';
 import { computeProfileSignals, type ProfileSignals } from './profile-signals';
@@ -147,6 +147,38 @@ export function computePartialAllocation(
   return splits;
 }
 
+// ── Commitment Level Classification ──
+// Classifies how much ongoing user commitment a move requires:
+// - one_time: single action (cancel subscription, open ISA, switch provider)
+// - short_term: behavioural change for a few months (reduce spending category)
+// - ongoing: sustained discipline over 6+ months (debt overpayments, regular saving)
+
+function classifyCommitmentLevel(move: Move): CommitmentLevel {
+  const action = (move.action || '').toLowerCase();
+  const cat = move.category || 'spending';
+
+  // One-time actions: cancellations, switches, account openings
+  if (action.includes('cancel') || action.includes('switch') || action.includes('open')
+    || action.includes('transfer to') || action.includes('consolidat')
+    || cat === 'allocate') {
+    return 'one_time';
+  }
+
+  // Ongoing discipline: debt repayment, regular saving, investing
+  if (cat === 'debt' || cat === 'buffer' || cat === 'savings' || cat === 'invest') {
+    return 'ongoing';
+  }
+
+  // Spending reductions: short-term habit change
+  if (cat === 'spending') {
+    // Subscription cancellations are one-time
+    if (action.includes('subscript') || action.includes('cancel')) return 'one_time';
+    return 'short_term';
+  }
+
+  return 'short_term';
+}
+
 // ── Move Ranking ──
 // Takes raw moves from enrichment engine + goals + identity signals.
 // Re-ranks so the RIGHT TYPE of move comes first, not just biggest £ amount.
@@ -274,6 +306,9 @@ export function rankMoves(
     if (vol && goals?.target_amount && goals.target_amount > 0) {
       move.scenario = compareScenarios(null, move, profile as FinancialProfile, vol, goals.target_amount);
     }
+
+    // ── Classify commitment level ──
+    move.commitment_level = classifyCommitmentLevel(move);
 
     // ── Generate proof string ──
     // Concise mathematical explanation of the impact calculation

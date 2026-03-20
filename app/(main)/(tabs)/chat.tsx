@@ -1291,6 +1291,7 @@ export default function Chat() {
         effect: m.effect,
         subGoals: m.subGoals,
         proof: m.proof,
+        commitment_level: m.commitment_level,
         trajectory: m.trajectory ? {
           currentMonths: m.trajectory.currentMonths,
           newMonths: m.trajectory.newMonths,

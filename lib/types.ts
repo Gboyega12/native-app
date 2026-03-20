@@ -186,6 +186,9 @@ export interface MoveSubGoal {
 
 // ── Moves ──
 
+/** How much ongoing commitment this move requires from the user */
+export type CommitmentLevel = 'one_time' | 'short_term' | 'ongoing';
+
 export interface Move {
   action: string;
   annualImpact: number;
@@ -196,6 +199,8 @@ export interface Move {
   effect: string;
   timeline?: string;
   category?: 'break_even' | 'buffer' | 'debt' | 'spending' | 'savings' | 'invest' | 'allocate';
+  /** How much ongoing commitment this move requires (one_time / short_term / ongoing) */
+  commitment_level?: CommitmentLevel;
   merchants?: string[];
   /** Structured sub-goals derived from real data at generation time */
   subGoals?: MoveSubGoal[];

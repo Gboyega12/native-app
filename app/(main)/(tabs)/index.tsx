@@ -1445,6 +1445,8 @@ export default function Home() {
   const effortOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
   const effortColor = (e: string) => e === 'low' ? colors.lavender : e === 'medium' ? colors.dim : colors.green;
   const effortLabel = (e: string) => e === 'low' ? 'Quick win' : e === 'medium' ? 'Some effort' : 'Big move';
+  const commitmentColor = (c: string) => c === 'one_time' ? colors.lavender : c === 'short_term' ? colors.dim : colors.green;
+  const commitmentLabel = (c: string) => c === 'one_time' ? 'One-off' : c === 'short_term' ? 'Few months' : 'Ongoing';
 
   const togglePlanStep = (key: string, stepIndex: number, moveAction: string, totalSteps?: number) => {
     trackEvent('Plan Step Toggled', { action: moveAction, step: stepIndex });
@@ -2720,13 +2722,13 @@ export default function Home() {
                             <View style={{ position: 'absolute', top: 8, right: 0 }}>
                               <ExpandDots count={5} size={2.5} />
                             </View>
-                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
                             {move.proof && (
                               <View style={{ backgroundColor: colors.mintDim, borderRadius: 10, padding: 14, marginBottom: 16 }}>
                                 <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.dim, textTransform: 'uppercase', marginBottom: 6 }}>THE MATH</Text>
                                 <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2, lineHeight: 18 }}>{move.proof}</Text>
                               </View>
                             )}
+                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 22, marginBottom: 16 }}>{stripMd(move.strategy)}</Text>}
                             {/* Trajectory confidence band — shows Monte Carlo timeline */}
                             {(move as any).trajectory?.confidence?.p50 > 0 && (move as any).trajectory?.confidence?.p50 < 120 && (
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16, paddingHorizontal: 2 }}>
@@ -2930,6 +2932,11 @@ export default function Home() {
                                 <View style={[s.effortPill, { backgroundColor: `${effortColor(move.effort)}15` }]}>
                                   <Text style={[s.effortPillText, { color: effortColor(move.effort) }]}>{effortLabel(move.effort)}</Text>
                                 </View>
+                                {move.commitment_level && (
+                                  <View style={[s.effortPill, { backgroundColor: `${commitmentColor(move.commitment_level)}15` }]}>
+                                    <Text style={[s.effortPillText, { color: commitmentColor(move.commitment_level) }]}>{commitmentLabel(move.commitment_level)}</Text>
+                                  </View>
+                                )}
                                 <Text style={{ fontSize: 10, color: colors.muted, marginLeft: 'auto' }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                               </View>
                               {!isExpanded && move.merchants && move.merchants.length > 0 && (
@@ -2956,13 +2963,13 @@ export default function Home() {
                             <View style={{ position: 'absolute', top: 12, right: 0 }}>
                               <ExpandDots count={5} size={2.5} />
                             </View>
-                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 24, marginBottom: 20 }}>{stripMd(move.strategy)}</Text>}
                             {move.proof && (
                               <View style={{ backgroundColor: colors.mintDim, borderRadius: 10, padding: 14, marginBottom: 20 }}>
                                 <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, color: colors.dim, textTransform: 'uppercase', marginBottom: 6 }}>THE MATH</Text>
                                 <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2, lineHeight: 18 }}>{move.proof}</Text>
                               </View>
                             )}
+                            {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text2, lineHeight: 24, marginBottom: 20 }}>{stripMd(move.strategy)}</Text>}
 
                             <TouchableOpacity style={[s.heroCta, { marginBottom: 20, paddingVertical: 12 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
                               <Text style={s.heroCtaText}>Start this move</Text>
