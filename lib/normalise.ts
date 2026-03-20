@@ -47,6 +47,12 @@ const GATEWAY_PREFIXES: RegExp[] = [
   /^card\s+payment\s+to\s+/i,       // "Card payment to ..." → "..."
   /^direct\s+debit\s+(?:to|payment\s+to)\s+/i, // "Direct debit to ..." / "Direct debit payment to ..."
   /^standing\s+order\s+to\s+/i,     // "Standing order to ..."
+
+  // ── TrueLayer / credit card repayment descriptions ──
+  /^payment\s+received\s*[-–—]*\s*/i, // "Payment Received -- Thank You" → "Thank You" (then noise strips)
+  /\bpayment\s+received\b/gi,        // Strip embedded "payment received"
+  /\bthank\s+you\b/gi,               // Strip "Thank You"
+  /^credit\s+card\s+payment\s*/i,    // "Credit card payment"
 ];
 
 // Noise patterns to strip (order matters — most specific first)

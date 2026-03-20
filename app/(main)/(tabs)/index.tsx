@@ -17,7 +17,7 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
-import { hydrateSubGoals, repairDebtSubGoals } from '@/lib/types';
+import { hydrateSubGoals, repairDebtSubGoals, resolveDebtDisplayName } from '@/lib/types';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType, Insight } from '@/lib/types';
 import { classifyAccounts, type AccountBuckets } from '@/lib/account-classifier';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
@@ -1652,7 +1652,7 @@ export default function Home() {
     if ((action.includes('debt') || action.includes('credit') || action.includes('pay off')) && activeDebts.length > 0) {
       return activeDebts.map((d: any) => ({
         type: 'debt_clear' as MoveSubGoalType,
-        target: d.account_name || 'Debt',
+        target: resolveDebtDisplayName(d),
         startValue: Math.round(d.outstanding_balance || 0),
         targetValue: 0,
         currentValue: Math.round(d.outstanding_balance || 0),
@@ -2499,46 +2499,6 @@ export default function Home() {
           })()}
 
           {/* ══════════════════════════════════════════════
-              SYSTEM INSIGHTS — detected inefficiencies
-              ══════════════════════════════════════════════ */}
-          {insightsData.length > 0 && (
-            <View style={{ marginBottom: spacing.md }}>
-              <View style={s.moveSectionHeader}>
-                <Text style={s.moveSectionLabel}>DETECTED INEFFICIENCIES</Text>
-                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent, letterSpacing: 0.3 }}>
-                  {'\u00a3'}{Math.round(insightsData.reduce((sum: number, ins: Insight) => sum + ins.annualImpact, 0)).toLocaleString()}/yr impact
-                </Text>
-              </View>
-              {insightsData.slice(0, 3).map((insight: Insight, idx: number) => (
-                <Card key={`insight-${idx}`} variant="default" style={{ marginBottom: spacing.md, borderLeftWidth: 3, borderLeftColor: colors.accent }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 22 }}>
-                        {insight.statement}
-                      </Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                        <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
-                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
-                            {'\u00a3'}{insight.annualImpact.toLocaleString()}/yr
-                          </Text>
-                        </View>
-                        {insight.linkedMoveCategory && (
-                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, textTransform: 'uppercase' }}>
-                            {insight.linkedMoveCategory}
-                          </Text>
-                        )}
-                      </View>
-                      <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18, marginTop: 8 }}>
-                        {insight.cause}
-                      </Text>
-                    </View>
-                  </View>
-                </Card>
-              ))}
-            </View>
-          )}
-
-          {/* ══════════════════════════════════════════════
               YOUR INSIGHTS — inline from Plan page
               ══════════════════════════════════════════════ */}
           {(hasActive || hasCompleted || opportunityMoves.length > 0) && (
@@ -3062,6 +3022,58 @@ export default function Home() {
 
                 </>
               )}
+            </View>
+          )}
+
+          {/* ══════════════════════════════════════════════
+              DETECTED INEFFICIENCIES — moved below insights
+              ══════════════════════════════════════════════ */}
+          {insightsData.length > 0 && (
+            <View style={{ marginBottom: spacing.md }}>
+              <View style={s.moveSectionHeader}>
+                <Text style={s.moveSectionLabel}>DETECTED INEFFICIENCIES</Text>
+                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent, letterSpacing: 0.3 }}>
+                  {'\u00a3'}{Math.round(insightsData.reduce((sum: number, ins: Insight) => sum + ins.annualImpact, 0)).toLocaleString()}/yr impact
+                </Text>
+              </View>
+              {insightsData.slice(0, 4).map((insight: Insight, idx: number) => (
+                <Card key={`insight-${idx}`} variant="default" style={{ marginBottom: spacing.md, borderLeftWidth: 3, borderLeftColor: idx === 0 ? colors.coral : colors.accent }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 22 }}>
+                        {insight.statement}
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                        <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
+                            {'\u00a3'}{insight.annualImpact.toLocaleString()}/yr
+                          </Text>
+                        </View>
+                        {insight.longTermImpact && insight.longTermImpact > insight.annualImpact && (
+                          <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
+                              {'\u00a3'}{insight.longTermImpact.toLocaleString()} over 5yr
+                            </Text>
+                          </View>
+                        )}
+                        {insight.linkedMoveCategory && (
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, textTransform: 'uppercase' }}>
+                            {insight.linkedMoveCategory}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18, marginTop: 8 }}>
+                        {insight.cause}
+                      </Text>
+                      {insight.implication && (
+                        <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.green, lineHeight: 18, marginTop: 6 }}>
+                          {insight.implication}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                </Card>
+              ))}
             </View>
           )}
 

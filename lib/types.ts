@@ -1,3 +1,6 @@
+import { matchMerchant } from './merchant-db';
+import { normaliseDescription } from './normalise';
+
 // ── Transactions ──
 
 export interface RawTransaction {
@@ -228,15 +231,54 @@ export interface Move {
  * Never returns generic "Debt 1" style names.
  */
 export function resolveDebtDisplayName(d: any, merchantFallback?: string): string {
-  if (d?.account_name && d.account_name !== 'Card' && d.account_name !== 'card') return d.account_name;
-  if (d?.institution) return d.institution;
-  if (d?.provider_name) return d.provider_name;
-  if (merchantFallback) return merchantFallback;
+  // Try structured fields first
+  if (d?.account_name && d.account_name !== 'Card' && d.account_name !== 'card') {
+    // Run account_name through merchant-db to resolve raw descriptions
+    // e.g. "Payment Received -- Thank You" → "American Express"
+    const normalised = normaliseDescription(d.account_name);
+    const match = matchMerchant(d.account_name, normalised);
+    if (match && match.isDebt) return match.merchant;
+    // If it doesn't look like a raw transaction description, use it as-is
+    if (!looksLikeTransactionDescription(d.account_name)) return d.account_name;
+  }
+  if (d?.institution) {
+    const normalised = normaliseDescription(d.institution);
+    const match = matchMerchant(d.institution, normalised);
+    if (match) return match.merchant;
+    return d.institution;
+  }
+  if (d?.provider_name) {
+    const normalised = normaliseDescription(d.provider_name);
+    const match = matchMerchant(d.provider_name, normalised);
+    if (match) return match.merchant;
+    return d.provider_name;
+  }
+  if (merchantFallback) {
+    // Also try to resolve the fallback through merchant-db
+    const normalised = normaliseDescription(merchantFallback);
+    const match = matchMerchant(merchantFallback, normalised);
+    if (match) return match.merchant;
+    return merchantFallback;
+  }
   // Type-based fallback
   const accType = d?.account_type || d?.type || '';
   if (/credit/i.test(accType)) return 'Credit card';
   if (/loan/i.test(accType)) return 'Loan';
   return 'Debt account';
+}
+
+/** Detect raw transaction descriptions that shouldn't be used as display names */
+function looksLikeTransactionDescription(name: string): boolean {
+  const lower = name.toLowerCase();
+  return /payment received/i.test(lower)
+    || /thank you/i.test(lower)
+    || /direct debit/i.test(lower)
+    || /standing order/i.test(lower)
+    || /card payment/i.test(lower)
+    || /faster payment/i.test(lower)
+    || /--/.test(lower)
+    || /\btxn\b/i.test(lower)
+    || /\bref\b/i.test(lower);
 }
 
 /**

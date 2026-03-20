@@ -362,6 +362,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             minimum_payment: defaultMin,
             is_default_apr: true,
             source: 'truelayer',
+            provider_name: providerName || null,
             last_updated: new Date().toISOString(),
           }, { onConflict: 'user_id,account_name' });
         }

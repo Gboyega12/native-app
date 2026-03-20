@@ -1506,9 +1506,36 @@ const EnrichmentEngine = {
     // Never returns generic "Debt 1" / "Debt 2" — always uses merchant payment name or type.
     const resolveDebtName = (d: any, index: number): string => {
       if (!d) return debtMerchantNames[index] || 'Debt account';
-      if (d.account_name && d.account_name !== 'Card' && d.account_name !== 'card') return d.account_name;
-      if (d.institution) return d.institution;
-      if (d.provider_name) return d.provider_name;
+
+      // Helper: try to resolve a raw name through merchant-db
+      const tryMerchantMatch = (name: string): string | null => {
+        const norm = normaliseDescription(name);
+        const match = matchMerchant(name, norm);
+        return match ? match.merchant : null;
+      };
+
+      // Helper: detect raw transaction descriptions that shouldn't be used as display names
+      const isRawDescription = (name: string): boolean => {
+        return /payment received/i.test(name) || /thank you/i.test(name)
+          || /direct debit/i.test(name) || /standing order/i.test(name)
+          || /card payment/i.test(name) || /--/.test(name);
+      };
+
+      if (d.account_name && d.account_name !== 'Card' && d.account_name !== 'card') {
+        // Check if account_name is a raw transaction description
+        const matched = tryMerchantMatch(d.account_name);
+        if (matched) return matched;
+        if (!isRawDescription(d.account_name)) return d.account_name;
+        // Fall through if it's a raw description with no match
+      }
+      if (d.institution) {
+        const matched = tryMerchantMatch(d.institution);
+        return matched || d.institution;
+      }
+      if (d.provider_name) {
+        const matched = tryMerchantMatch(d.provider_name);
+        return matched || d.provider_name;
+      }
       // Use debt payment merchant name as fallback (matched by index)
       if (debtMerchantNames[index]) return debtMerchantNames[index];
       // Try any remaining merchant names not yet used
@@ -1564,7 +1591,7 @@ const EnrichmentEngine = {
         const debtUrgency = hasExpensiveDebt ? 0.7 : 0.5; // 70% of surplus for expensive debt
         // Restore debt reservation back into surplus pool before debt claims
         remainingSurplus += debtReservation;
-        const surplusForDebt = claimSurplus(Math.round(Math.min(p.surplus * debtUrgency, 500)));
+        const surplusForDebt = claimSurplus(Math.max(0, Math.round(Math.min(p.surplus * debtUrgency, 500))));
         let totalInterestSaved = 0;
         let totalMonthlyInterestCost = 0;
 
@@ -1701,7 +1728,7 @@ const EnrichmentEngine = {
         // Restore debt reservation back into surplus pool before single-debt claims
         remainingSurplus += debtReservation;
         debtReservation = 0; // consumed — prevent double-restore
-        const overpay = claimSurplus(Math.round(Math.min(p.surplus * overpayPct, overpayCap)));
+        const overpay = claimSurplus(Math.max(0, Math.round(Math.min(p.surplus * overpayPct, overpayCap))));
         const interestSaved = hasConnectedDebtData
           ? calcInterestSaved(singleBal, singleAPR, p.debtPayments, p.debtPayments + overpay)
           : 0;
@@ -1711,13 +1738,22 @@ const EnrichmentEngine = {
           || monthlyInterestCost;
         const aprStr = singleDebt && !singleDebt.is_default_apr ? ` at ${(singleAPR * 100).toFixed(1)}%` : '';
 
-        const actionText = hasConnectedDebtData
-          ? `Overpay ${singleName} (\u00a3${singleBal.toLocaleString()}${aprStr}) by \u00a3${overpay}/month`
-          : `Accelerate ${singleName} payoff by \u00a3${overpay}/month`;
+        // When in deficit (no surplus), frame as interest cost awareness, not overpayment
+        const actionText = overpay > 0
+          ? (hasConnectedDebtData
+            ? `Overpay ${singleName} (\u00a3${singleBal.toLocaleString()}${aprStr}) by \u00a3${overpay}/month`
+            : `Accelerate ${singleName} payoff by \u00a3${overpay}/month`)
+          : (hasConnectedDebtData
+            ? `${singleName} (\u00a3${singleBal.toLocaleString()}${aprStr}) costing \u00a3${monthlyInterestCost}/month in interest`
+            : `${singleName} — \u00a3${monthlyInterestCost}/month in interest cost`);
 
-        const strategyText = hasConnectedDebtData
-          ? `${singleName}: \u00a3${singleBal.toLocaleString()} balance${aprStr}, currently paying \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''} Adding \u00a3${overpay}/month extra accelerates payoff.`
-          : `Payments to ${singleName} detected (\u00a3${Math.round(p.debtPayments)}/month). Adding \u00a3${overpay}/month extra accelerates payoff.`;
+        const strategyText = overpay > 0
+          ? (hasConnectedDebtData
+            ? `${singleName}: \u00a3${singleBal.toLocaleString()} balance${aprStr}, currently paying \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''} Adding \u00a3${overpay}/month extra accelerates payoff.`
+            : `Payments to ${singleName} detected (\u00a3${Math.round(p.debtPayments)}/month). Adding \u00a3${overpay}/month extra accelerates payoff.`)
+          : (hasConnectedDebtData
+            ? `${singleName}: \u00a3${singleBal.toLocaleString()} balance${aprStr}, currently paying \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''} No surplus available — reduce spending first to free up overpayment capacity.`
+            : `Payments to ${singleName} detected (\u00a3${Math.round(p.debtPayments)}/month). No surplus available yet — reduce spending first to create overpayment capacity.`);
 
         // Phase 4A: Single debt tier info + debt-vs-invest for low-rate debt
         const singleTier = classifyDebtTier(singleAPR);
@@ -2111,11 +2147,62 @@ const EnrichmentEngine = {
       });
     }
 
-    // Break-even move if in deficit
+    // Break-even move if in deficit — with actionable, quantified sub-goals
     if (p.surplus < 0) {
       const deficit = Math.abs(Math.round(p.surplus));
-      const topDiscItems = profile.budgetReality?.discretionary?.items || [];
+      const topDiscItems: { category: string; monthly: number }[] = profile.budgetReality?.discretionary?.items || [];
       const topCuts = topDiscItems.slice(0, 3).map((i) => i.category);
+
+      // Build specific, quantified sub-goals from actual spending data
+      const deficitSubGoals: MoveSubGoal[] = [];
+      let remainingDeficit = deficit;
+
+      for (const item of topDiscItems) {
+        if (remainingDeficit <= 0) break;
+        const monthly = Math.round(item.monthly || 0);
+        if (monthly <= 0) continue;
+        // Cut 30-50% of each category depending on how essential it is
+        const cutPct = item.category === 'Subscriptions' ? 0.5
+          : item.category === 'Delivery' || item.category === 'Eating Out' || item.category === 'Coffee & Cafes' ? 0.4
+          : item.category === 'Shopping' || item.category === 'Entertainment' || item.category === 'Gambling' ? 0.5
+          : 0.3;
+        const saving = Math.min(Math.round(monthly * cutPct), remainingDeficit);
+        if (saving >= 10) {
+          deficitSubGoals.push({
+            type: 'spending_reduce',
+            target: item.category,
+            startValue: monthly,
+            targetValue: monthly - saving,
+          });
+          remainingDeficit -= saving;
+        }
+      }
+
+      // Build transparent math proof
+      const proofLines: string[] = [
+        `\u00a3${Math.round(p.income)}/mo income \u2212 \u00a3${Math.round(p.spending)}/mo spending = \u2212\u00a3${deficit}/mo deficit`,
+      ];
+      if (deficitSubGoals.length > 0) {
+        const totalCut = deficitSubGoals.reduce((s, sg) => s + (sg.startValue - sg.targetValue), 0);
+        proofLines.push(`target: cut \u00a3${totalCut}/mo across ${deficitSubGoals.length} categories`);
+        for (const sg of deficitSubGoals) {
+          const cut = sg.startValue - sg.targetValue;
+          const pct = Math.round((cut / sg.startValue) * 100);
+          proofLines.push(`  ${sg.target}: \u00a3${sg.startValue}/mo \u2192 \u00a3${sg.targetValue}/mo (\u2212${pct}%)`);
+        }
+      }
+      proofLines.push(`\u00a3${deficit}/mo \u00d7 12 = \u00a3${(deficit * 12).toLocaleString()}/yr impact`);
+
+      // Build actionable steps from actual categories
+      const actionableSteps: string[] = deficitSubGoals.map((sg) => {
+        const cut = sg.startValue - sg.targetValue;
+        return `Cut ${sg.target} from \u00a3${sg.startValue} to \u00a3${sg.targetValue}/mo (\u2212\u00a3${cut})`;
+      });
+      if (actionableSteps.length === 0) {
+        actionableSteps.push('Review all non-essential spending categories');
+      }
+      actionableSteps.push('Set a weekly spending cap and track against it');
+
       moves.push({
         action: `Close \u00a3${deficit}/month deficit by cutting discretionary spending`,
         annualImpact: deficit * 12,
@@ -2124,8 +2211,10 @@ const EnrichmentEngine = {
         category: 'break_even',
         merchants: topCuts,
         strategy: `Spending \u00a3${deficit}/month more than income. Top discretionary categories: ${topCuts.join(', ') || 'unknown'}.`,
-        steps: ['Freeze all non-essential spending for 30 days', 'Cancel unnecessary subscriptions immediately', 'Switch to cash/prepaid for discretionary spending'],
-        effect: `Stops the bleed and creates a foundation for saving.`,
+        steps: actionableSteps,
+        effect: `Closes the \u00a3${deficit}/mo gap and creates \u00a3${(deficit * 12).toLocaleString()}/yr capacity for debt repayment or saving.`,
+        subGoals: deficitSubGoals.length > 0 ? deficitSubGoals : undefined,
+        proof: proofLines.join('\n'),
       });
     }
 
