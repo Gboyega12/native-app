@@ -1,0 +1,472 @@
+{
+  "schema_version": "1.0",
+  "name": "decision-engine-tools",
+  "description": "Tool schema for the BOCY financial decision engine. Defines every tool the LLM may invoke, its typed inputs/outputs, execution rules, and the global constraints that govern all tool usage.",
+
+  "system_rules": {
+    "description": "Non-negotiable constraints applied to every tool invocation and every LLM response.",
+    "rules": [
+      "LLM must not perform financial calculations — all numeric outputs must come from tool responses",
+      "LLM must not estimate or approximate monetary values",
+      "All recommendations must pass liquidity constraint checks before surfacing",
+      "All investment decisions must reference probability-weighted outcomes where applicable",
+      "No tool may return unstructured output — every response conforms to its declared output schema",
+      "Tool outputs are the single source of truth — LLM must never override or reinterpret numeric results"
+    ]
+  },
+
+  "layers": {
+    "state_retrieval": {
+      "description": "Layer 1 — Fetches the user's current financial state. Must be called before any analysis or recommendation.",
+      "tools": [
+        {
+          "name": "get_user_balance_sheet",
+          "description": "Returns the user's full system-level financial state: cash, investments, pensions, debts, and net worth. Maps to SystemMap + FinancialProfile + DebtAccount[] in the codebase.",
+          "source": "lib/insight-engine.ts → buildSystemMap(), lib/types.ts → SystemMap, DebtAccount",
+          "inputs": {
+            "user_id": { "type": "string", "required": true, "description": "Supabase user ID" }
+          },
+          "output": {
+            "cash_accounts": {
+              "type": "array",
+              "items": {
+                "account_id": { "type": "string" },
+                "balance": { "type": "number" }
+              }
+            },
+            "investment_accounts": {
+              "type": "array",
+              "items": {
+                "account_id": { "type": "string" },
+                "value": { "type": "number" }
+              }
+            },
+            "pension_accounts": {
+              "type": "array",
+              "items": {
+                "account_id": { "type": "string" },
+                "value": { "type": "number" }
+              }
+            },
+            "debts": {
+              "type": "array",
+              "items": {
+                "type": { "type": "string", "enum": ["credit_card", "loan", "mortgage", "bnpl"] },
+                "balance": { "type": "number" },
+                "interest_rate": { "type": "number" },
+                "monthly_payment": { "type": "number" },
+                "is_variable": { "type": "boolean" },
+                "is_default_apr": { "type": "boolean" }
+              }
+            },
+            "net_worth": { "type": "number" }
+          },
+          "rules": [
+            "Must be called before any system-level analysis",
+            "Must be called before calculate_liquidity_position",
+            "Must be called before detect_inefficiencies"
+          ]
+        },
+        {
+          "name": "get_enriched_transactions",
+          "description": "Returns fully enriched transaction data with merchant resolution, economic classification, and confidence scoring. Maps to EnrichmentResult in the codebase.",
+          "source": "lib/enrichment-engine.ts → deriveEconomicType(), lib/types.ts → EnrichedTransaction",
+          "inputs": {
+            "user_id": { "type": "string", "required": true, "description": "Supabase user ID" },
+            "time_range": {
+              "type": "string",
+              "required": true,
+              "description": "ISO duration or date range (e.g. 'P3M' for last 3 months)",
+              "enum": ["P1M", "P3M", "P6M", "P12M"]
+            }
+          },
+          "output": {
+            "transactions": {
+              "type": "array",
+              "items": {
+                "merchant": { "type": "string" },
+                "amount": { "type": "number" },
+                "type": {
+                  "type": "string",
+                  "enum": ["income", "fixed_essential", "variable_essential", "discretionary", "debt_repayment", "asset_transfer", "internal_transfer", "investment", "tax_related", "anomalous"]
+                },
+                "is_recurring": { "type": "boolean" },
+                "confidence_score": { "type": "number", "minimum": 0, "maximum": 1 },
+                "classified_by": {
+                  "type": "string",
+                  "enum": ["user_override", "merchant_db", "fuzzy_match", "keyword", "claude_ai", "default"]
+                }
+              }
+            }
+          },
+          "rules": [
+            "Transactions with confidence_score < 0.5 must not be used in aggregate calculations without flagging uncertainty",
+            "Economic type classification is authoritative — LLM must not reclassify"
+          ]
+        },
+        {
+          "name": "get_user_constraints",
+          "description": "Returns user financial constraints derived from identity, goals, and profile signals. Maps to UserIdentity + Goals + FinancialProfile in the codebase.",
+          "source": "lib/types.ts → UserIdentity, Goals, FinancialProfile; lib/profile-signals.ts",
+          "inputs": {
+            "user_id": { "type": "string", "required": true, "description": "Supabase user ID" }
+          },
+          "output": {
+            "monthly_expenses": { "type": "number", "description": "Total monthly outgoings (essential + discretionary)" },
+            "liquidity_months_required": { "type": "number", "description": "Emergency buffer in months (3-12, depends on income stability)" },
+            "risk_tolerance": {
+              "type": "string",
+              "enum": ["conservative", "balanced", "growth"],
+              "description": "Maps to UserIdentity.risk_appetite"
+            },
+            "time_horizon_years": { "type": "number", "description": "Investment horizon from Goals.goal_timeline" },
+            "income_stability": {
+              "type": "string",
+              "enum": ["stable", "variable"],
+              "description": "Derived from income CV > 0.10"
+            },
+            "cohort": {
+              "type": "string",
+              "enum": ["crisis", "debt_focus", "foundation", "accumulator", "optimizer", "coasting"],
+              "description": "User's financial cohort"
+            }
+          },
+          "rules": [
+            "Must be called before calculate_liquidity_position",
+            "liquidity_months_required adjusts upward for variable income earners"
+          ]
+        }
+      ]
+    },
+
+    "core_calculation": {
+      "description": "Layer 2 — Pure calculation tools. Accept numeric inputs, return numeric outputs. No side effects.",
+      "tools": [
+        {
+          "name": "calculate_liquidity_position",
+          "description": "Determines required vs excess liquidity using CRRA utility model. Excess liquidity gates all downstream allocation decisions.",
+          "source": "lib/liquidity-engine.ts → getLiquidityDiscount(), CRRA model",
+          "inputs": {
+            "total_cash": { "type": "number", "required": true, "description": "Sum of all liquid cash balances" },
+            "monthly_expenses": { "type": "number", "required": true, "description": "From get_user_constraints" },
+            "liquidity_months_required": { "type": "number", "required": true, "description": "Buffer months from get_user_constraints" }
+          },
+          "output": {
+            "liquidity_threshold": { "type": "number", "description": "monthly_expenses × liquidity_months_required" },
+            "excess_liquidity": { "type": "number", "description": "total_cash − liquidity_threshold (can be negative)" },
+            "liquidity_status": {
+              "type": "string",
+              "enum": ["surplus", "adequate", "deficit"],
+              "description": "surplus: >20% above threshold, adequate: within 20%, deficit: below threshold"
+            }
+          },
+          "rules": [
+            "Must be called before any allocation decision (calculate_lamu_score, generate_recommendation)",
+            "If excess_liquidity <= 0, allocation to investments is blocked",
+            "If liquidity_status is 'deficit', only buffer-building recommendations are permitted"
+          ]
+        },
+        {
+          "name": "calculate_lamu_score",
+          "description": "Calculates Liquidity-Adjusted Marginal Utility of capital across allocation options. Ranks competing uses of each marginal pound.",
+          "source": "lib/liquidity-engine.ts, skills/financial-models.md → LAMU formula",
+          "inputs": {
+            "allocation_options": {
+              "type": "array",
+              "required": true,
+              "items": {
+                "type": { "type": "string", "description": "e.g. 'debt_repayment', 'isa', 'pension', 'gic', 'equity'" },
+                "expected_return": { "type": "number", "description": "Annualised expected return (decimal, e.g. 0.07)" },
+                "risk": { "type": "number", "description": "Annualised volatility (decimal)" },
+                "tax_impact": { "type": "number", "description": "Tax drag as decimal (0 for ISA, marginal rate for GIA)" },
+                "liquidity_impact": {
+                  "type": "number",
+                  "description": "Liquidity discount from getLiquidityDiscount() — penalty for illiquid allocations"
+                }
+              }
+            }
+          },
+          "output": {
+            "ranked_allocations": {
+              "type": "array",
+              "items": {
+                "type": { "type": "string" },
+                "utility_score": { "type": "number" }
+              },
+              "description": "Sorted descending by utility_score"
+            }
+          },
+          "rules": [
+            "Requires calculate_liquidity_position to have been called first",
+            "Capital hierarchy must be respected: high-interest debt > employer match > tax-advantaged > market",
+            "LAMU = Liquidity Utility + Probability-Weighted Return − Cost of Capital − Tax Drag − Risk Penalty"
+          ]
+        },
+        {
+          "name": "run_monte_carlo_simulation",
+          "description": "Simulates probability distribution of investment outcomes using 1,000 seeded paths with GBM + Poisson drawdowns. Used for all long-term projections.",
+          "source": "lib/monte-carlo.ts → createRng(), normalSample(), samplePoisson()",
+          "inputs": {
+            "initial_amount": { "type": "number", "required": true, "description": "Starting capital (£)" },
+            "monthly_contribution": { "type": "number", "required": true, "description": "Ongoing monthly addition (£)" },
+            "expected_return": { "type": "number", "required": true, "description": "Annualised expected return (decimal)" },
+            "volatility": { "type": "number", "required": true, "description": "Annualised volatility (decimal)" },
+            "time_horizon_years": { "type": "number", "required": true, "description": "Projection horizon in years (max 10)" }
+          },
+          "output": {
+            "median_outcome": { "type": "number", "description": "50th percentile final value" },
+            "downside_10th_percentile": { "type": "number", "description": "10th percentile (pessimistic)" },
+            "upside_90th_percentile": { "type": "number", "description": "90th percentile (optimistic)" },
+            "probability_of_outperformance": { "type": "number", "description": "% of sims beating the initial + contributions baseline" }
+          },
+          "rules": [
+            "Must be used for all long-term investment comparisons",
+            "Must be used when generating ScenarioComparison on recommendations",
+            "Max 1,000 simulations × 120 months to stay within client-side performance budget",
+            "Results must be presented as ranges (p10–p90), never as point estimates"
+          ]
+        },
+        {
+          "name": "compare_debt_vs_investment",
+          "description": "Compares debt repayment vs investing using risk-adjusted Monte Carlo outcomes. Returns probability of investment outperformance.",
+          "source": "lib/debt-engine.ts → DebtInvestComparison, classifyDebtTier()",
+          "inputs": {
+            "debt_interest_rate": { "type": "number", "required": true, "description": "APR on the debt (decimal)" },
+            "investment_return": { "type": "number", "required": true, "description": "Expected annual return (decimal)" },
+            "volatility": { "type": "number", "required": true, "description": "Investment volatility (decimal)" },
+            "time_horizon_years": { "type": "number", "required": true, "description": "Comparison horizon" },
+            "amount": { "type": "number", "required": true, "description": "Capital being allocated (£)" }
+          },
+          "output": {
+            "repayment_value": { "type": "number", "description": "Guaranteed savings from debt repayment" },
+            "investment_median": { "type": "number", "description": "Median investment outcome" },
+            "investment_downside": { "type": "number", "description": "10th percentile investment outcome" },
+            "outperformance_probability": { "type": "number", "description": "% of sims where investing beats repaying" },
+            "debt_tier": {
+              "type": "string",
+              "enum": ["tier1_high", "tier2_medium", "tier3_low"],
+              "description": "Debt classification: >8% high, 4-8% medium, <4% low"
+            }
+          },
+          "rules": [
+            "tier1_high debt (>8%) — always recommend repayment, do not simulate",
+            "tier2_medium (4-8%) — run full simulation, present trade-off",
+            "tier3_low (<4%) — investing likely wins, but still show downside risk"
+          ]
+        }
+      ]
+    },
+
+    "insight_engine": {
+      "description": "Layer 3 — Detects financial inefficiencies and quantifies their economic impact.",
+      "tools": [
+        {
+          "name": "detect_inefficiencies",
+          "description": "Identifies financial inefficiencies across the user's system: idle capital drag, tax leakage, debt-return mismatch, liquidity inefficiency, cross-system distortion, and time-based loss.",
+          "source": "lib/insight-engine.ts → buildSystemMap(), lib/types.ts → InsightType, Insight",
+          "inputs": {
+            "balance_sheet": {
+              "type": "object",
+              "required": true,
+              "description": "Output of get_user_balance_sheet",
+              "schema": "$ref:get_user_balance_sheet.output"
+            },
+            "transactions": {
+              "type": "object",
+              "required": true,
+              "description": "Output of get_enriched_transactions",
+              "schema": "$ref:get_enriched_transactions.output"
+            },
+            "constraints": {
+              "type": "object",
+              "required": true,
+              "description": "Output of get_user_constraints",
+              "schema": "$ref:get_user_constraints.output"
+            }
+          },
+          "output": {
+            "inefficiencies": {
+              "type": "array",
+              "items": {
+                "type": {
+                  "type": "string",
+                  "enum": ["idle_capital_drag", "tax_leakage", "debt_return_mismatch", "liquidity_inefficiency", "cross_system_distortion", "time_based_loss"]
+                },
+                "description": { "type": "string", "description": "BOCY-level statement quantifying the inefficiency" },
+                "annual_impact": { "type": "number", "description": "£/year cost of this inefficiency" },
+                "long_term_impact": { "type": "number", "description": "5-year compounded cost" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+                "linked_move_category": {
+                  "type": "string",
+                  "enum": ["break_even", "buffer", "debt", "spending", "savings", "invest", "allocate"]
+                }
+              }
+            }
+          },
+          "rules": [
+            "Requires all three state retrieval tools to have been called first",
+            "Only surfaces inefficiencies with annual_impact > materiality threshold (no micro-optimisations)",
+            "Each inefficiency must have a clear path to improvement via a linked move category"
+          ]
+        },
+        {
+          "name": "quantify_opportunity_cost",
+          "description": "Calculates the annual cost of maintaining a current allocation versus an optimal alternative.",
+          "source": "lib/insight-engine.ts, skills/insight-engine.md",
+          "inputs": {
+            "current_return": { "type": "number", "required": true, "description": "Current annualised return (decimal)" },
+            "alternative_return": { "type": "number", "required": true, "description": "Achievable alternative return (decimal)" },
+            "amount": { "type": "number", "required": true, "description": "Capital amount (£)" }
+          },
+          "output": {
+            "annual_opportunity_cost": { "type": "number", "description": "£/year cost = amount × (alternative_return − current_return)" }
+          },
+          "rules": [
+            "LLM must not compute this — must call the tool",
+            "alternative_return must be realistic and evidence-based, not aspirational"
+          ]
+        }
+      ]
+    },
+
+    "recommendation_engine": {
+      "description": "Layer 4 — Generates and ranks executable financial recommendations. Every recommendation is a precise capital reallocation decision.",
+      "tools": [
+        {
+          "name": "generate_recommendation",
+          "description": "Produces an optimised capital allocation decision from an inefficiency + supporting analysis. Passes feasibility checks before returning.",
+          "source": "lib/move-engine.ts → checkFeasibility(), skills/recommendation-engine.md",
+          "inputs": {
+            "inefficiency": {
+              "type": "object",
+              "required": true,
+              "description": "Single item from detect_inefficiencies output",
+              "schema": "$ref:detect_inefficiencies.output.inefficiencies.items"
+            },
+            "liquidity_position": {
+              "type": "object",
+              "required": true,
+              "description": "Output of calculate_liquidity_position",
+              "schema": "$ref:calculate_liquidity_position.output"
+            },
+            "lamu_scores": {
+              "type": "object",
+              "required": true,
+              "description": "Output of calculate_lamu_score",
+              "schema": "$ref:calculate_lamu_score.output"
+            },
+            "monte_carlo": {
+              "type": "object",
+              "required": false,
+              "description": "Output of run_monte_carlo_simulation (required for investment recommendations)",
+              "schema": "$ref:run_monte_carlo_simulation.output"
+            }
+          },
+          "output": {
+            "action": { "type": "string", "description": "Human-readable action statement" },
+            "amount": { "type": "number", "description": "Exact £ amount" },
+            "source": { "type": "string", "description": "Where funds come from (account/bucket)" },
+            "destination": { "type": "string", "description": "Where funds go (account/bucket)" },
+            "recommendation_type": {
+              "type": "string",
+              "enum": ["reallocation", "reduction", "optimization", "timing"]
+            },
+            "expected_impact": { "type": "number", "description": "£/year expected benefit" },
+            "downside_risk": { "type": "number", "description": "£/year worst-case (p10)" },
+            "scenario": {
+              "type": "object",
+              "description": "Current vs recommended outcome comparison",
+              "properties": {
+                "current": {
+                  "median": { "type": "number" },
+                  "p10": { "type": "number" },
+                  "p90": { "type": "number" }
+                },
+                "recommended": {
+                  "median": { "type": "number" },
+                  "p10": { "type": "number" },
+                  "p90": { "type": "number" }
+                },
+                "net_difference": { "type": "number" },
+                "probability": { "type": "number", "description": "% of sims where recommended beats current" }
+              }
+            },
+            "feasibility": {
+              "type": "object",
+              "properties": {
+                "feasible": { "type": "boolean" },
+                "reason": { "type": "string", "description": "Only present if feasible is false" }
+              }
+            }
+          },
+          "rules": [
+            "Must not violate liquidity constraints — if liquidity_status is 'deficit', only buffer moves allowed",
+            "Must include a quantified outcome (expected_impact + downside_risk)",
+            "Must be executable — source and destination must reference real accounts",
+            "Must include scenario comparison for investment-type recommendations",
+            "If feasibility.feasible is false, recommendation is suppressed with reason"
+          ]
+        },
+        {
+          "name": "rank_recommendations",
+          "description": "Orders a set of recommendations by priority using financial impact and certainty.",
+          "source": "skills/recommendation-engine.md, lib/types.ts → Move.category priority",
+          "inputs": {
+            "recommendations": {
+              "type": "array",
+              "required": true,
+              "description": "Array of generate_recommendation outputs",
+              "items": { "schema": "$ref:generate_recommendation.output" }
+            }
+          },
+          "output": {
+            "ranked": {
+              "type": "array",
+              "items": {
+                "rank": { "type": "number" },
+                "action": { "type": "string" },
+                "expected_impact": { "type": "number" },
+                "confidence": { "type": "number" },
+                "recommendation_type": { "type": "string" }
+              }
+            }
+          },
+          "rules": [
+            "Primary sort: expected_impact (descending)",
+            "Secondary sort: confidence/certainty (descending)",
+            "Feasibility-failed recommendations must be excluded",
+            "Maximum 5 ranked recommendations returned"
+          ]
+        }
+      ]
+    }
+  },
+
+  "execution_graph": {
+    "description": "Defines the required execution order. Arrows indicate dependency (A → B means A must complete before B).",
+    "dependencies": [
+      { "from": "get_user_balance_sheet",      "to": "calculate_liquidity_position" },
+      { "from": "get_user_constraints",         "to": "calculate_liquidity_position" },
+      { "from": "get_user_balance_sheet",      "to": "detect_inefficiencies" },
+      { "from": "get_enriched_transactions",   "to": "detect_inefficiencies" },
+      { "from": "get_user_constraints",         "to": "detect_inefficiencies" },
+      { "from": "calculate_liquidity_position", "to": "calculate_lamu_score" },
+      { "from": "calculate_liquidity_position", "to": "generate_recommendation" },
+      { "from": "calculate_lamu_score",         "to": "generate_recommendation" },
+      { "from": "detect_inefficiencies",        "to": "generate_recommendation" },
+      { "from": "generate_recommendation",      "to": "rank_recommendations" }
+    ],
+    "parallel_groups": [
+      {
+        "group": "state_retrieval",
+        "tools": ["get_user_balance_sheet", "get_enriched_transactions", "get_user_constraints"],
+        "note": "All three can be called in parallel as they have no inter-dependencies"
+      },
+      {
+        "group": "independent_calculations",
+        "tools": ["run_monte_carlo_simulation", "compare_debt_vs_investment"],
+        "note": "Can run in parallel with each other and with detect_inefficiencies, once their inputs are available"
+      }
+    ]
+  }
+}
