@@ -109,7 +109,7 @@ function detectTaxLeakage(systemMap: SystemMap, profile: FinancialProfile): Insi
     if (annualTaxSaving >= MATERIALITY_THRESHOLD) {
       return {
         type: 'tax_leakage',
-        statement: `~£${annualTaxSaving.toLocaleString()}/year in tax on investment gains could be sheltered inside an ISA`,
+        statement: `~£${annualTaxSaving.toLocaleString()}/year in tax on investment gains is unprotected — sheltering inside an ISA eliminates this`,
         annualImpact: annualTaxSaving,
         longTermImpact: annualTaxSaving * 5,
         cause: `£${taxablePortion.toLocaleString()} of investable assets sit outside tax wrappers`,
@@ -172,7 +172,7 @@ function detectDebtReturnMismatch(systemMap: SystemMap, debtAccounts: DebtAccoun
       if (expectedGain >= MATERIALITY_THRESHOLD) {
         return {
           type: 'debt_return_mismatch',
-          statement: `${(apr * 100).toFixed(1)}% debt may be optimal to maintain — investing the overpayment could earn £${expectedGain.toLocaleString()}/year more`,
+          statement: `${(apr * 100).toFixed(1)}% debt is below expected investment returns — redirecting overpayments to investments nets ~£${expectedGain.toLocaleString()}/year more`,
           annualImpact: expectedGain,
           cause: `Debt APR (${(apr * 100).toFixed(1)}%) is below expected investment returns (${(investReturnExpected * 100)}%)`,
           implication: 'Overpaying low-rate debt has an opportunity cost',
@@ -216,7 +216,7 @@ function detectLiquidityInefficiency(systemMap: SystemMap, profile: FinancialPro
         statement: `${bufferMonths.toFixed(0)} months of buffer — £${excess.toLocaleString()} excess costing ~£${opportunityCost.toLocaleString()}/year in opportunity`,
         annualImpact: opportunityCost,
         cause: `Buffer significantly exceeds the recommended 3-6 months`,
-        implication: 'Excess cash could be deployed for higher returns in ISAs or investments',
+        implication: 'Deploying excess cash into ISAs or investments captures higher returns',
         linkedMoveCategory: 'allocate',
         confidence: 0.8,
         priority: 3,

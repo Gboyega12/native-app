@@ -10,6 +10,7 @@ import {
   type VolatilityProfile,
 } from './monte-carlo';
 import { calcMoveMarginalUtility, calcOpportunityCostMultiplier } from './liquidity-engine';
+import { classifyDebtAccounts, applyLiquidityOverride } from './debt-engine';
 
 const GOAL_LABELS: Record<string, string> = {
   clear_debt: 'Clear all debt',
@@ -290,6 +291,15 @@ export function rankMoves(
       liquidityTier,
     };
   });
+
+  // Phase 4C: Liquidity override gate — suppress non-tier-1 debt moves when buffer is dangerously low
+  if (profile.monthly && debtAccounts && debtAccounts.length > 0) {
+    const bufferMonths = profile.monthly.spending > 0
+      ? (profile.monthly.surplus * 3) / profile.monthly.spending
+      : 99;
+    const tieredDebts = classifyDebtAccounts(debtAccounts);
+    applyLiquidityOverride(scored, bufferMonths, tieredDebts);
+  }
 
   // Sort by score (includes CRRA utility, opportunity cost, goal alignment, Monte Carlo consistency)
   scored.sort((a, b) => b.score - a.score);

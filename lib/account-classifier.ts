@@ -157,7 +157,7 @@ export function generateCapitalMoves(
     const currentRate = 0.01;
     const annualDrag = Math.round(idleCapital * (achievableRate - currentRate));
     moves.push({
-      action: `\u00a3${idleCapital.toLocaleString()} of your cash is earning <1%. Reallocating could generate ~\u00a3${annualDrag.toLocaleString()}/year.`,
+      action: `\u00a3${idleCapital.toLocaleString()} of your cash is earning <1%. Reallocating generates ~\u00a3${annualDrag.toLocaleString()}/year in additional returns.`,
       annualImpact: annualDrag,
       monthlyImpact: Math.round(annualDrag / 12),
       effort: 'low',

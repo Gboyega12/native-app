@@ -9,6 +9,7 @@ import { calcInterestSaved } from './amortisation';
 import { calcMarginalRate, inferTaxSituation, UK_TAX } from './surplus-engine';
 import { detectCohort, calcSophisticationLevel } from './profile-signals';
 import { classifyAccounts, generateCapitalMoves, detectHighEarnerCohort } from './account-classifier';
+import { classifyDebtAccounts, classifyDebtTier, tierLabel, simulateDebtVsInvest, applyLiquidityOverride } from './debt-engine';
 import type {
   RawTransaction,
   EnrichedTransaction,
@@ -1325,6 +1326,11 @@ const EnrichmentEngine = {
     const totalDebtBalance = connectedDebts.reduce((s: number, d: any) => s + (d.outstanding_balance || 0), 0);
     const hasExpensiveDebt = highestDebtAPR > 0.08 && totalDebtBalance > 0;
 
+    // ── Phase 4A: Debt tier classification ──
+    const tieredDebts = classifyDebtAccounts(connectedDebts);
+    const tier1Debts = tieredDebts.filter((d) => d.tier === 'tier1_high' && (d.outstanding_balance || 0) > 0);
+    const tier3Debts = tieredDebts.filter((d) => d.tier === 'tier3_low' && (d.outstanding_balance || 0) > 0);
+
     // ── Debt-first surplus pre-reservation ──
     // When APR > 15%, pre-reserve 70% of surplus for debt repayment (min £0, max £500).
     // Other moves compete for the remaining 30%. Debt claimSurplus draws from reservation first.
@@ -1627,6 +1633,30 @@ const EnrichmentEngine = {
             });
         stepsBase.push('Pay minimums on everything else', 'When one is cleared, I\'ll roll payments into the next');
 
+        // Phase 4A: Build tier breakdown for proof string
+        const tierCounts = { tier1: tier1Debts.length, tier3: tier3Debts.length };
+        const tierProofParts: string[] = [];
+        if (tierCounts.tier1 > 0) tierProofParts.push(`${tierCounts.tier1} high-cost (>8% APR) — clear first`);
+        if (tierCounts.tier3 > 0) tierProofParts.push(`${tierCounts.tier3} low-cost (<4% APR) — may be optimal to maintain`);
+        const tierProof = tierProofParts.length > 0 ? tierProofParts.join(' | ') : undefined;
+
+        // Phase 4B: For tier 3 debts, run debt-vs-invest comparison
+        let debtVsInvestProof: string | undefined;
+        if (tier3Debts.length > 0 && hasConnectedDebtData) {
+          const t3 = tier3Debts[0];
+          const comparison = simulateDebtVsInvest(t3.interest_rate || 0, t3.outstanding_balance || 0);
+          if (comparison.probabilityInvestWins > 50) {
+            debtVsInvestProof = `${comparison.probabilityInvestWins}% probability investing beats paying off ${(t3.interest_rate! * 100).toFixed(1)}% debt | break-even ~${comparison.breakEvenYears}yr`;
+          }
+        }
+
+        const proofParts = [
+          `\u00a3${totalDebtBalance.toLocaleString()} total across ${actualDebtCount} debts`,
+          tierProof,
+          debtVsInvestProof,
+          totalInterestSaved > 0 ? `\u00a3${debtSaving * 12}/yr interest saved via avalanche method` : `\u00a3${totalMonthlyInterestCost}/mo current interest cost`,
+        ].filter(Boolean).join('\n');
+
         moves.push({
           action: `Clear ${actualDebtCount} debts${hasConnectedDebtData ? ` (\u00a3${totalDebtBalance.toLocaleString()} total)` : ''}, highest interest first`,
           annualImpact: debtSaving * 12,
@@ -1640,6 +1670,7 @@ const EnrichmentEngine = {
             ? `Saves \u00a3${debtSaving * 12}/year in interest across all debts.`
             : `\u00a3${totalMonthlyInterestCost}/month in interest across ${actualDebtCount} debts — clearing these frees that up.`,
           subGoals: debtSubGoals.length > 0 ? debtSubGoals : undefined,
+          proof: proofParts,
         });
       }
     }
@@ -1688,6 +1719,23 @@ const EnrichmentEngine = {
           ? `${singleName}: \u00a3${singleBal.toLocaleString()} balance${aprStr}, currently paying \u00a3${Math.round(p.debtPayments)}/month.${isHighUtil ? ` Utilisation at ${Math.round(overallUtil)}% — priority to reduce this.` : ''} Adding \u00a3${overpay}/month extra accelerates payoff.`
           : `Payments to ${singleName} detected (\u00a3${Math.round(p.debtPayments)}/month). Adding \u00a3${overpay}/month extra accelerates payoff.`;
 
+        // Phase 4A: Single debt tier info + debt-vs-invest for low-rate debt
+        const singleTier = classifyDebtTier(singleAPR);
+        const singleTierLabel = tierLabel(singleTier);
+        const singleProofParts: string[] = [
+          `${singleTierLabel}`,
+          hasConnectedDebtData ? `\u00a3${singleBal.toLocaleString()}${aprStr}` : undefined,
+          interestSaved > 0 ? `\u00a3${debtSaving * 12}/yr interest saved` : `\u00a3${monthlyInterestCost}/mo interest cost`,
+        ].filter(Boolean) as string[];
+
+        // Phase 4B: For low-cost single debt, show invest comparison
+        if (singleTier === 'tier3_low' && hasConnectedDebtData && singleBal > 0) {
+          const comparison = simulateDebtVsInvest(singleAPR, singleBal);
+          if (comparison.probabilityInvestWins > 50) {
+            singleProofParts.push(`${comparison.probabilityInvestWins}% probability investing outperforms repayment`);
+          }
+        }
+
         moves.push({
           action: actionText,
           annualImpact: debtSaving * 12,
@@ -1702,6 +1750,7 @@ const EnrichmentEngine = {
           effect: hasConnectedDebtData
             ? `Clears ${singleName} faster and saves \u00a3${debtSaving * 12}/year in interest.`
             : `Clears ${singleName} faster and saves an estimated \u00a3${debtSaving * 12}/year in interest.`,
+          proof: singleProofParts.join('\n'),
           subGoals: singleDebt ? [{
             type: 'debt_clear',
             target: resolveDebtName(singleDebt, 0),
