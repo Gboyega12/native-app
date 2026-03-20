@@ -7,6 +7,8 @@ import { supabase } from '@/lib/supabase';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { rankMoves } from '@/lib/move-engine';
 import { runReactiveEngine, type ReactiveResult } from '@/lib/reactive-engine';
+import { buildSystemMap, detectInsights } from '@/lib/insight-engine';
+import { classifyAccounts } from '@/lib/account-classifier';
 import type { Analysis, Goals, EnrichedTransaction, FinancialProfile, UserIdentity, DebtAccount, BudgetAdjustment, BudgetSection, Move } from '@/lib/types';
 import type { TransactionOverride } from '@/lib/enrichment-engine';
 import { DEFAULT_APR, defaultMinimumPayment } from '@/lib/constants';
@@ -498,6 +500,28 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
 
   const topMove = allMoves[0] || null;
 
+  // ── 4b. Detect insights from system map ──
+  let detectedInsights: import('@/lib/types').Insight[] = [];
+  try {
+    // Fetch account balances for system map
+    const { data: bankBalanceRows } = await supabase
+      .from('bank_data')
+      .select('account_balances')
+      .eq('user_id', userId)
+      .not('account_balances', 'is', null);
+
+    const accountBalances = (bankBalanceRows || []).flatMap((r: any) =>
+      Array.isArray(r.account_balances) ? r.account_balances : [],
+    );
+
+    const accounts = accountBalances.length > 0 ? classifyAccounts(accountBalances) : null;
+    const systemMap = buildSystemMap(result.profile as FinancialProfile, accounts, debtAccountsData);
+    detectedInsights = detectInsights(systemMap, result.profile as FinancialProfile, allMoves, debtAccountsData);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn('[sync] Insight detection failed (non-blocking):', message);
+  }
+
   // ── 5. Build raw analysis ──
   const rawAnalysis: Analysis = {
     user_id: userId,
@@ -529,6 +553,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       bnplCount: result.profile.metrics.bnplCount,
     },
     analysis_months: (result.profile as any).months || 1,
+    insights: detectedInsights.length > 0 ? detectedInsights : undefined,
   };
 
   // ── 6. Upsert to Supabase ──
@@ -556,6 +581,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     incoming_transfers: rawAnalysis.incoming_transfers,
     enrichment_metrics: rawAnalysis.enrichment_metrics,
     analysis_months: rawAnalysis.analysis_months,
+    insights: rawAnalysis.insights,
   };
 
   try {

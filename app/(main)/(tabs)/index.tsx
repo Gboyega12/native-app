@@ -18,7 +18,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals, repairDebtSubGoals } from '@/lib/types';
-import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType, Insight } from '@/lib/types';
 import { classifyAccounts, type AccountBuckets } from '@/lib/account-classifier';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
@@ -1754,6 +1754,7 @@ export default function Home() {
 
   // ── Derived data ──
   const moves = Array.isArray(analysis?.all_moves) ? analysis.all_moves : [];
+  const insightsData = Array.isArray(analysis?.insights) ? analysis.insights : [];
   const income = analysis?.monthly_income ?? 0;
   const incomeSources = Array.isArray(analysis?.income_sources) ? analysis.income_sources : [];
   const isVariableIncome = analysis?.is_variable_income ?? false;
@@ -2494,6 +2495,46 @@ export default function Home() {
           </View>
             );
           })()}
+
+          {/* ══════════════════════════════════════════════
+              SYSTEM INSIGHTS — detected inefficiencies
+              ══════════════════════════════════════════════ */}
+          {insightsData.length > 0 && (
+            <View style={{ marginBottom: spacing.md }}>
+              <View style={s.moveSectionHeader}>
+                <Text style={s.moveSectionLabel}>DETECTED INEFFICIENCIES</Text>
+                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent, letterSpacing: 0.3 }}>
+                  {'\u00a3'}{Math.round(insightsData.reduce((sum: number, ins: Insight) => sum + ins.annualImpact, 0)).toLocaleString()}/yr impact
+                </Text>
+              </View>
+              {insightsData.slice(0, 3).map((insight: Insight, idx: number) => (
+                <Card key={`insight-${idx}`} variant="default" style={{ marginBottom: spacing.md, borderLeftWidth: 3, borderLeftColor: colors.accent }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 22 }}>
+                        {insight.statement}
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
+                        <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
+                            {'\u00a3'}{insight.annualImpact.toLocaleString()}/yr
+                          </Text>
+                        </View>
+                        {insight.linkedMoveCategory && (
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, textTransform: 'uppercase' }}>
+                            {insight.linkedMoveCategory}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18, marginTop: 8 }}>
+                        {insight.cause}
+                      </Text>
+                    </View>
+                  </View>
+                </Card>
+              ))}
+            </View>
+          )}
 
           {/* ══════════════════════════════════════════════
               YOUR INSIGHTS — inline from Plan page

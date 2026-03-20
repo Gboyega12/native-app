@@ -2238,6 +2238,11 @@ const EnrichmentEngine = {
             strategy: cm.strategy,
             steps: cm.steps,
             effect: cm.effect,
+            proof: cm.proof,
+            source: cm.source,
+            destination: cm.destination,
+            amount: cm.amount,
+            recommendationType: cm.recommendationType,
           });
         }
       } catch (err) {

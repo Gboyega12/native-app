@@ -1347,6 +1347,15 @@ export default function Chat() {
     // Add budget line data (real income, trade-offs, month-over-month)
     ctx.budget_line = buildBudgetLine(a, prevSnapshot);
 
+    // Phase 5D: Inject active insights for proactive surfacing in chat
+    if (a?.insights && a.insights.length > 0) {
+      ctx.active_insights = a.insights.slice(0, 5).map((ins: any) => ({
+        statement: ins.statement,
+        annualImpact: ins.annualImpact,
+        linkedMoveCategory: ins.linkedMoveCategory,
+      }));
+    }
+
     // Add recent person-to-person transfers so Claude can spot miscategorised rent/bills
     const transferItems: { description: string; amount: number; date: string }[] = [];
     for (const section of [a?.non_discretionary, a?.discretionary]) {
