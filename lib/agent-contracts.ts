@@ -111,11 +111,11 @@ export function postflightCheck(
 
 function checkHardRules(agentId: AgentId, output: AgentOutput): string[] {
   const violations: string[] = [];
+  const o = output as unknown as Record<string, unknown>;
 
   switch (agentId) {
     case 'data_integrity': {
       // Must NOT contain insights, actions, or interpretations
-      const o = output as Record<string, unknown>;
       if ('insights' in o) violations.push('Data Integrity Agent must NOT generate insights');
       if ('recommendations' in o) violations.push('Data Integrity Agent must NOT suggest actions');
       if ('actions' in o) violations.push('Data Integrity Agent must NOT suggest actions');
@@ -124,7 +124,6 @@ function checkHardRules(agentId: AgentId, output: AgentOutput): string[] {
 
     case 'financial_analyst': {
       // Must NOT contain recommendations or user-facing text
-      const o = output as Record<string, unknown>;
       if ('recommendations' in o) violations.push('Financial Analyst must NOT produce recommendations');
       if ('allocations' in o) violations.push('Financial Analyst must NOT make allocation decisions');
       if ('user_message' in o) violations.push('Financial Analyst must NOT communicate with user');
@@ -133,7 +132,6 @@ function checkHardRules(agentId: AgentId, output: AgentOutput): string[] {
 
     case 'allocation': {
       // Must NOT contain user communication or simulations
-      const o = output as Record<string, unknown>;
       if ('recommendations' in o) violations.push('Allocation Agent must NOT generate recommendations');
       if ('user_message' in o) violations.push('Allocation Agent must NOT communicate with user');
       if ('simulations' in o) violations.push('Allocation Agent must NOT simulate outcomes');
@@ -142,7 +140,6 @@ function checkHardRules(agentId: AgentId, output: AgentOutput): string[] {
 
     case 'risk_investment': {
       // Must NOT contain recommendations or deterministic conclusions
-      const o = output as Record<string, unknown>;
       if ('recommendations' in o) violations.push('Risk Agent must NOT produce recommendations');
       if ('allocations' in o) violations.push('Risk Agent must NOT make allocation decisions');
       break;
@@ -150,7 +147,6 @@ function checkHardRules(agentId: AgentId, output: AgentOutput): string[] {
 
     case 'wealth_manager': {
       // Must NOT expose raw data
-      const o = output as Record<string, unknown>;
       if ('raw_transactions' in o) violations.push('Wealth Manager must NOT expose raw data');
       if ('raw_balance_sheet' in o) violations.push('Wealth Manager must NOT expose raw data');
       // Every recommendation must have required fields
