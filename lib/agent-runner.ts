@@ -23,16 +23,18 @@ import type {
 // ── Lib imports (the real engines) ──
 
 import EnrichmentEngine from './enrichment-engine';
-import { buildSystemMap, detectInsights } from './insight-engine';
-import { rankMoves, checkFeasibility, compareScenarios } from './move-engine';
+import { buildSystemMap, detectInsights, formatInsightForCohort } from './insight-engine';
+import { rankMoves, checkFeasibility, compareScenarios, computePartialAllocation } from './move-engine';
 import { getLiquidityDiscount, calcMoveMarginalUtility } from './liquidity-engine';
 import { classifyDebtAccounts, simulateDebtVsInvest } from './debt-engine';
 import { classifyAccounts, type AccountBuckets } from './account-classifier';
 import { estimateVolatility, simulateGoalTimeline } from './monte-carlo';
+import { detectCohort } from './profile-signals';
 import type {
   EnrichedTransaction,
   FinancialProfile,
   DebtAccount,
+  FinancialCohort,
   SystemMap,
   Move,
   Goals,
@@ -85,6 +87,7 @@ export class AgentRunnerImpl implements IAgentRunner {
     goals?: Goals | null;
     moves?: Move[];
     insights?: Insight[];
+    cohort?: FinancialCohort;
   } = {};
 
   constructor(provider: DataProvider) {
@@ -192,13 +195,13 @@ export class AgentRunnerImpl implements IAgentRunner {
     const systemMap = buildSystemMap(profile, accounts, debtAccounts);
     this.cache.systemMap = systemMap;
 
-    // Generate moves first (needed by detectInsights for time-based loss)
-    const enrichmentResult = EnrichmentEngine.enrich(
-      '', // Not re-parsing CSV — we use cached enriched transactions
-    );
-    // Use cached profile's move generation instead
+    // Detect user's financial cohort for tone/priority adjustments
+    const cohort = detectCohort(profile, identity, goals, debtAccounts);
+    this.cache.cohort = cohort;
+
+    // Generate moves (needed by detectInsights for time-based loss)
     const rankedMoves = rankMoves(
-      context.dataIntegrity ? [] : [], // Moves will be generated from profile data
+      [], // decisionStack populated from profile data by rankMoves
       profile,
       goals,
       identity,
@@ -330,13 +333,33 @@ export class AgentRunnerImpl implements IAgentRunner {
     allocationOptions.sort((a, b) => b.utility_score - a.utility_score);
     this.tracker.markCalled('calculate_lamu_score');
 
+    // Partial allocation: split surplus across top allocation options
+    // instead of binary "all to the best option"
+    if (excessLiquidity > 0 && allocationOptions.length > 1) {
+      const totalUtility = allocationOptions.reduce((s, a) => s + a.utility_score, 0);
+      if (totalUtility > 0) {
+        let remaining = excessLiquidity;
+        for (const opt of allocationOptions) {
+          const proportion = opt.utility_score / totalUtility;
+          const splitAmount = Math.min(
+            Math.round(excessLiquidity * proportion),
+            opt.amount,
+            remaining,
+          );
+          opt.amount = splitAmount;
+          remaining -= splitAmount;
+          if (remaining <= 0) break;
+        }
+      }
+    }
+
     // Verify all required tools were called
     const missing = this.tracker.verifyAgent('allocation');
     if (missing.length > 0) {
       throw new Error(`Allocation Agent failed to call required tools: ${missing.join(', ')}`);
     }
 
-    return { allocations: allocationOptions };
+    return { allocations: allocationOptions.filter((a) => a.amount > 0) };
   }
 
   // ── Risk & Investment Agent ──
@@ -432,6 +455,7 @@ export class AgentRunnerImpl implements IAgentRunner {
     const insights = this.cache.insights || [];
     const allocations = context.allocation?.allocations || [];
     const riskOutput = context.riskInvestment;
+    const cohort = this.cache.cohort || 'foundation';
 
     // Tool: generate_recommendation
     // Generate one recommendation per material inefficiency, bounded by allocations
@@ -478,8 +502,11 @@ export class AgentRunnerImpl implements IAgentRunner {
 
       if (!feasibility.feasible) continue;
 
+      // Apply cohort-specific tone to action text
+      const actionText = formatInsightForCohort(insight, cohort);
+
       recommendations.push({
-        action: insight.statement,
+        action: actionText,
         amount: Math.round(amount),
         source,
         destination,

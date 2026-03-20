@@ -1357,6 +1357,14 @@ export default function Chat() {
       }));
     }
 
+    // Agent pipeline outputs — inject recommendations and insights into chat context
+    if ((a as any)?.agent_recommendations?.length > 0) {
+      (ctx as any).agent_recommendations = (a as any).agent_recommendations;
+    }
+    if ((a as any)?.agent_insights?.length > 0) {
+      (ctx as any).agent_insights = (a as any).agent_insights;
+    }
+
     // Add recent person-to-person transfers so Claude can spot miscategorised rent/bills
     const transferItems: { description: string; amount: number; date: string }[] = [];
     for (const section of [a?.non_discretionary, a?.discretionary]) {

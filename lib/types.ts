@@ -562,6 +562,14 @@ export interface Analysis {
   analysis_months?: number;
   /** Detected insights from the insight engine (Phase 2) */
   insights?: Insight[];
+  /** Agent pipeline: ranked recommendations from wealth manager agent */
+  agent_recommendations?: Array<{ action: string; amount: number; source: string; destination: string; expected_impact: number; downside_risk: number }>;
+  /** Agent pipeline: detected inefficiencies from financial analyst agent */
+  agent_insights?: Array<{ type: string; description: string; annual_impact: number; confidence: number }>;
+  /** Agent pipeline execution status */
+  agent_pipeline_status?: string;
+  /** Agent pipeline last run timestamp */
+  agent_pipeline_run_at?: string;
 }
 
 // ── Goal Trajectory ──

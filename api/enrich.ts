@@ -9,6 +9,9 @@ import { createClient } from '@supabase/supabase-js';
 import EnrichmentEngine from '../lib/enrichment-engine.js';
 import { rankMoves } from '../lib/move-engine.js';
 import { classifyTransactionsBatch } from './claude/index.js';
+import { AgentOrchestrator } from '../lib/agent-orchestrator.js';
+import { AgentRunnerImpl } from '../lib/agent-runner.js';
+import { SupabaseDataProvider } from '../lib/supabase-data-provider.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const bodySchema = z.object({
@@ -347,6 +350,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // ── 9. Agent pipeline — structural analysis ──
+    // Runs the 5-agent pipeline for insights, allocation, risk, and recommendations.
+    // Non-blocking: if the pipeline fails, the base analysis is still valid.
+    let agentRecommendations: unknown[] = [];
+    let agentInsights: unknown[] = [];
+    let pipelineStatus = 'skipped';
+    try {
+      const provider = new SupabaseDataProvider(admin);
+      const runner = new AgentRunnerImpl(provider);
+      const orchestrator = new AgentOrchestrator(runner, { confidenceThreshold: 0.6 });
+
+      const pipelineResult = await orchestrator.execute({
+        userId,
+        queryIntent: 'full_analysis',
+      });
+
+      pipelineStatus = pipelineResult.status;
+
+      if (pipelineResult.recommendations) {
+        agentRecommendations = pipelineResult.recommendations.recommendations;
+      }
+
+      // Extract insights from financial analyst output
+      const faResult = pipelineResult.results.financial_analyst;
+      if (faResult?.status === 'success' && faResult.output) {
+        agentInsights = (faResult.output as any).inefficiencies || [];
+      }
+
+      // Persist agent outputs alongside the analysis
+      if (agentRecommendations.length > 0 || agentInsights.length > 0) {
+        await admin.from('analyses').update({
+          agent_recommendations: agentRecommendations,
+          agent_insights: agentInsights,
+          agent_pipeline_status: pipelineStatus,
+          agent_pipeline_run_at: new Date().toISOString(),
+        }).eq('user_id', userId).order('created_at', { ascending: false }).limit(1);
+      }
+
+      console.log(`[enrich] Agent pipeline: ${pipelineStatus} — ${agentRecommendations.length} recommendations, ${agentInsights.length} insights (${pipelineResult.totalDurationMs}ms)`);
+    } catch (err) {
+      // Agent pipeline is additive — don't fail the enrichment if it breaks
+      console.warn('[enrich] Agent pipeline failed (non-critical):', err instanceof Error ? err.message : err);
+      pipelineStatus = 'error';
+    }
+
     console.log(`[enrich] Updated analysis for user ${userId} — ${result.enrichedTransactions.length} transactions, latest: ${latestTransactionDate}`);
 
     return res.json({
@@ -354,6 +402,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       transactions_enriched: result.enrichedTransactions.length,
       latest_transaction_date: latestTransactionDate,
       decision_score: rawAnalysis.decision_score,
+      agent_pipeline: pipelineStatus,
+      agent_recommendations: agentRecommendations.length,
+      agent_insights: agentInsights.length,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

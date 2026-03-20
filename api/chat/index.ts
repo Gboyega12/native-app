@@ -71,14 +71,36 @@ function validateResponse(responseText: string, userMessage: string): ResponseVa
 // ── Phase 5D: Proactive Insight Injection ──
 
 function buildInsightContext(context: Record<string, unknown>): string {
+  const parts: string[] = [];
+
+  // Phase 5D: Active insights
   const insights = (context as any).active_insights as Array<{ statement: string; annualImpact: number; linkedMoveCategory?: string }> | undefined;
-  if (!insights || insights.length === 0) return '';
+  if (insights && insights.length > 0) {
+    const lines = insights.slice(0, 3).map((i) =>
+      `- ${i.statement} (£${i.annualImpact}/yr impact)`,
+    );
+    parts.push(`## Active Insights (proactively surface when relevant)\n${lines.join('\n')}`);
+  }
 
-  const lines = insights.slice(0, 3).map((i) =>
-    `- ${i.statement} (£${i.annualImpact}/yr impact)`,
-  );
+  // Agent pipeline recommendations (if available)
+  const agentRecs = (context as any).agent_recommendations as Array<{ action: string; amount: number; expected_impact: number; source: string; destination: string }> | undefined;
+  if (agentRecs && agentRecs.length > 0) {
+    const lines = agentRecs.slice(0, 5).map((r) =>
+      `- ${r.action} — Move £${r.amount} from ${r.source} → ${r.destination} (£${r.expected_impact}/yr benefit)`,
+    );
+    parts.push(`## Agent Recommendations (ranked by impact — reference these in responses)\n${lines.join('\n')}`);
+  }
 
-  return `\n\n## Active Insights (proactively surface when relevant)\n${lines.join('\n')}`;
+  // Agent-detected inefficiencies
+  const agentInsights = (context as any).agent_insights as Array<{ type: string; description: string; annual_impact: number }> | undefined;
+  if (agentInsights && agentInsights.length > 0) {
+    const lines = agentInsights.slice(0, 3).map((i) =>
+      `- [${i.type}] ${i.description} (£${i.annual_impact}/yr)`,
+    );
+    parts.push(`## Detected Inefficiencies\n${lines.join('\n')}`);
+  }
+
+  return parts.length > 0 ? '\n\n' + parts.join('\n\n') : '';
 }
 
 const MAX_RETRIES = 2;
