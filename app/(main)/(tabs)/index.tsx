@@ -1287,7 +1287,7 @@ export default function Home() {
       try {
         const { data: allDebt } = await supabase
           .from('debt_accounts')
-          .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source')
+          .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source, is_default_apr, provider_name, connection_id, account_id')
           .eq('user_id', userId);
         if (allDebt) setDebtAccounts(allDebt);
       } catch {
@@ -1759,6 +1759,9 @@ export default function Home() {
   // ── Derived data ──
   const moves = Array.isArray(analysis?.all_moves) ? analysis.all_moves : [];
   const insightsData = Array.isArray(analysis?.insights) ? analysis.insights : [];
+  const agentRecommendations = Array.isArray(analysis?.agent_recommendations) ? analysis.agent_recommendations : [];
+  const agentInsights = Array.isArray(analysis?.agent_insights) ? analysis.agent_insights : [];
+  const agentPipelineStatus = analysis?.agent_pipeline_status ?? null;
   const income = analysis?.monthly_income ?? 0;
   const incomeSources = Array.isArray(analysis?.income_sources) ? analysis.income_sources : [];
   const isVariableIncome = analysis?.is_variable_income ?? false;
@@ -3076,6 +3079,116 @@ export default function Home() {
                   </View>
                 </Card>
               ))}
+            </View>
+          )}
+
+          {/* ══════════════════════════════════════════════
+              AGENT RECOMMENDATIONS — ranked actions from wealth manager
+              ══════════════════════════════════════════════ */}
+          {agentRecommendations.length > 0 && (
+            <View style={{ marginBottom: spacing.md }}>
+              <View style={s.moveSectionHeader}>
+                <Text style={s.moveSectionLabel}>RECOMMENDED ACTIONS</Text>
+                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green, letterSpacing: 0.3 }}>
+                  {agentRecommendations.length} action{agentRecommendations.length !== 1 ? 's' : ''}
+                </Text>
+              </View>
+              {agentRecommendations.slice(0, 5).map((rec, idx) => {
+                const impactColor = rec.expected_impact > 500 ? colors.green : rec.expected_impact > 100 ? colors.accent : colors.text2;
+                const riskColor = rec.downside_risk > 500 ? colors.coral : rec.downside_risk > 100 ? colors.amber : colors.muted;
+                return (
+                  <Card key={`agent-rec-${idx}`} variant="default" style={{ marginBottom: spacing.sm, borderLeftWidth: 3, borderLeftColor: idx === 0 ? colors.green : colors.accent }}>
+                    <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text, lineHeight: 22 }}>
+                      {rec.action}
+                    </Text>
+                    {/* Flow: source → destination */}
+                    {(rec.source || rec.destination) && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                        {rec.source ? (
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2 }}>{rec.source}</Text>
+                        ) : null}
+                        {rec.source && rec.destination ? (
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>{'\u2192'}</Text>
+                        ) : null}
+                        {rec.destination ? (
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.text2 }}>{rec.destination}</Text>
+                        ) : null}
+                        {rec.amount > 0 && (
+                          <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8, marginLeft: 'auto' }}>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
+                              {'\u00a3'}{Math.round(rec.amount).toLocaleString()}/mo
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                    {/* Impact & risk badges */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      {rec.expected_impact > 0 && (
+                        <View style={{ backgroundColor: `${impactColor}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: impactColor }}>
+                            +{'\u00a3'}{Math.round(rec.expected_impact).toLocaleString()}/yr
+                          </Text>
+                        </View>
+                      )}
+                      {rec.downside_risk > 0 && (
+                        <View style={{ backgroundColor: `${riskColor}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: riskColor }}>
+                            {'\u00a3'}{Math.round(rec.downside_risk).toLocaleString()} risk
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  </Card>
+                );
+              })}
+            </View>
+          )}
+
+          {/* ══════════════════════════════════════════════
+              AGENT INSIGHTS — inefficiencies detected by financial analyst
+              ══════════════════════════════════════════════ */}
+          {agentInsights.length > 0 && (
+            <View style={{ marginBottom: spacing.md }}>
+              <View style={s.moveSectionHeader}>
+                <Text style={s.moveSectionLabel}>AGENT INSIGHTS</Text>
+                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral, letterSpacing: 0.3 }}>
+                  {'\u00a3'}{Math.round(agentInsights.reduce((sum, ai) => sum + (ai.annual_impact || 0), 0)).toLocaleString()}/yr impact
+                </Text>
+              </View>
+              {agentInsights.slice(0, 4).map((ai, idx) => {
+                const confidenceColor = ai.confidence > 0.8 ? colors.green : ai.confidence > 0.5 ? colors.amber : colors.muted;
+                return (
+                  <Card key={`agent-insight-${idx}`} variant="default" style={{ marginBottom: spacing.sm, borderLeftWidth: 3, borderLeftColor: colors.coral }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 22 }}>
+                          {ai.description}
+                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                          {ai.annual_impact > 0 && (
+                            <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
+                                {'\u00a3'}{Math.round(ai.annual_impact).toLocaleString()}/yr
+                              </Text>
+                            </View>
+                          )}
+                          <View style={{ backgroundColor: `${confidenceColor}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: confidenceColor }}>
+                              {Math.round(ai.confidence * 100)}% confidence
+                            </Text>
+                          </View>
+                          {ai.type && (
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              {ai.type}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  </Card>
+                );
+              })}
             </View>
           )}
 
