@@ -373,7 +373,9 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
             source: 'truelayer',
             last_updated: new Date().toISOString(),
           }, { onConflict: 'user_id,account_name' });
-          if (!upsertErr) {
+          if (upsertErr) {
+            console.error('[sync] debt_accounts upsert failed:', JSON.stringify(upsertErr));
+          } else {
             syncedDebt.push({
               account_name: cardName,
               account_type: card.type || 'credit_card',

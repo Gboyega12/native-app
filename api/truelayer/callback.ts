@@ -352,7 +352,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const acctType = card.type || 'credit_card';
           const defaultApr = DEFAULT_APR[acctType] ?? DEFAULT_APR.credit_card;
           const defaultMin = defaultMinimumPayment(acctType, card.balance);
-          await admin.from('debt_accounts').upsert({
+          const { error: debtUpsertErr } = await admin.from('debt_accounts').upsert({
             user_id: postUserId,
             account_name: card.name || 'Card',
             account_type: acctType,
@@ -365,6 +365,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             provider_name: providerName || null,
             last_updated: new Date().toISOString(),
           }, { onConflict: 'user_id,account_name' });
+          if (debtUpsertErr) {
+            console.error('[callback] debt_accounts upsert failed:', JSON.stringify(debtUpsertErr));
+          }
         }
       }
     } catch (debtErr: unknown) {

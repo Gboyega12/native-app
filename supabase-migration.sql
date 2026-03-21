@@ -235,7 +235,12 @@ CREATE TABLE debt_accounts (
   credit_limit NUMERIC,
   interest_rate NUMERIC,
   minimum_payment NUMERIC,
+  is_default_apr BOOLEAN DEFAULT true,
   source TEXT NOT NULL DEFAULT 'truelayer',
+  provider_name TEXT,
+  institution TEXT,
+  connection_id TEXT,
+  account_id TEXT,
   last_updated TIMESTAMPTZ DEFAULT now(),
   created_at TIMESTAMPTZ DEFAULT now(),
   UNIQUE(user_id, account_name)
@@ -340,3 +345,18 @@ ALTER TABLE analyses
 -- ============================================================
 ALTER TABLE bank_data
   ADD COLUMN IF NOT EXISTS last_successful_sync_date DATE;
+
+
+-- ============================================================
+-- Migration: add missing columns to debt_accounts
+-- The code upserts is_default_apr, provider_name, institution,
+-- connection_id, and account_id but the original CREATE TABLE
+-- did not include them — causing silent upsert failures and an
+-- empty debt_accounts table for TrueLayer-connected users.
+-- ============================================================
+ALTER TABLE debt_accounts
+  ADD COLUMN IF NOT EXISTS is_default_apr BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS provider_name TEXT,
+  ADD COLUMN IF NOT EXISTS institution TEXT,
+  ADD COLUMN IF NOT EXISTS connection_id TEXT,
+  ADD COLUMN IF NOT EXISTS account_id TEXT;
