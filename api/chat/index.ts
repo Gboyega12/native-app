@@ -7,6 +7,11 @@ const bodySchema = z.object({
   messages: z.array(z.object({
     role: z.string(),
     content: z.string(),
+    attachment: z.object({
+      name: z.string(),
+      type: z.string(),
+      dataUrl: z.string(),
+    }).optional(),
   })),
   context: z.record(z.string(), z.unknown()).optional(),
   stream: z.boolean().optional(),
@@ -98,6 +103,17 @@ function buildInsightContext(context: Record<string, unknown>): string {
       `- [${i.type}] ${i.description} (£${i.annual_impact}/yr)`,
     );
     parts.push(`## Detected Inefficiencies\n${lines.join('\n')}`);
+  }
+
+  // Manual assets (investments/pensions on external platforms)
+  const manualAssets = (context as any).manual_assets as Array<{ platform: string; asset_type: string; estimated_value: number; currency: string; notes: string | null }> | undefined;
+  if (manualAssets && manualAssets.length > 0) {
+    const lines = manualAssets.map((a) => {
+      const typeLabel = a.asset_type.replace(/_/g, ' ');
+      return `- ${a.platform}: ${typeLabel} — £${Math.round(a.estimated_value).toLocaleString()}${a.notes ? ` (${a.notes})` : ''}`;
+    });
+    const totalValue = manualAssets.reduce((s, a) => s + a.estimated_value, 0);
+    parts.push(`## External Assets (manually tracked, not connected via open banking)\n${lines.join('\n')}\nTotal external assets: £${Math.round(totalValue).toLocaleString()}\nInclude these in net worth calculations and capital allocation analysis.`);
   }
 
   return parts.length > 0 ? '\n\n' + parts.join('\n\n') : '';
@@ -227,6 +243,38 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'save_manual_asset',
+    description:
+      'Save a manual investment or asset that the user holds on an external platform (not connected via open banking). Use this when the user tells you about investments, pensions, ISAs, property, crypto, or other assets they hold elsewhere. Examples: "I have £30k in a Vanguard ISA", "My pension is worth about £85k with Aviva", "I have 2 BTC", "My house is worth £350k". The user must provide the platform/provider, asset type, and approximate value.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        platform: {
+          type: 'string',
+          description: 'Platform or provider name. E.g. "Vanguard", "Hargreaves Lansdown", "Coinbase", "Workplace pension", "Property".',
+        },
+        asset_type: {
+          type: 'string',
+          description: 'Type of asset.',
+          enum: ['stocks_and_shares_isa', 'cash_isa', 'general_investment', 'pension', 'sipp', 'crypto', 'property', 'premium_bonds', 'other'],
+        },
+        estimated_value: {
+          type: 'number',
+          description: 'Current estimated value in pounds.',
+        },
+        currency: {
+          type: 'string',
+          description: 'Currency if not GBP. Defaults to GBP.',
+        },
+        notes: {
+          type: 'string',
+          description: 'Additional details. E.g. "Global index fund", "workplace defined contribution", "Buy-to-let in Manchester".',
+        },
+      },
+      required: ['platform', 'asset_type', 'estimated_value'],
+    },
+  },
+  {
     name: 'suggest_goal_update',
     description:
       'Suggest the user update their financial goals when their situation has clearly changed. Use this when: (1) The user says their circumstances changed (got a raise, paid off debt, new expense, job loss). (2) Their financial data shows they\'ve achieved or outgrown their current goal (e.g. debt is nearly cleared but goal is still "clear debt"). (3) They explicitly ask to change their goals. Do NOT use this for minor progress updates \u2014 only for genuine goal shifts.',
@@ -289,7 +337,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (insightContext ? insightContext : '') +
     (conversationMode !== 'general' ? `\n\n[Detected conversation mode: ${conversationMode}]` : '');
 
-  const apiMessages = messages.map((m) => ({ role: m.role, content: m.content }));
+  const apiMessages = messages.map((m) => {
+    // If message has an image attachment, build multimodal content for Claude
+    if (m.attachment && m.attachment.dataUrl && m.attachment.type.startsWith('image/')) {
+      // Extract base64 data from data URL (format: data:image/png;base64,...)
+      const base64Match = m.attachment.dataUrl.match(/^data:(image\/\w+);base64,(.+)$/);
+      if (base64Match) {
+        return {
+          role: m.role,
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: base64Match[1], data: base64Match[2] } },
+            { type: 'text', text: m.content || `User attached an image: ${m.attachment.name}. Please analyse it for any financial data, statements, or information that could help with their financial optimisation.` },
+          ],
+        };
+      }
+    }
+    // For non-image attachments (CSV, PDF, etc.), include the file info in text
+    if (m.attachment && m.attachment.dataUrl && !m.attachment.type.startsWith('image/')) {
+      const fileContext = `[User attached file: ${m.attachment.name} (${m.attachment.type}). The file content has been received for analysis.]`;
+      return { role: m.role, content: m.content ? `${m.content}\n\n${fileContext}` : fileContext };
+    }
+    return { role: m.role, content: m.content };
+  });
 
   // ── Streaming mode ──
   if (stream) {
@@ -540,6 +609,9 @@ async function executeTool(name: string, input: Record<string, unknown>, userId:
   if (name === 'suggest_goal_update') {
     return executeGoalUpdate(input, userId);
   }
+  if (name === 'save_manual_asset') {
+    return executeManualAsset(input, userId);
+  }
   if (name === 'search_gif') {
     return executeGifSearch(input);
   }
@@ -732,6 +804,58 @@ async function executeGoalUpdate(input: Record<string, unknown>, userId: string 
   };
 }
 
+async function executeManualAsset(input: Record<string, unknown>, userId: string | null): Promise<ToolResult> {
+  if (!userId) {
+    return {
+      response: { success: false, error: 'No user session' },
+      action: null,
+    };
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    return {
+      response: { success: false, error: 'Server misconfigured' },
+      action: null,
+    };
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  const assetData = {
+    user_id: userId,
+    platform: input.platform as string,
+    asset_type: input.asset_type as string,
+    estimated_value: input.estimated_value as number,
+    currency: (input.currency as string) || 'GBP',
+    notes: (input.notes as string) || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await admin.from('manual_assets').upsert(assetData, {
+    onConflict: 'user_id,platform,asset_type',
+  });
+
+  if (error) {
+    return {
+      response: { success: false, error: error.message },
+      action: null,
+    };
+  }
+
+  return {
+    response: {
+      success: true,
+      message: `Saved: ${input.platform} ${(input.asset_type as string).replace(/_/g, ' ')} — £${Math.round(input.estimated_value as number).toLocaleString()}. This will be included in your net worth and financial analysis.`,
+    },
+    action: {
+      type: 'manual_asset_saved',
+      data: assetData,
+    },
+  };
+}
+
 async function executeGifSearch(input: Record<string, unknown>): Promise<ToolResult> {
   const apiKey = process.env.GIPHY_API_KEY;
   if (!apiKey) {
@@ -893,6 +1017,8 @@ Rules:
 - When discussing tax wrappers (ISA, pension, GIA), state the mathematical facts: allowance remaining, tax relief rate, effective cost per \u00a31. Never say "you should put money in X."
 - NEVER guess or assume expenses that aren't in the data. If you don't see rent, council tax, childcare, or other expected essentials, ASK the user \u2014 don't fill in amounts yourself. Say "I don't see rent in your transactions \u2014 do you pay it via another account or a partner?" The user's data might be correct (they might live rent-free, or pay via a partner). ALWAYS confirm before acting.
 - NEVER call propose_plan or save_budget_item unless the user EXPLICITLY asks you to create a plan or add a budget item. Giving a breakdown, answering a question, or discussing spending is NOT a trigger to create plans or save budget items.
+- NEVER suggest cancelling subscriptions or reducing spending for users who earn well and manage their credit well. You are a financial OPTIMISATION platform, not a budgeting app. Focus on capital allocation, tax efficiency, investment returns, and wealth building. Only suggest spending changes for users genuinely in financial difficulty.
+- NEVER suggest reducing essential costs like council tax, rent, mortgage, insurance, energy, or broadband. These are non-negotiable obligations.
 - No bullet lists unless they ask for steps. Keep it conversational.
 - No filler. No preamble. No "Great question!" No "Absolutely!" No "Let me break this down." Just answer.
 - Don't echo what they said. Don't restate the question. Jump straight to the answer.
@@ -926,7 +1052,10 @@ Tools:
 - IMPORTANT: When the user says a person-to-person payment is NOT income, use category "Transfers" \u2014 NOT "Other". Transfers stay visible in their transaction history but won't inflate income figures. If the payment is a partner's household contribution (rent share, bills share), use "Household Contribution" instead \u2014 this is also excluded from income but tracked as a regular inflow. If the user says "that's my own account", use "Internal Transfer".
 - When the user EXPLICITLY asks to set a target or track a goal, use propose_plan to create it. The user will see an "Add to plan" button and can approve or dismiss it from the chat. NEVER call propose_plan unless the user directly asks for a plan. Answering questions, giving breakdowns, or discussing budgets is NOT a reason to create a plan. If a user asks "how should I split my paycheck" that's a question \u2014 answer it, don't create a plan.
 - When the user EXPLICITLY tells you to add a specific expense with a concrete amount, use save_budget_item. The user must provide both what it is AND how much. NEVER call this tool based on assumptions or as part of a breakdown. If you notice rent or an essential is missing from their data, ASK about it first \u2014 don't add it yourself.
+- When the user mentions investments, pensions, ISAs, crypto, property, or other assets held on external platforms (not connected via open banking), use save_manual_asset to record them. Ask for the platform name, type, and approximate value. Examples: "I have £30k in a Vanguard ISA" → save it. "My workplace pension is about £85k" → save it. This data enriches their net worth picture and unlocks better capital allocation recommendations.
 - When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis. Don't suggest this casually \u2014 only when a real shift has happened.
+- When users attach images (screenshots of bank statements, investment platforms, payslips, etc.), analyse the content and extract relevant financial data. Use this information to update their profile, add manual assets, or answer questions. If the image shows investment balances from another platform, offer to save them using save_manual_asset.
+- When users attach files (CSV bank statements, spreadsheets), acknowledge receipt and extract any useful financial information to help with their queries.
 - IMPORTANT: In all tool call inputs (action titles, reasons, descriptions), use PLAIN TEXT only \u2014 no markdown, no **bold**, no *italic*. Markdown is only for your chat messages.`;
 
   if (!ctx) return prompt;

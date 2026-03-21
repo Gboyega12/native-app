@@ -700,6 +700,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   actions?: ChatAction[];
+  /** File/image attachment (base64 data URL) */
+  attachment?: { name: string; type: string; dataUrl: string };
 }
 
 export interface ChatContext {

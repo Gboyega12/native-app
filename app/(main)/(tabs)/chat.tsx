@@ -1068,6 +1068,9 @@ export default function Chat() {
   const stopSpeechRef = useRef<(() => void) | null>(null);
   // Set when voice input triggers a message; cleared after TTS speaks the response
   const pendingVoiceResponseRef = useRef(false);
+  // File/image attachment state
+  const [attachment, setAttachment] = useState<{ name: string; type: string; dataUrl: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // ── Full speech-to-speech conversation hook ──
   const {
@@ -1364,6 +1367,17 @@ export default function Chat() {
     if ((a as any)?.agent_insights?.length > 0) {
       (ctx as any).agent_insights = (a as any).agent_insights;
     }
+
+    // Manual assets — investments/pensions held on external platforms
+    try {
+      const { data: manualAssets } = await supabase
+        .from('manual_assets')
+        .select('platform, asset_type, estimated_value, currency, notes, updated_at')
+        .eq('user_id', user.id);
+      if (manualAssets && manualAssets.length > 0) {
+        (ctx as any).manual_assets = manualAssets;
+      }
+    } catch {}
 
     // Add recent person-to-person transfers so Claude can spot miscategorised rent/bills
     const transferItems: { description: string; amount: number; date: string }[] = [];
@@ -2074,15 +2088,52 @@ export default function Chat() {
 
   // ── Send message (with streaming + fallback) ──
 
-  const sendMessage = async (text: string, _source: 'text' | 'voice' | 'suggestion' = 'text') => {
-    if (!text.trim() || loading) return;
-    hapticLight();
-    trackEvent('Chat Message Sent', { source: _source });
+  // ── File/image picker ──
+  const handleFilePick = () => {
+    if (typeof document === 'undefined') return;
+    if (!fileInputRef.current) {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'image/*,.pdf,.csv,.xlsx,.xls,.txt';
+      inp.style.display = 'none';
+      inp.addEventListener('change', () => {
+        const file = inp.files?.[0];
+        if (!file) return;
+        if (file.size > 10 * 1024 * 1024) {
+          window.alert('File too large. Maximum size is 10MB.');
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          setAttachment({ name: file.name, type: file.type, dataUrl: reader.result as string });
+        };
+        reader.readAsDataURL(file);
+        inp.value = ''; // reset for re-pick
+      });
+      document.body.appendChild(inp);
+      fileInputRef.current = inp;
+    }
+    fileInputRef.current.click();
+  };
 
-    const userMsg: ChatMessage = { role: 'user', content: text.trim() };
+  const sendMessage = async (text: string, _source: 'text' | 'voice' | 'suggestion' = 'text') => {
+    if ((!text.trim() && !attachment) || loading) return;
+    hapticLight();
+    trackEvent('Chat Message Sent', { source: _source, hasAttachment: !!attachment });
+
+    // Build message content — include attachment description if present
+    let messageContent = text.trim();
+    const currentAttachment = attachment;
+    if (currentAttachment) {
+      const attachLabel = `[Attached: ${currentAttachment.name}]`;
+      messageContent = messageContent ? `${messageContent}\n\n${attachLabel}` : attachLabel;
+    }
+
+    const userMsg: ChatMessage = { role: 'user', content: messageContent, attachment: currentAttachment || undefined };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput('');
+    setAttachment(null);
     setInputHeight(40);
     setLoading(true);
     setError(null);
@@ -2495,6 +2546,15 @@ export default function Chat() {
 
               {msg.role === 'user' ? (
                 <View style={[s.bubble, s.userBubble]}>
+                  {msg.attachment?.type.startsWith('image/') && (
+                    <img src={msg.attachment.dataUrl} alt={msg.attachment.name} style={{ width: '100%', maxWidth: 240, borderRadius: 12, marginBottom: 8 }} />
+                  )}
+                  {msg.attachment && !msg.attachment.type.startsWith('image/') && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6, opacity: 0.8 }}>
+                      <Text style={{ fontSize: 14 }}>{'\uD83D\uDCC4'}</Text>
+                      <Text style={[s.bubbleText, s.userText, { fontSize: 12 }]}>{msg.attachment.name}</Text>
+                    </View>
+                  )}
                   <Text style={[s.bubbleText, s.userText]}>{msg.content}</Text>
                 </View>
               ) : (
@@ -2609,8 +2669,30 @@ export default function Chat() {
       {/* ── Input (only shown in conversation mode, not empty state) ── */}
       {!isEmptyState && (
         <>
+              {/* Attachment preview */}
+              {attachment && (
+                <View style={[s.attachmentPreview, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
+                  {attachment.type.startsWith('image/') && (
+                    <img src={attachment.dataUrl} alt={attachment.name} style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover' }} />
+                  )}
+                  <Text style={s.attachmentName} numberOfLines={1}>{attachment.name}</Text>
+                  <TouchableOpacity onPress={() => setAttachment(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={s.attachmentRemove}>{'\u2715'}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
               {/* Voice-first input bar: mic button prominent, text secondary */}
               <View style={[s.voiceInputRow, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%' }]}>
+                {/* Attachment button */}
+                <TouchableOpacity
+                  style={s.attachButton}
+                  onPress={handleFilePick}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Attach file or image"
+                >
+                  <Text style={s.attachButtonIcon}>{'\uD83D\uDCCE'}</Text>
+                </TouchableOpacity>
                 <TextInput
                   ref={inputRef}
                   style={[s.input, { height: Math.max(40, Math.min(inputHeight, 160)) }]}
@@ -3392,6 +3474,41 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     height: 10,
     borderRadius: 2,
     backgroundColor: c.bg,
+  },
+
+  // ── Attachment ──
+  attachButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center' as const,
+    alignItems: 'center' as const,
+    backgroundColor: `${c.accent}15`,
+  },
+  attachButtonIcon: {
+    fontSize: 16,
+  },
+  attachmentPreview: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: c.border,
+    backgroundColor: c.bg,
+  },
+  attachmentName: {
+    flex: 1,
+    fontFamily: fonts.mono,
+    fontSize: 12,
+    color: c.muted,
+  },
+  attachmentRemove: {
+    fontSize: 14,
+    color: c.coral,
+    fontFamily: fonts.mono,
+    paddingHorizontal: 4,
   },
 
   // ── Free tier gate ──

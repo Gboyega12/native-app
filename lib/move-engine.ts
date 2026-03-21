@@ -112,7 +112,7 @@ export function computePartialAllocation(
   rankedMoves: RankedMove[],
   surplus: number,
 ): AllocationSplit[] {
-  if (surplus <= 0 || rankedMoves.length === 0) return [];
+  if (!surplus || surplus <= 0 || rankedMoves.length === 0) return [];
 
   const splits: AllocationSplit[] = [];
   let remaining = surplus;

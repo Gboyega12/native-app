@@ -1311,6 +1311,7 @@ const EnrichmentEngine = {
     // Prevents moves from collectively promising more than the user has.
     let remainingSurplus = Math.max(0, p.surplus);
     const claimSurplus = (amount: number): number => {
+      if (amount <= 0 || remainingSurplus <= 0) return 0;
       const claimed = Math.min(amount, remainingSurplus);
       remainingSurplus -= claimed;
       return claimed;
@@ -1378,6 +1379,13 @@ const EnrichmentEngine = {
     // Only show spending cuts if savings rate is below this threshold.
     const isHighSaver = m.savingsRate >= 25;
 
+    // ── Financial optimisation gate ──
+    // Users in optimizer/accumulator/coasting cohorts with good credit utilisation
+    // don't need budgeting-style advice (cancel subscriptions, reduce spending).
+    // They need capital allocation, tax optimisation, and wealth-building moves.
+    const isFinanciallyOptimised = (cohort === 'optimizer' || cohort === 'coasting' || cohort === 'accumulator')
+      || (isHighSaver && isAdvanced);
+
     // §13p1: Essential protection — filter essential merchants from all cut recommendations
     const essentialMerchants = new Set<string>();
     for (const tx of txs) {
@@ -1386,8 +1394,9 @@ const EnrichmentEngine = {
     const isEssentialMerchant = (name: string) => essentialMerchants.has(name);
 
     // Subscriptions — single consolidated recommendation (not per-merchant)
+    // Suppressed for financially optimised users — this is not a budgeting platform
     const nonEssentialSubs = subs.filter((s) => !isEssentialMerchant(s.merchant));
-    if (!isHighSaver && nonEssentialSubs.length >= T.subscriptionMinCount) {
+    if (!isHighSaver && !isFinanciallyOptimised && nonEssentialSubs.length >= T.subscriptionMinCount) {
       const subNames = nonEssentialSubs.map((s) => s.merchant).filter(Boolean);
       const cutCount = Math.max(2, Math.round(nonEssentialSubs.length * T.subscriptionCutPct));
       const nonEssentialTotal = nonEssentialSubs.reduce((s, sub) => s + sub.averageAmount, 0);
@@ -1417,8 +1426,8 @@ const EnrichmentEngine = {
       });
     }
 
-    // Food delivery
-    if (!isHighSaver && m.foodDelivery > T.foodDeliveryMin) {
+    // Food delivery — suppressed for financially optimised users
+    if (!isHighSaver && !isFinanciallyOptimised && m.foodDelivery > T.foodDeliveryMin) {
       const saving = Math.round(m.foodDelivery * Math.min(T.foodDeliveryCutPct * cutMultiplier, 0.6));
       const deliveryMerchants = this._getMerchantsByCategory(txs, 'Delivery');
       moves.push({
@@ -1440,8 +1449,8 @@ const EnrichmentEngine = {
       });
     }
 
-    // Eating out
-    if (!isHighSaver && m.eatingOut > T.eatingOutMin) {
+    // Eating out — suppressed for financially optimised users
+    if (!isHighSaver && !isFinanciallyOptimised && m.eatingOut > T.eatingOutMin) {
       const saving = Math.round(m.eatingOut * Math.min(T.eatingOutCutPct * cutMultiplier, 0.5));
       const eatingMerchants = this._getMerchantsByCategory(txs, 'Eating Out');
       const coffeeMerchants = this._getMerchantsByCategory(txs, 'Coffee & Cafes');
@@ -1464,8 +1473,8 @@ const EnrichmentEngine = {
       });
     }
 
-    // Shopping
-    if (!isHighSaver && m.shopping > T.shoppingMin) {
+    // Shopping — suppressed for financially optimised users
+    if (!isHighSaver && !isFinanciallyOptimised && m.shopping > T.shoppingMin) {
       const saving = Math.round(m.shopping * Math.min(T.shoppingCutPct * cutMultiplier, 0.5));
       const shopMerchants = this._getMerchantsByCategory(txs, 'Shopping');
       moves.push({
@@ -1818,8 +1827,8 @@ const EnrichmentEngine = {
       }
     }
 
-    // Transport — adjusted for work setup
-    if (!isHighSaver && m.transport > T.transportMin && !isRemote) {
+    // Transport — adjusted for work setup, suppressed for financially optimised users
+    if (!isHighSaver && !isFinanciallyOptimised && m.transport > T.transportMin && !isRemote) {
       const cutPct = isHybrid ? T.transportCutPct * 0.5 : T.transportCutPct; // Hybrid workers already commute less
       const saving = Math.round(m.transport * cutPct);
       const transportMerchants = this._getMerchantsByCategory(txs, 'Transport');
@@ -2388,19 +2397,27 @@ const EnrichmentEngine = {
       }
     }
 
+    // ── Sanitise move amounts — never show negative values ──
+    for (const move of moves) {
+      if (move.monthlyImpact < 0) move.monthlyImpact = 0;
+      if (move.annualImpact < 0) move.annualImpact = 0;
+    }
+
     // ── Cohort-aware filtering (§15e) ──
     // Filter moves based on financial cohort to avoid noise
     const filtered = moves.filter((move) => {
       const cat = move.category || 'spending';
+      // Drop zero-impact moves (can arise from negative surplus clamping)
+      if (move.monthlyImpact <= 0 && move.annualImpact <= 0) return false;
       // crisis: suppress invest moves and trivial spending cuts
       if (cohort === 'crisis') {
         if (cat === 'invest' || cat === 'allocate') return false;
         if (cat === 'spending' && move.monthlyImpact < 20) return false;
       }
-      // coasting: suppress most spending cuts
-      if (cohort === 'coasting' && cat === 'spending' && move.annualImpact < 500) return false;
-      // optimizer: suppress trivial spending cuts
-      if (cohort === 'optimizer' && cat === 'spending' && move.annualImpact < 300) return false;
+      // coasting/optimizer/accumulator: suppress spending cut moves entirely —
+      // these cohorts need capital allocation and tax optimisation, not budgeting advice
+      if ((cohort === 'coasting' || cohort === 'optimizer') && cat === 'spending') return false;
+      if (cohort === 'accumulator' && cat === 'spending' && move.annualImpact < 500) return false;
       // sophistication gate: suppress complex tax/pension moves for beginners
       if (sophistication < 0.5 && cat === 'invest' && move.annualImpact < 500) return false;
       return true;
