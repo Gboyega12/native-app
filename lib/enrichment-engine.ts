@@ -346,8 +346,11 @@ const EnrichmentEngine = {
     let isPerson = selfTransfer ? false : isPersonTransfer(tx.description);
     const isCredit = tx.amount > 0;
     const isRefund = isCredit && tx.description.toLowerCase().includes('refund');
-    const isSavings = !!(tx.amount < 0 && tx.description.toLowerCase().match(/\bsaving|isa\b|premium bond|ns&i/i));
-    const isInvestment = !!(tx.amount < 0 && !isSavings && tx.description.toLowerCase().match(/\binvest|pension|sipp|stocks?\s*(?:&|and)\s*shares?/i));
+    // Don't auto-classify self-transfers as savings — the user must explicitly
+    // categorise them (via transaction_overrides or chat). A transfer between
+    // your own accounts isn't savings until the user says it is.
+    const isSavings = !!(tx.amount < 0 && !selfTransfer && tx.description.toLowerCase().match(/\bsaving|isa\b|premium bond|ns&i/i));
+    const isInvestment = !!(tx.amount < 0 && !selfTransfer && !isSavings && tx.description.toLowerCase().match(/\binvest|pension|sipp|stocks?\s*(?:&|and)\s*shares?/i));
 
     // ── Income decision tree ──
     // Credit comes in → determine if it's real income or a person transfer

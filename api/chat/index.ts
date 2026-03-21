@@ -275,6 +275,70 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'manage_savings_account',
+    description:
+      'Add, update, or delete a savings account. Use this when the user tells you about a savings account they have, wants to update a balance or interest rate, or wants to remove one. Examples: "I have £5k in a Marcus account", "My ISA balance is now £12,000", "Remove my old Chip account". Also use when the user wants to tag an internal transfer as going to their savings — update the balance of the destination savings account.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        operation: {
+          type: 'string',
+          description: 'The operation to perform.',
+          enum: ['add', 'update', 'delete'],
+        },
+        account_name: {
+          type: 'string',
+          description: 'Name of the savings account. E.g. "Marcus", "Chip", "Help to Buy ISA".',
+        },
+        provider: {
+          type: 'string',
+          description: 'Provider name (optional). E.g. "Goldman Sachs", "Chase".',
+        },
+        balance: {
+          type: 'number',
+          description: 'Current balance in pounds.',
+        },
+        interest_rate: {
+          type: 'number',
+          description: 'Annual interest rate as a percentage. E.g. 4.5.',
+        },
+        account_type: {
+          type: 'string',
+          description: 'Type of savings account.',
+          enum: ['easy_access', 'fixed', 'isa', 'other'],
+        },
+        monthly_contribution: {
+          type: 'number',
+          description: 'How much the user puts into this account each month (optional). Helps track savings rate accurately.',
+        },
+      },
+      required: ['operation', 'account_name'],
+    },
+  },
+  {
+    name: 'tag_transfer_as_savings',
+    description:
+      'Tag an internal transfer (between the user\'s own accounts) as a savings contribution. Use this when the user says a specific transfer goes to their savings. This creates a transaction override so future transfers matching this description are counted as savings, not just internal transfers. Examples: "The transfer to my Marcus is savings", "My standing order to Chip is my monthly savings".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        match_description: {
+          type: 'string',
+          description: 'Transaction description to match (case-insensitive). E.g. "MARCUS", "TFR TO CHIP", "STANDING ORDER SAVINGS".',
+        },
+        savings_account_name: {
+          type: 'string',
+          description: 'Which savings account this transfer goes to (optional — helps link to a specific account).',
+        },
+        notes: {
+          type: 'string',
+          description: 'Brief note. E.g. "Monthly savings standing order".',
+        },
+      },
+      required: ['match_description'],
+    },
+  },
+  {
     name: 'suggest_goal_update',
     description:
       'Suggest the user update their financial goals when their situation has clearly changed. Use this when: (1) The user says their circumstances changed (got a raise, paid off debt, new expense, job loss). (2) Their financial data shows they\'ve achieved or outgrown their current goal (e.g. debt is nearly cleared but goal is still "clear debt"). (3) They explicitly ask to change their goals. Do NOT use this for minor progress updates \u2014 only for genuine goal shifts.',
@@ -609,6 +673,12 @@ async function executeTool(name: string, input: Record<string, unknown>, userId:
   if (name === 'suggest_goal_update') {
     return executeGoalUpdate(input, userId);
   }
+  if (name === 'manage_savings_account') {
+    return executeSavingsAccount(input, userId);
+  }
+  if (name === 'tag_transfer_as_savings') {
+    return executeTagTransferAsSavings(input, userId);
+  }
   if (name === 'save_manual_asset') {
     return executeManualAsset(input, userId);
   }
@@ -856,6 +926,141 @@ async function executeManualAsset(input: Record<string, unknown>, userId: string
   };
 }
 
+async function executeSavingsAccount(input: Record<string, unknown>, userId: string | null): Promise<ToolResult> {
+  if (!userId) {
+    return { response: { success: false, error: 'No user session' }, action: null };
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    return { response: { success: false, error: 'Server misconfigured' }, action: null };
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+  const operation = input.operation as string;
+  const accountName = input.account_name as string;
+
+  if (operation === 'delete') {
+    const { error } = await admin.from('savings_accounts')
+      .delete()
+      .eq('user_id', userId)
+      .ilike('account_name', accountName);
+
+    if (error) {
+      return { response: { success: false, error: error.message }, action: null };
+    }
+
+    return {
+      response: { success: true, message: `Removed savings account "${accountName}".` },
+      action: { type: 'savings_account_deleted', data: { account_name: accountName } },
+    };
+  }
+
+  if (operation === 'update') {
+    const updates: Record<string, unknown> = {};
+    if (input.balance != null) updates.balance = input.balance;
+    if (input.interest_rate != null) updates.interest_rate = input.interest_rate;
+    if (input.provider != null) updates.provider = input.provider;
+    if (input.account_type != null) updates.account_type = input.account_type;
+    if (input.monthly_contribution != null) updates.monthly_contribution = input.monthly_contribution;
+
+    if (Object.keys(updates).length === 0) {
+      return { response: { success: false, error: 'Nothing to update — provide at least one field.' }, action: null };
+    }
+
+    const { error } = await admin.from('savings_accounts')
+      .update(updates)
+      .eq('user_id', userId)
+      .ilike('account_name', accountName);
+
+    if (error) {
+      return { response: { success: false, error: error.message }, action: null };
+    }
+
+    const balanceStr = input.balance != null ? ` Balance: £${Math.round(input.balance as number).toLocaleString()}.` : '';
+    const rateStr = input.interest_rate != null ? ` Rate: ${input.interest_rate}%.` : '';
+    const contribStr = input.monthly_contribution != null ? ` Monthly contribution: £${Math.round(input.monthly_contribution as number)}.` : '';
+    return {
+      response: { success: true, message: `Updated "${accountName}".${balanceStr}${rateStr}${contribStr}` },
+      action: { type: 'savings_account_updated', data: { account_name: accountName, ...updates } },
+    };
+  }
+
+  // operation === 'add'
+  const newAccount = {
+    user_id: userId,
+    account_name: accountName,
+    provider: (input.provider as string) || null,
+    balance: (input.balance as number) ?? 0,
+    interest_rate: (input.interest_rate as number) || null,
+    account_type: (input.account_type as string) || 'easy_access',
+    monthly_contribution: (input.monthly_contribution as number) || null,
+    source: 'chat',
+  };
+
+  const { data, error } = await admin.from('savings_accounts').insert(newAccount).select('id').maybeSingle();
+  if (error) {
+    return { response: { success: false, error: error.message }, action: null };
+  }
+
+  const balanceStr = newAccount.balance ? ` Balance: £${Math.round(newAccount.balance).toLocaleString()}.` : '';
+  const rateStr = newAccount.interest_rate ? ` Rate: ${newAccount.interest_rate}%.` : '';
+  const contribStr = newAccount.monthly_contribution ? ` Monthly contribution: £${Math.round(newAccount.monthly_contribution)}.` : '';
+  return {
+    response: {
+      success: true,
+      message: `Added savings account "${accountName}" (${newAccount.account_type}).${balanceStr}${rateStr}${contribStr} This will be reflected in your savings total.`,
+    },
+    action: {
+      type: 'savings_account_added',
+      data: { id: data?.id, ...newAccount },
+    },
+  };
+}
+
+async function executeTagTransferAsSavings(input: Record<string, unknown>, userId: string | null): Promise<ToolResult> {
+  if (!userId) {
+    return { response: { success: false, error: 'No user session' }, action: null };
+  }
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) {
+    return { response: { success: false, error: 'Server misconfigured' }, action: null };
+  }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  // Create a transaction override that reclassifies this transfer as Savings
+  const { error } = await admin.from('transaction_overrides').insert({
+    user_id: userId,
+    match_description: input.match_description,
+    category: 'Savings',
+    is_essential: false,
+    notes: (input.notes as string) || `Tagged as savings${input.savings_account_name ? ` (→ ${input.savings_account_name})` : ''}`,
+  });
+
+  if (error) {
+    return { response: { success: false, error: error.message }, action: null };
+  }
+
+  const accountNote = input.savings_account_name ? ` (linked to ${input.savings_account_name})` : '';
+  return {
+    response: {
+      success: true,
+      message: `Done. Transfers matching "${input.match_description}" will now count as savings${accountNote}. This applies on your next analysis refresh.`,
+    },
+    action: {
+      type: 'transfer_tagged_as_savings',
+      data: {
+        match_description: input.match_description,
+        savings_account_name: (input.savings_account_name as string) || null,
+      },
+    },
+  };
+}
+
 async function executeGifSearch(input: Record<string, unknown>): Promise<ToolResult> {
   const apiKey = process.env.GIPHY_API_KEY;
   if (!apiKey) {
@@ -927,6 +1132,9 @@ interface ChatContext {
   idle_capital?: number;
   isa_remaining?: number;
   high_earner_cohort?: 'unstructured_high_earner' | 'structured_high_earner' | null;
+  savings_accounts?: Array<{ account_name: string; provider?: string; balance: number; interest_rate?: number; account_type: string; monthly_contribution?: number }>;
+  savings_categories?: Array<{ category: string; monthly: number; txs: number; transactions?: Array<{ date: string; merchant: string; amount: number }> }>;
+  monthly_savings?: number;
 }
 
 async function executeIncomeSummary(userId: string | null): Promise<ToolResult> {
@@ -1056,6 +1264,7 @@ Tools:
 - When the user's situation has clearly changed (life event, achieved a goal, outgrown their current goal), use suggest_goal_update to propose updated goals. This re-aligns all future analysis. Don't suggest this casually \u2014 only when a real shift has happened.
 - When users attach images (screenshots of bank statements, investment platforms, payslips, etc.), analyse the content and extract relevant financial data. Use this information to update their profile, add manual assets, or answer questions. If the image shows investment balances from another platform, offer to save them using save_manual_asset.
 - When users attach files (CSV bank statements, spreadsheets), acknowledge receipt and extract any useful financial information to help with their queries.
+- SAVINGS: When the user mentions a savings account (e.g. "I have \u00a35k in Marcus", "my ISA has \u00a312k"), use manage_savings_account to add or update it. When they say a transfer goes to their savings (e.g. "that transfer to Chip is my savings"), use tag_transfer_as_savings so it counts toward their savings total. When they ask "how much am I saving" or "what are my savings", reference the savings accounts and savings transaction breakdown in context. Be transparent: internal transfers between own accounts are NOT savings unless the user explicitly tags them. If the user asks why a transfer isn't counting as savings, explain this and offer to tag it.
 - IMPORTANT: In all tool call inputs (action titles, reasons, descriptions), use PLAIN TEXT only \u2014 no markdown, no **bold**, no *italic*. Markdown is only for your chat messages.`;
 
   if (!ctx) return prompt;
@@ -1183,6 +1392,47 @@ Tools:
       prompt += `\n- Cohort: ${cohortLabel}`;
     }
     prompt += `\nIMPORTANT: When the user asks "where should I put my money?", use this allocation data. For UHE: focus on deploying idle cash. For SHE: focus on tax efficiency and rebalancing.`;
+  }
+
+  // ── Savings accounts & activity ──
+  if (ctx.savings_accounts?.length) {
+    const totalSavingsBalance = ctx.savings_accounts.reduce((s, a) => s + (a.balance || 0), 0);
+    const totalMonthlyContrib = ctx.savings_accounts.reduce((s, a) => s + (a.monthly_contribution || 0), 0);
+    prompt += `\n\nSavings accounts (user-declared, ground truth):`;
+    for (const acc of ctx.savings_accounts) {
+      let line = `\n- ${acc.account_name}`;
+      if (acc.provider) line += ` (${acc.provider})`;
+      line += `: £${Math.round(acc.balance).toLocaleString()}`;
+      if (acc.interest_rate) line += `, ${acc.interest_rate}% AER`;
+      line += ` [${acc.account_type.replace(/_/g, ' ')}]`;
+      if (acc.monthly_contribution) line += `, £${Math.round(acc.monthly_contribution)}/month contribution`;
+      prompt += line;
+    }
+    prompt += `\nTotal savings balance: £${Math.round(totalSavingsBalance).toLocaleString()}`;
+    if (totalMonthlyContrib > 0) {
+      prompt += `\nTotal monthly savings contributions: £${Math.round(totalMonthlyContrib)}/month`;
+    }
+    prompt += `\nIMPORTANT: These are the user's DECLARED savings accounts. When they ask "how much do I have saved" or "what's my savings", use these numbers. The user can add, update, or remove savings accounts via chat using manage_savings_account.`;
+  }
+
+  if (ctx.savings_categories?.length) {
+    prompt += `\n\nSavings activity from transactions (auto-detected or user-tagged):`;
+    for (const cat of ctx.savings_categories) {
+      prompt += `\n- ${cat.category}: £${Math.round(cat.monthly)}/month (${cat.txs} transactions)`;
+      if (cat.transactions?.length) {
+        const recentTxs = cat.transactions.slice(0, 3);
+        for (const tx of recentTxs) {
+          prompt += `\n  ${tx.date.split('T')[0]}: ${tx.merchant} £${Math.abs(tx.amount).toFixed(2)}`;
+        }
+      }
+    }
+    if (ctx.monthly_savings != null) {
+      prompt += `\nTotal monthly savings outflow: £${Math.round(ctx.monthly_savings)}/month`;
+    }
+    prompt += `\nThese are the TRANSACTIONS that count toward savings. When the user asks "what counts as my savings" or "why is my savings number X", show these specific transactions.`;
+    prompt += `\nIMPORTANT: Internal transfers between the user's own accounts are NOT savings unless the user explicitly tagged them using tag_transfer_as_savings. If the user says a transfer is savings, use that tool to tag it. If they say it's just moving money, leave it as an internal transfer.`;
+  } else if (!ctx.savings_accounts?.length) {
+    prompt += `\n\nNo savings data available. If the user mentions savings accounts, use manage_savings_account to add them. If they mention transfers that are actually savings, use tag_transfer_as_savings to track them.`;
   }
 
   // ── Spending breakdown ──

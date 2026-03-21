@@ -1512,6 +1512,34 @@ export default function Chat() {
       }
     } catch {}
 
+    // Fetch savings accounts so chat knows user's declared savings
+    try {
+      const { data: savingsData } = await supabase
+        .from('savings_accounts')
+        .select('account_name, provider, balance, interest_rate, account_type, monthly_contribution')
+        .eq('user_id', user.id);
+      if (savingsData && savingsData.length > 0) {
+        (ctx as any).savings_accounts = savingsData;
+      }
+    } catch {}
+
+    // Pass savings transaction categories and monthly total from analysis
+    if (a?.savings_categories?.length) {
+      (ctx as any).savings_categories = a.savings_categories.map((c: any) => ({
+        category: c.category,
+        monthly: Math.round(c.monthly || 0),
+        txs: c.txs || 0,
+        transactions: (c.transactions || []).slice(0, 5).map((tx: any) => ({
+          date: tx.date,
+          merchant: tx.merchant || tx.description,
+          amount: tx.amount,
+        })),
+      }));
+    }
+    if (a?.monthly_savings != null) {
+      (ctx as any).monthly_savings = Math.round(a.monthly_savings);
+    }
+
     // Fetch user identity for personalised context
     try {
       const { data: identityData } = await supabase
@@ -1577,6 +1605,23 @@ export default function Chat() {
           confidence: freshA.goal_context.confidence,
           bufferRecommendation: freshA.goal_context.bufferRecommendation,
         } : null;
+
+        // Rebuild savings data from fresh sync
+        if (freshA.savings_categories?.length) {
+          (ctx as any).savings_categories = freshA.savings_categories.map((c: any) => ({
+            category: c.category,
+            monthly: Math.round(c.monthly || 0),
+            txs: c.txs || 0,
+            transactions: (c.transactions || []).slice(0, 5).map((tx: any) => ({
+              date: tx.date,
+              merchant: tx.merchant || tx.description,
+              amount: tx.amount,
+            })),
+          }));
+        }
+        if (freshA.monthly_savings != null) {
+          (ctx as any).monthly_savings = Math.round(freshA.monthly_savings);
+        }
 
         // Rebuild budget line from fresh sync data (identity not yet available here, enriched later)
         ctx.budget_line = buildBudgetLine(freshA, prevSnapshot);
