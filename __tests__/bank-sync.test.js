@@ -316,7 +316,7 @@ describe('Successful refresh', () => {
 // ════════════════════════════════════════════════════════════════
 
 describe('Expired connections', () => {
-  test('skips connections past the 90-day consent window', async () => {
+  test('marks as expired when token refresh returns no access_token', async () => {
     const oldDate = new Date();
     oldDate.setDate(oldDate.getDate() - 91);
 
@@ -328,6 +328,7 @@ describe('Expired connections', () => {
     const fetchCalls = [];
     global.fetch = jest.fn(async (url) => {
       fetchCalls.push(url);
+      // TrueLayer returns empty response (no access_token) for expired consent
       return { ok: true, status: 200, json: async () => ({}) };
     });
 
@@ -336,9 +337,9 @@ describe('Expired connections', () => {
 
     expect(res._json.expired).toBe(1);
     expect(res._json.refreshed).toBe(0);
-    // Should not have called TrueLayer token endpoint
+    // Code now always attempts refresh — TrueLayer's response determines expiry
     const tokenCalls = fetchCalls.filter((u) => u.includes('connect/token'));
-    expect(tokenCalls).toHaveLength(0);
+    expect(tokenCalls).toHaveLength(1);
   });
 });
 

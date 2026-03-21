@@ -369,7 +369,7 @@ describe('Partial transaction fetch failure', () => {
 // ════════════════════════════════════════════════════════════════
 
 describe('Expired token handling', () => {
-  test('returns sync_failed when token expires but within 90-day window', async () => {
+  test('returns token_expired when TrueLayer returns invalid_grant even within 90-day window', async () => {
     mockOrder.mockResolvedValue({
       data: [{ id: 'row-1', connection_id: 'conn-1', refresh_token: 'rt-old', created_at: new Date().toISOString(), provider_name: 'Monzo' }],
       error: null,
@@ -383,7 +383,8 @@ describe('Expired token handling', () => {
     await handler(makeReq(), res);
 
     expect(res._json.success).toBe(false);
-    expect(res._json.reason).toBe('sync_failed');
+    // TrueLayer's response determines expiry, not the 90-day window
+    expect(res._json.reason).toBe('token_expired');
   });
 
   test('returns token_expired when token fails and consent window lapsed', async () => {

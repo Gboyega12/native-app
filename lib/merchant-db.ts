@@ -584,11 +584,14 @@ export function isPersonTransfer(description: string): boolean {
   // If it contains any brand/company indicators, it's NOT a person
   if (BRAND_INDICATORS.some((b) => lower.includes(b))) return false;
 
-  // If it contains digits, it's likely a reference number — not a person name
-  if (/\d/.test(lower)) return false;
+  // Strip trailing reference numbers (e.g. "ALICE BROWN REF 98765") before digit check
+  const strippedRef = lower.replace(/\s+(ref|reference)\s+\d+\s*$/i, '').trim();
+
+  // If it still contains digits after stripping refs, it's likely not a person name
+  if (/\d/.test(strippedRef)) return false;
 
   // Clean the description: strip common prefixes
-  const cleaned = lower
+  const cleaned = strippedRef
     .replace(/^(mr|mrs|miss|ms|dr|prof)\s+/i, '')
     .replace(/\bfp\b|\bbgt\b|\bbacs\b|\bchq\b/g, '')
     .trim();
@@ -710,4 +713,29 @@ export function fuzzyMatchMerchant(
     }
   }
   return bestMatch;
+}
+
+// ── Credit card / bank brand extraction ──
+// Extracts a known financial brand from an account name string.
+
+const CARD_BRANDS: [RegExp, string][] = [
+  [/\b(amex|american express)\b/i, 'American Express'],
+  [/\bbarclaycard\b/i, 'Barclaycard'],
+  [/\bmbna\b/i, 'MBNA'],
+  [/\bcapital one\b/i, 'Capital One'],
+  [/\bvanquis\b/i, 'Vanquis'],
+  [/\baqua\b/i, 'Aqua'],
+  [/\bhsbc\b/i, 'HSBC'],
+  [/\bmonzo\b/i, 'Monzo'],
+  [/\bstarling\b/i, 'Starling'],
+  [/\brevolut\b/i, 'Revolut'],
+  [/\bchase\b/i, 'Chase'],
+];
+
+export function extractCreditCardBrand(accountName: string): string | null {
+  if (!accountName) return null;
+  for (const [pattern, brand] of CARD_BRANDS) {
+    if (pattern.test(accountName)) return brand;
+  }
+  return null;
 }

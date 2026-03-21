@@ -305,7 +305,7 @@ describe('CSV format', () => {
 describe('Error handling', () => {
   test('rejects missing authorization code', async () => {
     const res = makeRes();
-    await handler(makePostReq({ code: null }), res);
+    await handler(makePostReq({ code: undefined }), res);
     expect(res._status).toBe(400);
     expect(res._json.error).toContain('Missing authorization code');
   });
