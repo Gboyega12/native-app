@@ -18,6 +18,7 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals, repairDebtSubGoals, resolveDebtDisplayName } from '@/lib/types';
+import { classifyDebtAccounts } from '@/lib/debt-engine';
 import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType, Insight } from '@/lib/types';
 import { classifyAccounts, type AccountBuckets } from '@/lib/account-classifier';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
@@ -229,6 +230,7 @@ export default function Home() {
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [incomeExpanded, setIncomeExpanded] = useState(false);
+  const [debtExpanded, setDebtExpanded] = useState(false);
   const [expandedIncomeSource, setExpandedIncomeSource] = useState<string | null>(null);
   const [showAllMoves, setShowAllMoves] = useState(false);
   const [accountBuckets, setAccountBuckets] = useState<AccountBuckets | null>(null);
@@ -3215,6 +3217,150 @@ export default function Home() {
             )}
           </View>
           )}
+
+          {/* ══════════════════════════════════════════════
+              DEBT — connected debts, balances & utilisation
+              ══════════════════════════════════════════════ */}
+          {debtAccounts.length > 0 && (() => {
+            const activeDebts = debtAccounts.filter((d: any) => (d.outstanding_balance || 0) > 0);
+            if (activeDebts.length === 0) return null;
+            const tiered = classifyDebtAccounts(activeDebts);
+            const totalBalance = activeDebts.reduce((sum: number, d: any) => sum + (d.outstanding_balance || 0), 0);
+            const totalLimit = activeDebts.reduce((sum: number, d: any) => sum + (d.credit_limit || 0), 0);
+            const overallUtil = totalLimit > 0 ? Math.round((totalBalance / totalLimit) * 100) : null;
+            const totalMinPayment = activeDebts.reduce((sum: number, d: any) => sum + (d.minimum_payment || 0), 0);
+            const utilColor = overallUtil === null ? colors.muted : overallUtil > 75 ? colors.coral : overallUtil > 50 ? colors.amber : colors.green;
+            return (
+            <View>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => {
+                  LayoutAnimation.configureNext(SMOOTH_ANIM);
+                  setDebtExpanded(!debtExpanded);
+                }}
+                style={[s.collapsedSectionBtn, !debtExpanded && {
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  borderRadius: 16,
+                  backgroundColor: colors.coralDim || 'rgba(255,107,107,0.06)',
+                  paddingHorizontal: 20,
+                }]}
+              >
+                <Text style={s.moveSectionLabel}>DEBT</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.coral, letterSpacing: 0.3 }}>
+                    {'\u00a3'}{Math.round(totalBalance).toLocaleString()}
+                  </Text>
+                  {overallUtil !== null && (
+                    <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: `${utilColor}18` }}>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: utilColor, letterSpacing: 0.5 }}>
+                        {overallUtil}% USED
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={{ fontSize: 12, color: colors.dim }}>{debtExpanded ? '\u25B4' : '\u25BE'}</Text>
+                </View>
+              </TouchableOpacity>
+
+              {debtExpanded && (
+                <Card style={{ marginBottom: spacing.md }}>
+                  {/* Hero total */}
+                  <View style={s.debtHero}>
+                    <Text style={s.debtHeroAmount}>
+                      {'\u00a3'}{Math.round(totalBalance).toLocaleString()}
+                    </Text>
+                    <Text style={s.debtHeroLabel}>total outstanding</Text>
+                  </View>
+
+                  {/* Utilisation bar (credit-based debts only) */}
+                  {totalLimit > 0 && (
+                    <View style={{ marginBottom: 20 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, letterSpacing: 1 }}>UTILISATION</Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: utilColor, letterSpacing: 0.3 }}>
+                          {overallUtil}%
+                        </Text>
+                      </View>
+                      <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' }}>
+                        <View style={{ width: `${Math.min(overallUtil || 0, 100)}%`, height: '100%', borderRadius: 3, backgroundColor: utilColor }} />
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted }}>
+                          {'\u00a3'}{Math.round(totalBalance).toLocaleString()} / {'\u00a3'}{Math.round(totalLimit).toLocaleString()}
+                        </Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted }}>
+                          {'\u00a3'}{Math.round(totalLimit - totalBalance).toLocaleString()} available
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Summary row: min payments */}
+                  {totalMinPayment > 0 && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, marginBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }}>
+                      <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.text2 }}>Min. payments</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: colors.coral }}>
+                          {'\u00a3'}{Math.round(totalMinPayment).toLocaleString()}
+                        </Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>/mo</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Individual debt rows */}
+                  {tiered.map((debt, idx) => {
+                    const name = resolveDebtDisplayName(debt);
+                    const balance = debt.outstanding_balance || 0;
+                    const limit = debt.credit_limit || 0;
+                    const util = limit > 0 ? Math.round((balance / limit) * 100) : null;
+                    const apr = debt.interest_rate || 0;
+                    const debtUtilColor = util === null ? colors.muted : util > 75 ? colors.coral : util > 50 ? colors.amber : colors.green;
+                    const tierBadgeColor = debt.tier === 'tier1_high' ? colors.coral : debt.tier === 'tier2_medium' ? colors.amber : colors.green;
+                    return (
+                      <View key={`debt-${idx}`} style={[s.debtRow, idx === tiered.length - 1 && s.debtRowLast]}>
+                        <View style={s.debtRowLeft}>
+                          <Text style={s.debtName}>{name}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                            <Text style={s.debtType}>{debt.account_type || 'debt'}</Text>
+                            {apr > 0 && (
+                              <View style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 3, backgroundColor: `${tierBadgeColor}18` }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 8, color: tierBadgeColor, letterSpacing: 0.3 }}>
+                                  {(apr * 100).toFixed(1)}% APR
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                          {/* Per-account utilisation bar */}
+                          {util !== null && (
+                            <View style={{ marginTop: 6 }}>
+                              <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', width: '80%' }}>
+                                <View style={{ width: `${Math.min(util, 100)}%`, height: '100%', borderRadius: 1.5, backgroundColor: debtUtilColor }} />
+                              </View>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: debtUtilColor, marginTop: 2 }}>
+                                {util}% utilised
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                        <View style={s.debtRowRight}>
+                          <Text style={s.debtBalance}>
+                            {'\u00a3'}{Math.round(balance).toLocaleString()}
+                          </Text>
+                          {debt.minimum_payment && debt.minimum_payment > 0 && (
+                            <Text style={s.debtUtil}>
+                              min {'\u00a3'}{Math.round(debt.minimum_payment).toLocaleString()}/mo
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </Card>
+              )}
+            </View>
+            );
+          })()}
 
           {/* ══════════════════════════════════════════════
               NET WORTH — account allocation breakdown (UHE/SHE only)
