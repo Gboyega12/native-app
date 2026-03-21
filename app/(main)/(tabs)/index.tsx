@@ -19,7 +19,7 @@ import { useResponsive } from '@/lib/responsive';
 import { BocyFace, getBocyMood } from '@/components/Bocy';
 import { hydrateSubGoals, repairDebtSubGoals, resolveDebtDisplayName } from '@/lib/types';
 import { classifyDebtAccounts } from '@/lib/debt-engine';
-import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType, Insight } from '@/lib/types';
+import type { Analysis, BudgetCategory, TransactionDetail, IncomeSource, Move, Goals, MoveSubGoal, MoveSubGoalType, Insight, Investment } from '@/lib/types';
 import { classifyAccounts, type AccountBuckets } from '@/lib/account-classifier';
 import Card, { AnimatedCard, AnimGlyph, BreathingBar, CardTitle, CardTitleRow, InfoIcon, InfoBox, ExpandDots, SMOOTH_ANIM, HorizontalConnectorDots } from '@/components/Card';
 import AnimatedNumber from '@/components/AnimatedNumber';
@@ -65,6 +65,7 @@ export default function Home() {
   const userName = appData.userName;
   const debtAccounts = appData.debtAccounts;
   const setDebtAccounts = appData.setDebtAccounts;
+  const investments = appData.investments;
   const weeklyCtx = appData.weeklyCtx;
   const setWeeklyCtx = appData.setWeeklyCtx;
 
@@ -231,6 +232,7 @@ export default function Home() {
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [incomeExpanded, setIncomeExpanded] = useState(false);
   const [debtExpanded, setDebtExpanded] = useState(false);
+  const [investmentExpanded, setInvestmentExpanded] = useState(false);
   const [expandedIncomeSource, setExpandedIncomeSource] = useState<string | null>(null);
   const [showAllMoves, setShowAllMoves] = useState(false);
   const [accountBuckets, setAccountBuckets] = useState<AccountBuckets | null>(null);
@@ -3469,6 +3471,166 @@ export default function Home() {
                       </View>
                     );
                   })}
+                </Card>
+              )}
+            </View>
+            );
+          })()}
+
+          {/* ══════════════════════════════════════════════
+              INVESTMENTS — portfolio overview
+              ══════════════════════════════════════════════ */}
+          {investments.length > 0 && (() => {
+            const totalValue = investments.reduce((sum, i) => sum + (i.current_value || 0), 0);
+            if (totalValue <= 0) return null;
+            const totalCost = investments.reduce((sum, i) => sum + (i.purchase_cost || 0), 0);
+            const hasGainLoss = totalCost > 0;
+            const totalGain = hasGainLoss ? totalValue - totalCost : 0;
+            const totalGainPct = hasGainLoss && totalCost > 0 ? ((totalGain / totalCost) * 100).toFixed(1) : null;
+            const gainColor = totalGain >= 0 ? colors.green : colors.coral;
+
+            // Group by asset class
+            const ASSET_CLASS_COLORS: Record<string, string> = {
+              stocks: colors.accent,
+              bonds: colors.green,
+              etfs: '#9382DC',
+              crypto: colors.amber,
+              property: colors.text2,
+              pension: '#E8915C',
+              other: colors.muted,
+            };
+            const byClass: Record<string, { items: typeof investments; total: number }> = {};
+            for (const inv of investments) {
+              const cls = inv.asset_class || 'other';
+              if (!byClass[cls]) byClass[cls] = { items: [], total: 0 };
+              byClass[cls].items.push(inv);
+              byClass[cls].total += inv.current_value || 0;
+            }
+            const classRows = Object.entries(byClass)
+              .sort((a, b) => b[1].total - a[1].total)
+              .map(([cls, data]) => ({
+                label: cls.charAt(0).toUpperCase() + cls.slice(1),
+                key: cls,
+                color: ASSET_CLASS_COLORS[cls] || colors.muted,
+                total: data.total,
+                count: data.items.length,
+                items: data.items,
+              }));
+
+            return (
+            <View>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => {
+                  LayoutAnimation.configureNext(SMOOTH_ANIM);
+                  setInvestmentExpanded(!investmentExpanded);
+                }}
+                style={[s.collapsedSectionBtn, !investmentExpanded && {
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  borderRadius: 16,
+                  backgroundColor: colors.accentDim,
+                  paddingHorizontal: 20,
+                }]}
+              >
+                <Text style={s.moveSectionLabel}>INVESTMENTS</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.accent, letterSpacing: 0.3 }}>
+                    {'\u00a3'}{Math.round(totalValue).toLocaleString()}
+                  </Text>
+                  <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: `${colors.muted}18` }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 0.5 }}>
+                      {investments.length} HOLDING{investments.length !== 1 ? 'S' : ''}
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 12, color: colors.dim }}>{investmentExpanded ? '\u25B4' : '\u25BE'}</Text>
+                </View>
+              </TouchableOpacity>
+
+              {investmentExpanded && (
+                <Card style={{ marginBottom: spacing.md }}>
+                  {/* Hero total */}
+                  <View style={{ alignItems: 'center', paddingVertical: 20, paddingHorizontal: 28 }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 28, color: colors.accent, letterSpacing: -0.5 }}>
+                      {'\u00a3'}{Math.round(totalValue).toLocaleString()}
+                    </Text>
+                    <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.muted, marginTop: 4 }}>
+                      total portfolio value
+                    </Text>
+                  </View>
+
+                  {/* Gain/Loss row */}
+                  {hasGainLoss && (
+                    <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                      <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: gainColor }}>
+                        {totalGain >= 0 ? '+' : ''}{'\u00a3'}{Math.round(Math.abs(totalGain)).toLocaleString()}
+                      </Text>
+                      {totalGainPct && (
+                        <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: `${gainColor}18` }}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: gainColor }}>
+                            {totalGain >= 0 ? '+' : ''}{totalGainPct}%
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted }}>unrealised</Text>
+                    </View>
+                  )}
+
+                  {/* Asset allocation bar */}
+                  <View style={{ flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', marginBottom: 16 }}>
+                    {classRows.map((r) => (
+                      <View key={r.key} style={{ flex: r.total / totalValue, backgroundColor: r.color, marginRight: 1 }} />
+                    ))}
+                  </View>
+
+                  {/* Asset class breakdown */}
+                  {classRows.map((r, idx) => (
+                    <View key={r.key} style={{ borderBottomWidth: idx === classRows.length - 1 ? 0 : StyleSheet.hairlineWidth, borderBottomColor: colors.border }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: r.color }} />
+                          <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text }}>{r.label}</Text>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted }}>
+                            {r.count} holding{r.count !== 1 ? 's' : ''}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 14, color: r.color }}>
+                            {'\u00a3'}{Math.round(r.total).toLocaleString()}
+                          </Text>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted }}>
+                            {Math.round((r.total / totalValue) * 100)}%
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Individual holdings within class */}
+                      {r.items.map((inv, invIdx) => {
+                        const invGain = inv.purchase_cost ? inv.current_value - inv.purchase_cost : null;
+                        const invGainColor = invGain !== null ? (invGain >= 0 ? colors.green : colors.coral) : colors.muted;
+                        return (
+                          <View key={inv.id || invIdx} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, paddingLeft: 24 }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.text2 }}>{inv.name}</Text>
+                              {inv.platform && (
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted }}>{inv.platform}</Text>
+                              )}
+                            </View>
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.text }}>
+                                {'\u00a3'}{Math.round(inv.current_value).toLocaleString()}
+                              </Text>
+                              {invGain !== null && (
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: invGainColor }}>
+                                  {invGain >= 0 ? '+' : ''}{'\u00a3'}{Math.round(Math.abs(invGain)).toLocaleString()}
+                                </Text>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ))}
                 </Card>
               )}
             </View>

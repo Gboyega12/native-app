@@ -855,3 +855,38 @@ export interface BudgetAdjustment {
   monthly_amount?: number;
   is_essential?: boolean;
 }
+
+// ── Savings Accounts ──
+
+export interface SavingsAccount {
+  id?: string;
+  user_id?: string;
+  account_name: string;
+  provider?: string;
+  balance: number;
+  interest_rate?: number;
+  account_type: 'easy_access' | 'fixed' | 'isa' | 'other';
+  source?: 'manual' | 'truelayer';
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ── Investments ──
+
+export type InvestmentAssetClass = 'stocks' | 'bonds' | 'etfs' | 'crypto' | 'property' | 'pension' | 'other';
+
+export interface Investment {
+  id?: string;
+  user_id?: string;
+  name: string;
+  asset_class: InvestmentAssetClass;
+  platform?: string;
+  current_value: number;
+  purchase_cost?: number;
+  quantity?: number;
+  currency?: string;
+  notes?: string;
+  source?: 'manual' | 'csv';
+  created_at?: string;
+  updated_at?: string;
+}

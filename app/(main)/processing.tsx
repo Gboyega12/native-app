@@ -99,12 +99,13 @@ function ProcessingInner() {
   const navigation = useNavigation();
   const { csvData, source } = useLocalSearchParams<{ csvData: string; source?: string }>();
 
-  // Reset the (main) stack to only contain (tabs), clearing onboarding history
+  // After processing, route to account-setup (first time) or dashboard (returning)
   const goToDashboard = () => {
+    const setupDone = typeof window !== 'undefined' && localStorage.getItem('bocy_account_setup_done');
     navigation.dispatch(
       CommonActions.reset({
         index: 0,
-        routes: [{ name: '(tabs)' }],
+        routes: [{ name: setupDone ? '(tabs)' : 'account-setup' }],
       }),
     );
   };

@@ -9,12 +9,14 @@ import { supabase } from '@/lib/supabase';
 import { onSyncComplete } from '@/lib/sync-coordinator';
 import { getLastResult } from '@/app/(main)/processing';
 import { AppDataContext, type AppData, type AppDataSnapshot, type PlanProgressEntry } from '@/hooks/useAppData';
-import type { Analysis } from '@/lib/types';
+import type { Analysis, Investment, SavingsAccount } from '@/lib/types';
 import type { WeeklyContext } from '@/lib/sync';
 
 export default function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [debtAccounts, setDebtAccounts] = useState<any[]>([]);
+  const [investments, setInvestments] = useState<Investment[]>([]);
+  const [savingsAccounts, setSavingsAccounts] = useState<SavingsAccount[]>([]);
   const [budgetAdjustments, setBudgetAdjustments] = useState<any[]>([]);
   const [userPlans, setUserPlans] = useState<any[]>([]);
   const [planProgress, setPlanProgress] = useState<Record<string, PlanProgressEntry>>({});
@@ -33,7 +35,7 @@ export default function AppDataProvider({ children }: { children: React.ReactNod
    * Called on mount and whenever refresh() is invoked.
    */
   const fetchData = useCallback(async (): Promise<AppDataSnapshot> => {
-    const empty: AppDataSnapshot = { analysis: null, budgetAdjustments: [], debtAccounts: [], userPlans: [], planProgress: {}, prevSnapshot: null };
+    const empty: AppDataSnapshot = { analysis: null, budgetAdjustments: [], debtAccounts: [], investments: [], savingsAccounts: [], userPlans: [], planProgress: {}, prevSnapshot: null };
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -46,7 +48,7 @@ export default function AppDataProvider({ children }: { children: React.ReactNod
       setUserName(rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1) : '');
 
       // Parallel fetches for all shared data
-      const [analysisRes, adjRes, debtRes, plansRes, progressRes, prevRes] = await Promise.all([
+      const [analysisRes, adjRes, debtRes, investRes, savingsRes, plansRes, progressRes, prevRes] = await Promise.all([
         // Latest analysis
         supabase
           .from('analyses')
@@ -65,6 +67,18 @@ export default function AppDataProvider({ children }: { children: React.ReactNod
           .from('debt_accounts')
           .select('account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, last_updated, source, is_default_apr, provider_name, connection_id, account_id')
           .eq('user_id', user.id),
+        // Investments
+        supabase
+          .from('investments')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }),
+        // Savings accounts
+        supabase
+          .from('savings_accounts')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }),
         // Active user plans
         supabase
           .from('user_plans')
@@ -109,6 +123,14 @@ export default function AppDataProvider({ children }: { children: React.ReactNod
       const debt = debtRes.data || [];
       setDebtAccounts(debt);
 
+      // Investments
+      const inv = (investRes.data || []) as Investment[];
+      setInvestments(inv);
+
+      // Savings accounts
+      const sav = (savingsRes.data || []) as SavingsAccount[];
+      setSavingsAccounts(sav);
+
       // User plans
       const plans = plansRes.data || [];
       setUserPlans(plans);
@@ -139,7 +161,7 @@ export default function AppDataProvider({ children }: { children: React.ReactNod
 
       // Return snapshot so callers can use fresh data immediately
       // (React state updates are batched and may not be visible yet)
-      return { analysis: a, budgetAdjustments: adj, debtAccounts: debt, userPlans: plans, planProgress: progressMap, prevSnapshot: prev };
+      return { analysis: a, budgetAdjustments: adj, debtAccounts: debt, investments: inv, savingsAccounts: sav, userPlans: plans, planProgress: progressMap, prevSnapshot: prev };
     } catch (err: any) {
       console.warn('[AppDataProvider] fetchData error:', err?.message);
       setError(err?.message || 'Failed to load data');
@@ -193,6 +215,8 @@ export default function AppDataProvider({ children }: { children: React.ReactNod
   const value: AppData = {
     analysis,
     debtAccounts,
+    investments,
+    savingsAccounts,
     budgetAdjustments,
     userPlans,
     planProgress,
@@ -206,6 +230,8 @@ export default function AppDataProvider({ children }: { children: React.ReactNod
     setAnalysis,
     setPlanProgress,
     setDebtAccounts,
+    setInvestments,
+    setSavingsAccounts,
     setWeeklyCtx,
   };
 

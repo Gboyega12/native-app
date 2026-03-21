@@ -12,6 +12,7 @@ import { useResponsive } from '@/lib/responsive';
 import { useWebPush } from '@/lib/web-push';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { AnimGlyph, BreathingBar } from '@/components/Card';
+import type { Investment, InvestmentAssetClass } from '@/lib/types';
 
 const CONSENT_DAYS = 90;
 const WARN_DAYS = 14;
@@ -71,6 +72,24 @@ export default function Profile() {
   const [addDebtSaving, setAddDebtSaving] = useState(false);
   const [addDebtError, setAddDebtError] = useState('');
 
+  // Investment state
+  const [investmentAccounts, setInvestmentAccounts] = useState<Investment[]>([]);
+  const [showAddInvestment, setShowAddInvestment] = useState(false);
+  const [addInvName, setAddInvName] = useState('');
+  const [addInvClass, setAddInvClass] = useState<InvestmentAssetClass>('stocks');
+  const [addInvPlatform, setAddInvPlatform] = useState('');
+  const [addInvValue, setAddInvValue] = useState('');
+  const [addInvCost, setAddInvCost] = useState('');
+  const [addInvQuantity, setAddInvQuantity] = useState('');
+  const [addInvNotes, setAddInvNotes] = useState('');
+  const [addInvSaving, setAddInvSaving] = useState(false);
+  const [addInvError, setAddInvError] = useState('');
+
+  // CSV import state
+  const [showCsvPreview, setShowCsvPreview] = useState(false);
+  const [csvRows, setCsvRows] = useState<Partial<Investment>[]>([]);
+  const [csvImporting, setCsvImporting] = useState(false);
+
   const DEBT_TYPES = [
     { value: 'credit_card', label: 'Credit card' },
     { value: 'personal_loan', label: 'Personal loan' },
@@ -78,6 +97,16 @@ export default function Profile() {
     { value: 'student_loan', label: 'Student loan' },
     { value: 'car_finance', label: 'Car finance' },
     { value: 'bnpl', label: 'Buy now pay later' },
+    { value: 'other', label: 'Other' },
+  ];
+
+  const ASSET_CLASSES: { value: InvestmentAssetClass; label: string }[] = [
+    { value: 'stocks', label: 'Stocks' },
+    { value: 'bonds', label: 'Bonds' },
+    { value: 'etfs', label: 'ETFs' },
+    { value: 'crypto', label: 'Crypto' },
+    { value: 'property', label: 'Property' },
+    { value: 'pension', label: 'Pension' },
     { value: 'other', label: 'Other' },
   ];
 
@@ -106,7 +135,7 @@ export default function Profile() {
           .eq('source', 'truelayer');
       } catch {}
 
-      const [banksRes, debtRes] = await Promise.all([
+      const [banksRes, debtRes, investRes] = await Promise.all([
         supabase
           .from('bank_data')
           .select('id, connection_id, source, created_at, updated_at, account_type, provider_name')
@@ -116,9 +145,15 @@ export default function Profile() {
           .from('debt_accounts')
           .select('id, account_name, account_type, outstanding_balance, credit_limit, interest_rate, minimum_payment, source, last_updated')
           .eq('user_id', user.id),
+        supabase
+          .from('investments')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false }),
       ]);
       if (banksRes.data) setConnectedBanks(banksRes.data as BankConnection[]);
       if (debtRes.data) setDebtAccounts(debtRes.data);
+      if (investRes.data) setInvestmentAccounts(investRes.data as Investment[]);
 
       // Load notification preferences
       try {
@@ -174,6 +209,129 @@ export default function Profile() {
   const handleAddAccount = () => {
     trackEvent('Add Bank Tapped');
     router.push({ pathname: '/(main)/connect', params: { from: 'profile' } });
+  };
+
+  const handleSaveInvestment = async () => {
+    setAddInvError('');
+    if (!addInvName.trim()) { setAddInvError('Please enter a name.'); return; }
+    const value = parseFloat(addInvValue);
+    if (isNaN(value) || value <= 0) { setAddInvError('Please enter a valid current value.'); return; }
+
+    setAddInvSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setAddInvError('Not signed in.'); setAddInvSaving(false); return; }
+
+      const newInv = {
+        user_id: user.id,
+        name: addInvName.trim(),
+        asset_class: addInvClass,
+        platform: addInvPlatform.trim() || null,
+        current_value: value,
+        purchase_cost: parseFloat(addInvCost) || null,
+        quantity: parseFloat(addInvQuantity) || null,
+        notes: addInvNotes.trim() || null,
+        source: 'manual' as const,
+      };
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from('investments').insert(newInv).select().maybeSingle();
+      if (insertErr) { setAddInvError(insertErr.message); setAddInvSaving(false); return; }
+
+      trackEvent('Investment Added', { asset_class: addInvClass });
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setInvestmentAccounts((prev) => [inserted as Investment, ...prev]);
+
+      // Reset form
+      setAddInvName(''); setAddInvClass('stocks'); setAddInvPlatform('');
+      setAddInvValue(''); setAddInvCost(''); setAddInvQuantity(''); setAddInvNotes('');
+      setAddInvError(''); setShowAddInvestment(false);
+    } catch { setAddInvError('Something went wrong.'); }
+    setAddInvSaving(false);
+  };
+
+  const handleRemoveInvestment = async (invId: string, label: string) => {
+    trackEvent('Investment Removed');
+    const confirmed = window.confirm(`Remove ${label}?\n\nThis will remove this investment from your profile.`);
+    if (!confirmed) return;
+    try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setInvestmentAccounts((prev) => prev.filter((i) => i.id !== invId));
+      await supabase.from('investments').delete().eq('id', invId);
+    } catch (err: any) {
+      console.warn('[profile] Remove investment error:', err?.message);
+    }
+  };
+
+  const handleCsvImport = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+    input.onchange = async (e: any) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      const lines = text.split('\n').filter((l: string) => l.trim());
+      if (lines.length < 2) return;
+
+      const headers = lines[0].toLowerCase().split(',').map((h: string) => h.trim());
+      const nameIdx = headers.findIndex((h: string) => h === 'name');
+      const classIdx = headers.findIndex((h: string) => h === 'asset_class' || h === 'type');
+      const platformIdx = headers.findIndex((h: string) => h === 'platform' || h === 'provider');
+      const valueIdx = headers.findIndex((h: string) => h === 'current_value' || h === 'value');
+      const costIdx = headers.findIndex((h: string) => h === 'purchase_cost' || h === 'cost');
+      const quantityIdx = headers.findIndex((h: string) => h === 'quantity');
+      const notesIdx = headers.findIndex((h: string) => h === 'notes');
+
+      if (nameIdx === -1 || valueIdx === -1) {
+        window.alert('CSV must have "name" and "current_value" (or "value") columns.');
+        return;
+      }
+
+      const validClasses = ['stocks', 'bonds', 'etfs', 'crypto', 'property', 'pension', 'other'];
+      const rows: Partial<Investment>[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map((c: string) => c.trim());
+        const name = cols[nameIdx];
+        const val = parseFloat(cols[valueIdx]);
+        if (!name || isNaN(val) || val <= 0) continue;
+        const rawClass = classIdx >= 0 ? cols[classIdx]?.toLowerCase() : 'other';
+        rows.push({
+          name,
+          asset_class: (validClasses.includes(rawClass) ? rawClass : 'other') as InvestmentAssetClass,
+          platform: platformIdx >= 0 ? cols[platformIdx] || undefined : undefined,
+          current_value: val,
+          purchase_cost: costIdx >= 0 ? parseFloat(cols[costIdx]) || undefined : undefined,
+          quantity: quantityIdx >= 0 ? parseFloat(cols[quantityIdx]) || undefined : undefined,
+          notes: notesIdx >= 0 ? cols[notesIdx] || undefined : undefined,
+          source: 'csv' as const,
+        });
+      }
+
+      if (rows.length === 0) { window.alert('No valid rows found in CSV.'); return; }
+      setCsvRows(rows);
+      setShowCsvPreview(true);
+    };
+    input.click();
+  };
+
+  const handleConfirmCsvImport = async () => {
+    setCsvImporting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setCsvImporting(false); return; }
+
+      const toInsert = csvRows.map((r) => ({ ...r, user_id: user.id }));
+      const { data: inserted, error } = await supabase.from('investments').insert(toInsert).select();
+      if (error) { window.alert(`Import failed: ${error.message}`); setCsvImporting(false); return; }
+
+      trackEvent('Investments CSV Imported', { count: inserted?.length || 0 });
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setInvestmentAccounts((prev) => [...(inserted as Investment[]), ...prev]);
+      setCsvRows([]);
+      setShowCsvPreview(false);
+    } catch { window.alert('Something went wrong.'); }
+    setCsvImporting(false);
   };
 
   const handleSaveDebt = async () => {
@@ -312,7 +470,7 @@ export default function Profile() {
   };
 
   const allAccounts = connectedBanks;
-  const hasAccounts = allAccounts.length > 0 || debtAccounts.length > 0;
+  const hasAccounts = allAccounts.length > 0 || debtAccounts.length > 0 || investmentAccounts.length > 0;
 
   return (
     <ScrollView style={s.container} contentContainerStyle={[s.scroll, isTablet && { maxWidth: maxContentWidth, alignSelf: 'center' as const, width: '100%', paddingHorizontal: horizontalPadding }]} testID="profile-screen">
@@ -505,6 +663,140 @@ export default function Profile() {
 
             <TouchableOpacity style={s.modalSaveBtn} onPress={handleSaveDebt} disabled={addDebtSaving} activeOpacity={0.8}>
               {addDebtSaving ? <ActivityIndicator color={colors.bg} size="small" /> : <Text style={s.modalSaveBtnText}>Save</Text>}
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── Investments ── */}
+      <Text style={s.sectionLabel}>INVESTMENTS</Text>
+
+      {investmentAccounts.length > 0 ? (
+        investmentAccounts.map((inv, idx) => {
+          const gain = inv.purchase_cost ? inv.current_value - inv.purchase_cost : null;
+          const gainPct = inv.purchase_cost && inv.purchase_cost > 0 ? ((gain! / inv.purchase_cost) * 100).toFixed(1) : null;
+          const gainColor = gain !== null ? (gain >= 0 ? colors.green : colors.coral) : colors.muted;
+          return (
+            <AnimGlyph key={inv.id || idx} delay={80 + idx * 60}>
+              <View style={s.accountRow}>
+                <View style={[s.accountDot, { backgroundColor: colors.accent }]} />
+                <View style={s.accountInfo}>
+                  <Text style={s.accountName}>{inv.name}</Text>
+                  <Text style={s.accountMeta}>
+                    {inv.asset_class.toUpperCase()}
+                    {inv.platform ? ` \u2022 ${inv.platform}` : ''}
+                    {' \u2022 '}
+                    {'\u00a3'}{Math.round(inv.current_value).toLocaleString()}
+                    {gain !== null ? ` (${gain >= 0 ? '+' : ''}${'\u00a3'}${Math.round(gain).toLocaleString()})` : ''}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => handleRemoveInvestment(inv.id!, inv.name)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${inv.name} investment`}
+                  style={s.accountRemoveBtn}
+                >
+                  <Text style={s.accountRemove}>Remove</Text>
+                </TouchableOpacity>
+              </View>
+            </AnimGlyph>
+          );
+        })
+      ) : (
+        <Text style={s.emptyHint}>No investments added yet</Text>
+      )}
+
+      <View style={s.addButtonsRow}>
+        <TouchableOpacity
+          style={s.addBtn}
+          onPress={() => setShowAddInvestment(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={s.addBtnText}>+ Add investment</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.addBtn, { borderColor: colors.accentDim }]}
+          onPress={handleCsvImport}
+          activeOpacity={0.7}
+        >
+          <Text style={[s.addBtnText, { color: colors.dim }]}>+ Import CSV</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Add investment modal ── */}
+      <Modal visible={showAddInvestment} transparent animationType="fade" onRequestClose={() => { setAddInvError(''); setShowAddInvestment(false); }}>
+        <Pressable style={s.modalOverlay} onPress={() => { setAddInvError(''); setShowAddInvestment(false); }}>
+          <Pressable style={s.modalContent} onPress={() => {}}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <View style={s.modalHeader}>
+                <Text style={s.modalTitle}>Add investment</Text>
+                <TouchableOpacity style={s.modalCloseIcon} onPress={() => { setAddInvError(''); setShowAddInvestment(false); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={s.modalLabel}>Name</Text>
+              <TextInput style={s.modalInput} value={addInvName} onChangeText={setAddInvName} placeholder="e.g. Vanguard S&P 500" placeholderTextColor={colors.muted} />
+
+              <Text style={s.modalLabel}>Asset class</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.debtTypeScroll}>
+                {ASSET_CLASSES.map((t) => (
+                  <TouchableOpacity key={t.value} style={[s.debtTypeChip, addInvClass === t.value && s.debtTypeChipActive]} onPress={() => setAddInvClass(t.value)} activeOpacity={0.7}>
+                    <Text style={[s.debtTypeChipText, addInvClass === t.value && s.debtTypeChipTextActive]}>{t.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              <Text style={s.modalLabel}>Platform <Text style={s.modalOptional}>(optional)</Text></Text>
+              <TextInput style={s.modalInput} value={addInvPlatform} onChangeText={setAddInvPlatform} placeholder="e.g. Trading 212, Vanguard" placeholderTextColor={colors.muted} />
+
+              <Text style={s.modalLabel}>Current value</Text>
+              <TextInput style={s.modalInput} value={addInvValue} onChangeText={setAddInvValue} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+
+              <Text style={s.modalLabel}>Purchase cost <Text style={s.modalOptional}>(optional)</Text></Text>
+              <TextInput style={s.modalInput} value={addInvCost} onChangeText={setAddInvCost} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+
+              <Text style={s.modalLabel}>Quantity <Text style={s.modalOptional}>(optional)</Text></Text>
+              <TextInput style={s.modalInput} value={addInvQuantity} onChangeText={setAddInvQuantity} placeholder="e.g. 10.5" placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+
+              <Text style={s.modalLabel}>Notes <Text style={s.modalOptional}>(optional)</Text></Text>
+              <TextInput style={s.modalInput} value={addInvNotes} onChangeText={setAddInvNotes} placeholder="Any notes..." placeholderTextColor={colors.muted} multiline />
+
+              {addInvError ? <Text style={s.modalError}>{addInvError}</Text> : null}
+
+              <TouchableOpacity style={s.modalSaveBtn} onPress={handleSaveInvestment} disabled={addInvSaving} activeOpacity={0.8}>
+                {addInvSaving ? <ActivityIndicator color={colors.bg} size="small" /> : <Text style={s.modalSaveBtnText}>Save</Text>}
+              </TouchableOpacity>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* ── CSV preview modal ── */}
+      <Modal visible={showCsvPreview} transparent animationType="fade" onRequestClose={() => setShowCsvPreview(false)}>
+        <Pressable style={s.modalOverlay} onPress={() => setShowCsvPreview(false)}>
+          <Pressable style={s.modalContent} onPress={() => {}}>
+            <View style={s.modalHeader}>
+              <Text style={s.modalTitle}>Import {csvRows.length} investments</Text>
+              <TouchableOpacity style={s.modalCloseIcon} onPress={() => setShowCsvPreview(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={s.modalDesc}>Review the investments below before importing.</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {csvRows.map((r, idx) => (
+                <View key={idx} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.text }}>{r.name}</Text>
+                    <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.dim }}>{r.asset_class}{r.platform ? ` \u2022 ${r.platform}` : ''}</Text>
+                  </View>
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 13, color: colors.accent }}>{'\u00a3'}{Math.round(r.current_value || 0).toLocaleString()}</Text>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={s.modalSaveBtn} onPress={handleConfirmCsvImport} disabled={csvImporting} activeOpacity={0.8}>
+              {csvImporting ? <ActivityIndicator color={colors.bg} size="small" /> : <Text style={s.modalSaveBtnText}>Import all</Text>}
             </TouchableOpacity>
           </Pressable>
         </Pressable>
