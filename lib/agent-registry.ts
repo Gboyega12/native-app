@@ -9,7 +9,8 @@ export type AgentId =
   | 'financial_analyst'
   | 'allocation'
   | 'risk_investment'
-  | 'wealth_manager';
+  | 'wealth_manager'
+  | 'growth';
 
 // ── Tool identifiers (from decision-engine-tools.json) ──
 
@@ -24,7 +25,8 @@ export type ToolId =
   | 'detect_inefficiencies'
   | 'quantify_opportunity_cost'
   | 'generate_recommendation'
-  | 'rank_recommendations';
+  | 'rank_recommendations'
+  | 'generate_growth_report';
 
 // ── Skill identifiers (from skills/*.md) ──
 
@@ -38,7 +40,8 @@ export type SkillId =
   | 'tone'
   | 'user_cohorts'
   | 'app_behaviour'
-  | 'chat_engine';
+  | 'chat_engine'
+  | 'growth_product';
 
 // ── Agent output schemas (for contract validation) ──
 
@@ -93,6 +96,30 @@ export interface WealthManagerOutput {
   recommendations: Recommendation[];
 }
 
+export interface GrowthReportInsight {
+  insight: string;
+  impact: number;
+}
+
+export interface GrowthAgentOutput {
+  report: {
+    headline: string;
+    system_progress: {
+      net_improvement: number;
+      drivers: string[];
+    };
+    key_insights: GrowthReportInsight[];
+    forward_outlook: {
+      projected_gain: number;
+      time_horizon: string;
+    };
+    next_actions: Array<{
+      action: string;
+      impact: number;
+    }>;
+  };
+}
+
 // ── Agent output union ──
 
 export type AgentOutput =
@@ -100,7 +127,8 @@ export type AgentOutput =
   | FinancialAnalystOutput
   | AllocationOutput
   | RiskOutput
-  | WealthManagerOutput;
+  | WealthManagerOutput
+  | GrowthAgentOutput;
 
 // ── Agent definition ──
 
@@ -201,6 +229,49 @@ function validateWealthManager(output: unknown): { valid: boolean; errors: strin
   return { valid: errors.length === 0, errors };
 }
 
+function validateGrowthAgent(output: unknown): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  const o = output as Record<string, unknown>;
+  if (!o || typeof o !== 'object') return { valid: false, errors: ['Output must be an object'] };
+  const report = o.report as Record<string, unknown> | undefined;
+  if (!report || typeof report !== 'object') {
+    errors.push('report must be an object');
+    return { valid: false, errors };
+  }
+  if (typeof report.headline !== 'string') errors.push('report.headline must be a string');
+  const sp = report.system_progress as Record<string, unknown> | undefined;
+  if (!sp || typeof sp !== 'object') {
+    errors.push('report.system_progress must be an object');
+  } else {
+    if (typeof sp.net_improvement !== 'number') errors.push('system_progress.net_improvement must be a number');
+    if (!Array.isArray(sp.drivers)) errors.push('system_progress.drivers must be an array');
+  }
+  if (!Array.isArray(report.key_insights)) {
+    errors.push('report.key_insights must be an array');
+  } else {
+    for (const item of report.key_insights as Record<string, unknown>[]) {
+      if (typeof item.insight !== 'string') errors.push('Each key_insight must have insight as string');
+      if (typeof item.impact !== 'number') errors.push('Each key_insight must have impact as number');
+    }
+  }
+  const outlook = report.forward_outlook as Record<string, unknown> | undefined;
+  if (!outlook || typeof outlook !== 'object') {
+    errors.push('report.forward_outlook must be an object');
+  } else {
+    if (typeof outlook.projected_gain !== 'number') errors.push('forward_outlook.projected_gain must be a number');
+    if (typeof outlook.time_horizon !== 'string') errors.push('forward_outlook.time_horizon must be a string');
+  }
+  if (!Array.isArray(report.next_actions)) {
+    errors.push('report.next_actions must be an array');
+  } else {
+    for (const item of report.next_actions as Record<string, unknown>[]) {
+      if (typeof item.action !== 'string') errors.push('Each next_action must have action as string');
+      if (typeof item.impact !== 'number') errors.push('Each next_action must have impact as number');
+    }
+  }
+  return { valid: errors.length === 0, errors };
+}
+
 // ── Registry ──
 
 export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
@@ -291,6 +362,23 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     ],
     validateOutput: validateWealthManager,
   },
+
+  growth: {
+    id: 'growth',
+    name: 'Growth Agent',
+    role: 'Growth decision engine — generates forward-looking personalised growth reports',
+    requiredTools: ['generate_growth_report'],
+    optionalTools: ['get_user_balance_sheet', 'get_enriched_transactions'],
+    skills: ['growth_product', 'tone'],
+    dependsOn: ['wealth_manager'],
+    hardRules: [
+      'Do NOT generate content directly — only trigger and structure growth outputs',
+      'Do NOT exaggerate improvements',
+      'Do NOT create artificial engagement',
+      'All improvements must be backed by real financial data',
+    ],
+    validateOutput: validateGrowthAgent,
+  },
 };
 
 // ── Execution order (topologically sorted) ──
@@ -301,6 +389,7 @@ export const EXECUTION_ORDER: AgentId[] = [
   'allocation',
   'risk_investment',
   'wealth_manager',
+  'growth',
 ];
 
 // ── Helper: get all tools an agent needs ──

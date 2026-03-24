@@ -30,6 +30,7 @@ Ensure:
 3. Allocation Agent
 4. Risk & Investment Agent
 5. Wealth Manager Agent
+6. Growth Agent
 
 ---
 
@@ -89,6 +90,7 @@ The orchestrator spec is implemented by three TypeScript modules:
 | Allocation | `calculate_liquidity_position`, `calculate_lamu_score` | `financial-models`, `debt-intelligence` |
 | Risk & Investment | `run_monte_carlo_simulation` | `financial-models`, `debt-intelligence` |
 | Wealth Manager | `generate_recommendation`, `rank_recommendations` | `recommendation-engine`, `bocy-philosophy`, `tone`, `user-cohorts` |
+| Growth | `generate_growth_report` | `growth-product`, `tone` |
 
 ### Halt Conditions
 
@@ -98,6 +100,7 @@ The orchestrator spec is implemented by three TypeScript modules:
 | Data quality = LOW | Halt entire pipeline |
 | Critical agent failure (data_integrity, financial_analyst) | Halt pipeline with error |
 | Zero inefficiencies found | Continue — wealth manager reports "all clear" |
+| Growth agent failure | Continue — non-critical, pipeline still returns recommendations |
 
 ---
 

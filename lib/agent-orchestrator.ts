@@ -14,6 +14,7 @@ import {
   type AllocationOutput,
   type RiskOutput,
   type WealthManagerOutput,
+  type GrowthAgentOutput,
   type ToolId,
   type SkillId,
 } from './agent-registry';
@@ -44,6 +45,8 @@ export interface PipelineResult {
   results: Record<AgentId, AgentResult>;
   /** Final user-facing output (only from wealth_manager) */
   recommendations: WealthManagerOutput | null;
+  /** Growth report output (only from growth agent, full_analysis only) */
+  growthReport: GrowthAgentOutput | null;
   totalDurationMs: number;
   /** Pipeline execution log for observability */
   log: PipelineLogEntry[];
@@ -101,6 +104,7 @@ export interface PipelineContext {
   allocation?: AllocationOutput;
   riskInvestment?: RiskOutput;
   wealthManager?: WealthManagerOutput;
+  growth?: GrowthAgentOutput;
 }
 
 // ── Orchestrator options ──
@@ -309,6 +313,7 @@ export class AgentOrchestrator {
       haltReason,
       results: results as Record<AgentId, AgentResult>,
       recommendations: context.wealthManager ?? null,
+      growthReport: context.growth ?? null,
       totalDurationMs,
       log,
     };
@@ -327,10 +332,11 @@ export class AgentOrchestrator {
   private resolveAgentSequence(intent: NonNullable<PipelineInputs['queryIntent']>): AgentId[] {
     switch (intent) {
       case 'full_analysis':
+        // Full pipeline includes growth agent as final step
         return [...EXECUTION_ORDER];
 
       case 'quick_check':
-        // Skip risk simulations for fast queries
+        // Skip risk simulations and growth for fast queries
         return ['data_integrity', 'financial_analyst', 'wealth_manager'];
 
       case 'debt_only':
@@ -390,6 +396,9 @@ export class AgentOrchestrator {
         break;
       case 'wealth_manager':
         context.wealthManager = output as WealthManagerOutput;
+        break;
+      case 'growth':
+        context.growth = output as GrowthAgentOutput;
         break;
     }
   }

@@ -401,6 +401,33 @@ export function repairDebtSubGoals(sgs: MoveSubGoal[], debtAccounts: any[]): Mov
   return [...repairedDebtSgs, ...nonDebtSgs];
 }
 
+// ── Growth Report ──
+
+export interface GrowthReport {
+  user_id: string;
+  time_period: string;
+  report: {
+    headline: string;
+    system_progress: {
+      net_improvement: number;
+      drivers: string[];
+    };
+    key_insights: Array<{
+      insight: string;
+      impact: number;
+    }>;
+    forward_outlook: {
+      projected_gain: number;
+      time_horizon: string;
+    };
+    next_actions: Array<{
+      action: string;
+      impact: number;
+    }>;
+  };
+  created_at?: string;
+}
+
 // ── Scenario Comparison (Phase 3C) ──
 
 export interface ScenarioComparison {

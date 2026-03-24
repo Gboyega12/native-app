@@ -165,6 +165,24 @@ function checkHardRules(agentId: AgentId, output: AgentOutput): string[] {
       }
       break;
     }
+
+    case 'growth': {
+      // Must NOT generate content directly — only structured report data
+      if ('user_message' in o) violations.push('Growth Agent must NOT generate direct user-facing content');
+      if ('recommendations' in o) violations.push('Growth Agent must NOT produce recommendations (that is Wealth Manager\'s job)');
+      // Report must have quantified improvements backed by data
+      const report = (o as Record<string, unknown>).report as Record<string, unknown> | undefined;
+      if (report) {
+        const sp = report.system_progress as Record<string, unknown> | undefined;
+        if (sp && typeof sp.net_improvement === 'number' && sp.net_improvement < 0) {
+          // Negative improvement is allowed (honest reporting), but zero drivers is suspicious
+          if (Array.isArray(sp.drivers) && sp.drivers.length === 0 && sp.net_improvement !== 0) {
+            violations.push('Growth Agent must provide drivers for non-zero net_improvement');
+          }
+        }
+      }
+      break;
+    }
   }
 
   return violations;
@@ -187,6 +205,7 @@ export function checkAgentBoundary(
     median_outcome: 'risk_investment',
     probability_of_success: 'risk_investment',
     recommendations: 'wealth_manager',
+    report: 'growth',
   };
 
   for (const key of outputKeys) {

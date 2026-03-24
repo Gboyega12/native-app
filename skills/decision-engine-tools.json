@@ -329,6 +329,82 @@
       ]
     },
 
+    "growth_engine": {
+      "description": "Layer 5 — Generates forward-looking personalised growth reports. Runs after wealth manager to synthesise system-wide progress.",
+      "tools": [
+        {
+          "name": "generate_growth_report",
+          "description": "Generates a forward-looking, hyper-personalised financial intelligence report. Synthesises current state vs previous state, quantifies improvement, and identifies next opportunities.",
+          "source": "lib/growth-engine.ts → generateGrowthReport(), skills/growth-product.md",
+          "inputs": {
+            "user_id": { "type": "string", "required": true, "description": "Supabase user ID" },
+            "time_period": { "type": "string", "required": true, "description": "Report period (e.g. '2024-03' for March 2024)", "pattern": "^\\d{4}-\\d{2}$" },
+            "current_state": {
+              "type": "object",
+              "required": true,
+              "description": "Current financial state from latest analysis",
+              "schema": "$ref:get_user_balance_sheet.output"
+            },
+            "previous_state": {
+              "type": "object",
+              "required": true,
+              "description": "Previous period financial state for comparison",
+              "schema": "$ref:get_user_balance_sheet.output"
+            },
+            "recommendations": {
+              "type": "array",
+              "required": true,
+              "description": "Current ranked recommendations from wealth manager",
+              "items": { "schema": "$ref:generate_recommendation.output" }
+            }
+          },
+          "output": {
+            "report": {
+              "type": "object",
+              "properties": {
+                "headline": { "type": "string", "description": "One-line personalised headline summarising system progress" },
+                "system_progress": {
+                  "type": "object",
+                  "properties": {
+                    "net_improvement": { "type": "number", "description": "£/year net improvement vs previous period" },
+                    "drivers": { "type": "array", "items": { "type": "string" }, "description": "What drove the improvement/decline" }
+                  }
+                },
+                "key_insights": {
+                  "type": "array",
+                  "items": {
+                    "insight": { "type": "string", "description": "Personalised insight statement" },
+                    "impact": { "type": "number", "description": "£/year impact of this insight" }
+                  }
+                },
+                "forward_outlook": {
+                  "type": "object",
+                  "properties": {
+                    "projected_gain": { "type": "number", "description": "£/year projected gain if next actions are taken" },
+                    "time_horizon": { "type": "string", "description": "Time horizon for projection (e.g. '12 months')" }
+                  }
+                },
+                "next_actions": {
+                  "type": "array",
+                  "items": {
+                    "action": { "type": "string", "description": "Next recommended action" },
+                    "impact": { "type": "number", "description": "£/year impact" }
+                  }
+                }
+              }
+            }
+          },
+          "rules": [
+            "Must include forward-looking analysis — not just historical summaries",
+            "Must be personalised to the user's financial system, not generic",
+            "Must quantify improvement and future opportunity in £/year",
+            "Must avoid vanity metrics and gamification without financial meaning",
+            "Requires wealth_manager recommendations to have been generated first"
+          ]
+        }
+      ]
+    },
+
     "recommendation_engine": {
       "description": "Layer 4 — Generates and ranks executable financial recommendations. Every recommendation is a precise capital reallocation decision.",
       "tools": [
@@ -454,7 +530,9 @@
       { "from": "calculate_liquidity_position", "to": "generate_recommendation" },
       { "from": "calculate_lamu_score",         "to": "generate_recommendation" },
       { "from": "detect_inefficiencies",        "to": "generate_recommendation" },
-      { "from": "generate_recommendation",      "to": "rank_recommendations" }
+      { "from": "generate_recommendation",      "to": "rank_recommendations" },
+      { "from": "rank_recommendations",         "to": "generate_growth_report" },
+      { "from": "get_user_balance_sheet",       "to": "generate_growth_report" }
     ],
     "parallel_groups": [
       {
