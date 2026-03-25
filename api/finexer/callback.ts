@@ -49,9 +49,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { consent_id: consentIdParam, connection_id: connectionIdParam, origin: rawOrigin } = parsed.data;
 
-  // Return 200 for bare GET requests so Finexer dashboard can verify the URL
+  // If Finexer redirects without query params, try to find the most recently
+  // created unprocessed bank_data row. This handles the case where Finexer
+  // strips query params from the return_url during the redirect.
   if (!connectionIdParam && !consentIdParam) {
-    return res.status(200).json({ ok: true });
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !serviceKey) {
+      return res.status(200).json({ ok: true });
+    }
+
+    const admin = createClient(supabaseUrl, serviceKey);
+    // Look for a bank_data row created in the last 10 minutes that hasn't
+    // been processed yet (empty csv_data means the callback hasn't run).
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { data: pendingRow } = await admin
+      .from('bank_data')
+      .select('connection_id, consent_id, user_id')
+      .eq('source', 'finexer')
+      .eq('csv_data', '')
+      .gte('created_at', tenMinutesAgo)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (!pendingRow?.consent_id) {
+      // Genuine health-check or no pending connection — return OK
+      return res.status(200).json({ ok: true });
+    }
+
+    // Re-parse with the discovered values and continue the normal flow
+    // by redirecting to ourselves with the proper query params
+    const redirectUrl = new URL(req.url || '/api/finexer/callback', `https://${req.headers.host}`);
+    redirectUrl.searchParams.set('consent_id', pendingRow.consent_id);
+    if (pendingRow.connection_id) redirectUrl.searchParams.set('connection_id', pendingRow.connection_id);
+    if (rawOrigin) redirectUrl.searchParams.set('origin', rawOrigin);
+    return res.redirect(302, redirectUrl.toString());
   }
 
   const apiKey = process.env.FINEXER_API_KEY;
