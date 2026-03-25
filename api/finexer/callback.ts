@@ -58,6 +58,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.redirect(302, `bocy://callback?status=error&error=${errMsg}`);
   };
 
+  // Return 200 for bare GET requests so Finexer dashboard can verify the URL
+  if (!connectionId && !consentIdParam) {
+    return res.status(200).json({ ok: true });
+  }
+
   if (!connectionId) return fail('Missing connection_id');
 
   const apiKey = process.env.FINEXER_API_KEY;
