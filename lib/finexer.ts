@@ -16,6 +16,12 @@ function authHeader(apiKey: string): string {
   return `Basic ${encoded}`;
 }
 
+/** Throw with response body included for diagnostics. */
+async function throwFinexerError(label: string, res: Response): Promise<never> {
+  const body = await res.text().catch(() => '');
+  throw new Error(`${label}: ${res.statusText}${body ? ` — ${body}` : ''}`);
+}
+
 // ── Shared fetch wrapper ──
 async function finexerFetch(
   path: string,
@@ -77,7 +83,7 @@ export async function createCustomer(
 
 export async function getCustomer(apiKey: string, customerId: string): Promise<FinexerCustomer> {
   const res = await finexerFetch(`/customers/${customerId}`, apiKey);
-  if (!res.ok) throw new Error(`Finexer get customer failed: ${res.statusText}`);
+  if (!res.ok) await throwFinexerError('Finexer get customer failed', res);
   return res.json();
 }
 
@@ -148,7 +154,7 @@ export async function createConsent(
 
 export async function getConsent(apiKey: string, consentId: string): Promise<FinexerConsent> {
   const res = await finexerFetch(`/consents/${consentId}`, apiKey);
-  if (!res.ok) throw new Error(`Finexer get consent failed: ${res.statusText}`);
+  if (!res.ok) await throwFinexerError('Finexer get consent failed', res);
   return res.json();
 }
 
@@ -161,7 +167,7 @@ export async function renewConsent(
     method: 'POST',
     body: { renewed_at: renewedAt },
   });
-  if (!res.ok) throw new Error(`Finexer renew consent failed: ${res.statusText}`);
+  if (!res.ok) await throwFinexerError('Finexer renew consent failed', res);
   return res.json();
 }
 
@@ -174,7 +180,7 @@ export async function listConsents(
   if (opts?.status) params.set('status', opts.status);
   const qs = params.toString();
   const res = await finexerFetch(`/consents${qs ? `?${qs}` : ''}`, apiKey);
-  if (!res.ok) throw new Error(`Finexer list consents failed: ${res.statusText}`);
+  if (!res.ok) await throwFinexerError('Finexer list consents failed', res);
   return res.json();
 }
 
@@ -209,8 +215,9 @@ export async function listBankAccounts(
   const params = new URLSearchParams();
   if (opts.customer) params.set('customer', opts.customer);
   if (opts.consent) params.set('consent', opts.consent);
-  const res = await finexerFetch(`/bank_accounts?${params.toString()}`, apiKey);
-  if (!res.ok) throw new Error(`Finexer list bank accounts failed: ${res.statusText}`);
+  const qs = params.toString();
+  const res = await finexerFetch(`/bank_accounts${qs ? `?${qs}` : ''}`, apiKey);
+  if (!res.ok) await throwFinexerError('Finexer list bank accounts failed', res);
   return res.json();
 }
 
@@ -219,7 +226,7 @@ export async function getBankAccount(
   bankAccountId: string,
 ): Promise<FinexerBankAccount> {
   const res = await finexerFetch(`/bank_accounts/${bankAccountId}`, apiKey);
-  if (!res.ok) throw new Error(`Finexer get bank account failed: ${res.statusText}`);
+  if (!res.ok) await throwFinexerError('Finexer get bank account failed', res);
   return res.json();
 }
 
@@ -239,7 +246,7 @@ export async function getBalance(
   bankAccountId: string,
 ): Promise<{ data: FinexerBalance[] }> {
   const res = await finexerFetch(`/bank_accounts/${bankAccountId}/balance`, apiKey);
-  if (!res.ok) throw new Error(`Finexer get balance failed: ${res.statusText}`);
+  if (!res.ok) await throwFinexerError('Finexer get balance failed', res);
   return res.json();
 }
 
@@ -262,7 +269,7 @@ export async function syncBankAccount(
       // Rate limited (1/hour) — check current status instead
       return getSyncStatus(apiKey, bankAccountId);
     }
-    throw new Error(`Finexer sync failed: ${res.statusText}`);
+    await throwFinexerError('Finexer sync failed', res);
   }
   return res.json();
 }
@@ -272,7 +279,7 @@ export async function getSyncStatus(
   bankAccountId: string,
 ): Promise<FinexerSyncStatus> {
   const res = await finexerFetch(`/bank_accounts/${bankAccountId}/sync`, apiKey);
-  if (!res.ok) throw new Error(`Finexer get sync status failed: ${res.statusText}`);
+  if (!res.ok) await throwFinexerError('Finexer get sync status failed', res);
   return res.json();
 }
 
@@ -311,8 +318,9 @@ export async function listTransactions(
   if (opts?.status) params.set('status', opts.status);
   if (opts?.timestamp_gte) params.set('timestamp.gte', opts.timestamp_gte);
   if (opts?.timestamp_lte) params.set('timestamp.lte', opts.timestamp_lte);
-  const res = await finexerFetch(`/bank_accounts/${bankAccountId}/transactions?${params.toString()}`, apiKey);
-  if (!res.ok) throw new Error(`Finexer list transactions failed: ${res.statusText}`);
+  const qs = params.toString();
+  const res = await finexerFetch(`/bank_accounts/${bankAccountId}/transactions${qs ? `?${qs}` : ''}`, apiKey);
+  if (!res.ok) await throwFinexerError('Finexer list transactions failed', res);
   return res.json();
 }
 
@@ -373,8 +381,9 @@ export async function listProviders(
     for (const r of opts.roles) params.append('roles[]', r);
   }
   params.set('limit', '100');
-  const res = await finexerFetch(`/providers?${params.toString()}`, apiKey);
-  if (!res.ok) throw new Error(`Finexer list providers failed: ${res.statusText}`);
+  const qs = params.toString();
+  const res = await finexerFetch(`/providers${qs ? `?${qs}` : ''}`, apiKey);
+  if (!res.ok) await throwFinexerError('Finexer list providers failed', res);
   return res.json();
 }
 

@@ -155,8 +155,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return fail('Bank authorization not completed', `Consent status: ${consent.status}`);
     }
 
-    // List bank accounts under this consent
-    const { data: bankAccounts } = await listBankAccounts(apiKey, { consent: consentId });
+    // List bank accounts under this consent.
+    // Finexer may take a moment to provision accounts after consent authorization,
+    // so retry with backoff on failure (e.g. 400 Bad Request).
+    let bankAccounts: FinexerBankAccount[] = [];
+    const retryDelays = [0, 2000, 4000];
+    for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+      if (retryDelays[attempt]) await new Promise((r) => setTimeout(r, retryDelays[attempt]));
+      try {
+        const result = await listBankAccounts(apiKey, { consent: consentId });
+        bankAccounts = result.data || [];
+        break;
+      } catch (err) {
+        console.warn(`[finexer/callback] listBankAccounts attempt ${attempt + 1} failed:`, err);
+        if (attempt === retryDelays.length - 1) {
+          return fail('Failed to list bank accounts', err instanceof Error ? err.message : String(err));
+        }
+      }
+    }
 
     if (!bankAccounts || bankAccounts.length === 0) {
       return fail('No bank accounts found', 'Authorization succeeded but no accounts were returned');
