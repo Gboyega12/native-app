@@ -629,6 +629,285 @@ export function MockupChat() {
   );
 }
 
+// ── Glassmorphic education slide mockups ──
+// Frosted-glass card overlays for onboarding education screens
+
+const glassBase = {
+  backgroundColor: 'rgba(255,255,255,0.12)',
+  borderRadius: 20,
+  borderWidth: 1,
+  borderColor: 'rgba(255,255,255,0.20)',
+  padding: 24,
+  width: '100%' as any,
+  maxWidth: 300,
+} as const;
+
+/** Slide 1: Spending this month — sparkline + amount */
+export function GlassMockupSpending() {
+  const anims = useRef(Array.from({ length: 4 }, () => new Animated.Value(0))).current;
+  const floatAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.stagger(180, anims.map(a =>
+      Animated.timing(a, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    )).start();
+    Animated.loop(Animated.sequence([
+      Animated.timing(floatAnim, { toValue: 1, duration: 3000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      Animated.timing(floatAnim, { toValue: 0, duration: 3000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ])).start();
+  }, []);
+
+  // Simple sparkline using small bars
+  const BARS = [0.4, 0.6, 0.35, 0.8, 0.55, 0.7, 0.45];
+
+  return (
+    <Animated.View style={[glassBase, {
+      transform: [{ translateY: floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) }],
+    }]}>
+      <Animated.Text style={[glassS.label, { opacity: anims[0] }]}>SPENDING THIS MONTH</Animated.Text>
+      <Animated.Text style={[glassS.amount, {
+        opacity: anims[1],
+        transform: [{ scale: anims[1].interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }],
+      }]}>{'\u00A3'}1,847</Animated.Text>
+      {/* Sparkline */}
+      <Animated.View style={[glassS.sparkRow, {
+        opacity: anims[2],
+        transform: [{ translateY: anims[2].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+      }]}>
+        {BARS.map((h, i) => (
+          <View key={i} style={{
+            width: 24, height: 40 * h, borderRadius: 4,
+            backgroundColor: i === 3 ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)',
+          }} />
+        ))}
+      </Animated.View>
+      <Animated.Text style={[glassS.sub, { opacity: anims[3] }]}>
+        12% less than last month
+      </Animated.Text>
+    </Animated.View>
+  );
+}
+
+/** Slide 2: Chat input — frosted glass prompt */
+export function GlassMockupChat() {
+  const anims = useRef(Array.from({ length: 3 }, () => new Animated.Value(0))).current;
+  const floatAnim = useRef(new Animated.Value(0)).current;
+  const cursorAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.stagger(200, anims.map(a =>
+      Animated.timing(a, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    )).start();
+    Animated.loop(Animated.sequence([
+      Animated.timing(floatAnim, { toValue: 1, duration: 3200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      Animated.timing(floatAnim, { toValue: 0, duration: 3200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ])).start();
+    Animated.loop(Animated.sequence([
+      Animated.timing(cursorAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.timing(cursorAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
+    ])).start();
+  }, []);
+
+  return (
+    <Animated.View style={[glassBase, {
+      transform: [{ translateY: floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) }],
+    }]}>
+      {/* Chat input field */}
+      <Animated.View style={[glassS.inputField, {
+        opacity: anims[0],
+        transform: [{ translateY: anims[0].interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }],
+      }]}>
+        <Text style={glassS.inputText}>How is my portfolio performing?</Text>
+        <Animated.View style={[glassS.cursor, { opacity: cursorAnim }]} />
+      </Animated.View>
+
+      {/* Suggested questions */}
+      <Animated.View style={[glassS.suggestRow, {
+        opacity: anims[1],
+        transform: [{ translateY: anims[1].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+      }]}>
+        <View style={glassS.suggestChip}>
+          <Text style={glassS.chipText}>Spending breakdown</Text>
+        </View>
+        <View style={glassS.suggestChip}>
+          <Text style={glassS.chipText}>Am I on track?</Text>
+        </View>
+      </Animated.View>
+
+      <Animated.View style={[glassS.suggestRow, {
+        opacity: anims[2],
+        transform: [{ translateY: anims[2].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+      }]}>
+        <View style={glassS.suggestChip}>
+          <Text style={glassS.chipText}>When debt free?</Text>
+        </View>
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+/** Slide 3: Net worth — amount + gain + chart */
+export function GlassMockupNetWorth() {
+  const anims = useRef(Array.from({ length: 4 }, () => new Animated.Value(0))).current;
+  const floatAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.stagger(180, anims.map(a =>
+      Animated.timing(a, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true })
+    )).start();
+    Animated.loop(Animated.sequence([
+      Animated.timing(floatAnim, { toValue: 1, duration: 2800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      Animated.timing(floatAnim, { toValue: 0, duration: 2800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ])).start();
+  }, []);
+
+  // Simplified upward line chart using dots
+  const CHART_POINTS = [0.2, 0.25, 0.22, 0.35, 0.4, 0.38, 0.5, 0.55, 0.65, 0.7];
+
+  return (
+    <Animated.View style={[glassBase, {
+      transform: [{ translateY: floatAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) }],
+    }]}>
+      <Animated.Text style={[glassS.label, { opacity: anims[0] }]}>NET WORTH</Animated.Text>
+      <Animated.View style={[{ flexDirection: 'row', alignItems: 'baseline', gap: 10 }, {
+        opacity: anims[1],
+        transform: [{ scale: anims[1].interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] }) }],
+      }]}>
+        <Text style={glassS.amount}>{'\u00A3'}24,180</Text>
+        <Text style={glassS.gain}>+8.2%</Text>
+      </Animated.View>
+      {/* Mini chart */}
+      <Animated.View style={[glassS.chartRow, {
+        opacity: anims[2],
+        transform: [{ translateY: anims[2].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+      }]}>
+        {CHART_POINTS.map((h, i) => (
+          <View key={i} style={{
+            width: 4, height: 4, borderRadius: 2,
+            backgroundColor: 'rgba(255,255,255,0.5)',
+            marginBottom: h * 40,
+          }} />
+        ))}
+      </Animated.View>
+      <Animated.View style={[glassS.statRow, {
+        opacity: anims[3],
+        transform: [{ translateY: anims[3].interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }],
+      }]}>
+        <View style={glassS.stat}>
+          <Text style={glassS.statLabel}>INVESTED</Text>
+          <Text style={glassS.statValue}>{'\u00A3'}12,400</Text>
+        </View>
+        <View style={glassS.stat}>
+          <Text style={glassS.statLabel}>SAVINGS</Text>
+          <Text style={glassS.statValue}>{'\u00A3'}8,200</Text>
+        </View>
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+const glassS = StyleSheet.create({
+  label: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 2,
+    marginBottom: 6,
+  },
+  amount: {
+    fontFamily: fonts.heading,
+    fontSize: 32,
+    color: '#FFFFFF',
+    letterSpacing: -0.5,
+    marginBottom: 16,
+  },
+  gain: {
+    fontFamily: fonts.mono,
+    fontSize: 14,
+    color: '#7CFC7C',
+    letterSpacing: 0.5,
+    marginBottom: 16,
+  },
+  sub: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.5)',
+    marginTop: 12,
+  },
+  sparkRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+    height: 40,
+  },
+  inputField: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  inputText: {
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  cursor: {
+    width: 2,
+    height: 18,
+    backgroundColor: '#FFFFFF',
+    marginLeft: 2,
+    borderRadius: 1,
+  },
+  suggestRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+  },
+  suggestChip: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  chipText: {
+    fontFamily: fonts.medium,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.6)',
+  },
+  chartRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+    height: 44,
+    marginBottom: 16,
+  },
+  statRow: {
+    flexDirection: 'row',
+    gap: 24,
+  },
+  stat: {
+    flex: 1,
+  },
+  statLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.45)',
+    letterSpacing: 1.5,
+    marginBottom: 4,
+  },
+  statValue: {
+    fontFamily: fonts.semibold,
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.8)',
+  },
+});
+
 const mockS = StyleSheet.create({
   card: {
     borderRadius: radius.xl,

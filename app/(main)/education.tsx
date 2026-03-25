@@ -5,32 +5,53 @@ import {
 import { useRouter } from 'expo-router';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { hapticTick } from '@/lib/haptics';
-import { colors, fonts, spacing, radius } from '@/theme';
-import { MockupDashboard, MockupMoves, MockupChat } from '@/components/Bocy';
+import { colors, fonts, spacing } from '@/theme';
+import { GlassMockupSpending, GlassMockupChat, GlassMockupNetWorth } from '@/components/Bocy';
+
+// Per-slide nature gradient backgrounds (simulated with layered Views)
+const SLIDE_BG = [
+  // Warm amber / sand dune
+  { top: '#C4854C', bottom: '#8B5E34' },
+  // Deep night sky
+  { top: '#0A1628', bottom: '#1B2D4A' },
+  // Rich green leaf
+  { top: '#2D5A1E', bottom: '#4A8C2A' },
+] as const;
 
 const SLIDES = [
   {
-    mockup: 'dashboard' as const,
-    title: "This isn't a\nbudgeting app",
-    body: "Your whole picture.\nOne smart move.",
-    accent: colors.accent,
-  },
-  {
-    mockup: 'moves' as const,
-    title: 'One step at\na time',
-    body: "Biggest wins first.\nStep by step.",
-    accent: colors.text2,
+    mockup: 'spending' as const,
+    title: 'Optimise\nyour money',
+    body: 'Net worth, spending, and investments.',
   },
   {
     mockup: 'chat' as const,
-    title: 'Built around\nyour life',
-    body: "Adapts to your life.\nAlways learning.",
-    cta: "Let's get to know you",
-    accent: colors.green,
+    title: 'Ask\nanything',
+    body: 'Summaries, insights, and advice.',
+  },
+  {
+    mockup: 'networth' as const,
+    title: 'Grow your\nwealth',
+    body: 'Forecasting, investing and more.',
+    cta: "Let's get started",
   },
 ];
 
-// Staggered entrance for each slide's content elements
+// Simulated gradient bg with two layered Views (top/bottom color halves + blend)
+function GradientBg({ top, bottom }: { top: string; bottom: string }) {
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <View style={{ flex: 1, backgroundColor: top }} />
+      <View style={{ flex: 1, backgroundColor: bottom }} />
+      {/* Blend overlay for smoother transition */}
+      <View style={[StyleSheet.absoluteFill, {
+        backgroundColor: bottom,
+        opacity: 0.35,
+      }]} />
+    </View>
+  );
+}
+
 function SlideContent({ slide, idx, containerWidth, scrollX }: {
   slide: typeof SLIDES[number]; idx: number; containerWidth: number; scrollX: Animated.Value;
 }) {
@@ -48,15 +69,15 @@ function SlideContent({ slide, idx, containerWidth, scrollX }: {
 
   return (
     <View style={styles.content}>
-      {/* Title */}
+      {/* Title — large, white, serif-weight */}
       <Animated.Text style={[styles.title, {
         opacity: titleAnim,
-        transform: [{ translateY: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+        transform: [{ translateY: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
       }]}>
         {slide.title}
       </Animated.Text>
 
-      {/* Mockup hero with scroll parallax */}
+      {/* Glass mockup card with parallax */}
       <Animated.View style={[
         styles.mockupWrap,
         {
@@ -80,20 +101,18 @@ function SlideContent({ slide, idx, containerWidth, scrollX }: {
           ],
         },
       ]}>
-        {slide.mockup === 'dashboard' && <MockupDashboard />}
-        {slide.mockup === 'moves' && <MockupMoves />}
-        {slide.mockup === 'chat' && <MockupChat />}
+        {slide.mockup === 'spending' && <GlassMockupSpending />}
+        {slide.mockup === 'chat' && <GlassMockupChat />}
+        {slide.mockup === 'networth' && <GlassMockupNetWorth />}
       </Animated.View>
 
-      {/* Body text */}
-      {slide.body && (
-        <Animated.Text style={[styles.body, {
-          opacity: bodyAnim,
-          transform: [{ translateY: bodyAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
-        }]}>
-          {slide.body}
-        </Animated.Text>
-      )}
+      {/* Subtitle text */}
+      <Animated.Text style={[styles.body, {
+        opacity: bodyAnim,
+        transform: [{ translateY: bodyAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+      }]}>
+        {slide.body}
+      </Animated.Text>
     </View>
   );
 }
@@ -120,9 +139,6 @@ export default function Education() {
     } else {
       trackEvent('Education Slide Viewed', { slide: currentPage + 1 });
       const nextPage = currentPage + 1;
-      // Update page state directly — onMomentumScrollEnd doesn't fire
-      // for programmatic scrollTo() on web and some native platforms,
-      // which caused the button to get stuck on the Methods slide.
       setCurrentPage(nextPage);
       (scrollRef.current as any)?.scrollTo({ x: nextPage * containerWidth, animated: true });
     }
@@ -133,11 +149,16 @@ export default function Education() {
     router.push('/(main)/identity');
   };
 
+  const bg = SLIDE_BG[currentPage];
+
   return (
     <View
       style={styles.container}
       onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
     >
+      {/* Nature gradient background */}
+      <GradientBg top={bg.top} bottom={bg.bottom} />
+
       {/* Skip button */}
       {!isLast && (
         <TouchableOpacity style={styles.skipBtn} onPress={handleSkip}>
@@ -145,7 +166,7 @@ export default function Education() {
         </TouchableOpacity>
       )}
 
-      {/* ── Horizontal snap carousel ── */}
+      {/* Horizontal snap carousel */}
       {containerWidth > 0 && (
         <Animated.ScrollView
           ref={scrollRef}
@@ -175,19 +196,19 @@ export default function Education() {
         </Animated.ScrollView>
       )}
 
-      {/* Bottom area: animated dots + button */}
+      {/* Bottom area: dots + button */}
       <Animated.View style={[styles.bottomArea, {
         opacity: bottomEnter,
         transform: [{ translateY: bottomEnter.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
       }]}>
-        {/* Animated progress dots */}
+        {/* Progress dots */}
         <View style={styles.dots}>
-          {SLIDES.map((slide, i) => {
+          {SLIDES.map((_, i) => {
             if (containerWidth <= 0) {
               return (
                 <View
                   key={i}
-                  style={[styles.progressDot, i === 0 && [styles.dotActive, { backgroundColor: slide.accent }]]}
+                  style={[styles.progressDot, i === 0 && styles.dotActive]}
                 />
               );
             }
@@ -196,26 +217,26 @@ export default function Education() {
               outputRange: [8, 28, 8],
               extrapolate: 'clamp',
             });
-            const dotBg = scrollX.interpolate({
+            const dotOpacity = scrollX.interpolate({
               inputRange: [(i - 1) * containerWidth, i * containerWidth, (i + 1) * containerWidth],
-              outputRange: [colors.muted, slide.accent, colors.muted],
+              outputRange: [0.3, 1, 0.3],
               extrapolate: 'clamp',
             });
             return (
               <Animated.View
                 key={i}
-                style={[styles.progressDot, { width: dotWidth, backgroundColor: dotBg }]}
+                style={[styles.progressDot, { width: dotWidth, opacity: dotOpacity, backgroundColor: '#FFFFFF' }]}
               />
             );
           })}
         </View>
 
         <TouchableOpacity
-          style={[styles.button, isLast && { backgroundColor: colors.green }]}
+          style={styles.button}
           onPress={handleNext}
           activeOpacity={0.8}
         >
-          <Text style={[styles.buttonText, isLast && { color: '#000000' }]}>
+          <Text style={styles.buttonText}>
             {isLast ? (SLIDES[currentPage].cta || 'Continue') : 'Next'}
           </Text>
         </TouchableOpacity>
@@ -227,7 +248,7 @@ export default function Education() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: SLIDE_BG[0].bottom, // fallback
     maxWidth: 640,
     alignSelf: 'center' as const,
     width: '100%',
@@ -245,7 +266,7 @@ const styles = StyleSheet.create({
   skipText: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.dim,
+    color: 'rgba(255,255,255,0.6)',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
@@ -264,21 +285,21 @@ const styles = StyleSheet.create({
   },
   mockupWrap: {
     alignItems: 'center',
-    marginTop: spacing.xxl,
-    marginBottom: spacing.xxl,
+    marginTop: spacing.xl,
+    marginBottom: spacing.xl,
   },
   title: {
     fontFamily: fonts.heading,
-    fontSize: 32,
-    color: colors.text,
+    fontSize: 48,
+    color: '#FFFFFF',
     textAlign: 'center',
-    lineHeight: 42,
-    letterSpacing: -0.5,
+    lineHeight: 56,
+    letterSpacing: -1,
   },
   body: {
     fontFamily: fonts.medium,
     fontSize: 17,
-    color: colors.text2,
+    color: 'rgba(255,255,255,0.7)',
     textAlign: 'center',
     lineHeight: 28,
     maxWidth: 480,
@@ -298,23 +319,26 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.muted,
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
   dotActive: {
     width: 28,
     borderRadius: 4,
+    backgroundColor: '#FFFFFF',
   },
   button: {
     width: '100%',
     paddingVertical: 18,
     borderRadius: 100,
     alignItems: 'center',
-    backgroundColor: colors.accent,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   buttonText: {
     fontFamily: fonts.semibold,
     fontSize: 16,
-    color: colors.bg,
+    color: '#FFFFFF',
     letterSpacing: 0.3,
   },
 });
