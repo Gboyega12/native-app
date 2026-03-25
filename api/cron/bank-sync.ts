@@ -1,23 +1,23 @@
 // ── Automated Bank Sync Cron Job ──
 // Runs every 6 hours (via Vercel Cron).
-// Proactively refreshes TrueLayer access tokens and fetches fresh
-// transactions for all connected users, so data is always up-to-date
-// without requiring users to manually open the app.
-//
-// This solves the problem where TrueLayer connections appear "stale"
-// because the token refresh only happened on app open. By running
-// server-side, tokens stay warm and data stays fresh.
+// Checks Finexer consent status and fetches fresh transactions
+// for all connected users, so data is always up-to-date.
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import {
+  getConsent,
+  listBankAccounts,
+  syncBankAccount,
+  fetchAllTransactions,
+  getBalance,
+  type FinexerTransaction,
+  type FinexerBalance,
+  type FinexerBankAccount,
+} from '../../lib/finexer.js';
 
 // Allow up to 60s for the cron job (Hobby plan max).
-// Processing multiple users' bank connections easily exceeds the default 10s.
 export const config = { maxDuration: 60 };
-
-const IS_SANDBOX = (process.env.EXPO_PUBLIC_TRUELAYER_SANDBOX ?? 'false') === 'true';
-const TL_AUTH_HOST = IS_SANDBOX ? 'https://auth.truelayer-sandbox.com' : 'https://auth.truelayer.com';
-const TL_API_HOST = IS_SANDBOX ? 'https://api.truelayer-sandbox.com' : 'https://api.truelayer.com';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -25,7 +25,8 @@ const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 interface BankRow {
   id: string;
   connection_id: string;
-  refresh_token: string;
+  consent_id: string;
+  finexer_bank_account_ids: string[] | null;
   user_id: string;
   provider_name: string | null;
   created_at: string;
@@ -39,68 +40,50 @@ interface RefreshResult {
   expired?: boolean;
   csvLines?: string[];
   cardBalances?: Array<{ name: string; type: string; balance: number | null; limit: number | null; available: number | null }>;
-  newRefreshToken?: string | null;
   txCount?: number;
 }
 
 /**
- * Refresh a single TrueLayer connection: refresh token → fetch transactions + balances.
- * Returns updated data or null on failure.
+ * Sync a single Finexer connection: check consent → sync accounts → fetch transactions + balances.
  */
-async function refreshConnection(bankRow: BankRow, clientId: string, clientSecret: string, admin: SupabaseClient, lastSyncDate: string | null): Promise<RefreshResult> {
-  let newRefreshToken: string | null = null;
+async function refreshConnection(bankRow: BankRow, apiKey: string, admin: SupabaseClient, lastSyncDate: string | null): Promise<RefreshResult> {
   try {
-    const tokenRes = await fetch(`${TL_AUTH_HOST}/connect/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: bankRow.refresh_token,
-      }),
-    });
-
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) {
-      return { success: false, expired: true };
+    // Check consent is still authorized
+    const consent = await getConsent(apiKey, bankRow.consent_id);
+    if (consent.status !== 'authorized') {
+      console.warn(`[bank-sync] Consent ${bankRow.consent_id} status: ${consent.status}`);
+      return { success: false, expired: consent.status === 'expired' || consent.status === 'canceled' };
     }
 
-    // Persist the new refresh token IMMEDIATELY — before any data fetches.
-    // TrueLayer tokens are single-use. The old token is consumed on exchange.
-    // If we wait and the function times out, the new token is lost forever.
-    newRefreshToken = tokenData.refresh_token || null;
-    if (newRefreshToken && admin) {
-      await admin.from('bank_data').update({ refresh_token: newRefreshToken }).eq('id', bankRow.id);
+    // Get bank accounts
+    let bankAccountIds = bankRow.finexer_bank_account_ids || [];
+    if (bankAccountIds.length === 0) {
+      const { data: accounts } = await listBankAccounts(apiKey, { consent: bankRow.consent_id });
+      bankAccountIds = (accounts || []).map((a: FinexerBankAccount) => a.id);
+      if (bankAccountIds.length > 0) {
+        await admin.from('bank_data')
+          .update({ finexer_bank_account_ids: bankAccountIds })
+          .eq('id', bankRow.id);
+      }
     }
 
-    const headers = { Authorization: `Bearer ${tokenData.access_token}` };
-
-    const [accountsRes, cardsRes] = await Promise.all([
-      fetch(`${TL_API_HOST}/data/v1/accounts`, { headers }),
-      fetch(`${TL_API_HOST}/data/v1/cards`, { headers }),
-    ]);
-
-    const accountsJson = await accountsRes.json();
-    const cardsJson = await cardsRes.json();
-
-    // Guard: if TrueLayer returned an error (403, 429, etc.), bail out
-    // rather than proceeding with empty arrays and overwriting valid CSV.
-    // Refresh token is already persisted above.
-    if (!accountsRes.ok || !cardsRes.ok) {
-      console.warn(`[bank-sync] TrueLayer data endpoints returned errors — accounts: ${accountsRes.status}, cards: ${cardsRes.status}`);
-      return { success: false, expired: false, newRefreshToken: newRefreshToken ?? undefined };
+    if (bankAccountIds.length === 0) {
+      return { success: false, expired: false };
     }
 
-    const accounts: Array<{ account_id: string; display_name?: string; provider?: { display_name?: string } }> = accountsJson.results || [];
-    const cards: Array<{ account_id: string; display_name?: string; provider?: { display_name?: string } }> = cardsJson.results || [];
+    // Trigger sync on each bank account (best-effort, rate limited to 1/hr)
+    for (const accountId of bankAccountIds) {
+      try {
+        await syncBankAccount(apiKey, accountId);
+      } catch {
+        // Rate limited or already synced — fine
+      }
+    }
 
-    // Use tomorrow as the upper bound so TrueLayer includes all of today's transactions.
+    // Date range
     const toDate = new Date();
     toDate.setDate(toDate.getDate() + 1);
     const to = toDate.toISOString().split('T')[0];
-    // Fetch from last successful sync date to avoid gaps. Fall back to 1 month
-    // if no sync date is recorded (e.g. legacy rows before this column existed).
     const fromDate = new Date();
     if (lastSyncDate) {
       fromDate.setTime(new Date(lastSyncDate).getTime());
@@ -109,86 +92,78 @@ async function refreshConnection(bankRow: BankRow, clientId: string, clientSecre
     }
     const from = fromDate.toISOString().split('T')[0];
 
-    const txPromises = [
-      ...accounts.map((a) =>
-        fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/transactions?from=${from}&to=${to}`, { headers })
-          .then((r) => r.json())
-          .catch((err: Error) => { console.warn(`[bank-sync] Transaction fetch failed for account ${a.account_id}:`, err.message); return { results: [] }; })
+    // Fetch transactions + balances
+    const [txResults, balanceResults] = await Promise.all([
+      Promise.all(
+        bankAccountIds.map((id) =>
+          fetchAllTransactions(apiKey, id, { since: from, until: to })
+            .catch((err: Error) => { console.warn(`[bank-sync] Tx fetch failed for ${id}:`, err.message); return [] as FinexerTransaction[]; })
+        )
       ),
-      ...cards.map((c) =>
-        fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/transactions?from=${from}&to=${to}`, { headers })
-          .then((r) => r.json())
-          .catch((err: Error) => { console.warn(`[bank-sync] Transaction fetch failed for card ${c.account_id}:`, err.message); return { results: [] }; })
+      Promise.all(
+        bankAccountIds.map((id) =>
+          getBalance(apiKey, id)
+            .then((r) => ({ accountId: id, balances: r.data || [] }))
+            .catch(() => ({ accountId: id, balances: [] as FinexerBalance[] }))
+        )
       ),
-    ];
-
-    const cardBalancePromises = cards.map((c) =>
-      fetch(`${TL_API_HOST}/data/v1/cards/${c.account_id}/balance`, { headers })
-        .then((r) => r.json())
-        .then((data: { results?: Array<{ current?: number; credit_limit?: number; available?: number }> }) => ({ card: c, balance: (data.results || [])[0] || null }))
-        .catch(() => ({ card: c, balance: null }))
-    );
-    const accountBalancePromises = accounts.map((a) =>
-      fetch(`${TL_API_HOST}/data/v1/accounts/${a.account_id}/balance`, { headers })
-        .then((r) => r.json())
-        .then((data: { results?: Array<{ current?: number; overdraft?: number; available?: number }> }) => ({ account: a, balance: (data.results || [])[0] || null }))
-        .catch(() => ({ account: a, balance: null }))
-    );
-
-    const [txResults, cardBalanceResults, accountBalanceResults] = await Promise.all([
-      Promise.all(txPromises),
-      Promise.all(cardBalancePromises),
-      Promise.all(accountBalancePromises),
     ]);
-    const allTx: Array<{ timestamp?: string; merchant_name?: string; description?: string; transaction_type?: string; amount: number }> = txResults.flatMap((r: { results?: unknown[] }) => r.results || []) as Array<{ timestamp?: string; merchant_name?: string; description?: string; transaction_type?: string; amount: number }>;
 
+    const allTx = txResults.flat();
+
+    // Convert to CSV lines (no header)
     const csvLines: string[] = [];
     for (const tx of allTx) {
       const date = tx.timestamp ? tx.timestamp.split('T')[0] : '';
-      const desc = (tx.merchant_name || tx.description || '').replace(/,/g, ' ');
-      const amount = tx.transaction_type === 'CREDIT' ? Math.abs(tx.amount) : -Math.abs(tx.amount);
-      csvLines.push(`${date},${desc},${amount}`);
+      const desc = (tx.merchant || tx.description || tx.reference || 'Unknown').replace(/,/g, ' ');
+      csvLines.push(`${date},${desc},${tx.amount}`);
     }
 
-    const cardBalances = cardBalanceResults
-      .filter((r) => r.balance)
-      .map((r) => ({
-        name: r.card.display_name || r.card.provider?.display_name || 'Card',
-        type: 'credit_card' as const,
-        balance: r.balance!.current != null ? Math.abs(r.balance!.current!) : null,
-        limit: r.balance!.credit_limit || null,
-        available: r.balance!.available || null,
-      }));
+    // Build balance arrays
+    const { data: accountInfos } = await listBankAccounts(apiKey, { consent: bankRow.consent_id });
+    const accountMap = new Map((accountInfos || []).map((a: FinexerBankAccount) => [a.id, a]));
 
-    const accountBalances = accountBalanceResults
-      .filter((r) => r.balance)
-      .map((r) => {
-        const bal = r.balance!;
-        const hasOverdraft = bal.overdraft != null && bal.overdraft > 0;
-        const isOverdrawn = bal.current != null && bal.current < 0;
-        if (!hasOverdraft && !isOverdrawn) return null;
-        return {
-          name: r.account.display_name || r.account.provider?.display_name || 'Account',
-          type: isOverdrawn ? 'overdraft' as const : 'overdraft_facility' as const,
-          balance: isOverdrawn ? Math.abs(bal.current!) : 0,
-          limit: bal.overdraft || null,
-          available: bal.available || null,
-        };
-      })
-      .filter(Boolean) as Array<{ name: string; type: string; balance: number; limit: number | null; available: number | null }>;
+    const cardBalances: Array<{ name: string; type: string; balance: number | null; limit: number | null; available: number | null }> = [];
+
+    for (const { accountId, balances } of balanceResults) {
+      const account = accountMap.get(accountId);
+      const name = account?.nickname || account?.holder_name || bankRow.provider_name || 'Account';
+
+      for (const bal of balances) {
+        if (account?.class === 'credit') {
+          cardBalances.push({
+            name,
+            type: 'credit_card',
+            balance: bal.current != null ? Math.abs(bal.current) : 0,
+            limit: null,
+            available: bal.available || null,
+          });
+        } else {
+          const isOverdrawn = bal.current != null && bal.current < 0;
+          const hasOverdraft = bal.overdraft?.limit != null && bal.overdraft.limit > 0;
+          if (isOverdrawn || hasOverdraft) {
+            cardBalances.push({
+              name,
+              type: isOverdrawn ? 'overdraft' : 'overdraft_facility',
+              balance: isOverdrawn ? Math.abs(bal.current!) : 0,
+              limit: bal.overdraft?.limit || null,
+              available: bal.available || null,
+            });
+          }
+        }
+      }
+    }
 
     return {
       success: true,
       csvLines,
-      cardBalances: [...cardBalances, ...accountBalances],
-      newRefreshToken,
+      cardBalances,
       txCount: allTx.length,
     };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[bank-sync] Connection ${bankRow.connection_id} failed:`, message);
-    // Return the new refresh token even on failure so it can be persisted
-    return { success: false, expired: false, newRefreshToken: newRefreshToken ?? undefined };
+    return { success: false, expired: false };
   }
 }
 
@@ -204,10 +179,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.json({ success: false, error: 'SUPABASE_SERVICE_ROLE_KEY not configured' });
   }
 
-  const clientId = process.env.TRUELAYER_CLIENT_ID;
-  const clientSecret = process.env.TRUELAYER_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    return res.json({ success: false, error: 'TrueLayer credentials not configured' });
+  const apiKey = process.env.FINEXER_API_KEY;
+  if (!apiKey) {
+    return res.json({ success: false, error: 'FINEXER_API_KEY not configured' });
   }
 
   const admin = createClient(supabaseUrl!, serviceKey);
@@ -215,26 +189,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const refreshedUserIds = new Set<string>();
 
   try {
-    // Get all TrueLayer connections with valid refresh tokens
-    let { data: bankRows, error: fetchErr } = await admin
+    // Get all Finexer connections with valid consent IDs
+    const { data: bankRows, error: fetchErr } = await admin
       .from('bank_data')
-      .select('id, connection_id, refresh_token, user_id, provider_name, created_at, updated_at, csv_data, last_successful_sync_date')
-      .eq('source', 'truelayer')
-      .not('refresh_token', 'is', null)
+      .select('id, connection_id, consent_id, finexer_bank_account_ids, user_id, provider_name, created_at, updated_at, csv_data, last_successful_sync_date')
+      .eq('source', 'finexer')
+      .not('consent_id', 'is', null)
       .order('updated_at', { ascending: true }); // Oldest first — prioritize stale data
-
-    // Fallback: if last_successful_sync_date column doesn't exist yet, query without it
-    if (fetchErr && fetchErr.code === 'PGRST204' && fetchErr.message?.includes('last_successful_sync_date')) {
-      console.warn('[bank-sync] last_successful_sync_date column not found, querying without it');
-      const fallback = await admin
-        .from('bank_data')
-        .select('id, connection_id, refresh_token, user_id, provider_name, created_at, updated_at, csv_data')
-        .eq('source', 'truelayer')
-        .not('refresh_token', 'is', null)
-        .order('updated_at', { ascending: true });
-      bankRows = fallback.data as typeof bankRows;
-      fetchErr = fallback.error;
-    }
 
     if (fetchErr || !bankRows || bankRows.length === 0) {
       return res.json({ success: true, message: 'No connections to refresh', ...results });
@@ -242,18 +203,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     results.total = bankRows.length;
 
-    // Process connections in batches of 5 to avoid overwhelming TrueLayer
+    // Process connections in batches of 5
     const BATCH_SIZE = 5;
     for (let i = 0; i < bankRows.length; i += BATCH_SIZE) {
       const batch = bankRows.slice(i, i + BATCH_SIZE) as BankRow[];
 
       const batchResults = await Promise.all(
         batch.map(async (row) => {
-          // Don't pre-calculate 90-day expiry — let TrueLayer's token refresh
-          // response determine if consent has actually expired (400 invalid_grant).
-          // The FCA changed rules in 2022: UK banks issue long-lived tokens and
-          // only require consent reconfirmation, not re-authentication.
-          const result = await refreshConnection(row, clientId, clientSecret, admin, row.last_successful_sync_date ?? null);
+          const result = await refreshConnection(row, apiKey, admin, row.last_successful_sync_date ?? null);
           return { row, result };
         })
       );
@@ -272,17 +229,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         refreshedUserIds.add(row.user_id);
 
         // Update the bank_data row with fresh data.
-        // Guard: never overwrite stored CSV with empty data.
         const updateFields: Record<string, unknown> = {
           updated_at: new Date().toISOString(),
           last_successful_sync_date: new Date().toISOString().split('T')[0],
         };
         if (result.csvLines && result.csvLines.length > 0) {
-          // Merge new transactions with existing stored CSV (incremental sync).
-          // Uses count-based dedup: if the same transaction key appears N times in
-          // existing data and M times in fresh data, keep max(N, M). This preserves
-          // legitimate duplicate transactions (e.g. two identical coffees same day)
-          // while preventing inflation from re-fetching the same period.
+          // Count-based dedup for incremental sync
           const normalise = (line: string) => line.toLowerCase().replace(/"/g, '').replace(/\s+/g, ' ').trim();
           const countByKey = (lines: string[]) => {
             const counts = new Map<string, number>();
@@ -306,7 +258,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           for (const key of allKeys) {
             const maxCount = Math.max(existing.counts.get(key) || 0, fresh.counts.get(key) || 0);
             const line = fresh.lineByKey.get(key) || existing.lineByKey.get(key)!;
-            for (let i = 0; i < maxCount; i++) {
+            for (let j = 0; j < maxCount; j++) {
               unique.push(line);
             }
           }
@@ -316,13 +268,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           updateFields.card_balances = result.cardBalances;
         }
 
-        let { error: updateErr } = await admin.from('bank_data').update(updateFields).eq('id', row.id);
-        // Fallback: if last_successful_sync_date column doesn't exist yet, retry without it
-        if (updateErr && updateErr.code === 'PGRST204' && updateErr.message?.includes('last_successful_sync_date')) {
-          console.warn('[bank-sync] last_successful_sync_date column not found, retrying update without it');
-          delete updateFields.last_successful_sync_date;
-          await admin.from('bank_data').update(updateFields).eq('id', row.id);
-        }
+        await admin.from('bank_data').update(updateFields).eq('id', row.id);
 
         // ── Income arrival detection & notification ──
         try {
@@ -334,7 +280,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           weekStart.setHours(0, 0, 0, 0);
           const weekStartStr = weekStart.toISOString().split('T')[0];
 
-          // Salary-like patterns in description
           const SALARY_PATTERNS = /\b(salary|wages|payroll|payday|stipend|pension|net pay|direct deposit|pay from|monthly pay)\b/i;
           const EMPLOYER_PATTERNS = /\b(ltd|plc|limited|inc|corp|llp|group|holdings|council|nhs|university)\b/i;
           const TRANSFER_PATTERNS = /\b(faster payment|bank transfer|transfer from|transfer to)\b/i;
@@ -352,7 +297,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return allAlpha && hasFullName;
           }
 
-          // Find income-like transactions from this week
           const incomeCredits = (result.csvLines || []).filter((line: string) => {
             const parts = line.split(',');
             if (parts.length < 3) return false;
@@ -456,7 +400,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const verifyAppUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bocy.io';
         const verifyEndpoint = `${verifyAppUrl.replace(/\/$/, '')}/api/verify`;
 
-        for (const row of draftRows) {
+        for (const draftRow of draftRows) {
           try {
             const verifyRes = await fetch(verifyEndpoint, {
               method: 'POST',
@@ -464,14 +408,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${cronSecret}`,
               },
-              body: JSON.stringify({ user_id: row.user_id }),
+              body: JSON.stringify({ user_id: draftRow.user_id }),
             });
             const verifyData = await verifyRes.json();
             if (verifyData.success) verified++;
-            else console.warn(`[bank-sync] Verify failed for ${row.user_id}:`, verifyData.reason || verifyData.error);
+            else console.warn(`[bank-sync] Verify failed for ${draftRow.user_id}:`, verifyData.reason || verifyData.error);
           } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : String(e);
-            console.warn(`[bank-sync] Verify request failed for ${row.user_id}:`, msg);
+            console.warn(`[bank-sync] Verify request failed for ${draftRow.user_id}:`, msg);
           }
         }
       }
