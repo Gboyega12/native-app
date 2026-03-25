@@ -56,9 +56,10 @@ async function refreshConnection(bankRow: BankRow, apiKey: string, admin: Supaba
     }
 
     // Get bank accounts
+    const customerId = consent.customer || null;
     let bankAccountIds = bankRow.finexer_bank_account_ids || [];
     if (bankAccountIds.length === 0) {
-      const { data: accounts } = await listBankAccounts(apiKey, { consent: bankRow.consent_id });
+      const { data: accounts } = await listBankAccounts(apiKey, { customer: customerId || undefined, consent: bankRow.consent_id });
       bankAccountIds = (accounts || []).map((a: FinexerBankAccount) => a.id);
       if (bankAccountIds.length > 0) {
         await admin.from('bank_data')
@@ -120,7 +121,7 @@ async function refreshConnection(bankRow: BankRow, apiKey: string, admin: Supaba
     }
 
     // Build balance arrays
-    const { data: accountInfos } = await listBankAccounts(apiKey, { consent: bankRow.consent_id });
+    const { data: accountInfos } = await listBankAccounts(apiKey, { customer: customerId || undefined, consent: bankRow.consent_id });
     const accountMap = new Map((accountInfos || []).map((a: FinexerBankAccount) => [a.id, a]));
 
     const cardBalances: Array<{ name: string; type: string; balance: number | null; limit: number | null; available: number | null }> = [];

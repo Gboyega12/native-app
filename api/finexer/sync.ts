@@ -56,9 +56,10 @@ async function syncConnection(
     }
 
     // Get bank accounts — either from stored IDs or by listing
+    const customerId = consent.customer || null;
     let bankAccountIds = bankRow.finexer_bank_account_ids || [];
     if (bankAccountIds.length === 0) {
-      const { data: accounts } = await listBankAccounts(apiKey, { consent: bankRow.consent_id });
+      const { data: accounts } = await listBankAccounts(apiKey, { customer: customerId || undefined, consent: bankRow.consent_id });
       bankAccountIds = (accounts || []).map((a) => a.id);
       // Store for next time
       if (bankAccountIds.length > 0) {
@@ -128,7 +129,7 @@ async function syncConnection(
     }
 
     // Build balance arrays (get account info for naming)
-    const { data: accountInfos } = await listBankAccounts(apiKey, { consent: bankRow.consent_id });
+    const { data: accountInfos } = await listBankAccounts(apiKey, { customer: customerId || undefined, consent: bankRow.consent_id });
     const accountMap = new Map((accountInfos || []).map((a) => [a.id, a]));
 
     const cardBalances: Array<{ name: string; type: string; balance: number; limit: number | null; available: number | null }> = [];

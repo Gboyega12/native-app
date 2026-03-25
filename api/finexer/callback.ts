@@ -155,15 +155,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return fail('Bank authorization not completed', `Consent status: ${consent.status}`);
     }
 
-    // List bank accounts under this consent.
+    // Resolve Finexer customer ID — consent object is the authoritative source,
+    // fall back to the value stored in our DB during the connect step.
+    const customerId = consent.customer || bankRow?.finexer_customer_id || null;
+    if (!customerId) {
+      console.error(`[finexer/callback] No customer ID found for consent ${consentId}`);
+      return fail('Missing customer identity', 'No Finexer customer ID associated with this consent');
+    }
+
+    // List bank accounts under this consent + customer.
     // Finexer may take a moment to provision accounts after consent authorization,
-    // so retry with backoff on failure (e.g. 400 Bad Request).
+    // so retry with backoff on failure.
     let bankAccounts: FinexerBankAccount[] = [];
     const retryDelays = [0, 2000, 4000];
     for (let attempt = 0; attempt < retryDelays.length; attempt++) {
       if (retryDelays[attempt]) await new Promise((r) => setTimeout(r, retryDelays[attempt]));
       try {
-        const result = await listBankAccounts(apiKey, { consent: consentId });
+        const result = await listBankAccounts(apiKey, { customer: customerId, consent: consentId });
         bankAccounts = result.data || [];
         break;
       } catch (err) {

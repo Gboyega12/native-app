@@ -5,6 +5,90 @@ Entries are ordered newest-first so the most recent issues are at the top.
 
 ---
 
+## ERR-003 — Finexer `missing_identity` when listing bank accounts
+
+| Field | Detail |
+|-------|--------|
+| **Date** | 2026-03-25 |
+| **Severity** | Critical (all bank connection flows broken) |
+| **Environment** | Vercel serverless — `api/finexer/callback.ts`, `api/finexer/sync.ts`, `api/cron/bank-sync.ts` |
+| **Log** | `Finexer list bank accounts failed: Bad Request — {"error":{"type":"request_error","code":"missing_identity","message":"An associated identity is missing in the request. Please supply a valid vendor or customer identifier."}}` |
+
+### Cause
+
+The Finexer `/bank_accounts` endpoint requires **both** a `customer` and
+`consent` query parameter. All call sites in the codebase were only passing
+`{ consent: consentId }` — the `customer` identifier was never included.
+
+This was discovered thanks to the `throwFinexerError` helper added in ERR-001,
+which now includes the full API response body in error logs. Previously the
+error only showed "Bad Request" with no actionable detail.
+
+### Why it wasn't caught earlier
+
+The Finexer API previously accepted consent-only queries and inferred the
+customer. A recent change on Finexer's side made the `customer` parameter
+mandatory, breaking all three call paths (callback, manual sync, cron sync).
+
+### Fix Applied
+
+**Files changed:** `api/finexer/callback.ts`, `api/finexer/sync.ts`,
+`api/cron/bank-sync.ts`
+
+All three files already call `getConsent()` before `listBankAccounts()`, and
+the consent object contains `consent.customer` (the Finexer customer ID).
+The fix extracts the customer ID from the consent and passes it through.
+
+#### callback.ts
+
+```typescript
+// Resolve customer ID from consent (authoritative) or DB fallback
+const customerId = consent.customer || bankRow?.finexer_customer_id || null;
+if (!customerId) {
+  return fail('Missing customer identity', 'No Finexer customer ID associated with this consent');
+}
+
+// Now pass both identifiers
+const result = await listBankAccounts(apiKey, { customer: customerId, consent: consentId });
+```
+
+#### sync.ts and cron/bank-sync.ts
+
+```typescript
+const customerId = consent.customer || null;
+
+// Both listBankAccounts calls updated:
+await listBankAccounts(apiKey, { customer: customerId || undefined, consent: bankRow.consent_id });
+```
+
+### Affected call sites (5 total)
+
+| File | Line | Purpose |
+|------|------|---------|
+| `api/finexer/callback.ts` | ~166 | Initial account discovery after bank authorization |
+| `api/finexer/sync.ts` | ~61 | Account discovery during manual sync |
+| `api/finexer/sync.ts` | ~131 | Account info for balance naming |
+| `api/cron/bank-sync.ts` | ~61 | Account discovery during cron sync |
+| `api/cron/bank-sync.ts` | ~123 | Account info for balance naming |
+
+### How to verify
+
+- Trigger a new bank connection flow — the callback should list accounts
+  successfully on the first attempt.
+- Check Vercel logs for `[finexer/callback] Found N bank accounts` instead of
+  the `missing_identity` error.
+- Run a manual sync and verify it completes without errors.
+
+### Relationship to ERR-001
+
+ERR-001 added the `throwFinexerError` helper and retry logic that made this
+root cause visible. The retry logic remains useful for genuine transient
+failures but the core fix is passing the `customer` parameter.
+
+### Status: Fixed
+
+---
+
 ## ERR-002 — `url.parse()` Deprecation Warning
 
 | Field | Detail |
