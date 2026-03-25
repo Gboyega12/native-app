@@ -32,8 +32,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!apiKey) return apiError(res, 500, 'Server misconfigured', 'FINEXER_API_KEY not set');
-  if (!supabaseUrl || !serviceKey) return apiError(res, 500, 'Server misconfigured', 'Supabase credentials not set');
+  if (!apiKey) return apiError(res, 500, 'Server misconfigured: FINEXER_API_KEY not set');
+  if (!supabaseUrl || !serviceKey) return apiError(res, 500, 'Server misconfigured: Supabase credentials not set');
+  if (!redirectUri.startsWith('https://')) return apiError(res, 500, 'FINEXER_REDIRECT_URI must be a public HTTPS URL');
 
   try {
     const admin = createClient(supabaseUrl, serviceKey);
@@ -63,9 +64,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     retroDate.setFullYear(retroDate.getFullYear() - 1);
     const retroDateStr = retroDate.toISOString().split('T')[0];
 
-    // Encode connection_id + web origin in return_url for callback routing
-    const webOrigin = req.headers.origin || req.headers.referer?.replace(/\/[^/]*$/, '') || '';
-    const returnUrl = `${redirectUri}?connection_id=${encodeURIComponent(connectionId)}&origin=${encodeURIComponent(webOrigin)}`;
+    // Encode connection_id + web origin in return_url for callback routing.
+    // Finexer requires the entire return_url (including query params) to be
+    // publicly accessible HTTPS, so strip non-HTTPS origins to avoid rejection.
+    const rawOrigin = req.headers.origin || req.headers.referer?.replace(/\/[^/]*$/, '') || '';
+    const webOrigin = rawOrigin.startsWith('https://') ? rawOrigin : '';
+    const returnUrl = `${redirectUri}?connection_id=${encodeURIComponent(connectionId)}${webOrigin ? `&origin=${encodeURIComponent(webOrigin)}` : ''}`;
 
     const consent = await createConsent(apiKey, {
       customer: customerId,
