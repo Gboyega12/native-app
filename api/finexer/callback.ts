@@ -144,7 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const allTx: FinexerTransaction[] = txResults.flat();
     console.log(`[finexer/callback] Fetched ${allTx.length} transactions (since ${sinceDate})`);
 
-    // Convert to CSV (same format as TrueLayer: Date,Description,Amount)
+    // Convert to CSV format: Date,Description,Amount
     const csvLines = ['Date,Description,Amount'];
     for (const tx of allTx) {
       const date = tx.timestamp ? tx.timestamp.split('T')[0] : '';

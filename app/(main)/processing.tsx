@@ -238,7 +238,7 @@ function ProcessingInner() {
           if (idRes.data) identityData = idRes.data;
           if (debtRes.data) debtAccountsData = debtRes.data;
 
-          // Merge TrueLayer card balances into debt accounts (so enrichment has fresh data)
+          // Merge Finexer card balances into debt accounts (so enrichment has fresh data)
           if (bankRes.data?.card_balances && Array.isArray(bankRes.data.card_balances)) {
             const existingNames = new Set(debtAccountsData.map((d: any) => d.account_name));
             for (const card of bankRes.data.card_balances) {
@@ -249,11 +249,11 @@ function ProcessingInner() {
                   account_type: card.type || 'credit_card',
                   outstanding_balance: card.balance,
                   credit_limit: card.limit,
-                  source: 'truelayer',
+                  source: 'finexer',
                 });
                 existingNames.add(cardName);
               } else {
-                // Update existing entry with latest balance from TrueLayer
+                // Update existing entry with latest balance from Finexer
                 const existing = debtAccountsData.find((d: any) => d.account_name === cardName);
                 if (existing && card.balance != null) {
                   existing.outstanding_balance = card.balance;
@@ -436,7 +436,7 @@ function ProcessingInner() {
                   account_type: card.type || 'credit_card',
                   outstanding_balance: card.balance,
                   credit_limit: card.limit,
-                  source: 'truelayer',
+                  source: 'finexer',
                   last_updated: new Date().toISOString(),
                 }, { onConflict: 'user_id,account_name' });
               }

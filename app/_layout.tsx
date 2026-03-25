@@ -35,7 +35,7 @@ if (typeof window !== 'undefined') {
   if (code && state) {
     pendingSignals.oauth = { code, state };
   }
-  // Detect return from TrueLayer server callback (GET redirect flow)
+  // Detect return from Finexer server callback (GET redirect flow)
   if (p.get('connection_id') && p.get('status')) {
     pendingSignals.bankCallback = true;
   }
@@ -161,7 +161,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // If returning from TrueLayer bank callback, let connect screen handle the URL params.
+    // If returning from Finexer bank callback, let connect screen handle the URL params.
     // Don't reroute — just clear the flag once session arrives.
     if (pendingSignals.bankCallback) {
       if (session) {

@@ -71,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .from('bank_data')
             .delete()
             .eq('user_id', userId)
-            .eq('source', 'truelayer')
+            .eq('source', 'finexer')
             .eq('provider_name', row.provider_name)
             .neq('connection_id', connectionId);
         }

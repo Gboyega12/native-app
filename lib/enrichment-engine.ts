@@ -2491,7 +2491,7 @@ const EnrichmentEngine = {
    * (e.g. "AMEX", "BARCLAYCARD") is classified as "Debt Payments".
    *
    * Detection strategy:
-   *   1. Low utilization: if a TrueLayer-synced credit card has balance < 15%
+   *   1. Low utilization: if a Finexer-synced credit card has balance < 15%
    *      of credit limit, the user is clearly paying it off regularly.
    *   2. Payment-to-spending ratio: if monthly payments to a card issuer are
    *      within 30% of the monthly card spending, the user pays in full.
@@ -2507,7 +2507,7 @@ const EnrichmentEngine = {
       'Aqua', 'NewDay', 'Virgin Money', 'Tesco Bank', "Sainsbury's Bank",
     ]);
 
-    // Step 1: Check debtAccounts from TrueLayer for low-utilization cards
+    // Step 1: Check debtAccounts from Finexer for low-utilization cards
     const fullPayerIssuers = new Set<string>();
 
     if (debtAccounts && debtAccounts.length > 0) {

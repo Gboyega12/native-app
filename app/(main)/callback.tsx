@@ -5,7 +5,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 /**
  * Deep link handler for native bank auth callback.
  *
- * After authorising in the bank app, TrueLayer redirects to the server callback
+ * After authorising in the bank app, Finexer redirects to the server callback
  * which then redirects to `bocy://callback?connection_id=...&status=success`.
  * This route catches that deep link and forwards the params to the connect screen,
  * which already knows how to fetch bank data from a connection_id.

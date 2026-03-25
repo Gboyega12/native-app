@@ -1,5 +1,5 @@
 // ── Account Classifier ──
-// Classifies TrueLayer bank accounts into functional buckets
+// Classifies Finexer bank accounts into functional buckets
 // and detects UHE/SHE cohorts for capital allocation moves.
 
 import type { DebtAccount } from './types';

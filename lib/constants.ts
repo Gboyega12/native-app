@@ -49,7 +49,7 @@ export const INCOME_THRESHOLDS = {
 } as const;
 
 // ── Default APRs for debt accounts ──
-// TrueLayer does not provide interest rates, so we use these defaults
+// Finexer does not provide interest rates, so we use these defaults
 // until the user updates them manually.
 
 export const DEFAULT_APR: Record<string, number> = {

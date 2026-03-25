@@ -360,3 +360,17 @@ ALTER TABLE debt_accounts
   ADD COLUMN IF NOT EXISTS institution TEXT,
   ADD COLUMN IF NOT EXISTS connection_id TEXT,
   ADD COLUMN IF NOT EXISTS account_id TEXT;
+
+
+-- ============================================================
+-- Migration: Finexer Open Banking columns on bank_data
+-- Finexer uses consent-based auth (no OAuth tokens).
+-- consent_id replaces refresh_token for identifying active connections.
+-- ============================================================
+ALTER TABLE bank_data
+  ADD COLUMN IF NOT EXISTS consent_id TEXT,
+  ADD COLUMN IF NOT EXISTS finexer_customer_id TEXT,
+  ADD COLUMN IF NOT EXISTS finexer_bank_account_ids JSONB;
+
+ALTER TABLE bank_data
+  ALTER COLUMN source SET DEFAULT 'finexer';

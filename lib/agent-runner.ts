@@ -54,12 +54,12 @@ export interface DataProvider {
     validation: ValidationResult;
   }>;
 
-  /** Fetch account balances from TrueLayer */
+  /** Fetch account balances from Finexer */
   getAccountBalances(userId: string): Promise<
     Array<{ account_id: string; account_type: string; display_name?: string; provider?: string; balance?: number }>
   >;
 
-  /** Fetch debt accounts (TrueLayer + manual) */
+  /** Fetch debt accounts (Finexer + manual) */
   getDebtAccounts(userId: string): Promise<DebtAccount[]>;
 
   /** Fetch user constraints (identity, goals) */

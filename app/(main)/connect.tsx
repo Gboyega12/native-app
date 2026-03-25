@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import { getTrueLayerAuthUrl } from '@/lib/truelayer';
+import { getFinexerConsentUrl } from '@/lib/finexer';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
@@ -48,14 +48,13 @@ export default function Connect() {
   const router = useRouter();
   const params = useLocalSearchParams<{
     connection_id?: string; status?: string; error?: string;
-    code?: string; state?: string;
     from?: string;
     csvData?: string;
     banks?: string; // comma-separated list of expired bank names for multi-reconnect flow
   }>();
 
-  // Detect if we're returning from a TrueLayer redirect
-  const isRedirecting = !!(params.connection_id && params.status === 'success') || !!(params.code && params.state);
+  // Detect if we're returning from a Finexer redirect
+  const isRedirecting = !!(params.connection_id && params.status === 'success');
 
   const [loading, setLoading] = useState(false);
   const [loadingCSV, setLoadingCSV] = useState(false);
@@ -83,7 +82,7 @@ export default function Connect() {
   // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
     const init = async () => {
-      // Restore session state (from before TrueLayer redirect)
+      // Restore session state (from before Finexer redirect)
       const saved = restoreConnectState();
       if (saved && saved.count > 0) {
         setAccumulatedCSV((prev) => prev || saved.csv);
@@ -102,7 +101,7 @@ export default function Connect() {
             setConnectedCount((prev) => Math.max(prev, count));
           }
 
-          // Guard: if not from profile and not returning from TrueLayer,
+          // Guard: if not from profile and not returning from Finexer,
           // redirect to dashboard if analysis already exists
           if (!isFromProfile && !isRedirecting) {
             const { data: existing } = await supabase
@@ -134,58 +133,15 @@ export default function Connect() {
     return () => clearTimeout(timer);
   }, [redirectLoading]);
 
-  // Handle redirect params — arriving back from TrueLayer
+  // Handle redirect params — arriving back from Finexer
   useEffect(() => {
     if (params.status === 'success' && params.connection_id) {
       fetchBankData(params.connection_id);
     } else if (params.status === 'error' && params.error) {
       setErrorMsg(decodeURIComponent(params.error));
       setRedirectLoading(false);
-    } else if (params.code && params.state) {
-      exchangeTrueLayerCode(params.code, params.state);
     }
-  }, [params.connection_id, params.status, params.code, params.state]);
-
-  const exchangeTrueLayerCode = async (code: string, state: string) => {
-    setLoading(true);
-    setRedirectLoading(true);
-    setErrorMsg('');
-    setStatusMsg('Exchanging authorization code...');
-    try {
-      // Get user_id so the callback can set it on the bank_data row directly
-      let userId = '';
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        userId = user?.id || '';
-      } catch {}
-
-      const res = await fetch('/api/truelayer/callback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, state, user_id: userId }),
-      });
-      const data = await res.json();
-
-      if (data.success && data.connection_id) {
-        setStatusMsg('Fetching your transactions...');
-        await fetchBankData(data.connection_id);
-        return;
-      }
-
-      const errDetail = data.details
-        ? `${data.error}: ${typeof data.details === 'string' ? data.details : JSON.stringify(data.details)}`
-        : data.error || 'Token exchange failed';
-      setErrorMsg(errDetail);
-      setStatusMsg('');
-      setLoading(false);
-      setRedirectLoading(false);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Network error during token exchange');
-      setStatusMsg('');
-      setLoading(false);
-      setRedirectLoading(false);
-    }
-  };
+  }, [params.connection_id, params.status]);
 
   const fetchBankData = async (connId: string, attempt = 1) => {
     setLoading(true);
@@ -263,7 +219,7 @@ export default function Connect() {
     router.replace({ pathname: '/(main)/processing', params: { csvData, source } });
   };
 
-  const handleTrueLayer = async () => {
+  const handleOpenBanking = async () => {
     trackEvent('Bank Connect Started', { method: 'open_banking' });
     setLoading(true);
     setErrorMsg('');
@@ -273,13 +229,21 @@ export default function Connect() {
     saveConnectState(accumulatedCSV, connectedCount);
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Please sign in first');
+
       const connectionId = `conn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const authUrl = getTrueLayerAuthUrl(connectionId);
+      const { consent_url } = await getFinexerConsentUrl(
+        connectionId,
+        user.id,
+        user.email || '',
+        user.user_metadata?.full_name || user.email || '',
+      );
 
       if (Platform.OS === 'web') {
-        window.location.href = authUrl;
+        window.location.href = consent_url;
       } else {
-        await Linking.openURL(authUrl);
+        await Linking.openURL(consent_url);
       }
     } catch (err: any) {
       setLoading(false);
@@ -383,7 +347,7 @@ export default function Connect() {
 
   const anyLoading = loading || loadingCSV || loadingPDF;
 
-  // Show skeleton + status when returning from TrueLayer redirect
+  // Show skeleton + status when returning from Finexer redirect
   if (redirectLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -446,7 +410,7 @@ export default function Connect() {
 
           <TouchableOpacity
             style={[styles.primaryButton, loading && styles.buttonDisabled]}
-            onPress={handleTrueLayer}
+            onPress={handleOpenBanking}
             disabled={anyLoading}
           >
             {loading ? (
@@ -536,7 +500,7 @@ export default function Connect() {
 
         <TouchableOpacity
           style={[styles.primaryButton, loading && styles.buttonDisabled]}
-          onPress={handleTrueLayer}
+          onPress={handleOpenBanking}
           disabled={anyLoading}
         >
           {loading ? (
@@ -661,17 +625,17 @@ function TrustSection() {
         </View>
       </View>
 
-      {/* TrueLayer info */}
+      {/* Finexer info */}
       <View style={styles.trustInfo}>
         <Text style={styles.trustInfoText}>
           Powered by{' '}
           <Text
             style={styles.trustLink}
-            onPress={() => Linking.openURL('https://truelayer.com')}
+            onPress={() => Linking.openURL('https://finexer.com')}
           >
-            TrueLayer
+            Finexer
           </Text>
-          , an FCA-authorised open banking provider used by Revolut, Freetrade, and other leading financial services. Bocy never sees your login details and can only read transactions.
+          , an FCA-authorised open banking provider. Bocy never sees your login details and can only read transactions.
         </Text>
       </View>
     </View>

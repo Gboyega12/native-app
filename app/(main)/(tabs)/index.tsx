@@ -73,7 +73,7 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<number>(0);
   const [latestTxDate, setLatestTxDate] = useState<string | null>(null);
-  const [syncDataSource, setSyncDataSource] = useState<'truelayer' | 'fallback' | null>(null);
+  const [syncDataSource, setSyncDataSource] = useState<'finexer' | 'fallback' | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [connectionWarning, setConnectionWarning] = useState<{ message: string; banks: string[] } | null>(null);
   const [connectionDismissed, setConnectionDismissed] = useState(true); // Default hidden; show only after confirming not dismissed
@@ -1195,7 +1195,7 @@ export default function Home() {
       } catch {}
 
       // Trigger background sync if user has any data or a bank connection.
-      // Force-sync when data was previously stale (fallback) to retry TrueLayer.
+      // Force-sync when data was previously stale (fallback) to retry Finexer.
       const shouldForce = syncDataSource === 'fallback';
       syncInBackground(user.id, shouldForce);
     } catch (err: any) {
@@ -1205,7 +1205,7 @@ export default function Home() {
     setLoadingLocal(false);
   };
 
-  // Pull-to-refresh handler — force a fresh TrueLayer fetch
+  // Pull-to-refresh handler — force a fresh Finexer fetch
   const onRefresh = useCallback(async () => {
     trackEvent('Home Refreshed');
     try {
@@ -1221,7 +1221,7 @@ export default function Home() {
     setRefreshing(false);
   }, []);
 
-  // Background sync: refresh bank data via TrueLayer and re-run analysis
+  // Background sync: refresh bank data via Finexer and re-run analysis
   const syncInBackground = async (userId: string, force: boolean = false) => {
     // Skip sync when offline or app is backgrounded
     if (!isOnline || !isActive) return;
@@ -1276,7 +1276,7 @@ export default function Home() {
       setConnectionWarning(nextWarning);
 
       // Warn if data is stale — but only when sync actually failed (fallback).
-      // When TrueLayer synced successfully, stale data just means the bank
+      // When Finexer synced successfully, stale data just means the bank
       // hasn't posted recent transactions — "pull down to retry" won't help.
       if (result.dataSource === 'fallback' && result.latestTransactionDate) {
         const txAge = Math.floor((Date.now() - new Date(result.latestTransactionDate).getTime()) / (1000 * 60 * 60 * 24));

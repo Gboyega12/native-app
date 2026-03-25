@@ -858,7 +858,7 @@ export interface UserIdentity {
   updated_at?: string;
 }
 
-// ── Debt Accounts (TrueLayer + manual) ──
+// ── Debt Accounts (Finexer + manual) ──
 
 export interface DebtAccount {
   account_name?: string;
@@ -893,7 +893,7 @@ export interface SavingsAccount {
   balance: number;
   interest_rate?: number;
   account_type: 'easy_access' | 'fixed' | 'isa' | 'other';
-  source?: 'manual' | 'truelayer';
+  source?: 'manual' | 'finexer';
   created_at?: string;
   updated_at?: string;
 }

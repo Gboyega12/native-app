@@ -1,5 +1,5 @@
 // ── Shared bank-data sync ──
-// Fetches fresh transactions from TrueLayer (or falls back to stored CSV),
+// Fetches fresh transactions from Finexer (or falls back to stored CSV),
 // re-runs the enrichment + move engines, and persists the updated analysis.
 // Used by both the Home and Plan screens so data stays consistent.
 
@@ -38,12 +38,12 @@ export interface WeeklyContext {
 export interface SyncResult {
   /** The raw analysis (before budget-adjustment merge). Null when bank is connected but enrichment found no usable transactions yet. */
   analysis: Analysis | null;
-  /** Debt accounts synced from TrueLayer card balances. */
+  /** Debt accounts synced from Finexer card balances. */
   debtAccounts: DebtAccount[];
   /** Real-time weekly budget context for adaptive spending guidance. */
   weeklyContext: WeeklyContext;
   /** Where the transaction data came from. */
-  dataSource: 'truelayer' | 'fallback';
+  dataSource: 'finexer' | 'fallback';
   /** ISO date of the most recent transaction in the data. */
   latestTransactionDate: string | null;
   /** Non-empty if some bank connections have expired tokens. */
@@ -118,7 +118,7 @@ function deduplicateCSVLines(csvLines: string[], perRowLines?: string[][]): stri
  * If a BNPL/debt payment is detected in transactions, reduce the matching
  * manual debt account's outstanding balance by the payment amount.
  *
- * Only affects `source: 'manual'` debts — TrueLayer-synced debts get
+ * Only affects `source: 'manual'` debts — Finexer-synced debts get
  * their balance directly from the bank API.
  */
 async function reconcileDebtPayments(
@@ -185,7 +185,7 @@ async function reconcileDebtPayments(
 
 /**
  * Sync bank data for a user and return the updated analysis.
- * 1. Calls TrueLayer /api/truelayer/sync for fresh CSV (falls back to stored CSV).
+ * 1. Calls Finexer /api/finexer/sync for fresh CSV (falls back to stored CSV).
  * 2. Deduplicates transactions across multiple connected accounts.
  * 3. Re-enriches transactions with overrides, debt accounts, identity.
  * 4. Reconciles BNPL/debt payments against manual debt accounts.
@@ -199,7 +199,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
   const syncStartedAt = Date.now();
   // ── 1. Fetch fresh CSV ──
   let csvData: string | null = null;
-  let dataSource: 'truelayer' | 'fallback' = 'truelayer';
+  let dataSource: 'finexer' | 'fallback' = 'finexer';
   const connectionIssues: string[] = [];
   const expiredBankNames: string[] = [];
   let syncFailedNoConnection = false;
@@ -209,7 +209,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     const syncController = new AbortController();
     const syncTimeout = setTimeout(() => syncController.abort(), 45_000);
     const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch('/api/truelayer/sync', {
+    const res = await fetch('/api/finexer/sync', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -229,8 +229,8 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
           if (ec.provider_name) expiredBankNames.push(ec.provider_name);
         }
       }
-    } else if (data.reason === 'token_expired') {
-      connectionIssues.push('token_expired');
+    } else if (data.reason === 'consent_expired') {
+      connectionIssues.push('consent_expired');
       // Extract bank names from the all-expired response
       if (data.expired_connections?.length > 0) {
         for (const ec of data.expired_connections) {
@@ -242,14 +242,14 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
       // The fallback path below will load cached CSV, and the caller
       // will see dataSource='fallback' which triggers appropriate
       // freshness checks (stale_data vs fallback) instead of a scary
-      // "reconnect your bank" banner for a transient TrueLayer outage.
-      console.warn('[sync] All connections failed (transient, within 90-day window) — will use fallback data');
+      // "reconnect your bank" banner for a transient Finexer outage.
+      console.warn('[sync] All connections failed (transient) — will use fallback data');
     } else if (data.reason === 'no_connection') {
       // Don't push immediately — wait to see if we have cached CSV.
-      // The token may be dead but the data is still in bank_data.
+      // The consent may be dead but the data is still in bank_data.
       // We'll check after the fallback query below.
       syncFailedNoConnection = true;
-      console.warn('[sync] No active TrueLayer connections found — will check for cached data');
+      console.warn('[sync] No active Finexer connections found — will check for cached data');
     }
     // Extract connections approaching 90-day consent expiry
     if (data.expiring_connections?.length > 0) {
@@ -262,7 +262,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
     }
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
-    console.warn('[sync] TrueLayer sync request failed:', message);
+    console.warn('[sync] Finexer sync request failed:', message);
   }
 
   // If connections have issues but we still don't have bank names, query DB as fallback
@@ -370,7 +370,7 @@ export async function syncBankData(userId: string): Promise<SyncResult | null> {
             interest_rate: defaultApr,
             minimum_payment: defaultMin,
             is_default_apr: true,
-            source: 'truelayer',
+            source: 'finexer',
             last_updated: new Date().toISOString(),
           }, { onConflict: 'user_id,account_name' });
           if (upsertErr) {

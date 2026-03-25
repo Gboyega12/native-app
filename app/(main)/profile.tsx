@@ -126,13 +126,13 @@ export default function Profile() {
       setUserId(user.id);
 
       // Try to claim any unclaimed bank_data rows for this user
-      // This handles cases where TrueLayer redirect didn't properly set user_id
+      // This handles cases where Finexer redirect didn't properly set user_id
       try {
         await supabase
           .from('bank_data')
           .update({ user_id: user.id })
           .is('user_id', null)
-          .eq('source', 'truelayer');
+          .eq('source', 'finexer');
       } catch {}
 
       const [banksRes, debtRes, investRes] = await Promise.all([
