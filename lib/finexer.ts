@@ -405,7 +405,9 @@ export async function getFinexerConsentUrl(
   });
   const data = await res.json();
   if (!data.success || !data.consent_url) {
-    throw new Error(data.error || 'Failed to create bank connection');
+    const detail = data.details ? String(data.details) : '';
+    const msg = detail || data.error || 'Failed to create bank connection';
+    throw new Error(msg);
   }
   return { consent_url: data.consent_url, consent_id: data.consent_id };
 }

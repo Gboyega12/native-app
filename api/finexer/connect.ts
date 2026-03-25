@@ -99,6 +99,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[finexer/connect] Error:', message);
-    return apiError(res, 500, 'Failed to create bank connection', message);
+    return apiError(res, 500, message || 'Failed to create bank connection');
   }
 }
