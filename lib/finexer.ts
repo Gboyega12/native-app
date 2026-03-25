@@ -17,12 +17,10 @@ function authHeader(apiKey: string): string {
 }
 
 // ── Shared fetch wrapper ──
-// Sends POST bodies as JSON. Finexer rejects URL values in form-encoded
-// bodies because percent-encoding makes them look non-HTTPS.
 async function finexerFetch(
   path: string,
   apiKey: string,
-  options: { method?: string; body?: Record<string, unknown> } = {},
+  options: { method?: string; body?: Record<string, string | string[]> } = {},
 ): Promise<Response> {
   const { method = 'GET', body } = options;
   const headers: Record<string, string> = {
@@ -31,8 +29,16 @@ async function finexerFetch(
 
   let fetchBody: string | undefined;
   if (body) {
-    headers['Content-Type'] = 'application/json';
-    fetchBody = JSON.stringify(body);
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(body)) {
+      if (Array.isArray(value)) {
+        for (const v of value) params.append(`${key}[]`, v);
+      } else {
+        params.append(key, value);
+      }
+    }
+    fetchBody = params.toString();
   }
 
   return fetch(`${FINEXER_API}${path}`, {
@@ -118,7 +124,7 @@ export async function createConsent(
     metadata?: Record<string, string>;
   },
 ): Promise<FinexerConsent> {
-  const body: Record<string, unknown> = {
+  const body: Record<string, string | string[]> = {
     customer: opts.customer,
   };
   if (opts.return_url) body.return_url = opts.return_url;
@@ -126,7 +132,11 @@ export async function createConsent(
   if (opts.scopes) body.scopes = opts.scopes;
   if (opts.retro_date) body.retro_date = opts.retro_date;
   if (opts.expiry_date) body.expiry_date = opts.expiry_date;
-  if (opts.metadata) body.metadata = opts.metadata;
+  if (opts.metadata) {
+    for (const [k, v] of Object.entries(opts.metadata)) {
+      body[`metadata[${k}]`] = v;
+    }
+  }
 
   const res = await finexerFetch('/consents', apiKey, { method: 'POST', body });
   if (!res.ok) {
