@@ -47,8 +47,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ success: false, error: 'Invalid request' });
   }
 
-  const { consent_id: consentIdParam, connection_id: connectionId, origin: rawOrigin } = parsed.data;
-  const webOrigin = rawOrigin && ALLOWED_ORIGINS.has(rawOrigin) ? rawOrigin : null;
+  const { consent_id: consentIdParam, connection_id: connectionIdParam, origin: rawOrigin } = parsed.data;
+
+  // Return 200 for bare GET requests so Finexer dashboard can verify the URL
+  if (!connectionIdParam && !consentIdParam) {
+    return res.status(200).json({ ok: true });
+  }
+
+  const apiKey = process.env.FINEXER_API_KEY;
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  // Resolve webOrigin early so `fail` can use it, but it may be updated from
+  // consent metadata below when origin is no longer in the query string.
+  let webOrigin: string | null = rawOrigin && ALLOWED_ORIGINS.has(rawOrigin) ? rawOrigin : null;
 
   const fail = (error: string, details?: string) => {
     const errMsg = encodeURIComponent(details ? `${error}: ${details}` : error);
@@ -58,37 +70,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.redirect(302, `bocy://callback?status=error&error=${errMsg}`);
   };
 
-  // Return 200 for bare GET requests so Finexer dashboard can verify the URL
-  if (!connectionId && !consentIdParam) {
-    return res.status(200).json({ ok: true });
-  }
-
-  if (!connectionId) return fail('Missing connection_id');
-
-  const apiKey = process.env.FINEXER_API_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
   if (!apiKey) return fail('Server misconfigured', 'FINEXER_API_KEY not set');
   if (!supabaseUrl || !serviceKey) return fail('Server misconfigured', 'Supabase not configured');
 
   try {
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // Look up the pre-created bank_data row to get consent_id and user_id
-    const { data: bankRow } = await admin
-      .from('bank_data')
-      .select('id, consent_id, finexer_customer_id, user_id')
-      .eq('connection_id', connectionId)
-      .single();
+    // Resolve connection_id: prefer query param, fall back to DB lookup via consent_id
+    let connectionId = connectionIdParam || null;
+    let bankRow: { id: string; consent_id: string | null; finexer_customer_id: string | null; user_id: string | null } | null = null;
+
+    if (connectionId) {
+      const { data } = await admin
+        .from('bank_data')
+        .select('id, consent_id, finexer_customer_id, user_id')
+        .eq('connection_id', connectionId)
+        .single();
+      bankRow = data;
+    } else if (consentIdParam) {
+      // connection_id no longer in query — look up via consent_id
+      const { data } = await admin
+        .from('bank_data')
+        .select('id, connection_id, consent_id, finexer_customer_id, user_id')
+        .eq('consent_id', consentIdParam)
+        .single();
+      bankRow = data;
+      connectionId = (data as Record<string, string> | null)?.connection_id || null;
+    }
+
+    if (!connectionId) return fail('Missing connection_id');
 
     const consentId = consentIdParam || bankRow?.consent_id;
     if (!consentId) return fail('Missing consent_id');
 
     const userId = bankRow?.user_id || null;
 
-    // Verify consent is authorized
+    // Verify consent is authorized and resolve origin from metadata if needed
     const consent = await getConsent(apiKey, consentId);
+
+    // If origin wasn't in the query string, check consent metadata (set by connect endpoint)
+    if (!webOrigin && consent.metadata?.origin) {
+      const metaOrigin = consent.metadata.origin;
+      if (ALLOWED_ORIGINS.has(metaOrigin)) {
+        webOrigin = metaOrigin;
+      }
+    }
+
     if (consent.status !== 'authorized') {
       console.error(`[finexer/callback] Consent ${consentId} status: ${consent.status}`);
       return fail('Bank authorization not completed', `Consent status: ${consent.status}`);

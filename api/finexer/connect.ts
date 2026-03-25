@@ -64,22 +64,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     retroDate.setFullYear(retroDate.getFullYear() - 1);
     const retroDateStr = retroDate.toISOString().split('T')[0];
 
-    // Encode connection_id + web origin in return_url for callback routing.
-    // Finexer requires the entire return_url (including query params) to be
-    // publicly accessible HTTPS, so strip non-HTTPS origins to avoid rejection.
+    // Send a clean return_url (no query params) so Finexer's URL verification
+    // succeeds. Pass connection_id + origin through consent metadata instead;
+    // the callback retrieves them via consent_id.
     const rawOrigin = req.headers.origin || req.headers.referer?.replace(/\/[^/]*$/, '') || '';
     const webOrigin = rawOrigin.startsWith('https://') ? rawOrigin : '';
-    const returnUrl = `${redirectUri}?connection_id=${encodeURIComponent(connectionId)}${webOrigin ? `&origin=${encodeURIComponent(webOrigin)}` : ''}`;
+
+    const metadata: Record<string, string> = {
+      connection_id: connectionId,
+      user_id: userId,
+    };
+    if (webOrigin) metadata.origin = webOrigin;
 
     const consent = await createConsent(apiKey, {
       customer: customerId,
-      return_url: returnUrl,
+      return_url: redirectUri,
       scopes: ['accounts', 'balance', 'transactions'],
       retro_date: retroDateStr,
-      metadata: {
-        connection_id: connectionId,
-        user_id: userId,
-      },
+      metadata,
     });
 
     if (!consent.redirect?.consent_url) {
