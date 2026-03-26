@@ -514,7 +514,7 @@ export class AgentRunnerImpl implements IAgentRunner {
     if (isaRemaining > 1000) {
       opportunities.push({
         type: 'isa_underutilisation',
-        description: `£${isaRemaining.toLocaleString()} ISA allowance unused — tax-free growth foregone`,
+        description: `£${isaRemaining.toLocaleString()} ISA allowance available but not currently utilised`,
         annual_tax_saving: isaRemaining * 0.07 * marginalRate,
         confidence: 0.95,
       });
@@ -525,7 +525,7 @@ export class AgentRunnerImpl implements IAgentRunner {
       const additionalRelief = (optimalContrib - pensionContributions) * marginalRate;
       opportunities.push({
         type: 'pension_relief_unclaimed',
-        description: `Pension contributions below optimal — £${Math.round(additionalRelief).toLocaleString()}/year tax relief unclaimed`,
+        description: `Potential additional tax relief of £${Math.round(additionalRelief).toLocaleString()}/year available on increased pension contributions`,
         annual_tax_saving: additionalRelief,
         confidence: 0.85,
       });
@@ -534,7 +534,7 @@ export class AgentRunnerImpl implements IAgentRunner {
     if (cgtAllowanceRemaining > 0 && giaAssets > 10000) {
       opportunities.push({
         type: 'cgt_allowance_unused',
-        description: `£${cgtAllowanceRemaining.toLocaleString()} CGT allowance unused — consider realising gains`,
+        description: `£${cgtAllowanceRemaining.toLocaleString()} of annual CGT allowance not yet utilised this tax year`,
         annual_tax_saving: cgtAllowanceRemaining * 0.20, // 20% CGT rate
         confidence: 0.70,
       });
@@ -543,7 +543,7 @@ export class AgentRunnerImpl implements IAgentRunner {
     if (giaAssets > isaRemaining && isaRemaining > 0) {
       opportunities.push({
         type: 'bed_and_isa_opportunity',
-        description: `£${Math.min(giaAssets, isaRemaining).toLocaleString()} could be moved from GIA to ISA via bed-and-ISA`,
+        description: `£${Math.min(giaAssets, isaRemaining).toLocaleString()} in GIA holdings alongside £${isaRemaining.toLocaleString()} remaining ISA allowance`,
         annual_tax_saving: Math.min(giaAssets, isaRemaining) * 0.07 * marginalRate,
         confidence: 0.80,
       });
@@ -573,7 +573,7 @@ export class AgentRunnerImpl implements IAgentRunner {
     if (ihtLiability > 0) {
       // Annual exemption
       giftingRecs.push({
-        action: 'Use annual gifting exemption (£3,000/year)',
+        action: 'Annual gifting exemption available: £3,000/year (exempt from IHT immediately)',
         amount: 3000,
         iht_saving: 3000 * 0.40,
         time_horizon: 'Immediate — exempt from day one',
@@ -587,7 +587,7 @@ export class AgentRunnerImpl implements IAgentRunner {
         );
         if (petAmount > 5000) {
           giftingRecs.push({
-            action: `Make Potentially Exempt Transfer of £${petAmount.toLocaleString()}`,
+            action: `Potentially Exempt Transfer opportunity identified: £${petAmount.toLocaleString()}`,
             amount: petAmount,
             iht_saving: petAmount * 0.40,
             time_horizon: '7 years to full exemption (taper relief from year 3)',
@@ -598,7 +598,7 @@ export class AgentRunnerImpl implements IAgentRunner {
       // Pension maximisation
       if (totalPension < annualIncome * 5) {
         giftingRecs.push({
-          action: 'Maximise pension contributions — pensions sit outside estate for IHT',
+          action: 'Pension contributions reduce estate value — pensions typically sit outside estate for IHT purposes',
           amount: Math.round(annualIncome * 0.15),
           iht_saving: Math.round(annualIncome * 0.15 * 0.40),
           time_horizon: 'Ongoing — reduces estate value each year',

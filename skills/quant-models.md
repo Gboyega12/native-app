@@ -1,6 +1,8 @@
 # Quant Models — Tax-Aware Lifetime & Intergenerational Optimisation (UK)
 
-All models MUST optimise **post-tax outcomes** over the full lifetime and across generations.
+All models operate on **post-tax outcomes** over the full lifetime and across generations.
+
+**IMPORTANT: Model outputs are analytical projections, not guarantees or financial advice. Users should consult qualified professionals before making financial decisions based on these projections.**
 
 ---
 
@@ -30,7 +32,7 @@ Where:
 ## 2. Tax-Aware Portfolio Optimisation
 
 ### Objective
-Maximise after-tax expected return for given risk.
+Evaluate after-tax expected return for given risk.
 
 ### Standard
 ```
@@ -57,7 +59,7 @@ Where:
 ## 3. Asset Location Optimisation
 
 ### Objective
-Assign assets to wrappers to minimise tax drag.
+Evaluate asset-to-wrapper assignment for tax drag minimisation.
 
 ### Problem
 ```
@@ -65,8 +67,8 @@ min Tax(returns | allocation across accounts)
 ```
 
 ### Decision Rules
-- Bonds/fixed income → Pension (shelter income from tax)
-- High-growth equities → ISA (shelter capital gains)
+- Bonds/fixed income → Pension (shelters income from tax)
+- High-growth equities → ISA (shelters capital gains)
 - High-turnover strategies → Tax-sheltered accounts
 - Low-turnover, low-yield → GIA (minimal tax impact)
 
@@ -93,7 +95,7 @@ Subject to:
 - Minimum consumption constraint
 
 ### Output
-- Optimal yearly withdrawal by account type
+- Modelled yearly withdrawal by account type
 - Tax band utilisation per year
 - Probability of fund depletion
 
@@ -102,7 +104,7 @@ Subject to:
 ## 5. Tax-Loss Harvesting Model
 
 ### Objective
-Minimise realised gains within GIA.
+Identify opportunities to minimise realised gains within GIA.
 
 ### Logic
 ```
@@ -120,7 +122,7 @@ AND future_gain_offset_probability > 0.7
 ## 6. Capital Gains Timing Model
 
 ### Objective
-Optimise timing of disposals to minimise CGT.
+Evaluate optimal timing of disposals to minimise CGT.
 
 ### Decision Rule
 ```
@@ -129,7 +131,7 @@ OR: Annual_CGT_Allowance_Unused AND gains_available
 ```
 
 ### Extensions
-- Use £3,000 CGT allowance annually (use-it-or-lose-it)
+- Model £3,000 CGT allowance utilisation annually (use-it-or-lose-it)
 - Stagger disposals across tax years
 - Bed-and-ISA: sell in GIA, rebuy in ISA (reset cost base)
 - Inter-spouse transfers (at no gain/no loss)
@@ -153,7 +155,7 @@ IHT = max(0, Estate_t - NRB - RNRB) × 0.40
 
 ### Output
 - Expected IHT liability under N scenarios
-- Optimal gifting schedule
+- Projected optimal gifting schedule
 - Estate value passed to beneficiaries (probability-weighted)
 
 ---
@@ -173,9 +175,9 @@ subject to: Consumption >= Required_minimum
 - Liquidity constraints
 
 ### Output
-- Optimal annual gift amount
+- Projected optimal annual gift amount
 - PET tracking schedule
-- Expected IHT reduction
+- Estimated IHT reduction
 - Residual estate projection with confidence intervals
 
 ---
@@ -183,12 +185,12 @@ subject to: Consumption >= Required_minimum
 ## 9. Behavioural Risk Model
 
 ### Objective
-Predict and prevent suboptimal tax decisions.
+Identify patterns that may lead to suboptimal tax decisions.
 
 ### Inputs
 - Trading frequency (excess turnover = excess CGT)
-- Reaction to drawdowns (panic selling = realised losses at wrong time)
-- Deviation from tax-optimal plan
+- Reaction to drawdowns (panic selling = realised losses at suboptimal time)
+- Deviation from tax-efficient plan
 
 ### Output
 - Tax-behavioural risk score
@@ -207,7 +209,7 @@ Cash_t = Income_t - Expenses_t - Taxes_t
 - After-tax investable surplus
 - Tax liability forecast by month
 - Shortfall risk (probability of negative cash flow)
-- Optimal contribution timing (pension vs ISA vs GIA)
+- Contribution timing analysis (pension vs ISA vs GIA)
 
 ---
 
@@ -217,20 +219,20 @@ Cash_t = Income_t - Expenses_t - Taxes_t
 1. Generate scenarios (Monte Carlo, tax-aware)
 2. Apply UK tax model per scenario
 3. Evaluate decisions across scenarios
-4. Select optimal action (max expected after-tax utility)
+4. Surface highest expected after-tax utility option
 
 ### Output
-- Action recommendation
+- Insight with comparison
 - Tax impact (£/year)
 - Probability-weighted after-tax outcome
-- Comparison: current vs recommended
+- Comparison: current vs alternative
 
 ---
 
 ## 12. Meta Optimisation Layer
 
 ### Core Principle
-Continuous optimisation across time, tax, and user behaviour.
+Continuous analysis across time, tax, and user behaviour.
 
 ### Inputs
 - Market data (returns, volatility)
@@ -238,10 +240,10 @@ Continuous optimisation across time, tax, and user behaviour.
 - UK tax rules (rates, bands, allowances)
 
 ### Outputs
-- Daily/weekly tax-aware decisions
+- Daily/weekly tax-aware insights
 - Tax threshold alerts
 - Rebalancing triggers (tax-efficient)
-- Year-end optimisation actions
+- Year-end optimisation opportunities
 
 ---
 
@@ -269,9 +271,9 @@ Continuous optimisation across time, tax, and user behaviour.
 
 ## FINAL PRINCIPLE
 
-BOCY must optimise:
-→ **After-tax wealth**
-→ **Over lifetime**
-→ **Across generations**
+BOCY models and surfaces:
+→ **After-tax wealth** projections
+→ **Lifetime** efficiency opportunities
+→ **Intergenerational** transfer insights
 
-NOT just pre-tax returns.
+All outputs are analytical — not prescriptive.

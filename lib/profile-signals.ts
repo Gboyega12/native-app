@@ -11,6 +11,8 @@ import type {
   DebtAccount,
   UpcomingEventWithTimeline,
   IncomeBand,
+  TaxBand,
+  TaxSignal,
 } from './types';
 
 // ── Public Interface ──
@@ -22,6 +24,14 @@ export interface ProfileSignals {
   timePressure: { event: string; monthsAway: number; urgency: number }[];
   riskGammaShift: number; // CRRA adjustment
   incomeBand: IncomeBand | null;
+  // Tax-aware signals
+  taxBand: TaxBand;
+  isPensionContributor: boolean;
+  hasCgtExposure: boolean;
+  /** Estimated annual income for tax calculations */
+  estimatedAnnualIncome: number;
+  /** Marginal tax rate (0-0.45) */
+  marginalRate: number;
 }
 
 // ── 15a: Cohort Detection ──
@@ -194,6 +204,82 @@ export function normalizeUpcomingEvents(
     );
 }
 
+// ── Tax Band Detection ──
+
+// UK 2025-26 thresholds
+const UK_PA = 12_570;
+const UK_BASIC_LIMIT = 50_270;
+const UK_HIGHER_LIMIT = 125_140;
+const UK_PA_TAPER_START = 100_000;
+
+export function detectTaxBand(annualIncome: number): TaxBand {
+  if (annualIncome <= UK_PA) return 'personal_allowance';
+  if (annualIncome > UK_PA_TAPER_START && annualIncome <= UK_HIGHER_LIMIT) return 'pa_taper';
+  if (annualIncome <= UK_BASIC_LIMIT) return 'basic_rate';
+  if (annualIncome <= UK_HIGHER_LIMIT) return 'higher_rate';
+  return 'additional_rate';
+}
+
+export function calcMarginalRate(annualIncome: number): number {
+  if (annualIncome <= UK_PA) return 0;
+  if (annualIncome > UK_PA_TAPER_START && annualIncome <= UK_HIGHER_LIMIT) return 0.60; // effective 60% in taper
+  if (annualIncome <= UK_BASIC_LIMIT) return 0.20;
+  if (annualIncome <= UK_HIGHER_LIMIT) return 0.40;
+  return 0.45;
+}
+
+/**
+ * Estimate annual gross income from monthly net income + income band.
+ * Income band (from onboarding) takes priority when available.
+ */
+export function estimateAnnualIncome(
+  monthlyNetIncome: number,
+  incomeBand: IncomeBand | null,
+): number {
+  // If user told us their band, use midpoint
+  if (incomeBand) {
+    switch (incomeBand) {
+      case 'under_30k': return 25_000;
+      case '30k_50k': return 40_000;
+      case '50k_100k': return 75_000;
+      case 'over_100k': return 130_000;
+    }
+  }
+  // Fallback: gross up from net (approximate — assumes basic rate)
+  const annualNet = monthlyNetIncome * 12;
+  if (annualNet <= 30_000) return annualNet * 1.25; // ~20% tax + NI
+  if (annualNet <= 45_000) return annualNet * 1.45; // ~40% effective
+  return annualNet * 1.55; // higher rate
+}
+
+/**
+ * Detect pension contributor status from transaction patterns.
+ * Returns true if regular pension/SIPP contributions detected.
+ */
+export function detectPensionContributor(
+  taxSignals: TaxSignal[] | undefined,
+): boolean {
+  if (!taxSignals) return false;
+  return taxSignals.some(
+    (s) => (s.type === 'pension_contribution' || s.type === 'salary_sacrifice' || s.type === 'employer_pension')
+      && s.transactionCount >= 2
+      && s.confidence >= 0.6,
+  );
+}
+
+/**
+ * Detect CGT exposure from investment transaction patterns.
+ * Returns true if material investment activity detected outside tax wrappers.
+ */
+export function detectCgtExposure(
+  taxSignals: TaxSignal[] | undefined,
+): boolean {
+  if (!taxSignals) return false;
+  return taxSignals.some(
+    (s) => s.type === 'capital_gain' && s.annualAmount > 0 && s.confidence >= 0.5,
+  );
+}
+
 // ── Compute All Signals ──
 
 export function computeProfileSignals(
@@ -201,6 +287,7 @@ export function computeProfileSignals(
   identity: UserIdentity | null,
   goals: Goals | null,
   debtAccounts: DebtAccount[],
+  taxSignals?: TaxSignal[],
 ): ProfileSignals {
   const cohort = detectCohort(profile, identity, goals, debtAccounts);
   const sophisticationLevel = calcSophisticationLevel(identity?.financial_experience);
@@ -222,12 +309,31 @@ export function computeProfileSignals(
     : identity?.risk_appetite === 'growth' ? -0.3
     : 0;
 
+  // Tax signal detection
+  const monthlyIncome = profile.monthly?.income ?? 0;
+  const incomeBand = identity?.income_band || null;
+  const estimatedAnnualIncome = estimateAnnualIncome(monthlyIncome, incomeBand);
+  const taxBand = detectTaxBand(estimatedAnnualIncome);
+  const marginalRate = calcMarginalRate(estimatedAnnualIncome);
+  const isPensionContributor = detectPensionContributor(taxSignals);
+  const hasCgtExposure = detectCgtExposure(taxSignals);
+
+  // Boost allocate affinity for higher-rate taxpayers (tax optimisation is more impactful)
+  if (taxBand === 'higher_rate' || taxBand === 'additional_rate' || taxBand === 'pa_taper') {
+    categoryAffinity['allocate'] = Math.min(2.0, (categoryAffinity['allocate'] || 1.0) * 1.25);
+  }
+
   return {
     cohort,
     sophisticationLevel,
     categoryAffinity,
     timePressure,
     riskGammaShift,
-    incomeBand: identity?.income_band || null,
+    incomeBand,
+    taxBand,
+    isPensionContributor,
+    hasCgtExposure,
+    estimatedAnnualIncome,
+    marginalRate,
   };
 }

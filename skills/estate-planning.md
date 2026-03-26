@@ -1,22 +1,24 @@
 # Estate Planning Engine — Institutional Grade (UK)
 
-BOCY must minimise inheritance tax while preserving control and intent of wealth transfer.
+BOCY analyses estate structures to surface IHT exposure and wealth transfer efficiency insights.
+
+**IMPORTANT: BOCY does not provide financial or legal advice. Estate planning insights are data-driven observations for the user to consider. Users should consult a qualified financial planner or solicitor before acting on estate planning matters.**
 
 ---
 
 ## CORE OBJECTIVE
 
-Minimise IHT liability while:
-→ Preserving user lifestyle
-→ Maintaining control over asset distribution
-→ Ensuring estate liquidity
-→ Optimising intergenerational wealth transfer
+Surface insights on IHT exposure while considering:
+→ User lifestyle preservation
+→ Control over asset distribution
+→ Estate liquidity
+→ Intergenerational wealth transfer efficiency
 
 ---
 
 ## UK INHERITANCE TAX FRAMEWORK
 
-Claude must model:
+The system models:
 - Nil Rate Band: £325,000
 - Residence Nil Rate Band: £175,000 (conditions apply)
 - IHT rate: 40% above thresholds
@@ -33,7 +35,7 @@ IHT_liability = Taxable_estate × 0.40
 
 ---
 
-## KEY STRATEGIES
+## KEY STRATEGIES THE SYSTEM EVALUATES
 
 ### 1. Lifetime Gifting
 - Annual exemption: £3,000 per year (carry forward 1 year)
@@ -43,28 +45,28 @@ IHT_liability = Taxable_estate × 0.40
 - Potentially Exempt Transfers (PETs): fully exempt after 7 years
 
 ### 7-Year Rule Tracking
-Claude must:
-- Track all PETs with dates
-- Model taper relief (3-7 years: 20%→80% relief)
-- Alert when PETs approach the 7-year mark
-- Recommend optimal gifting schedules
+The system:
+- Tracks all PETs with dates
+- Models taper relief (3-7 years: 20%→80% relief)
+- Alerts when PETs approach the 7-year mark
+- Surfaces optimal gifting schedule insights
 
 ### 2. Trust Structures
 
-Claude must understand:
+The system understands:
 - **Discretionary trusts**: Control over distribution, 10-year periodic charges
 - **Bare trusts**: Simple, beneficiary has immediate entitlement
 - **Interest in possession trusts**: Income rights to beneficiary
 - **Relevant property regime**: 6% × (trust value - NRB fraction) every 10 years
 
-Use cases:
+Relevant use cases:
 - Control over distribution timing
 - Asset protection from creditors/divorce
 - Tax mitigation across generations
 - Business succession planning
 
 ### 3. Pension as Estate Tool
-Claude must prioritise pensions for:
+The system evaluates pensions for:
 - IHT efficiency (pensions typically outside estate)
 - Tax-free death benefits if death before 75
 - Intergenerational transfer vehicle
@@ -79,17 +81,17 @@ Claude must prioritise pensions for:
 
 ## ESTATE LIQUIDITY PLANNING
 
-Claude must ensure:
-- Sufficient liquid assets to cover IHT liability
-- Avoid forced asset sales at undervalue
-- Consider life insurance (written in trust) for IHT cover
-- Model liquidity under different estate scenarios
+The system evaluates:
+- Whether sufficient liquid assets exist to cover IHT liability
+- Risk of forced asset sales at undervalue
+- Life insurance (written in trust) as IHT cover option
+- Liquidity position under different estate scenarios
 
 ---
 
 ## ASSET STRUCTURING
 
-Claude should optimise ownership:
+The system analyses ownership efficiency:
 - Individual vs joint (tenants in common vs joint tenants)
 - Personal vs corporate holding
 - Trust-held assets
@@ -112,16 +114,16 @@ Inputs:
 - Risk tolerance
 
 Output:
-- Optimal annual gifting amount
+- Optimal annual gifting range
 - PET schedule with 7-year tracking
-- Expected IHT saving
+- Projected IHT reduction
 - Residual estate projection
 
 ---
 
 ## IHT SIMULATION
 
-Claude must run scenarios:
+The system runs scenarios:
 1. No action (baseline IHT)
 2. Maximum gifting strategy
 3. Trust + gifting combination
@@ -138,24 +140,26 @@ For each scenario, output:
 
 ## DECISION ENGINE RULES
 
-1. Never recommend estate actions without IHT impact analysis
-2. Always simulate baseline vs optimised estate outcomes
-3. Prefer compliant strategies over aggressive schemes
-4. Model longevity risk in all gifting recommendations
-5. Ensure lifestyle is never compromised for estate optimisation
-6. Track all PETs and trust charges continuously
+1. No insight is surfaced without IHT impact analysis
+2. Baseline vs optimised estate outcomes are always modelled
+3. Only compliant strategies are presented
+4. Longevity risk is modelled in all gifting insights
+5. Lifestyle is never assumed to be compromised for estate optimisation
+6. All PETs and trust charges are tracked continuously
+7. All outputs are informational — not directives
 
 ---
 
 ## OUTPUT FORMAT
 
-Every estate recommendation must include:
-- Action
+Every estate insight includes:
+- Observation (what the system detected)
 - IHT impact (£)
 - Net estate benefit
 - Risks (longevity, legislative change)
 - Time horizon
 - Liquidity impact
+- Disclaimer: "This is a data-driven insight, not estate planning advice"
 
 ---
 

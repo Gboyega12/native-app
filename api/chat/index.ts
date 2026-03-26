@@ -57,6 +57,26 @@ function detectConversationMode(userMessage: string): ConversationMode {
   return 'general';
 }
 
+// ── Tax/Estate Intent Detection ──
+// Detects when the user's question relates to tax optimisation, estate planning,
+// inheritance, or wrapper allocation — so we can inject the tax_estate agent's
+// analysis into the chat context for more accurate answers.
+
+function isTaxEstateQuery(userMessage: string): boolean {
+  const msg = userMessage.toLowerCase();
+  const taxPatterns = [
+    /\btax\b/, /\bisa\b/, /\bpension\b/, /\bsipp\b/, /\bwrapper/,
+    /\binheritance\b/, /\biht\b/, /\bestate\b/, /\bgifting\b/,
+    /\bcapital\s*gains?\b/, /\bcgt\b/, /\btax\s*relief\b/, /\btax\s*free\b/,
+    /\bnil\s*rate\b/, /\bpersonal\s*allowance\b/, /\bsalary\s*sacrifice\b/,
+    /\btax\s*drag\b/, /\btax\s*efficien/, /\btax\s*year\b/, /\b5\s*april\b/,
+    /\bdividend\s*(?:tax|allowance)\b/, /\btaper\s*relief\b/,
+    /\bwhere\s+should\s+(?:i|we)\s+put\b/, /\bwhich\s+account\b/,
+    /\bshould\s+i\s+(?:invest|save|contribute)\b/,
+  ];
+  return taxPatterns.some((p) => p.test(msg));
+}
+
 // ── Phase 5B: Response Quality Validation ──
 
 interface ResponseValidation {
@@ -114,6 +134,71 @@ function buildInsightContext(context: Record<string, unknown>): string {
     });
     const totalValue = manualAssets.reduce((s, a) => s + a.estimated_value, 0);
     parts.push(`## External Assets (manually tracked, not connected via open banking)\n${lines.join('\n')}\nTotal external assets: £${Math.round(totalValue).toLocaleString()}\nInclude these in net worth calculations and capital allocation analysis.`);
+  }
+
+  // Tax & Estate agent output (when available)
+  const taxAnalysis = (context as any).tax_estate_analysis as {
+    tax_analysis?: {
+      effective_tax_rate: number;
+      annual_tax_drag: number;
+      wrapper_utilisation: { isa_used: number; isa_remaining: number; pension_contributed: number; pension_relief_captured: number };
+      cgt_position: { realised_gains: number; allowance_remaining: number; losses_available: number };
+      optimisation_opportunities: Array<{ type: string; description: string; annual_tax_saving: number }>;
+    };
+    estate_analysis?: {
+      estimated_estate_value: number;
+      iht_liability: number;
+      nil_rate_band_available: number;
+      residence_nil_rate_band_available: number;
+      gifting_recommendations: Array<{ action: string; amount: number; iht_saving: number }>;
+    };
+  } | undefined;
+
+  if (taxAnalysis?.tax_analysis) {
+    const t = taxAnalysis.tax_analysis;
+    const lines = [
+      `- Effective tax rate: ${(t.effective_tax_rate * 100).toFixed(1)}%`,
+      `- Annual tax drag: £${t.annual_tax_drag.toLocaleString()}/yr`,
+      `- ISA remaining: £${t.wrapper_utilisation.isa_remaining.toLocaleString()} of £20,000`,
+      `- Pension relief captured: £${t.wrapper_utilisation.pension_relief_captured.toLocaleString()}`,
+      `- CGT allowance remaining: £${t.cgt_position.allowance_remaining.toLocaleString()} of £3,000`,
+    ];
+    if (t.optimisation_opportunities.length > 0) {
+      lines.push('', 'Tax optimisation opportunities:');
+      for (const o of t.optimisation_opportunities.slice(0, 4)) {
+        lines.push(`  - ${o.description} (saves ~£${o.annual_tax_saving.toLocaleString()}/yr)`);
+      }
+    }
+    parts.push(`## Tax Position Analysis\n${lines.join('\n')}`);
+  }
+
+  if (taxAnalysis?.estate_analysis && taxAnalysis.estate_analysis.iht_liability > 0) {
+    const e = taxAnalysis.estate_analysis;
+    const lines = [
+      `- Estimated estate: £${e.estimated_estate_value.toLocaleString()}`,
+      `- IHT liability: £${e.iht_liability.toLocaleString()}`,
+      `- Nil rate band available: £${(e.nil_rate_band_available + e.residence_nil_rate_band_available).toLocaleString()}`,
+    ];
+    if (e.gifting_recommendations.length > 0) {
+      lines.push('', 'Estate planning observations:');
+      for (const g of e.gifting_recommendations.slice(0, 3)) {
+        lines.push(`  - ${g.action} — potential IHT reduction: £${g.iht_saving.toLocaleString()}`);
+      }
+    }
+    parts.push(`## Estate Position\nIMPORTANT: These are data-driven observations, not estate planning advice. Recommend the user consults a qualified adviser.\n${lines.join('\n')}`);
+  }
+
+  // Tax signals from enrichment pipeline (structured transaction-level signals)
+  const taxSignals = (context as any).tax_signals as Array<{
+    type: string; annualAmount: number; monthlyAmount: number; confidence: number;
+  }> | undefined;
+  if (taxSignals && taxSignals.length > 0) {
+    const lines = taxSignals
+      .filter((s) => s.confidence >= 0.6)
+      .map((s) => `- ${s.type.replace(/_/g, ' ')}: ~£${s.annualAmount.toLocaleString()}/yr (${s.confidence >= 0.8 ? 'high' : 'moderate'} confidence)`);
+    if (lines.length > 0) {
+      parts.push(`## Detected Tax-Relevant Transactions\n${lines.join('\n')}`);
+    }
   }
 
   return parts.length > 0 ? '\n\n' + parts.join('\n\n') : '';
@@ -394,12 +479,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const lastUserMsg = messages.filter((m) => m.role === 'user').pop()?.content || '';
   const conversationMode = detectConversationMode(lastUserMsg);
 
+  // Tax/estate intent detection — enables richer tax context in responses
+  const isTaxQuery = isTaxEstateQuery(lastUserMsg);
+
   // Phase 5D: Build insight context for proactive injection
   const insightContext = context ? buildInsightContext(context) : '';
 
+  let taxQueryGuidance = '';
+  if (isTaxQuery) {
+    taxQueryGuidance = `\n\n[Tax/Estate query detected — prioritise tax position data, wrapper utilisation, and allowance numbers in your response. `
+      + `State mathematical facts (rates, allowances, relief amounts). `
+      + `If tax_estate agent analysis is available above, reference those specific numbers. `
+      + `IMPORTANT: All tax and estate outputs are data-driven observations, not financial or tax advice. `
+      + `Recommend the user consults a qualified tax adviser or financial planner before acting.]`;
+  }
+
   const systemPrompt = buildSystemPrompt(context) +
     (insightContext ? insightContext : '') +
-    (conversationMode !== 'general' ? `\n\n[Detected conversation mode: ${conversationMode}]` : '');
+    (conversationMode !== 'general' ? `\n\n[Detected conversation mode: ${conversationMode}]` : '') +
+    taxQueryGuidance;
 
   const apiMessages = messages.map((m) => {
     // If message has an image attachment, build multimodal content for Claude

@@ -223,6 +223,8 @@ export interface Move {
   suppressedReason?: string;
   /** Scenario comparison: current vs recommended outcome (Phase 3C) */
   scenario?: ScenarioComparison;
+  /** Tax-aware context for wrapper-related moves */
+  taxContext?: TaxMoveContext;
 }
 
 /**
@@ -687,6 +689,8 @@ export interface EnrichmentResult {
   essentialGaps?: EssentialGap[];
   /** Bills verified from actual transaction data with exact amounts */
   verifiedBills?: VerifiedBill[];
+  /** Structured tax signals extracted from transactions for tax agent consumption */
+  taxSignals?: TaxSignal[];
 }
 
 // ── Chat ──
@@ -896,6 +900,106 @@ export interface SavingsAccount {
   source?: 'manual' | 'finexer';
   created_at?: string;
   updated_at?: string;
+}
+
+// ── Tax & Estate Persistent State ──
+
+/** UK tax band derived from income — used for move gating and wrapper priority */
+export type TaxBand = 'personal_allowance' | 'basic_rate' | 'higher_rate' | 'additional_rate' | 'pa_taper';
+
+/** Persistent tax position snapshot — stored per analysis cycle */
+export interface TaxPosition {
+  taxBand: TaxBand;
+  effectiveTaxRate: number;
+  marginalRate: number;
+  /** Annual tax drag from suboptimal wrapper allocation (£/yr) */
+  annualTaxDrag: number;
+  wrapperUtilisation: {
+    isaUsed: number;
+    isaRemaining: number;
+    pensionContributed: number;
+    pensionReliefCaptured: number;
+    pensionAnnualAllowanceRemaining: number;
+  };
+  cgtPosition: {
+    realisedGains: number;
+    unrealisedGains: number;
+    allowanceRemaining: number;
+    lossesAvailable: number;
+  };
+  /** Detected tax-relevant signals from transactions */
+  taxSignals: TaxSignal[];
+  /** Tax year this position relates to (e.g. "2025-26") */
+  taxYear: string;
+  computedAt: string;
+}
+
+/** Structured signal extracted from enrichment pipeline for tax agent consumption */
+export interface TaxSignal {
+  type: 'pension_contribution' | 'isa_contribution' | 'dividend_income' | 'rental_income'
+    | 'self_assessment' | 'capital_gain' | 'gift_payment' | 'salary_sacrifice'
+    | 'employer_pension' | 'interest_income';
+  /** Annual estimated amount (£) */
+  annualAmount: number;
+  /** Monthly detected amount (£) */
+  monthlyAmount: number;
+  /** Transaction count supporting this signal */
+  transactionCount: number;
+  /** Confidence in detection (0-1) */
+  confidence: number;
+  /** Source merchant/description pattern */
+  sourcePattern?: string;
+}
+
+/** Potentially Exempt Transfer record for IHT 7-year tracking */
+export interface PETRecord {
+  id: string;
+  userId: string;
+  /** Gift amount (£) */
+  amount: number;
+  /** Date of gift */
+  date: string;
+  /** Recipient description (not stored — user-provided context) */
+  recipientLabel?: string;
+  /** Years remaining until full exemption */
+  yearsRemaining: number;
+  /** Current taper relief percentage (0% at 0-3 years, then 20% increments) */
+  taperReliefPct: number;
+  /** Whether this PET has been confirmed by user (vs auto-detected) */
+  confirmed: boolean;
+  createdAt: string;
+}
+
+/** Tax event log entry — tracks changes in tax position over time */
+export interface TaxEventLog {
+  id: string;
+  userId: string;
+  eventType: 'band_change' | 'allowance_used' | 'pet_recorded' | 'wrapper_contribution'
+    | 'cgt_event' | 'relief_captured' | 'tax_year_rollover';
+  description: string;
+  /** Quantified impact (£/yr if recurring, £ if one-off) */
+  impact: number;
+  /** Snapshot of position before this event */
+  previousValue?: number;
+  /** Snapshot after */
+  newValue?: number;
+  occurredAt: string;
+  taxYear: string;
+}
+
+/** Wrapper priority for tax-aware move ranking */
+export type TaxWrapperPriority = 'isa' | 'pension' | 'gia' | 'cash';
+
+/** Tax-aware move metadata — attached to moves that involve wrapper decisions */
+export interface TaxMoveContext {
+  /** Which wrapper this move targets */
+  targetWrapper: TaxWrapperPriority;
+  /** Tax saving from using optimal wrapper vs default (£/yr) */
+  wrapperTaxSaving: number;
+  /** Whether this move respects ISA > Pension > GIA priority */
+  respectsWrapperPriority: boolean;
+  /** Effective cost per £1 after tax relief */
+  effectiveCostPerPound?: number;
 }
 
 // ── Investments ──

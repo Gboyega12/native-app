@@ -18,6 +18,7 @@ import type {
   Move,
   DebtAccount,
 } from './types';
+import type { TaxEstateOutput } from './agent-registry';
 import type { AccountBuckets } from './account-classifier';
 
 // ── Phase 2A: Build System Map ──
@@ -427,15 +428,80 @@ function detectInterestArbitrage(systemMap: SystemMap, profile: FinancialProfile
 
 // ── Phase 2B: Main Detection Function ──
 
+/**
+ * Convert tax_estate agent output into Insight[] for unified display.
+ * When the agent has run, its analysis is more comprehensive than the local
+ * detectTaxLeakage — so we use it instead to avoid duplicates.
+ */
+function taxEstateToInsights(agentOutput: TaxEstateOutput): Insight[] {
+  const insights: Insight[] = [];
+  const tax = agentOutput.tax_analysis;
+  const estate = agentOutput.estate_analysis;
+
+  // Tax drag insight (replaces local tax_leakage)
+  if (tax.annual_tax_drag > MATERIALITY_THRESHOLD) {
+    insights.push({
+      type: 'tax_leakage',
+      statement: `~£${tax.annual_tax_drag.toLocaleString()}/year in tax drag from suboptimal wrapper allocation`,
+      annualImpact: tax.annual_tax_drag,
+      longTermImpact: tax.annual_tax_drag * 5,
+      cause: `ISA allowance: £${tax.wrapper_utilisation.isa_remaining.toLocaleString()} unused. `
+        + `Pension relief captured: £${tax.wrapper_utilisation.pension_relief_captured.toLocaleString()}`,
+      implication: `Assets outside tax wrappers are taxed at your marginal rate on gains and dividends`,
+      linkedMoveCategory: 'allocate',
+      confidence: 0.90,
+      priority: 2,
+    });
+  }
+
+  // Surface each optimisation opportunity as a sub-insight
+  for (const opp of tax.optimisation_opportunities) {
+    if (opp.annual_tax_saving >= MATERIALITY_THRESHOLD) {
+      insights.push({
+        type: 'tax_leakage',
+        statement: `${opp.description} — saves ~£${opp.annual_tax_saving.toLocaleString()}/year`,
+        annualImpact: opp.annual_tax_saving,
+        cause: `${opp.type.replace(/_/g, ' ')} detected by tax analysis`,
+        implication: `Each year this remains unaddressed, £${opp.annual_tax_saving.toLocaleString()} is lost to unnecessary tax`,
+        linkedMoveCategory: 'allocate',
+        confidence: opp.confidence,
+        priority: 2,
+      });
+    }
+  }
+
+  // IHT exposure insight
+  if (estate.iht_liability > 0) {
+    insights.push({
+      type: 'cross_system_distortion',
+      statement: `Estimated IHT exposure of £${estate.iht_liability.toLocaleString()} on a £${estate.estimated_estate_value.toLocaleString()} estate`,
+      annualImpact: Math.round(estate.iht_liability / 10), // amortised over 10yr planning horizon
+      longTermImpact: estate.iht_liability,
+      cause: `Estate value exceeds available nil rate bands (£${(estate.nil_rate_band_available + estate.residence_nil_rate_band_available).toLocaleString()})`,
+      implication: `Without planning, 40% of the excess goes to HMRC on transfer`,
+      linkedMoveCategory: 'allocate',
+      confidence: 0.70,
+      priority: 4,
+    });
+  }
+
+  return insights;
+}
+
 export function detectInsights(
   systemMap: SystemMap,
   profile: FinancialProfile,
   moves: Move[],
   debtAccounts: DebtAccount[],
+  taxEstateOutput?: TaxEstateOutput | null,
 ): Insight[] {
+  // When the tax_estate agent has run, delegate tax insights to it
+  const useTaxAgent = !!taxEstateOutput;
+
   const detectors = [
     () => detectIdleCapitalDrag(systemMap, profile),
-    () => detectTaxLeakage(systemMap, profile),
+    // Skip local tax_leakage if the tax agent produced richer output
+    ...(!useTaxAgent ? [() => detectTaxLeakage(systemMap, profile)] : []),
     () => detectDebtReturnMismatch(systemMap, debtAccounts),
     () => detectLiquidityInefficiency(systemMap, profile),
     () => detectCrossSystemDistortion(systemMap, profile, debtAccounts),
@@ -446,6 +512,12 @@ export function detectInsights(
   ];
 
   const insights: Insight[] = [];
+
+  // Add tax_estate agent insights (deduplicated — replaces local tax_leakage)
+  if (useTaxAgent) {
+    insights.push(...taxEstateToInsights(taxEstateOutput!));
+  }
+
   for (const detect of detectors) {
     const insight = detect();
     if (insight && insight.annualImpact >= MATERIALITY_THRESHOLD) {

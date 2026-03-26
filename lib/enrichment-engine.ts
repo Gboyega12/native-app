@@ -28,6 +28,7 @@ import type {
   EconomicType,
   ValidationResult,
   ValidationFlag,
+  TaxSignal,
 } from './types';
 
 // ── Phase 1A: Economic Type Mapping ──
@@ -54,6 +55,107 @@ function deriveEconomicType(tx: EnrichedTransaction): EconomicType {
   }
 
   return 'discretionary';
+}
+
+// ── Tax Signal Extraction ──
+// Scans enriched transactions for structured tax-relevant signals.
+// These feed directly into the tax_estate agent without it needing to
+// reconstruct from keyword search.
+
+function extractTaxSignals(transactions: EnrichedTransaction[]): TaxSignal[] {
+  const signals: TaxSignal[] = [];
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - ANALYSIS_MONTHS);
+  const recent = transactions.filter((t) => new Date(t.date) >= cutoff);
+
+  // Pattern matchers
+  const patterns: Array<{
+    type: TaxSignal['type'];
+    test: (tx: EnrichedTransaction) => boolean;
+    getAmount: (tx: EnrichedTransaction) => number;
+  }> = [
+    {
+      type: 'pension_contribution',
+      test: (tx) => tx.amount < 0 && !!(tx.description || '').toLowerCase().match(/\bpension|sipp\b/) && tx.economicType === 'investment',
+      getAmount: (tx) => Math.abs(tx.amount),
+    },
+    {
+      type: 'salary_sacrifice',
+      test: (tx) => tx.amount < 0 && !!(tx.description || '').toLowerCase().match(/\bsalary\s*sacrifice|sal\s*sac\b/),
+      getAmount: (tx) => Math.abs(tx.amount),
+    },
+    {
+      type: 'employer_pension',
+      test: (tx) => tx.amount > 0 && !!(tx.description || '').toLowerCase().match(/\bemployer\s*pension|workplace\s*pension\b/),
+      getAmount: (tx) => tx.amount,
+    },
+    {
+      type: 'isa_contribution',
+      test: (tx) => tx.amount < 0 && (
+        !!(tx.description || '').toLowerCase().match(/\bisa\b/) ||
+        (tx.category === 'Savings' && !!(tx.merchant || '').toLowerCase().match(/\bisa\b/))
+      ),
+      getAmount: (tx) => Math.abs(tx.amount),
+    },
+    {
+      type: 'dividend_income',
+      test: (tx) => tx.amount > 0 && !!(tx.description || '').toLowerCase().match(/\bdividend|div\s*(?:payment|income)\b/),
+      getAmount: (tx) => tx.amount,
+    },
+    {
+      type: 'interest_income',
+      test: (tx) => tx.amount > 0 && !!(tx.description || '').toLowerCase().match(/\binterest\s*(?:paid|payment|income)\b/),
+      getAmount: (tx) => tx.amount,
+    },
+    {
+      type: 'self_assessment',
+      test: (tx) => tx.amount < 0 && !!(tx.description || '').toLowerCase().match(/\bhmrc|self\s*assess|tax\s*(?:payment|refund)\b/),
+      getAmount: (tx) => Math.abs(tx.amount),
+    },
+    {
+      type: 'capital_gain',
+      test: (tx) => tx.amount > 0 && tx.economicType === 'investment' && !!(tx.description || '').toLowerCase().match(/\bsale|sold|dispose|withdraw/),
+      getAmount: (tx) => tx.amount,
+    },
+    {
+      type: 'gift_payment',
+      test: (tx) => tx.amount < 0 && !!(tx.description || '').toLowerCase().match(/\bgift|present\b/) && Math.abs(tx.amount) >= 250,
+      getAmount: (tx) => Math.abs(tx.amount),
+    },
+  ];
+
+  for (const pattern of patterns) {
+    const matches = recent.filter(pattern.test);
+    if (matches.length === 0) continue;
+
+    const totalAmount = matches.reduce((sum, tx) => sum + pattern.getAmount(tx), 0);
+    const months = ANALYSIS_MONTHS || 3;
+    const monthlyAmount = Math.round(totalAmount / months);
+    const annualAmount = monthlyAmount * 12;
+
+    // Confidence based on transaction count and consistency
+    const confidence = matches.length >= 6 ? 0.95
+      : matches.length >= 3 ? 0.80
+      : matches.length >= 2 ? 0.65
+      : 0.45;
+
+    // Source pattern from most common merchant/description
+    const descriptions = matches.map((tx) => tx.merchant || tx.description);
+    const descCounts = new Map<string, number>();
+    for (const d of descriptions) descCounts.set(d, (descCounts.get(d) || 0) + 1);
+    const sourcePattern = [...descCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+
+    signals.push({
+      type: pattern.type,
+      annualAmount,
+      monthlyAmount,
+      transactionCount: matches.length,
+      confidence,
+      sourcePattern,
+    });
+  }
+
+  return signals;
 }
 
 // ── Phase 1B: Confidence Score Mapping ──
@@ -175,6 +277,9 @@ const EnrichmentEngine = {
       ? this.detectEssentialGaps(profile, identity, debtAccounts, undefined, verifiedBills)
       : undefined;
 
+    // Extract structured tax signals for tax_estate agent consumption
+    const taxSignals = extractTaxSignals(enriched);
+
     return {
       profile,
       segment,
@@ -185,6 +290,7 @@ const EnrichmentEngine = {
       enrichmentMetrics,
       essentialGaps,
       verifiedBills: verifiedBills.length > 0 ? verifiedBills : undefined,
+      taxSignals: taxSignals.length > 0 ? taxSignals : undefined,
     };
   },
 
@@ -217,6 +323,8 @@ const EnrichmentEngine = {
       ? this.detectEssentialGaps(profile, identity, debtAccounts, undefined, verifiedBills)
       : undefined;
 
+    const taxSignals = extractTaxSignals(enriched);
+
     return {
       profile,
       segment,
@@ -227,6 +335,7 @@ const EnrichmentEngine = {
       enrichmentMetrics,
       essentialGaps,
       verifiedBills: verifiedBills.length > 0 ? verifiedBills : undefined,
+      taxSignals: taxSignals.length > 0 ? taxSignals : undefined,
     };
   },
 

@@ -283,6 +283,21 @@ export function rankMoves(
       score *= 0.5;
     }
 
+    // Tax wrapper priority — boost moves that target optimal wrappers
+    // ISA > Pension > GIA priority. Moves with taxContext get a scoring boost
+    // proportional to their tax saving and wrapper optimality.
+    if (move.taxContext) {
+      const wrapperBoosts: Record<string, number> = { isa: 1.20, pension: 1.15, gia: 0.95, cash: 0.90 };
+      const wrapperMult = wrapperBoosts[move.taxContext.targetWrapper] ?? 1.0;
+      score *= wrapperMult;
+
+      // Additional boost scaled by marginal rate — higher-rate taxpayers
+      // benefit more from tax-efficient wrapper allocation
+      if (signals.marginalRate >= 0.40 && move.taxContext.wrapperTaxSaving > 0) {
+        score *= 1 + Math.min(0.3, move.taxContext.wrapperTaxSaving / 5000);
+      }
+    }
+
     // Monte Carlo consistency — reward reliable moves
     let riskAdjustedImpact: number | undefined;
     let consistencyScore: number | undefined;
