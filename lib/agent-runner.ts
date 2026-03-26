@@ -17,6 +17,7 @@ import type {
   FinancialAnalystOutput,
   AllocationOutput,
   RiskOutput,
+  TaxEstateOutput,
   WealthManagerOutput,
 } from './agent-registry';
 
@@ -108,6 +109,8 @@ export class AgentRunnerImpl implements IAgentRunner {
         return this.runAllocation(context);
       case 'risk_investment':
         return this.runRiskInvestment(context);
+      case 'tax_estate':
+        return this.runTaxEstate(context);
       case 'wealth_manager':
         return this.runWealthManager(context);
       default:
@@ -443,6 +446,203 @@ export class AgentRunnerImpl implements IAgentRunner {
     };
   }
 
+  // ── Tax & Estate Planning Agent ──
+  // Tools: calculate_tax_position, simulate_estate_iht
+  // Role: Evaluate tax efficiency and IHT exposure
+
+  private async runTaxEstate(context: PipelineContext): Promise<TaxEstateOutput> {
+    const profile = this.cache.profile!;
+    const accounts = this.cache.accounts!;
+    const transactions = this.cache.transactions!;
+    const debtAccounts = this.cache.debtAccounts!;
+    const identity = this.cache.identity;
+
+    // Tool: get_user_balance_sheet (from cache)
+    this.tracker.markCalled('get_user_balance_sheet');
+
+    // Tool: get_enriched_transactions (from cache)
+    this.tracker.markCalled('get_enriched_transactions');
+
+    // Tool: calculate_tax_position
+    // Assess wrapper utilisation and tax drag
+
+    // ISA utilisation
+    const isaUsed = accounts.isa?.total || 0;
+    const isaAllowance = 20000;
+    const isaRemaining = Math.max(0, isaAllowance - isaUsed);
+
+    // Pension analysis
+    const pensionContributions = transactions
+      .filter((t) => t.economicType === 'asset_transfer' || t.economicType === 'investment')
+      .filter((t) => {
+        const desc = (t.description || '').toLowerCase();
+        return desc.includes('pension') || desc.includes('sipp');
+      })
+      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+
+    // Estimate marginal tax rate from income
+    const annualIncome = profile.monthly.income * 12;
+    let marginalRate = 0.20;
+    if (annualIncome > 125140) marginalRate = 0.45;
+    else if (annualIncome > 50270) marginalRate = 0.40;
+
+    const pensionReliefCaptured = pensionContributions * marginalRate;
+
+    // CGT position (estimate from transaction data)
+    const investmentTx = transactions.filter(
+      (t) => t.economicType === 'investment' || t.economicType === 'asset_transfer',
+    );
+    const realisedGains = investmentTx
+      .filter((t) => t.amount > 0)
+      .reduce((sum, t) => sum + t.amount * 0.1, 0); // Estimate 10% gain on positive flows
+    const cgtAllowance = 3000;
+    const cgtAllowanceRemaining = Math.max(0, cgtAllowance - realisedGains);
+
+    // Calculate tax drag
+    const giaAssets = accounts.investments?.total || 0;
+    const estimatedGiaReturn = giaAssets * 0.07; // 7% expected return
+    const taxDragOnGia = estimatedGiaReturn * marginalRate * 0.5; // Blended CGT/dividend rate
+    const annualTaxDrag = taxDragOnGia + (isaRemaining > 0 ? isaRemaining * 0.07 * marginalRate * 0.2 : 0);
+
+    const effectiveTaxRate = annualIncome > 0
+      ? (annualIncome * marginalRate - pensionReliefCaptured) / annualIncome
+      : 0;
+
+    // Identify optimisation opportunities
+    const opportunities: TaxEstateOutput['tax_analysis']['optimisation_opportunities'] = [];
+
+    if (isaRemaining > 1000) {
+      opportunities.push({
+        type: 'isa_underutilisation',
+        description: `£${isaRemaining.toLocaleString()} ISA allowance unused — tax-free growth foregone`,
+        annual_tax_saving: isaRemaining * 0.07 * marginalRate,
+        confidence: 0.95,
+      });
+    }
+
+    if (pensionContributions < annualIncome * 0.05 && annualIncome > 50270) {
+      const optimalContrib = annualIncome * 0.10;
+      const additionalRelief = (optimalContrib - pensionContributions) * marginalRate;
+      opportunities.push({
+        type: 'pension_relief_unclaimed',
+        description: `Pension contributions below optimal — £${Math.round(additionalRelief).toLocaleString()}/year tax relief unclaimed`,
+        annual_tax_saving: additionalRelief,
+        confidence: 0.85,
+      });
+    }
+
+    if (cgtAllowanceRemaining > 0 && giaAssets > 10000) {
+      opportunities.push({
+        type: 'cgt_allowance_unused',
+        description: `£${cgtAllowanceRemaining.toLocaleString()} CGT allowance unused — consider realising gains`,
+        annual_tax_saving: cgtAllowanceRemaining * 0.20, // 20% CGT rate
+        confidence: 0.70,
+      });
+    }
+
+    if (giaAssets > isaRemaining && isaRemaining > 0) {
+      opportunities.push({
+        type: 'bed_and_isa_opportunity',
+        description: `£${Math.min(giaAssets, isaRemaining).toLocaleString()} could be moved from GIA to ISA via bed-and-ISA`,
+        annual_tax_saving: Math.min(giaAssets, isaRemaining) * 0.07 * marginalRate,
+        confidence: 0.80,
+      });
+    }
+
+    this.tracker.markCalled('calculate_tax_position');
+
+    // Tool: simulate_estate_iht
+    // Calculate estate value and IHT exposure
+    const totalCash = accounts.cash?.total || 0;
+    const totalSavings = accounts.savings?.total || 0;
+    const totalInvestments = (accounts.investments?.total || 0) + isaUsed;
+    const totalPension = accounts.pension?.total || 0;
+    const totalDebt = debtAccounts.reduce((s, d) => s + (d.outstanding_balance || 0), 0);
+
+    // Pensions are generally outside estate for IHT
+    const estateValue = totalCash + totalSavings + totalInvestments - totalDebt;
+    const nilRateBand = 325000;
+    const residenceNilRateBand = 175000; // Assume main residence qualifies
+    const totalNRB = nilRateBand + residenceNilRateBand;
+    const taxableEstate = Math.max(0, estateValue - totalNRB);
+    const ihtLiability = taxableEstate * 0.40;
+
+    // Gifting recommendations
+    const giftingRecs: TaxEstateOutput['estate_analysis']['gifting_recommendations'] = [];
+
+    if (ihtLiability > 0) {
+      // Annual exemption
+      giftingRecs.push({
+        action: 'Use annual gifting exemption (£3,000/year)',
+        amount: 3000,
+        iht_saving: 3000 * 0.40,
+        time_horizon: 'Immediate — exempt from day one',
+      });
+
+      // PET strategy
+      if (estateValue > totalNRB + 100000) {
+        const petAmount = Math.min(
+          Math.round((estateValue - totalNRB) * 0.3),
+          profile.monthly.surplus * 12 * 3, // Don't exceed 3 years surplus
+        );
+        if (petAmount > 5000) {
+          giftingRecs.push({
+            action: `Make Potentially Exempt Transfer of £${petAmount.toLocaleString()}`,
+            amount: petAmount,
+            iht_saving: petAmount * 0.40,
+            time_horizon: '7 years to full exemption (taper relief from year 3)',
+          });
+        }
+      }
+
+      // Pension maximisation
+      if (totalPension < annualIncome * 5) {
+        giftingRecs.push({
+          action: 'Maximise pension contributions — pensions sit outside estate for IHT',
+          amount: Math.round(annualIncome * 0.15),
+          iht_saving: Math.round(annualIncome * 0.15 * 0.40),
+          time_horizon: 'Ongoing — reduces estate value each year',
+        });
+      }
+    }
+
+    this.tracker.markCalled('simulate_estate_iht');
+
+    // Verify required tools
+    const missing = this.tracker.verifyAgent('tax_estate');
+    if (missing.length > 0) {
+      throw new Error(`Tax & Estate Agent failed to call required tools: ${missing.join(', ')}`);
+    }
+
+    return {
+      tax_analysis: {
+        effective_tax_rate: Math.round(effectiveTaxRate * 1000) / 1000,
+        annual_tax_drag: Math.round(annualTaxDrag),
+        wrapper_utilisation: {
+          isa_used: Math.round(isaUsed),
+          isa_remaining: Math.round(isaRemaining),
+          pension_contributed: Math.round(pensionContributions),
+          pension_relief_captured: Math.round(pensionReliefCaptured),
+        },
+        cgt_position: {
+          realised_gains: Math.round(realisedGains),
+          unrealised_gains: Math.round(giaAssets * 0.15), // Estimate 15% unrealised gain
+          allowance_remaining: Math.round(cgtAllowanceRemaining),
+          losses_available: 0, // Would need historical data
+        },
+        optimisation_opportunities: opportunities,
+      },
+      estate_analysis: {
+        estimated_estate_value: Math.round(estateValue),
+        iht_liability: Math.round(ihtLiability),
+        nil_rate_band_available: nilRateBand,
+        residence_nil_rate_band_available: residenceNilRateBand,
+        active_pets: [], // Would need PET tracking data from user
+        gifting_recommendations: giftingRecs,
+      },
+    };
+  }
+
   // ── Wealth Manager Agent ──
   // Tools: generate_recommendation, rank_recommendations
   // Role: Convert agent outputs into user-facing recommendations
@@ -455,6 +655,7 @@ export class AgentRunnerImpl implements IAgentRunner {
     const insights = this.cache.insights || [];
     const allocations = context.allocation?.allocations || [];
     const riskOutput = context.riskInvestment;
+    const taxEstateOutput = context.taxEstate;
     const cohort = this.cache.cohort || 'foundation';
 
     // Tool: generate_recommendation
@@ -515,6 +716,33 @@ export class AgentRunnerImpl implements IAgentRunner {
           ? Math.round(riskOutput.median_outcome - riskOutput.downside)
           : Math.round(insight.annualImpact * 0.2),
       });
+    }
+
+    // Incorporate tax & estate optimisation opportunities
+    if (taxEstateOutput) {
+      for (const opp of taxEstateOutput.tax_analysis.optimisation_opportunities) {
+        if (opp.annual_tax_saving < 50) continue; // Skip immaterial
+        recommendations.push({
+          action: opp.description,
+          amount: Math.round(opp.annual_tax_saving),
+          source: 'Tax optimisation',
+          destination: opp.type.replace(/_/g, ' '),
+          expected_impact: Math.round(opp.annual_tax_saving),
+          downside_risk: 0, // Tax savings are generally guaranteed
+        });
+      }
+
+      for (const gift of taxEstateOutput.estate_analysis.gifting_recommendations) {
+        if (gift.iht_saving < 100) continue;
+        recommendations.push({
+          action: gift.action,
+          amount: gift.amount,
+          source: 'Estate planning',
+          destination: 'IHT reduction',
+          expected_impact: Math.round(gift.iht_saving),
+          downside_risk: Math.round(gift.iht_saving * 0.1), // Longevity risk
+        });
+      }
     }
 
     this.tracker.markCalled('generate_recommendation');

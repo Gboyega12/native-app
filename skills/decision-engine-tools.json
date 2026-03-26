@@ -257,6 +257,154 @@
       ]
     },
 
+    "tax_estate_engine": {
+      "description": "Layer 2b — Tax optimisation and estate planning calculations. Evaluates tax efficiency, models IHT exposure, and generates estate strategies.",
+      "tools": [
+        {
+          "name": "calculate_tax_position",
+          "description": "Calculates the user's current tax position across all tax types (income, CGT, dividend, IHT). Evaluates wrapper utilisation and identifies optimisation opportunities.",
+          "source": "lib/tax-engine.ts → calculateTaxPosition(), skills/tax-optimisation.md",
+          "inputs": {
+            "balance_sheet": {
+              "type": "object",
+              "required": true,
+              "description": "Output of get_user_balance_sheet",
+              "schema": "$ref:get_user_balance_sheet.output"
+            },
+            "transactions": {
+              "type": "object",
+              "required": true,
+              "description": "Output of get_enriched_transactions",
+              "schema": "$ref:get_enriched_transactions.output"
+            },
+            "tax_year": {
+              "type": "string",
+              "required": false,
+              "description": "Tax year to calculate for (e.g. '2025-26'). Defaults to current tax year."
+            }
+          },
+          "output": {
+            "effective_tax_rate": { "type": "number", "description": "Overall effective tax rate as decimal" },
+            "annual_tax_drag": { "type": "number", "description": "£/year total tax drag across all wrappers" },
+            "wrapper_utilisation": {
+              "type": "object",
+              "properties": {
+                "isa_used": { "type": "number", "description": "£ of ISA allowance used this tax year" },
+                "isa_remaining": { "type": "number", "description": "£ of ISA allowance remaining" },
+                "pension_contributed": { "type": "number", "description": "£ pension contributions this tax year" },
+                "pension_relief_captured": { "type": "number", "description": "£ tax relief captured from pension contributions" }
+              }
+            },
+            "cgt_position": {
+              "type": "object",
+              "properties": {
+                "realised_gains": { "type": "number", "description": "£ realised capital gains this tax year" },
+                "unrealised_gains": { "type": "number", "description": "£ unrealised capital gains across GIA holdings" },
+                "allowance_remaining": { "type": "number", "description": "£ of CGT annual allowance remaining (max £3,000)" },
+                "losses_available": { "type": "number", "description": "£ of capital losses available for offset" }
+              }
+            },
+            "optimisation_opportunities": {
+              "type": "array",
+              "items": {
+                "type": {
+                  "type": "string",
+                  "enum": ["isa_underutilisation", "pension_relief_unclaimed", "cgt_allowance_unused", "loss_harvesting", "asset_location_suboptimal", "dividend_allowance_unused", "bed_and_isa_opportunity"]
+                },
+                "description": { "type": "string" },
+                "annual_tax_saving": { "type": "number", "description": "£/year tax saving if acted upon" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+              }
+            }
+          },
+          "rules": [
+            "Must use current UK tax rates and bands",
+            "Must be called before any tax-related recommendation",
+            "Must consider interaction between income tax, CGT, and dividend tax",
+            "Must not recommend aggressive avoidance schemes",
+            "Requires get_user_balance_sheet and get_enriched_transactions to have been called first"
+          ]
+        },
+        {
+          "name": "simulate_estate_iht",
+          "description": "Simulates inheritance tax liability under multiple estate planning scenarios. Models gifting strategies, trust structures, and pension as estate tool.",
+          "source": "lib/tax-engine.ts → simulateEstateIHT(), skills/estate-planning.md, skills/quant-models.md",
+          "inputs": {
+            "balance_sheet": {
+              "type": "object",
+              "required": true,
+              "description": "Output of get_user_balance_sheet",
+              "schema": "$ref:get_user_balance_sheet.output"
+            },
+            "constraints": {
+              "type": "object",
+              "required": false,
+              "description": "Output of get_user_constraints",
+              "schema": "$ref:get_user_constraints.output"
+            },
+            "existing_pets": {
+              "type": "array",
+              "required": false,
+              "description": "Array of existing Potentially Exempt Transfers",
+              "items": {
+                "amount": { "type": "number" },
+                "date": { "type": "string", "format": "date" },
+                "recipient": { "type": "string" }
+              }
+            },
+            "marital_status": {
+              "type": "string",
+              "required": false,
+              "enum": ["single", "married", "civil_partnership", "widowed"],
+              "description": "Affects nil rate band transferability"
+            }
+          },
+          "output": {
+            "estimated_estate_value": { "type": "number", "description": "Total estate value for IHT purposes (£)" },
+            "iht_liability": { "type": "number", "description": "£ IHT payable under current structure" },
+            "nil_rate_band_available": { "type": "number", "description": "£ NRB available (£325,000 base, potentially doubled)" },
+            "residence_nil_rate_band_available": { "type": "number", "description": "£ RNRB available (£175,000 base, conditions apply)" },
+            "active_pets": {
+              "type": "array",
+              "items": {
+                "amount": { "type": "number" },
+                "date": { "type": "string" },
+                "years_remaining": { "type": "number", "description": "Years until PET becomes fully exempt" },
+                "taper_relief_pct": { "type": "number", "description": "% taper relief currently applicable" }
+              }
+            },
+            "scenarios": {
+              "type": "array",
+              "description": "Comparison of estate planning strategies",
+              "items": {
+                "strategy": { "type": "string", "enum": ["no_action", "maximum_gifting", "trust_plus_gifting", "pension_maximisation", "combined_optimal"] },
+                "iht_liability": { "type": "number" },
+                "estate_to_beneficiaries": { "type": "number" },
+                "iht_saving_vs_baseline": { "type": "number" }
+              }
+            },
+            "gifting_recommendations": {
+              "type": "array",
+              "items": {
+                "action": { "type": "string" },
+                "amount": { "type": "number" },
+                "iht_saving": { "type": "number" },
+                "time_horizon": { "type": "string" }
+              }
+            }
+          },
+          "rules": [
+            "Must use current UK IHT thresholds (NRB £325,000, RNRB £175,000)",
+            "Must model at least 3 scenarios (no_action, maximum_gifting, combined_optimal)",
+            "Must track PETs with 7-year rule and taper relief",
+            "Must ensure lifestyle is never compromised for estate optimisation",
+            "Must consider pension as estate planning vehicle (outside estate)",
+            "Requires get_user_balance_sheet to have been called first"
+          ]
+        }
+      ]
+    },
+
     "insight_engine": {
       "description": "Layer 3 — Detects financial inefficiencies and quantifies their economic impact.",
       "tools": [
@@ -530,6 +678,11 @@
       { "from": "calculate_liquidity_position", "to": "generate_recommendation" },
       { "from": "calculate_lamu_score",         "to": "generate_recommendation" },
       { "from": "detect_inefficiencies",        "to": "generate_recommendation" },
+      { "from": "get_user_balance_sheet",      "to": "calculate_tax_position" },
+      { "from": "get_enriched_transactions",   "to": "calculate_tax_position" },
+      { "from": "get_user_balance_sheet",      "to": "simulate_estate_iht" },
+      { "from": "calculate_tax_position",       "to": "generate_recommendation" },
+      { "from": "simulate_estate_iht",          "to": "generate_recommendation" },
       { "from": "generate_recommendation",      "to": "rank_recommendations" },
       { "from": "rank_recommendations",         "to": "generate_growth_report" },
       { "from": "get_user_balance_sheet",       "to": "generate_growth_report" }

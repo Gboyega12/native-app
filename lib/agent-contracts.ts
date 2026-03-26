@@ -145,6 +145,28 @@ function checkHardRules(agentId: AgentId, output: AgentOutput): string[] {
       break;
     }
 
+    case 'tax_estate': {
+      // Must NOT contain recommendations, user-facing text, or allocation decisions
+      if ('recommendations' in o) violations.push('Tax & Estate Agent must NOT produce recommendations');
+      if ('user_message' in o) violations.push('Tax & Estate Agent must NOT communicate with user');
+      if ('allocations' in o) violations.push('Tax & Estate Agent must NOT make allocation decisions');
+      if ('simulations' in o) violations.push('Tax & Estate Agent must NOT run risk simulations');
+      // Validate tax_analysis has required structure
+      const taxAnalysis = o.tax_analysis as Record<string, unknown> | undefined;
+      if (taxAnalysis) {
+        if (typeof taxAnalysis.annual_tax_drag !== 'number') {
+          violations.push('Tax & Estate Agent must quantify annual_tax_drag');
+        }
+      }
+      const estateAnalysis = o.estate_analysis as Record<string, unknown> | undefined;
+      if (estateAnalysis) {
+        if (typeof estateAnalysis.iht_liability !== 'number') {
+          violations.push('Tax & Estate Agent must quantify iht_liability');
+        }
+      }
+      break;
+    }
+
     case 'wealth_manager': {
       // Must NOT expose raw data
       if ('raw_transactions' in o) violations.push('Wealth Manager must NOT expose raw data');
@@ -204,6 +226,8 @@ export function checkAgentBoundary(
     allocations: 'allocation',
     median_outcome: 'risk_investment',
     probability_of_success: 'risk_investment',
+    tax_analysis: 'tax_estate',
+    estate_analysis: 'tax_estate',
     recommendations: 'wealth_manager',
     report: 'growth',
   };

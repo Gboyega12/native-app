@@ -9,6 +9,7 @@ export type AgentId =
   | 'financial_analyst'
   | 'allocation'
   | 'risk_investment'
+  | 'tax_estate'
   | 'wealth_manager'
   | 'growth';
 
@@ -24,6 +25,8 @@ export type ToolId =
   | 'compare_debt_vs_investment'
   | 'detect_inefficiencies'
   | 'quantify_opportunity_cost'
+  | 'calculate_tax_position'
+  | 'simulate_estate_iht'
   | 'generate_recommendation'
   | 'rank_recommendations'
   | 'generate_growth_report';
@@ -41,7 +44,10 @@ export type SkillId =
   | 'user_cohorts'
   | 'app_behaviour'
   | 'chat_engine'
-  | 'growth_product';
+  | 'growth_product'
+  | 'tax_optimisation'
+  | 'estate_planning'
+  | 'quant_models';
 
 // ── Agent output schemas (for contract validation) ──
 
@@ -120,6 +126,55 @@ export interface GrowthAgentOutput {
   };
 }
 
+export interface TaxOptimisationOpportunity {
+  type: string;
+  description: string;
+  annual_tax_saving: number;
+  confidence: number;
+}
+
+export interface ActivePET {
+  amount: number;
+  date: string;
+  years_remaining: number;
+  taper_relief_pct: number;
+}
+
+export interface GiftingRecommendation {
+  action: string;
+  amount: number;
+  iht_saving: number;
+  time_horizon: string;
+}
+
+export interface TaxEstateOutput {
+  tax_analysis: {
+    effective_tax_rate: number;
+    annual_tax_drag: number;
+    wrapper_utilisation: {
+      isa_used: number;
+      isa_remaining: number;
+      pension_contributed: number;
+      pension_relief_captured: number;
+    };
+    cgt_position: {
+      realised_gains: number;
+      unrealised_gains: number;
+      allowance_remaining: number;
+      losses_available: number;
+    };
+    optimisation_opportunities: TaxOptimisationOpportunity[];
+  };
+  estate_analysis: {
+    estimated_estate_value: number;
+    iht_liability: number;
+    nil_rate_band_available: number;
+    residence_nil_rate_band_available: number;
+    active_pets: ActivePET[];
+    gifting_recommendations: GiftingRecommendation[];
+  };
+}
+
 // ── Agent output union ──
 
 export type AgentOutput =
@@ -127,6 +182,7 @@ export type AgentOutput =
   | FinancialAnalystOutput
   | AllocationOutput
   | RiskOutput
+  | TaxEstateOutput
   | WealthManagerOutput
   | GrowthAgentOutput;
 
@@ -272,6 +328,56 @@ function validateGrowthAgent(output: unknown): { valid: boolean; errors: string[
   return { valid: errors.length === 0, errors };
 }
 
+function validateTaxEstate(output: unknown): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  const o = output as Record<string, unknown>;
+  if (!o || typeof o !== 'object') return { valid: false, errors: ['Output must be an object'] };
+
+  // Validate tax_analysis
+  const tax = o.tax_analysis as Record<string, unknown> | undefined;
+  if (!tax || typeof tax !== 'object') {
+    errors.push('tax_analysis must be an object');
+  } else {
+    if (typeof tax.effective_tax_rate !== 'number') errors.push('tax_analysis.effective_tax_rate must be a number');
+    if (typeof tax.annual_tax_drag !== 'number') errors.push('tax_analysis.annual_tax_drag must be a number');
+    const wrapper = tax.wrapper_utilisation as Record<string, unknown> | undefined;
+    if (!wrapper || typeof wrapper !== 'object') {
+      errors.push('tax_analysis.wrapper_utilisation must be an object');
+    } else {
+      if (typeof wrapper.isa_used !== 'number') errors.push('wrapper_utilisation.isa_used must be a number');
+      if (typeof wrapper.isa_remaining !== 'number') errors.push('wrapper_utilisation.isa_remaining must be a number');
+    }
+    const cgt = tax.cgt_position as Record<string, unknown> | undefined;
+    if (!cgt || typeof cgt !== 'object') {
+      errors.push('tax_analysis.cgt_position must be an object');
+    } else {
+      if (typeof cgt.allowance_remaining !== 'number') errors.push('cgt_position.allowance_remaining must be a number');
+    }
+    if (!Array.isArray(tax.optimisation_opportunities)) {
+      errors.push('tax_analysis.optimisation_opportunities must be an array');
+    } else {
+      for (const opp of tax.optimisation_opportunities as Record<string, unknown>[]) {
+        if (typeof opp.annual_tax_saving !== 'number') errors.push('Each opportunity must have annual_tax_saving as number');
+        if (typeof opp.confidence !== 'number') errors.push('Each opportunity must have confidence as number');
+      }
+    }
+  }
+
+  // Validate estate_analysis
+  const estate = o.estate_analysis as Record<string, unknown> | undefined;
+  if (!estate || typeof estate !== 'object') {
+    errors.push('estate_analysis must be an object');
+  } else {
+    if (typeof estate.estimated_estate_value !== 'number') errors.push('estate_analysis.estimated_estate_value must be a number');
+    if (typeof estate.iht_liability !== 'number') errors.push('estate_analysis.iht_liability must be a number');
+    if (typeof estate.nil_rate_band_available !== 'number') errors.push('estate_analysis.nil_rate_band_available must be a number');
+    if (!Array.isArray(estate.active_pets)) errors.push('estate_analysis.active_pets must be an array');
+    if (!Array.isArray(estate.gifting_recommendations)) errors.push('estate_analysis.gifting_recommendations must be an array');
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
 // ── Registry ──
 
 export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
@@ -347,6 +453,29 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     validateOutput: validateRiskInvestment,
   },
 
+  tax_estate: {
+    id: 'tax_estate',
+    name: 'Tax & Estate Planning Agent',
+    role: 'Tax and estate intelligence layer — evaluates tax efficiency and IHT exposure',
+    requiredTools: [
+      'get_user_balance_sheet',
+      'get_enriched_transactions',
+      'calculate_tax_position',
+      'simulate_estate_iht',
+    ],
+    optionalTools: ['get_user_constraints', 'calculate_liquidity_position'],
+    skills: ['tax_optimisation', 'estate_planning', 'quant_models', 'financial_models'],
+    dependsOn: ['financial_analyst', 'allocation'],
+    hardRules: [
+      'No user-facing communication',
+      'No allocation decisions',
+      'No risk simulation',
+      'Must not override tax wrapper priority: ISA > Pension > GIA',
+      'Must comply with HMRC regulations — no avoidance schemes',
+    ],
+    validateOutput: validateTaxEstate,
+  },
+
   wealth_manager: {
     id: 'wealth_manager',
     name: 'Wealth Manager Agent',
@@ -354,7 +483,7 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     requiredTools: ['generate_recommendation', 'rank_recommendations'],
     optionalTools: [],
     skills: ['recommendation_engine', 'bocy_philosophy', 'tone', 'user_cohorts'],
-    dependsOn: ['financial_analyst', 'allocation', 'risk_investment'],
+    dependsOn: ['financial_analyst', 'allocation', 'risk_investment', 'tax_estate'],
     hardRules: [
       'Only agent allowed to produce user-facing output',
       'No raw data exposure',
@@ -388,6 +517,7 @@ export const EXECUTION_ORDER: AgentId[] = [
   'financial_analyst',
   'allocation',
   'risk_investment',
+  'tax_estate',
   'wealth_manager',
   'growth',
 ];

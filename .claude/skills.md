@@ -69,3 +69,6 @@ Every skill file is mandatory and must be followed without exception:
 - `skills/app-behaviour.md` — User-facing app behaviour and UX rules
 - `skills/tone.md` — Communication style and language rules
 - `skills/user-cohorts.md` — Target user segmentation
+- `skills/tax-optimisation.md` — Tax planning engine (UK): wrappers, CGT, income structuring, continuous monitoring
+- `skills/estate-planning.md` — Estate planning engine (UK): IHT framework, gifting, trusts, pension as estate tool
+- `skills/quant-models.md` — Tax-aware quant models: Monte Carlo, asset location, withdrawal optimisation, IHT simulation

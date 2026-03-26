@@ -13,6 +13,7 @@ import {
   type FinancialAnalystOutput,
   type AllocationOutput,
   type RiskOutput,
+  type TaxEstateOutput,
   type WealthManagerOutput,
   type GrowthAgentOutput,
   type ToolId,
@@ -24,7 +25,7 @@ import {
 export interface PipelineInputs {
   userId: string;
   /** If provided, orchestrator may skip agents not needed for this query */
-  queryIntent?: 'full_analysis' | 'quick_check' | 'debt_only' | 'allocation_only';
+  queryIntent?: 'full_analysis' | 'quick_check' | 'debt_only' | 'allocation_only' | 'tax_estate_only';
 }
 
 export interface AgentResult {
@@ -103,6 +104,7 @@ export interface PipelineContext {
   financialAnalyst?: FinancialAnalystOutput;
   allocation?: AllocationOutput;
   riskInvestment?: RiskOutput;
+  taxEstate?: TaxEstateOutput;
   wealthManager?: WealthManagerOutput;
   growth?: GrowthAgentOutput;
 }
@@ -345,6 +347,9 @@ export class AgentOrchestrator {
       case 'allocation_only':
         return ['data_integrity', 'allocation', 'risk_investment', 'wealth_manager'];
 
+      case 'tax_estate_only':
+        return ['data_integrity', 'financial_analyst', 'allocation', 'tax_estate', 'wealth_manager'];
+
       default:
         return [...EXECUTION_ORDER];
     }
@@ -393,6 +398,9 @@ export class AgentOrchestrator {
         break;
       case 'risk_investment':
         context.riskInvestment = output as RiskOutput;
+        break;
+      case 'tax_estate':
+        context.taxEstate = output as TaxEstateOutput;
         break;
       case 'wealth_manager':
         context.wealthManager = output as WealthManagerOutput;

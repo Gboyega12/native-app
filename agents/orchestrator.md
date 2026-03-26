@@ -29,8 +29,9 @@ Ensure:
 2. Financial Analyst Agent
 3. Allocation Agent
 4. Risk & Investment Agent
-5. Wealth Manager Agent
-6. Growth Agent
+5. Tax & Estate Planning Agent
+6. Wealth Manager Agent
+7. Growth Agent
 
 ---
 
@@ -89,6 +90,7 @@ The orchestrator spec is implemented by three TypeScript modules:
 | Financial Analyst | `get_user_balance_sheet`, `get_enriched_transactions`, `get_user_constraints`, `detect_inefficiencies` | `insight-engine`, `financial-models` |
 | Allocation | `calculate_liquidity_position`, `calculate_lamu_score` | `financial-models`, `debt-intelligence` |
 | Risk & Investment | `run_monte_carlo_simulation` | `financial-models`, `debt-intelligence` |
+| Tax & Estate | `calculate_tax_position`, `simulate_estate_iht` | `tax-optimisation`, `estate-planning`, `quant-models`, `financial-models` |
 | Wealth Manager | `generate_recommendation`, `rank_recommendations` | `recommendation-engine`, `bocy-philosophy`, `tone`, `user-cohorts` |
 | Growth | `generate_growth_report` | `growth-product`, `tone` |
 
@@ -100,6 +102,7 @@ The orchestrator spec is implemented by three TypeScript modules:
 | Data quality = LOW | Halt entire pipeline |
 | Critical agent failure (data_integrity, financial_analyst) | Halt pipeline with error |
 | Zero inefficiencies found | Continue — wealth manager reports "all clear" |
+| Tax & Estate agent failure | Continue — non-critical, wealth manager proceeds with degraded tax/estate context |
 | Growth agent failure | Continue — non-critical, pipeline still returns recommendations |
 
 ---
