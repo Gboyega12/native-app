@@ -93,7 +93,8 @@ export default function AccountSetup() {
     { value: 'other', label: 'Other' },
   ];
 
-  const allVisited = debtStatus !== 'pending' && savingsStatus !== 'pending' && investmentStatus !== 'pending';
+  // Investment ticker field for stocks
+  const [invTicker, setInvTicker] = useState('');
 
   // ── Save handlers ──
 
@@ -187,6 +188,7 @@ export default function AccountSetup() {
         purchase_cost: parseFloat(invCost) || null,
         quantity: parseFloat(invQuantity) || null,
         notes: invNotes.trim() || null,
+        ticker: invClass === 'stocks' && invTicker.trim() ? invTicker.trim().toUpperCase() : null,
         source: 'manual' as const,
       };
 
@@ -230,10 +232,15 @@ export default function AccountSetup() {
 
   const resetInvestmentForm = () => {
     setInvName(''); setInvClass('stocks'); setInvPlatform('');
-    setInvValue(''); setInvCost(''); setInvQuantity(''); setInvNotes(''); setInvError('');
+    setInvValue(''); setInvCost(''); setInvQuantity(''); setInvNotes(''); setInvTicker(''); setInvError('');
   };
 
   // ── Section renderer ──
+
+  const handleConnectOpenBanking = (type: 'credit_card' | 'savings') => {
+    trackEvent('Open Banking Connect (Setup)', { type });
+    router.push({ pathname: '/(main)/connect', params: { accountType: type, returnTo: 'account-setup' } });
+  };
 
   const renderSection = (
     title: string,
@@ -243,6 +250,7 @@ export default function AccountSetup() {
     itemValue: (item: any) => string,
     onAdd: () => void,
     onSkip: () => void,
+    showOpenBanking?: boolean,
   ) => (
     <View style={s.section}>
       <View style={s.sectionHeader}>
@@ -258,9 +266,19 @@ export default function AccountSetup() {
         </View>
       ))}
 
+      {showOpenBanking && (
+        <TouchableOpacity
+          style={s.openBankingBtn}
+          onPress={() => handleConnectOpenBanking(title.includes('Debt') ? 'credit_card' : 'savings')}
+          activeOpacity={0.7}
+        >
+          <Text style={s.openBankingText}>Connect via Open Banking</Text>
+        </TouchableOpacity>
+      )}
+
       <View style={s.sectionActions}>
         <TouchableOpacity style={s.addBtn} onPress={onAdd} activeOpacity={0.7}>
-          <Text style={s.addBtnText}>+ Add</Text>
+          <Text style={s.addBtnText}>{showOpenBanking ? 'Or add manually' : '+ Add'}</Text>
         </TouchableOpacity>
         {status === 'pending' && (
           <TouchableOpacity onPress={onSkip} activeOpacity={0.7}>
@@ -296,6 +314,7 @@ export default function AccountSetup() {
         (d) => String(d.outstanding_balance || 0),
         () => setShowDebtModal(true),
         () => { setDebtStatus('skipped'); },
+        true,
       )}
 
       {/* ── Savings ── */}
@@ -307,6 +326,7 @@ export default function AccountSetup() {
         (s) => String(s.balance || 0),
         () => setShowSavingsModal(true),
         () => { setSavingsStatus('skipped'); },
+        true,
       )}
 
       {/* ── Investments ── */}
@@ -322,23 +342,21 @@ export default function AccountSetup() {
 
       {/* ── Continue button ── */}
       <TouchableOpacity
-        style={[s.continueBtn, !allVisited && s.continueBtnDisabled]}
+        style={s.continueBtn}
         onPress={handleContinue}
-        disabled={!allVisited || saving}
+        disabled={saving}
         activeOpacity={0.8}
       >
         {saving ? (
           <ActivityIndicator color={colors.bg} size="small" />
         ) : (
-          <Text style={[s.continueBtnText, !allVisited && { opacity: 0.4 }]}>
+          <Text style={s.continueBtnText}>
             Continue to Dashboard
           </Text>
         )}
       </TouchableOpacity>
 
-      {!allVisited && (
-        <Text style={s.continueHint}>Visit or skip all sections above to continue</Text>
-      )}
+      <Text style={s.continueHint}>You can always add accounts later from your profile</Text>
 
       {/* ══ Add Debt Modal ══ */}
       <Modal visible={showDebtModal} transparent animationType="fade" onRequestClose={() => { resetDebtForm(); setShowDebtModal(false); }}>
@@ -447,6 +465,14 @@ export default function AccountSetup() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
+
+            {invClass === 'stocks' && (
+              <>
+                <Text style={s.modalLabel}>Ticker / Symbol <Text style={s.optional}>(optional)</Text></Text>
+                <TextInput style={s.modalInput} value={invTicker} onChangeText={setInvTicker} placeholder="e.g. VUSA, AAPL" placeholderTextColor={colors.muted} autoCapitalize="characters" />
+                <Text style={s.tickerHint}>Adding a ticker enables live price tracking</Text>
+              </>
+            )}
 
             <Text style={s.modalLabel}>Platform <Text style={s.optional}>(optional)</Text></Text>
             <TextInput style={s.modalInput} value={invPlatform} onChangeText={setInvPlatform} placeholder="e.g. Trading 212, Vanguard" placeholderTextColor={colors.muted} />
@@ -566,4 +592,15 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   chipActive: { borderColor: c.accent, backgroundColor: c.accentDim },
   chipText: { fontFamily: fonts.regular, fontSize: 13, color: c.muted },
   chipTextActive: { color: c.accent },
+
+  // ── Open Banking button ──
+  openBankingBtn: {
+    backgroundColor: c.accent, borderRadius: 10,
+    paddingVertical: 12, alignItems: 'center', marginTop: 8,
+  },
+  openBankingText: { fontFamily: fonts.semibold, fontSize: 14, color: c.bg },
+  tickerHint: {
+    fontFamily: fonts.regular, fontSize: 11, color: c.muted,
+    marginTop: 2, marginBottom: 4,
+  },
 });

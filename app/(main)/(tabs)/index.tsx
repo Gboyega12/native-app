@@ -235,6 +235,11 @@ export default function Home() {
   const [investmentExpanded, setInvestmentExpanded] = useState(false);
   const [expandedIncomeSource, setExpandedIncomeSource] = useState<string | null>(null);
   const [showAllMoves, setShowAllMoves] = useState(false);
+  const [expandedInsights, setExpandedInsights] = useState<Set<number>>(new Set());
+  const [insightsSectionOpen, setInsightsSectionOpen] = useState(false);
+  const [recsSectionOpen, setRecsSectionOpen] = useState(false);
+  const [agentInsightsSectionOpen, setAgentInsightsSectionOpen] = useState(false);
+  const [showAllInsights, setShowAllInsights] = useState(false);
   const [accountBuckets, setAccountBuckets] = useState<AccountBuckets | null>(null);
   const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
   const userIdRef = useRef<string | null>(null);
@@ -2043,76 +2048,90 @@ export default function Home() {
 
       {/* ── Connection warning ── */}
       {connectionWarning && !connectionDismissed && (
-        <View style={s.connectionBanner}>
-          <TouchableOpacity style={s.connectionBannerBody} onPress={() => router.push({ pathname: '/(main)/connect', params: { from: 'banner', banks: connectionWarning.banks.join(',') } })} activeOpacity={0.8}>
+        <Card variant="default" style={{ marginBottom: spacing.lg, borderLeftWidth: 3, borderLeftColor: colors.amber }}>
+          <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }} onPress={() => router.push({ pathname: '/(main)/connect', params: { from: 'banner', banks: connectionWarning.banks.join(',') } })} activeOpacity={0.8}>
             <View style={{ flex: 1 }}>
-              {connectionWarning.message === 'stale_data'
-                ? <Text style={s.connectionBannerText}>Transactions haven't updated in days — try reconnecting</Text>
-                : connectionWarning.banks.length > 1
-                ? <Text style={s.connectionBannerText}>Reconnect {connectionWarning.banks.length} bank accounts: {connectionWarning.banks.join(', ')}</Text>
-                : connectionWarning.banks.length === 1
-                ? <Text style={s.connectionBannerText}>Reconnect {connectionWarning.banks[0]}</Text>
-                : <Text style={s.connectionBannerText}>Bank connection needs attention</Text>}
+              <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.amber }}>
+                {connectionWarning.message === 'stale_data'
+                  ? 'Bank connection needs attention'
+                  : connectionWarning.banks.length > 1
+                  ? `Reconnect ${connectionWarning.banks.length} bank accounts`
+                  : connectionWarning.banks.length === 1
+                  ? `Reconnect ${connectionWarning.banks[0]}`
+                  : 'Bank connection needs attention'}
+              </Text>
             </View>
-            <Text style={s.connectionBannerAction}>Fix</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ backgroundColor: `${colors.amber}20`, borderRadius: 6, paddingVertical: 4, paddingHorizontal: 10 }}>
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 12, color: colors.amber }}>Fix</Text>
+              </View>
+              <TouchableOpacity onPress={dismissConnection} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.amber, opacity: 0.6 }}>{'\u2715'}</Text>
+              </TouchableOpacity>
+            </View>
           </TouchableOpacity>
-          <TouchableOpacity style={s.bannerDismiss} onPress={dismissConnection} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={s.bannerDismissX}>{'\u2715'}</Text>
-          </TouchableOpacity>
-        </View>
+        </Card>
       )}
 
       {!analysis ? (
         <View style={s.emptyState}>
-          <View style={s.emptyBocyWrap}>
-            <BocyFace mood={hasBankConnection ? 'thinking' : 'neutral'} size="lg" breathing />
+          {/* Nature-themed gradient background */}
+          <View style={s.emptyNatureBg}>
+            <View style={[s.emptyNatureLayer, { backgroundColor: '#2D5A1E', opacity: 0.8 }]} />
+            <View style={[s.emptyNatureLayer, { backgroundColor: '#4A8C2A', opacity: 0.4, top: '30%' }]} />
+            {/* Glassmorphic card */}
+            <View style={s.emptyGlassCard}>
+              <View style={s.emptyBocyWrap}>
+                <BocyFace mood={hasBankConnection ? 'thinking' : 'neutral'} size="lg" breathing />
+              </View>
+              {hasBankConnection ? (
+                retriesExhausted ? (
+                  <>
+                    <Text style={s.emptyTitle}>Transactions aren't available yet</Text>
+                    <Text style={s.emptyDesc}>
+                      Your bank is connected but hasn't returned any transactions yet. This usually resolves within a few hours.
+                    </Text>
+                    <TouchableOpacity
+                      style={s.ctaButton}
+                      onPress={() => {
+                        syncRetryRef.current = 0;
+                        setRetriesExhausted(false);
+                        supabase.auth.getUser().then(({ data: { user } }) => {
+                          if (user) syncInBackground(user.id, true);
+                        });
+                      }}
+                    >
+                      <Text style={s.ctaText}>Try again</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.ctaButton, { backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', marginTop: spacing.sm }]}
+                      onPress={() => router.push('/(main)/connect')}
+                    >
+                      <Text style={[s.ctaText, { color: colors.text }]}>Upload a statement instead</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <Text style={s.emptyTitle}>Building your financial picture</Text>
+                    <Text style={s.emptyDesc}>
+                      Your bank is connected. Transactions can take a little while to appear — your plan will be ready soon.
+                    </Text>
+                    <ActivityIndicator size="small" color="#fff" style={{ marginTop: spacing.md }} />
+                  </>
+                )
+              ) : (
+                <>
+                  <Text style={s.emptyTitle}>Grow your wealth</Text>
+                  <Text style={s.emptyDesc}>
+                    Connect your bank so we can find the most impactful action you can take right now.
+                  </Text>
+                  <TouchableOpacity style={s.ctaButton} onPress={() => router.push('/(main)/connect')}>
+                    <Text style={s.ctaText}>Connect your bank</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
           </View>
-          {hasBankConnection ? (
-            retriesExhausted ? (
-              <>
-                <Text style={s.emptyTitle}>Transactions aren't available yet</Text>
-                <Text style={s.emptyDesc}>
-                  Your bank is connected but hasn't returned any transactions yet. This can happen with new connections — it usually resolves within a few hours.
-                </Text>
-                <TouchableOpacity
-                  style={s.ctaButton}
-                  onPress={() => {
-                    syncRetryRef.current = 0;
-                    setRetriesExhausted(false);
-                    supabase.auth.getUser().then(({ data: { user } }) => {
-                      if (user) syncInBackground(user.id, true);
-                    });
-                  }}
-                >
-                  <Text style={s.ctaText}>Try again</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[s.ctaButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm }]}
-                  onPress={() => router.push('/(main)/connect')}
-                >
-                  <Text style={[s.ctaText, { color: colors.text }]}>Upload a statement instead</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={s.emptyTitle}>Building your financial picture</Text>
-                <Text style={s.emptyDesc}>
-                  Your bank is connected. Transactions can take a little while to appear — Bocy will have your plan ready as soon as they settle.
-                </Text>
-                <ActivityIndicator size="small" color={colors.accent} style={{ marginTop: spacing.md }} />
-              </>
-            )
-          ) : (
-            <>
-              <Text style={s.emptyTitle}>Your #1 financial move awaits</Text>
-              <Text style={s.emptyDesc}>
-                Connect your bank account so Bocy can analyse your transactions and find the most impactful action you can take right now.
-              </Text>
-              <TouchableOpacity style={s.ctaButton} onPress={() => router.push('/(main)/connect')}>
-                <Text style={s.ctaText}>Connect your bank</Text>
-              </TouchableOpacity>
-            </>
-          )}
         </View>
       ) : (
         <>
@@ -3037,50 +3056,64 @@ export default function Home() {
               ══════════════════════════════════════════════ */}
           {insightsData.length > 0 && (
             <View style={{ marginBottom: spacing.md }}>
-              <View style={s.moveSectionHeader}>
+              <TouchableOpacity style={s.moveSectionHeader} onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setInsightsSectionOpen(!insightsSectionOpen); }} activeOpacity={0.7}>
                 <Text style={s.moveSectionLabel}>DETECTED INEFFICIENCIES</Text>
                 <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent, letterSpacing: 0.3 }}>
-                  {'\u00a3'}{Math.round(insightsData.reduce((sum: number, ins: Insight) => sum + ins.annualImpact, 0)).toLocaleString()}/yr impact
+                  {'\u00a3'}{Math.round(insightsData.reduce((sum: number, ins: Insight) => sum + ins.annualImpact, 0)).toLocaleString()}/yr impact {insightsSectionOpen ? '\u25B2' : '\u25BC'}
                 </Text>
-              </View>
-              {insightsData.slice(0, 4).map((insight: Insight, idx: number) => (
-                <Card key={`insight-${idx}`} variant="default" style={{ marginBottom: spacing.md, borderLeftWidth: 3, borderLeftColor: idx === 0 ? colors.coral : colors.accent }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 22 }}>
-                        {insight.statement}
-                      </Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8 }}>
-                        <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
-                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
-                            {'\u00a3'}{insight.annualImpact.toLocaleString()}/yr
+              </TouchableOpacity>
+              {insightsSectionOpen && (showAllInsights ? insightsData : insightsData.slice(0, 3)).map((insight: Insight, idx: number) => {
+                const isExpanded = expandedInsights.has(idx);
+                return (
+                  <TouchableOpacity key={`insight-${idx}`} activeOpacity={0.8} onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setExpandedInsights(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; }); }}>
+                    <Card variant="default" style={{ marginBottom: spacing.sm, borderLeftWidth: 3, borderLeftColor: idx === 0 ? colors.coral : colors.accent }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text, lineHeight: 22 }} numberOfLines={isExpanded ? undefined : 2}>
+                            {insight.statement}
                           </Text>
                         </View>
-                        {insight.longTermImpact && insight.longTermImpact > insight.annualImpact && (
-                          <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
-                            <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
-                              {'\u00a3'}{insight.longTermImpact.toLocaleString()} over 5yr
-                            </Text>
-                          </View>
-                        )}
-                        {insight.linkedMoveCategory && (
-                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, textTransform: 'uppercase' }}>
-                            {insight.linkedMoveCategory}
+                        <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
+                            {'\u00a3'}{Math.round(insight.annualImpact).toLocaleString()}/yr
                           </Text>
-                        )}
+                        </View>
                       </View>
-                      <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18, marginTop: 8 }}>
-                        {insight.cause}
-                      </Text>
-                      {insight.implication && (
-                        <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.green, lineHeight: 18, marginTop: 6 }}>
-                          {insight.implication}
-                        </Text>
+                      {isExpanded && (
+                        <View style={{ marginTop: 8 }}>
+                          {insight.longTermImpact != null && insight.longTermImpact > insight.annualImpact && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                              <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
+                                  {'\u00a3'}{Math.round(insight.longTermImpact).toLocaleString()} over 5yr
+                                </Text>
+                              </View>
+                              {insight.linkedMoveCategory && (
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, textTransform: 'uppercase' }}>
+                                  {insight.linkedMoveCategory}
+                                </Text>
+                              )}
+                            </View>
+                          )}
+                          <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18 }}>
+                            {insight.cause}
+                          </Text>
+                          {insight.implication && (
+                            <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.green, lineHeight: 18, marginTop: 6 }}>
+                              {insight.implication}
+                            </Text>
+                          )}
+                        </View>
                       )}
-                    </View>
-                  </View>
-                </Card>
-              ))}
+                    </Card>
+                  </TouchableOpacity>
+                );
+              })}
+              {insightsSectionOpen && insightsData.length > 3 && !showAllInsights && (
+                <TouchableOpacity onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setShowAllInsights(true); }} activeOpacity={0.7}>
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.accent, textAlign: 'center', paddingVertical: 8 }}>View {insightsData.length - 3} more</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
@@ -3089,13 +3122,13 @@ export default function Home() {
               ══════════════════════════════════════════════ */}
           {agentRecommendations.length > 0 && (
             <View style={{ marginBottom: spacing.md }}>
-              <View style={s.moveSectionHeader}>
+              <TouchableOpacity style={s.moveSectionHeader} onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setRecsSectionOpen(!recsSectionOpen); }} activeOpacity={0.7}>
                 <Text style={s.moveSectionLabel}>RECOMMENDED ACTIONS</Text>
                 <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green, letterSpacing: 0.3 }}>
-                  {agentRecommendations.length} action{agentRecommendations.length !== 1 ? 's' : ''}
+                  {agentRecommendations.length} action{agentRecommendations.length !== 1 ? 's' : ''} {recsSectionOpen ? '\u25B2' : '\u25BC'}
                 </Text>
-              </View>
-              {agentRecommendations.slice(0, 5).map((rec, idx) => {
+              </TouchableOpacity>
+              {recsSectionOpen && agentRecommendations.slice(0, 5).map((rec, idx) => {
                 const impactColor = rec.expected_impact > 500 ? colors.green : rec.expected_impact > 100 ? colors.accent : colors.text2;
                 const riskColor = rec.downside_risk > 500 ? colors.coral : rec.downside_risk > 100 ? colors.amber : colors.muted;
                 return (
@@ -3152,13 +3185,13 @@ export default function Home() {
               ══════════════════════════════════════════════ */}
           {agentInsights.length > 0 && (
             <View style={{ marginBottom: spacing.md }}>
-              <View style={s.moveSectionHeader}>
+              <TouchableOpacity style={s.moveSectionHeader} onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setAgentInsightsSectionOpen(!agentInsightsSectionOpen); }} activeOpacity={0.7}>
                 <Text style={s.moveSectionLabel}>AGENT INSIGHTS</Text>
                 <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral, letterSpacing: 0.3 }}>
-                  {'\u00a3'}{Math.round(agentInsights.reduce((sum, ai) => sum + (ai.annual_impact || 0), 0)).toLocaleString()}/yr impact
+                  {'\u00a3'}{Math.round(agentInsights.reduce((sum, ai) => sum + (ai.annual_impact || 0), 0)).toLocaleString()}/yr impact {agentInsightsSectionOpen ? '\u25B2' : '\u25BC'}
                 </Text>
-              </View>
-              {agentInsights.slice(0, 4).map((ai, idx) => {
+              </TouchableOpacity>
+              {agentInsightsSectionOpen && agentInsights.slice(0, 4).map((ai, idx) => {
                 const confidenceColor = ai.confidence > 0.8 ? colors.green : ai.confidence > 0.5 ? colors.amber : colors.muted;
                 return (
                   <Card key={`agent-insight-${idx}`} variant="default" style={{ marginBottom: spacing.sm, borderLeftWidth: 3, borderLeftColor: colors.coral }}>
@@ -4449,16 +4482,37 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Empty State ──
   emptyState: {
-    marginTop: 64,
+    marginTop: 32,
+    alignItems: 'center',
+  },
+  emptyNatureBg: {
+    width: '100%',
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    minHeight: 360,
+    position: 'relative',
+    backgroundColor: '#2D5A1E',
+  },
+  emptyNatureLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  emptyGlassCard: {
+    margin: spacing.lg,
+    marginTop: 40,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    padding: spacing.xl,
     alignItems: 'center',
   },
   emptyBocyWrap: {
-    marginBottom: 32,
+    marginBottom: 24,
   },
   emptyTitle: {
     fontFamily: fonts.medium,
-    fontSize: 17,
-    color: c.text,
+    fontSize: 20,
+    color: '#fff',
     textAlign: 'center',
     marginBottom: spacing.sm,
     letterSpacing: -0.3,
@@ -4466,11 +4520,11 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   emptyDesc: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: c.dim,
+    color: 'rgba(255,255,255,0.75)',
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 40,
-    paddingHorizontal: spacing.lg,
+    marginBottom: 28,
+    paddingHorizontal: spacing.sm,
   },
   ctaButton: {
     backgroundColor: c.accent,

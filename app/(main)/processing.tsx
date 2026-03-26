@@ -5,9 +5,7 @@ import { CommonActions } from '@react-navigation/native';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { SpendingRing } from '@/components/Charts';
 import { colors, fonts, spacing, radius } from '@/theme';
-import { BocyHero } from '@/components/Bocy';
 import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
 
 const STEPS = [
@@ -113,6 +111,7 @@ function ProcessingInner() {
   const [error, setError] = useState('');
   const [enrichProgress, setEnrichProgress] = useState('');
   const [insight, setInsight] = useState('');
+  const [planStats, setPlanStats] = useState<{ income: number; surplus: number; moveCount: number } | null>(null);
   const [slowWarning, setSlowWarning] = useState(false);
   const fadeAnims = useRef(STEPS.map(() => new Animated.Value(0))).current;
   const slideAnims = useRef(STEPS.map(() => new Animated.Value(20))).current;
@@ -607,6 +606,11 @@ function ProcessingInner() {
 
       // Show personalised first insight — user navigates manually
       const firstInsight = buildFirstInsight(identityData, result.profile, topMove);
+      setPlanStats({
+        income: Math.round(result.profile.monthly.income),
+        surplus: Math.round(result.profile.monthly.surplus),
+        moveCount: allMoves.length,
+      });
       setInsight(firstInsight || 'Your personalised action plan is ready.');
       // User will tap the button to navigate
     } catch (err: any) {
@@ -647,30 +651,44 @@ function ProcessingInner() {
   if (insight) {
     return (
       <View style={styles.container}>
-        <View style={styles.insightHero}>
-          <BocyHero mood="celebrating" animate />
-        </View>
-
-        {/* Completion ring */}
-        <View style={{ alignItems: 'center', marginBottom: spacing.lg }}>
-          <SpendingRing
-            progress={1}
-            remaining={STEPS.length}
-            budget={STEPS.length}
-            color={colors.green}
-            size={120}
-          />
+        {/* Animated success checkmark */}
+        <View style={{ alignItems: 'center', marginBottom: spacing.xl }}>
+          <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: `${colors.green}20`, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontSize: 36, color: colors.green }}>{'\u2713'}</Text>
+          </View>
         </View>
 
         <Text style={styles.insightTitle}>Your plan is ready</Text>
         <Text style={styles.insightText}>{insight}</Text>
+
+        {/* Key stats row */}
+        {planStats && (
+          <View style={styles.insightStats}>
+            <View style={styles.insightStat}>
+              <Text style={styles.insightStatValue}>{'\u00a3'}{planStats.income.toLocaleString()}</Text>
+              <Text style={styles.insightStatLabel}>Monthly Income</Text>
+            </View>
+            <View style={styles.insightStatDivider} />
+            <View style={styles.insightStat}>
+              <Text style={[styles.insightStatValue, planStats.surplus < 0 && { color: colors.coral }]}>
+                {planStats.surplus < 0 ? '-' : ''}{'\u00a3'}{Math.abs(planStats.surplus).toLocaleString()}
+              </Text>
+              <Text style={styles.insightStatLabel}>Surplus</Text>
+            </View>
+            <View style={styles.insightStatDivider} />
+            <View style={styles.insightStat}>
+              <Text style={styles.insightStatValue}>{planStats.moveCount}</Text>
+              <Text style={styles.insightStatLabel}>Moves Found</Text>
+            </View>
+          </View>
+        )}
 
         <TouchableOpacity
           style={styles.insightButton}
           onPress={goToDashboard}
           activeOpacity={0.8}
         >
-          <Text style={styles.insightButtonText}>Go to dashboard</Text>
+          <Text style={styles.insightButtonText}>View your dashboard</Text>
         </TouchableOpacity>
       </View>
     );

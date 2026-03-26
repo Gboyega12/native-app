@@ -1523,6 +1523,17 @@ export default function Chat() {
       }
     } catch {}
 
+    // Fetch investment holdings so chat knows user's declared investments
+    try {
+      const { data: investmentData } = await supabase
+        .from('investments')
+        .select('name, asset_class, platform, current_value, purchase_cost, quantity, ticker, notes')
+        .eq('user_id', user.id);
+      if (investmentData && investmentData.length > 0) {
+        (ctx as any).investments = investmentData;
+      }
+    } catch {}
+
     // Pass savings transaction categories and monthly total from analysis
     if (a?.savings_categories?.length) {
       (ctx as any).savings_categories = a.savings_categories.map((c: any) => ({
