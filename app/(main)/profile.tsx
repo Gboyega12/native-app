@@ -804,20 +804,6 @@ export default function Profile() {
       <Text style={s.sectionLabel}>PROFILE</Text>
 
       <View style={s.groupCard}>
-        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/identity')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Financial Profile</Text>
-          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
-
-        <View style={s.groupDivider} />
-
-        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/subscriptions')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Spending Settings</Text>
-          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
-
-        <View style={s.groupDivider} />
-
         <TouchableOpacity
           style={s.groupRow}
           onPress={() => {
