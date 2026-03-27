@@ -146,16 +146,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const triggered: string[] = [];
 
   try {
-    // Fetch user's latest analysis
-    const { data: analysisRow } = await admin
-      .from('financial_analysis')
-      .select('analysis')
+    const now = new Date();
+    const currentMonth = now.getMonth(); // 0-indexed
+    const currentDay = now.getDate();
+
+    // Fetch user's latest analysis (table is "analyses", columns are top-level)
+    const { data: analysis } = await admin
+      .from('analyses')
+      .select('monthly_income, monthly_spending, surplus, non_discretionary, discretionary, income_sources, income_floor, is_variable_income')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    const analysis = analysisRow?.analysis;
     if (!analysis) {
       return res.json({ success: true, triggered: [], reason: 'no_analysis' });
     }
@@ -169,50 +172,99 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const state = notifState || {};
 
+    // ── Compute weekly budget & this week's spending from real data ──
+    // (mirrors api/cron/daily-spending.ts logic)
+    const rawIncome = analysis.monthly_income || 0;
+    const income = analysis.is_variable_income && analysis.income_floor
+      ? analysis.income_floor
+      : rawIncome;
+    const nonDiscTotal = (analysis.non_discretionary as { total?: number })?.total || 0;
+    const discTotal = (analysis.discretionary as { total?: number })?.total || 0;
+    const leftToDecide = Math.max(0, income - nonDiscTotal - discTotal);
+    const weeklyBudget = Math.round(leftToDecide / 4.33);
+
+    // Parse bank_data CSV to get this week's actual spending
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay()); // Sunday start
+    const weekStartStr = weekStart.toISOString().slice(0, 10);
+    const todayStr = now.toISOString().slice(0, 10);
+
+    let spentThisWeek = 0;
+    const categorySpending: Record<string, number> = {};
+
+    const { data: bankRows } = await admin
+      .from('bank_data')
+      .select('csv_data')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+
+    if (bankRows?.length) {
+      for (const row of bankRows) {
+        if (!row.csv_data) continue;
+        const lines = (row.csv_data as string).split('\n');
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          const parts = line.split(',');
+          if (parts.length < 3) continue;
+          const txDate = parts[0].trim();
+          const desc = parts.slice(1, -1).join(',').trim();
+          const amount = parseFloat(parts[parts.length - 1]) || 0;
+
+          if (amount >= 0) continue; // only spending
+          if (txDate >= weekStartStr && txDate <= todayStr) {
+            spentThisWeek += Math.abs(amount);
+            // Rough category grouping by description for spike detection
+            const key = desc.toLowerCase().replace(/[^a-z]/g, '').slice(0, 20);
+            categorySpending[key] = (categorySpending[key] || 0) + Math.abs(amount);
+          }
+        }
+      }
+    }
+    spentThisWeek = Math.round(spentThisWeek);
+
     // ── 1. Payday Alert ──
-    const incomeEvents = Array.isArray(analysis.recent_income_events)
-      ? analysis.recent_income_events
+    // Derive income fingerprint from income_sources JSONB
+    const incomeSources = Array.isArray(analysis.income_sources)
+      ? analysis.income_sources
       : [];
-    if (incomeEvents.length > 0) {
-      const latestIncome = incomeEvents[0];
-      const incomeFingerprint = incomeEvents
-        .map((e: any) => `${e?.source}:${Math.round(e?.amount ?? 0)}`)
+    if (incomeSources.length > 0) {
+      const incomeFingerprint = incomeSources
+        .map((s: any) => `${s?.description || s?.source || 'unknown'}:${Math.round(s?.monthly_amount ?? s?.amount ?? 0)}`)
         .sort()
         .join('|');
 
       if (incomeFingerprint && incomeFingerprint !== state.last_income_fingerprint) {
-        const amount = Math.round(latestIncome?.amount ?? 0);
+        const topAmount = Math.round(
+          incomeSources.reduce((max: number, s: any) =>
+            Math.max(max, s?.monthly_amount ?? s?.amount ?? 0), 0)
+        );
         await sendPushToUser(admin, userId, {
-          title: 'Payday Alert',
-          body: `Your salary of \u00a3${amount.toLocaleString()} has arrived. Tap to see your plan.`,
+          title: 'Income Update',
+          body: `Your income of £${topAmount.toLocaleString()}/month has been detected. Tap to see your plan.`,
           url: '/',
           tag: 'income_arrival',
         });
         triggered.push('payday');
 
-        // Update state
         await admin.from('notification_state').upsert({
           user_id: userId,
           last_income_fingerprint: incomeFingerprint,
-          updated_at: new Date().toISOString(),
+          updated_at: now.toISOString(),
         }, { onConflict: 'user_id' });
       }
     }
 
     // ── 2. Spending Limit Warning (50% threshold) ──
-    const weeklyBudget = analysis.weekly_budget ?? 0;
-    const spentThisWeek = analysis.spent_this_week ?? 0;
-
-    if (weeklyBudget > 0) {
+    if (weeklyBudget > 0 && spentThisWeek > 0) {
       const spentPct = (spentThisWeek / weeklyBudget) * 100;
       const lastSpendingPct = state.last_spending_pct ?? 0;
 
-      // Trigger when crossing 50% and haven't already notified for this threshold
       if (spentPct >= 50 && lastSpendingPct < 50) {
         const remaining = Math.max(0, Math.round(weeklyBudget - spentThisWeek));
         await sendPushToUser(admin, userId, {
           title: 'Spending Alert',
-          body: `You've used ${Math.round(spentPct)}% of your weekly budget. \u00a3${remaining.toLocaleString()} left to spend.`,
+          body: `You've used ${Math.round(spentPct)}% of your weekly budget. £${remaining.toLocaleString()} left to spend.`,
           url: '/',
           tag: 'spending_limit',
         });
@@ -221,34 +273,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await admin.from('notification_state').upsert({
           user_id: userId,
           last_spending_pct: Math.round(spentPct),
-          updated_at: new Date().toISOString(),
+          updated_at: now.toISOString(),
         }, { onConflict: 'user_id' });
       }
     }
 
     // ── 3. Growth Engine: Tax Season Alerts ──
-    const now = new Date();
-    const currentMonth = now.getMonth(); // 0-indexed
-    const currentDay = now.getDate();
 
     // ISA deadline: April 5th - alert in March
     if (currentMonth === 2 && !state.isa_deadline_notified_year?.toString().includes(String(now.getFullYear()))) {
       const isaAllowance = 20000;
-      const investmentTotal = Array.isArray(analysis.investments)
-        ? analysis.investments.reduce((sum: number, inv: any) => {
-            if (inv?.asset_class === 'isa' || inv?.name?.toLowerCase().includes('isa')) {
-              return sum + (inv.current_value || 0);
-            }
-            return sum;
-          }, 0)
-        : 0;
+
+      // Check investments table for ISA holdings
+      const { data: isaInvestments } = await admin
+        .from('investments')
+        .select('current_value, name, asset_class')
+        .eq('user_id', userId);
+
+      const investmentTotal = (isaInvestments || []).reduce((sum: number, inv: any) => {
+        if (inv?.asset_class === 'isa' || inv?.name?.toLowerCase().includes('isa')) {
+          return sum + (inv.current_value || 0);
+        }
+        return sum;
+      }, 0);
 
       const isaRemaining = Math.max(0, isaAllowance - investmentTotal);
 
       if (isaRemaining > 0) {
         await sendPushToUser(admin, userId, {
           title: 'Tax Season Ending Soon',
-          body: `You have \u00a3${isaRemaining.toLocaleString()} ISA allowance remaining. Use it before April 5th to maximise tax-free savings.`,
+          body: `You have £${isaRemaining.toLocaleString()} ISA allowance remaining. Use it before April 5th to maximise tax-free savings.`,
           url: '/(main)/(tabs)/chat?context=tax_optimisation_isa',
           tag: 'tax_isa_deadline',
         });
@@ -257,7 +311,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await admin.from('notification_state').upsert({
           user_id: userId,
           isa_deadline_notified_year: String(now.getFullYear()),
-          updated_at: new Date().toISOString(),
+          updated_at: now.toISOString(),
         }, { onConflict: 'user_id' });
       }
     }
@@ -275,7 +329,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await admin.from('notification_state').upsert({
         user_id: userId,
         sa_deadline_notified_year: String(now.getFullYear()),
-        updated_at: new Date().toISOString(),
+        updated_at: now.toISOString(),
       }, { onConflict: 'user_id' });
     }
 
@@ -285,19 +339,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ═══════════════════════════════════════════════════════════
 
     // ── 4. Unusual Spending Spike ──
-    // Alert when any discretionary category this week is 2x its weekly average
+    // Alert when any merchant/category this week is 2x its share of weekly average
     const thisWeek = isoWeekKey(now);
+    const discObj = (analysis.discretionary || {}) as Record<string, number>;
+    const discEntries = Object.entries(discObj).filter(([k]) => k !== 'total');
 
-    if (state.last_spending_spike_week !== thisWeek) {
+    if (state.last_spending_spike_week !== thisWeek && discEntries.length > 0) {
       const spikeCats: string[] = [];
-      if (Array.isArray(analysis.category_breakdown)) {
-        for (const cb of analysis.category_breakdown) {
-          const catName = cb?.category || cb?.name;
-          const weeklyActual = (cb?.this_week ?? 0);
-          const weeklyNorm = (cb?.monthly_average ?? 0) / 4.33;
-          if (weeklyNorm > 10 && weeklyActual >= weeklyNorm * 2) {
-            spikeCats.push(catName);
-          }
+      for (const [catName, monthlyAmount] of discEntries) {
+        if (typeof monthlyAmount !== 'number') continue;
+        const weeklyAvg = monthlyAmount / 4.33;
+        // Check if this week's real spending in similar transactions exceeds 2x
+        // Use category name to loosely match CSV descriptions
+        const catKey = catName.toLowerCase().replace(/[^a-z]/g, '').slice(0, 20);
+        const actualThisWeek = categorySpending[catKey] ?? 0;
+        if (weeklyAvg > 10 && actualThisWeek >= weeklyAvg * 2) {
+          spikeCats.push(catName);
         }
       }
 
@@ -314,7 +371,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await admin.from('notification_state').upsert({
           user_id: userId,
           last_spending_spike_week: thisWeek,
-          updated_at: new Date().toISOString(),
+          updated_at: now.toISOString(),
         }, { onConflict: 'user_id' });
       }
     }
