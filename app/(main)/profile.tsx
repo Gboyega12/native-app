@@ -500,8 +500,8 @@ export default function Profile() {
         </View>
       </AnimGlyph>
 
-      {/* ── Connected accounts ── */}
-      <Text style={s.sectionLabel}>ACCOUNTS</Text>
+      {/* ── ACCOUNT — connected banks, debts, investments ── */}
+      <Text style={s.sectionLabel}>ACCOUNT</Text>
 
       {allAccounts.map((bank, i) => {
         const displayName = bank.provider_name || (bank.account_type === 'credit' ? `Credit card ${i + 1}` : `Bank account ${i + 1}`);
@@ -668,9 +668,7 @@ export default function Profile() {
         </Pressable>
       </Modal>
 
-      {/* ── Investments ── */}
-      <Text style={s.sectionLabel}>INVESTMENTS</Text>
-
+      {/* ── Investments (within Account section) ── */}
       {investmentAccounts.length > 0 ? (
         investmentAccounts.map((inv, idx) => {
           const gain = inv.purchase_cost ? inv.current_value - inv.purchase_cost : null;
@@ -802,12 +800,19 @@ export default function Profile() {
         </Pressable>
       </Modal>
 
-      {/* ── ACCOUNT ── */}
-      <Text style={s.sectionLabel}>ACCOUNT</Text>
+      {/* ── PROFILE — identity, notifications, spending settings ── */}
+      <Text style={s.sectionLabel}>PROFILE</Text>
 
       <View style={s.groupCard}>
         <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/identity')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Profile</Text>
+          <Text style={s.groupRowLabel}>Financial Profile</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
+
+        <View style={s.groupDivider} />
+
+        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/subscriptions')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Spending Settings</Text>
           <Text style={s.groupRowChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
@@ -880,35 +885,19 @@ export default function Profile() {
             )}
           </>
         )}
-
-        <View style={s.groupDivider} />
-
-        <TouchableOpacity style={s.groupRow} onPress={handleAddAccount} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Linked Accounts</Text>
-          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
       </View>
 
-      {/* ── PREFERENCES ── */}
-      <Text style={s.sectionLabel}>PREFERENCES</Text>
+      {/* ── APPEARANCE — dark/light mode ── */}
+      <Text style={s.sectionLabel}>APPEARANCE</Text>
 
       <View style={s.groupCard}>
-        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/subscriptions')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Spending Settings</Text>
-          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
-
-        <View style={s.groupDivider} />
-
-        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/identity')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>AI Financial Profile</Text>
-          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
-
-        <View style={s.groupDivider} />
-
         <View style={s.groupRow}>
-          <Text style={s.groupRowLabel}>Appearance</Text>
+          <View>
+            <Text style={s.groupRowLabel}>{isDark ? 'Dark mode' : 'Light mode'}</Text>
+            <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted, marginTop: 2 }}>
+              {isDark ? 'AMOLED-optimised dark theme' : 'Clean light theme'}
+            </Text>
+          </View>
           <Switch
             value={!isDark}
             onValueChange={() => { trackEvent('Theme Toggled'); toggleTheme(); }}
@@ -943,11 +932,18 @@ export default function Profile() {
         </TouchableOpacity>
       </View>
 
-      {/* ── Logout ── */}
+      {/* ── Logout & Delete ── */}
       <View style={[s.groupCard, { marginTop: 8 }]}>
         <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Sign out of your account" testID="profile-sign-out-button">
           <Text style={[s.groupRowLabel, { color: colors.coral }]}>Logout</Text>
           <Text style={[s.groupRowChevron, { color: colors.coral }]}>{'\u203A'}</Text>
+        </TouchableOpacity>
+
+        <View style={s.groupDivider} />
+
+        <TouchableOpacity style={s.groupRow} onPress={handleDeleteAccount} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Delete your account">
+          <Text style={[s.groupRowLabel, { color: colors.muted }]}>Delete account</Text>
+          <Text style={[s.groupRowChevron, { color: colors.muted }]}>{'\u203A'}</Text>
         </TouchableOpacity>
       </View>
 

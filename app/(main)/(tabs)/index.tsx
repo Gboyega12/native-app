@@ -32,6 +32,7 @@ import { useAppData } from '@/hooks/useAppData';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { formatTimeAgo, formatTxDateAge } from '@/lib/date-utils';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { useWebPush } from '@/lib/web-push';
 
 // Cache the beforeinstallprompt event for the install modal
 if (typeof window !== 'undefined') {
@@ -244,6 +245,17 @@ export default function Home() {
   const [userProperties, setUserProperties] = useState<Array<{ address: string; estimated_value: number; mortgage_balance: number | null; has_mortgage: boolean }>>([]);
   const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
   const userIdRef = useRef<string | null>(null);
+
+  // Web push & notification banner
+  const [notifBannerDismissed, setNotifBannerDismissed] = useState(true);
+  const webPush = useWebPush(userIdRef.current ?? undefined);
+
+  // Hydrate notification banner dismiss state
+  useEffect(() => {
+    AsyncStorage.getItem('dismiss:notif_banner').then((val) => {
+      setNotifBannerDismissed(val === 'true');
+    }).catch(() => setNotifBannerDismissed(false));
+  }, []);
 
   // Custom weekly spending limit
   const [customWeeklyLimit, setCustomWeeklyLimit] = useState<number | null>(null);
@@ -2104,10 +2116,8 @@ export default function Home() {
 
       {!analysis ? (
         <View style={s.emptyState}>
-          {/* Nature-themed gradient background */}
+          {/* Nothing Phone style — monochrome, clean, minimal */}
           <View style={s.emptyNatureBg}>
-            <View style={[s.emptyNatureLayer, { backgroundColor: '#2D5A1E', opacity: 0.8 }]} />
-            <View style={[s.emptyNatureLayer, { backgroundColor: '#4A8C2A', opacity: 0.4, top: '30%' }]} />
             {/* Glassmorphic card */}
             <View style={s.emptyGlassCard}>
               <View style={s.emptyBocyWrap}>
@@ -2133,7 +2143,7 @@ export default function Home() {
                       <Text style={s.ctaText}>Try again</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[s.ctaButton, { backgroundColor: 'rgba(255,255,255,0.12)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', marginTop: spacing.sm }]}
+                      style={[s.ctaButton, { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm }]}
                       onPress={() => router.push('/(main)/connect')}
                     >
                       <Text style={[s.ctaText, { color: colors.text }]}>Upload a statement instead</Text>
@@ -2145,7 +2155,7 @@ export default function Home() {
                     <Text style={s.emptyDesc}>
                       Your bank is connected. Transactions can take a little while to appear — your plan will be ready soon.
                     </Text>
-                    <ActivityIndicator size="small" color="#fff" style={{ marginTop: spacing.md }} />
+                    <ActivityIndicator size="small" color={colors.accent} style={{ marginTop: spacing.md }} />
                   </>
                 )
               ) : (
@@ -2677,18 +2687,18 @@ export default function Home() {
 
               {/* Opportunity moves — parent card design */}
               {opportunityMoves.length > 0 && (
-                <Card style={{ marginBottom: spacing.md }}>
+                <Card style={{ marginBottom: spacing.lg }}>
                   <CardTitleRow
                     title="Your Insights"
                     right={
-                      <View style={{ backgroundColor: `${colors.green}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                      <View style={{ backgroundColor: `${colors.green}15`, borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 }}>
                         <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green }}>
                           {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo
                         </Text>
                       </View>
                     }
                   />
-                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginBottom: 12, marginTop: -4 }}>
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginBottom: 24, marginTop: 4 }}>
                     {opportunityMoves.length} move{opportunityMoves.length !== 1 ? 's' : ''} available {'\u00B7'} tap to explore
                   </Text>
                   {/* First 2 moves always visible */}
@@ -2698,7 +2708,7 @@ export default function Home() {
                     const moveKey = `move-${i}`;
                     const providerActions = getProviderActions(move);
                     return (
-                      <View key={`opp-${i}`}>
+                      <View key={`opp-${i}`} style={{ paddingTop: seqIdx > 0 ? 28 : 0, borderTopWidth: seqIdx > 0 ? StyleSheet.hairlineWidth : 0, borderTopColor: colors.border, marginTop: seqIdx > 0 ? 28 : 0 }}>
                         <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
                           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
                             <View style={[s.moveBadge, seqIdx === 0 && { borderColor: colors.green }]}>
@@ -2706,7 +2716,7 @@ export default function Home() {
                             </View>
                             <View style={{ flex: 1 }}>
                               <Text style={s.moveAction}>{stripMd(move.action)}</Text>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 }}>
                                 <Text style={s.moveImpactText}>{'\u00a3'}{move.monthlyImpact}/mo</Text>
                                 <View style={[s.effortPill, { backgroundColor: `${effortColor(move.effort)}15` }]}>
                                   <Text style={[s.effortPillText, { color: effortColor(move.effort) }]}>{effortLabel(move.effort)}</Text>
@@ -2719,9 +2729,9 @@ export default function Home() {
                                 <Text style={{ fontSize: 10, color: colors.muted, marginLeft: 'auto' }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                               </View>
                               {!isExpanded && move.merchants && move.merchants.length > 0 && (
-                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
                                   {move.merchants.slice(0, 3).map((m: string, j: number) => (
-                                    <View key={j} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 100, paddingVertical: 2, paddingHorizontal: 8 }}>
+                                    <View key={j} style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 100, paddingVertical: 3, paddingHorizontal: 10 }}>
                                       <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.text2 }}>{m}</Text>
                                     </View>
                                   ))}
@@ -2732,7 +2742,7 @@ export default function Home() {
                         </TouchableOpacity>
 
                         {!isExpanded && (
-                          <TouchableOpacity style={[s.heroCta, { marginTop: 12, paddingVertical: 10 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
+                          <TouchableOpacity style={[s.heroCta, { marginTop: 20, paddingVertical: 12 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
                             <Text style={[s.heroCtaText, { fontSize: 13 }]}>Start this move</Text>
                           </TouchableOpacity>
                         )}
@@ -2844,9 +2854,9 @@ export default function Home() {
                         const isExpanded = expandedMove === i;
                         const providerActions = getProviderActions(move);
                         return (
-                          <View key={`opp-${i}`}>
+                          <View key={`opp-${i}`} style={{ paddingTop: 28, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, marginTop: 28 }}>
                             <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                                 <View style={{ width: 4, height: 28, borderRadius: 2, backgroundColor: colors.accent }} />
                                 <View style={{ flex: 1 }}>
                                   <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text, lineHeight: 22 }} numberOfLines={isExpanded ? undefined : 2}>
@@ -2864,9 +2874,9 @@ export default function Home() {
                               </View>
                             </TouchableOpacity>
                             {isExpanded && (
-                              <View style={{ marginLeft: 14, marginBottom: 8 }}>
-                                {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18, marginBottom: 8 }}>{stripMd(move.strategy)}</Text>}
-                                <TouchableOpacity style={[s.heroCta, { paddingVertical: 10 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
+                              <View style={{ marginLeft: 14, marginTop: 12, marginBottom: 8 }}>
+                                {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.text2, lineHeight: 20, marginBottom: 12 }}>{stripMd(move.strategy)}</Text>}
+                                <TouchableOpacity style={[s.heroCta, { paddingVertical: 12 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
                                   <Text style={[s.heroCtaText, { fontSize: 13 }]}>Start this move</Text>
                                 </TouchableOpacity>
                               </View>
@@ -2971,21 +2981,59 @@ export default function Home() {
           </Card>
 
           {/* ══════════════════════════════════════════════
+              NOTIFICATION BANNER — encourage push notifications
+              ══════════════════════════════════════════════ */}
+          {webPush.supported && !webPush.subscribed && webPush.permission !== 'denied' && !notifBannerDismissed && (
+            <Card variant="compact" style={{ marginBottom: spacing.md }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 16 }}>{'\uD83D\uDD14'}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text, marginBottom: 2 }}>Stay in the loop</Text>
+                  <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.dim, lineHeight: 18 }}>Get alerts for spending spikes, payday, and weekly recaps.</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    setNotifBannerDismissed(true);
+                    AsyncStorage.setItem('dismiss:notif_banner', 'true').catch(() => {});
+                  }}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.muted }}>{'\u2715'}</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={{ backgroundColor: colors.accent, borderRadius: 100, paddingVertical: 10, alignItems: 'center', marginTop: 14 }}
+                onPress={() => {
+                  trackEvent('Notification Banner CTA');
+                  webPush.subscribe();
+                  setNotifBannerDismissed(true);
+                  AsyncStorage.setItem('dismiss:notif_banner', 'true').catch(() => {});
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.bg }}>Enable notifications</Text>
+              </TouchableOpacity>
+            </Card>
+          )}
+
+          {/* ══════════════════════════════════════════════
               HIGHLIGHTS — detected inefficiencies in a parent card
               ══════════════════════════════════════════════ */}
           {insightsData.length > 0 && (
-            <Card style={{ marginBottom: spacing.md }}>
+            <Card style={{ marginBottom: spacing.lg }}>
               <CardTitleRow
                 title="Highlights"
                 right={
-                  <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                  <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 }}>
                     <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
                       {'\u00a3'}{Math.round(insightsData.reduce((sum: number, ins: Insight) => sum + ins.annualImpact, 0)).toLocaleString()}/yr
                     </Text>
                   </View>
                 }
               />
-              <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginBottom: 12, marginTop: -4 }}>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginBottom: 24, marginTop: 4 }}>
                 {insightsData.length} inefficienc{insightsData.length === 1 ? 'y' : 'ies'} detected {'\u00B7'} tap to explore
               </Text>
               {/* First 2 insights always visible */}
@@ -2998,7 +3046,7 @@ export default function Home() {
                     LayoutAnimation.configureNext(SMOOTH_ANIM);
                     setExpandedInsights(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; });
                   }}>
-                    <View style={{ paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }}>
+                    <View style={{ paddingTop: idx > 0 ? 28 : 0, borderTopWidth: idx > 0 ? StyleSheet.hairlineWidth : 0, borderTopColor: colors.border, marginTop: idx > 0 ? 28 : 0 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                         <View style={{ width: 4, height: 28, borderRadius: 2, backgroundColor: idx === 0 ? colors.coral : colors.accent }} />
                         <View style={{ flex: 1 }}>
@@ -3016,10 +3064,10 @@ export default function Home() {
                         </View>
                       </View>
                       {isExpanded && (
-                        <View style={{ marginTop: 8, marginLeft: 14 }}>
+                        <View style={{ marginTop: 14, marginLeft: 14 }}>
                           {insight.longTermImpact != null && insight.longTermImpact > insight.annualImpact && (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                              <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                              <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 }}>
                                 <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
                                   {'\u00a3'}{Math.round(insight.longTermImpact).toLocaleString()} over 5yr
                                 </Text>
@@ -3031,16 +3079,16 @@ export default function Home() {
                               )}
                             </View>
                           )}
-                          <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18 }}>
+                          <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.text2, lineHeight: 20 }}>
                             {insight.cause}
                           </Text>
                           {insight.implication && (
-                            <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.green, lineHeight: 18, marginTop: 6 }}>
+                            <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.green, lineHeight: 20, marginTop: 8 }}>
                               {insight.implication}
                             </Text>
                           )}
                           <TouchableOpacity
-                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12 }}
                             onPress={() => {
                               trackEvent('Insight Ask Bocy', { statement: insight.statement?.slice(0, 40) });
                               router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about this: "${insight.statement}"` } });
@@ -3078,7 +3126,7 @@ export default function Home() {
                         LayoutAnimation.configureNext(SMOOTH_ANIM);
                         setExpandedInsights(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; });
                       }}>
-                        <View style={{ paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                        <View style={{ paddingTop: 28, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, marginTop: 28 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                             <View style={{ width: 4, height: 28, borderRadius: 2, backgroundColor: colors.accent }} />
                             <View style={{ flex: 1 }}>
@@ -3087,7 +3135,7 @@ export default function Home() {
                               </Text>
                             </View>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                              <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 }}>
                                 <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
                                   {'\u00a3'}{Math.round(insight.annualImpact).toLocaleString()}/yr
                                 </Text>
@@ -3096,26 +3144,26 @@ export default function Home() {
                             </View>
                           </View>
                           {isExpanded && (
-                            <View style={{ marginTop: 8, marginLeft: 14 }}>
+                            <View style={{ marginTop: 14, marginLeft: 14 }}>
                               {insight.longTermImpact != null && insight.longTermImpact > insight.annualImpact && (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                                  <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                                  <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 3, paddingHorizontal: 10 }}>
                                     <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
                                       {'\u00a3'}{Math.round(insight.longTermImpact).toLocaleString()} over 5yr
                                     </Text>
                                   </View>
                                 </View>
                               )}
-                              <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18 }}>
+                              <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.text2, lineHeight: 20 }}>
                                 {insight.cause}
                               </Text>
                               {insight.implication && (
-                                <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.green, lineHeight: 18, marginTop: 6 }}>
+                                <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.green, lineHeight: 20, marginTop: 8 }}>
                                   {insight.implication}
                                 </Text>
                               )}
                               <TouchableOpacity
-                                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12 }}
                                 onPress={() => {
                                   router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about this: "${insight.statement}"` } });
                                 }}
@@ -4273,8 +4321,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   },
   scroll: {
     padding: 24,
-    paddingTop: 68,
-    paddingBottom: 120,
+    paddingTop: 72,
+    paddingBottom: 140,
   },
   loadingContainer: {
     flex: 1,
@@ -4285,7 +4333,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Header ──
   headerWrap: {
-    marginBottom: 40,
+    marginBottom: 48,
   },
   headerRow: {
     flexDirection: 'row',
@@ -4416,8 +4464,8 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginTop: 36,
-    marginBottom: 18,
+    marginTop: 44,
+    marginBottom: 24,
   },
   moveSectionLabel: {
     fontFamily: fonts.mono,
@@ -4522,28 +4570,25 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Empty State ──
   emptyState: {
-    marginTop: 32,
+    marginTop: 48,
     alignItems: 'center',
   },
   emptyNatureBg: {
     width: '100%',
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     overflow: 'hidden',
     minHeight: 360,
     position: 'relative',
-    backgroundColor: '#2D5A1E',
-  },
-  emptyNatureLayer: {
-    ...StyleSheet.absoluteFillObject,
+    backgroundColor: c.surface,
+    borderWidth: 1,
+    borderColor: c.border,
   },
   emptyGlassCard: {
-    margin: spacing.lg,
-    marginTop: 40,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    padding: spacing.xl,
+    margin: spacing.xl,
+    marginTop: 48,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    padding: spacing.lg,
     alignItems: 'center',
   },
   emptyBocyWrap: {
@@ -4552,18 +4597,18 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   emptyTitle: {
     fontFamily: fonts.medium,
     fontSize: 20,
-    color: '#fff',
+    color: c.text,
     textAlign: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     letterSpacing: -0.3,
   },
   emptyDesc: {
     fontFamily: fonts.regular,
     fontSize: 14,
-    color: 'rgba(255,255,255,0.75)',
+    color: c.dim,
     textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 28,
+    lineHeight: 24,
+    marginBottom: 36,
     paddingHorizontal: spacing.sm,
   },
   ctaButton: {
@@ -4748,7 +4793,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
 
   // ── Card 1: Move items (kept for modals) ──
   moveItemFull: {
-    paddingVertical: 20,
+    paddingVertical: 24,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: c.border,
   },

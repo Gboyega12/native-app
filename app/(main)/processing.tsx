@@ -651,10 +651,10 @@ function ProcessingInner() {
   if (insight) {
     return (
       <View style={styles.container}>
-        {/* Animated success checkmark */}
-        <View style={{ alignItems: 'center', marginBottom: spacing.xl }}>
-          <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: `${colors.green}20`, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontSize: 36, color: colors.green }}>{'\u2713'}</Text>
+        {/* Animated success checkmark — monochrome Nothing Phone style */}
+        <View style={{ alignItems: 'center', marginBottom: spacing.xxl }}>
+          <View style={{ width: 64, height: 64, borderRadius: 32, borderWidth: 1.5, borderColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontSize: 28, color: colors.accent }}>{'\u2713'}</Text>
           </View>
         </View>
 
@@ -780,26 +780,27 @@ const styles = StyleSheet.create({
   dotGridContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.xl,
-    paddingVertical: spacing.md,
+    marginBottom: spacing.xxl,
+    paddingVertical: spacing.lg,
   },
   dotRow: {
     flexDirection: 'row',
     justifyContent: 'center',
   },
   dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.green,
-    margin: 5,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.accent,
+    margin: 6,
   },
 
   title: {
-    fontFamily: fonts.heading,
-    fontSize: 20,
+    fontFamily: fonts.medium,
+    fontSize: 18,
     color: colors.text,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
+    letterSpacing: -0.3,
   },
 
   // ── Progress bar ──
@@ -813,7 +814,7 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     borderRadius: 2,
-    backgroundColor: colors.green,
+    backgroundColor: colors.accent,
   },
   progressLabel: {
     fontFamily: fonts.mono,
@@ -825,7 +826,7 @@ const styles = StyleSheet.create({
   },
 
   steps: {
-    gap: spacing.md,
+    gap: spacing.lg,
   },
   stepRow: {
     flexDirection: 'row',
@@ -842,11 +843,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   stepIconActive: {
-    color: colors.green,
+    color: colors.accent,
     fontSize: 10,
   },
   stepIconDone: {
-    color: colors.green,
+    color: colors.accent,
     fontSize: 14,
   },
   stepText: {
@@ -863,8 +864,8 @@ const styles = StyleSheet.create({
   enrichProgress: {
     fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.green,
-    marginTop: 2,
+    color: colors.accent,
+    marginTop: 4,
   },
   slowWarning: {
     fontFamily: fonts.mono,
@@ -879,11 +880,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
   },
   insightTitle: {
-    fontFamily: fonts.heading,
-    fontSize: 24,
+    fontFamily: fonts.medium,
+    fontSize: 22,
     color: colors.text,
     textAlign: 'center',
     marginBottom: spacing.md,
+    letterSpacing: -0.5,
   },
   insightText: {
     fontFamily: fonts.regular,
@@ -897,9 +899,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: spacing.xl,
-    marginBottom: spacing.xl,
-    gap: spacing.lg,
+    marginTop: spacing.xxl,
+    marginBottom: spacing.xxl,
+    gap: spacing.xl,
   },
   insightStat: {
     alignItems: 'center',
@@ -925,14 +927,15 @@ const styles = StyleSheet.create({
   insightButton: {
     backgroundColor: colors.accent,
     paddingVertical: 16,
-    borderRadius: radius.md,
+    borderRadius: 100,
     alignItems: 'center',
-    marginHorizontal: spacing.md,
+    marginHorizontal: 0,
   },
   insightButtonText: {
     fontFamily: fonts.semibold,
-    fontSize: 16,
+    fontSize: 14,
     color: colors.bg,
+    letterSpacing: 0.2,
   },
   errorIcon: {
     fontFamily: fonts.medium,
