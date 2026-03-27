@@ -3,6 +3,16 @@
 //   1. Payday alerts (income arrival)
 //   2. Spending limit warnings (50% threshold)
 //   3. Growth engine time-sensitive alerts (tax deadlines, ISA allowance)
+//   4. Unusual spending spike (category 2x weekly average)
+//   5. Surplus milestone (first £100, £500, £1000)
+//   6. Debt payoff countdown (< 3 months remaining)
+//   7. Move reminder (approved but not started after 7 days)
+//   8. Weekly spending recap (Sunday summary)
+//   9. Savings rate milestone (10%, 20%, 30%)
+//  10. Capital Gains Tax deadline (December alert)
+//  11. Pension annual allowance (March alert)
+//  12. Bank of England rate change (rate decision days)
+//  13. Council tax new year (April alert)
 //
 // POST body: { user_id }
 // Called after sync or analysis refresh.
@@ -26,6 +36,30 @@ const webPush = require('web-push') as {
 if (VAPID_PUBLIC && VAPID_PRIVATE) {
   webPush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
 }
+
+/** Returns ISO week key like "2026-W13" for dedup */
+function isoWeekKey(d: Date): string {
+  const jan1 = new Date(d.getFullYear(), 0, 1);
+  const days = Math.floor((d.getTime() - jan1.getTime()) / 86400000);
+  const week = Math.ceil((days + jan1.getDay() + 1) / 7);
+  return `${d.getFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+/** Returns month key like "2026-03" for dedup */
+function monthKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Surplus milestone thresholds */
+const SURPLUS_MILESTONES = [100, 250, 500, 1000, 2000, 5000];
+
+/** Savings rate milestone thresholds */
+const SAVINGS_RATE_MILESTONES = [10, 20, 30, 50];
+
+/** 2026 Bank of England MPC announcement dates (month-day) */
+const BOE_RATE_DATES_2026 = [
+  '02-05', '03-19', '05-07', '06-18', '08-06', '09-17', '11-05', '12-17',
+];
 
 async function sendPushToUser(
   admin: ReturnType<typeof createClient>,
@@ -242,6 +276,328 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         user_id: userId,
         sa_deadline_notified_year: String(now.getFullYear()),
         updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    }
+
+
+    // ═══════════════════════════════════════════════════════════
+    // MONEY-SAVING NOTIFICATIONS
+    // ═══════════════════════════════════════════════════════════
+
+    // ── 4. Unusual Spending Spike ──
+    // Alert when any discretionary category this week is 2x its weekly average
+    const thisWeek = isoWeekKey(now);
+
+    if (state.last_spending_spike_week !== thisWeek) {
+      const spikeCats: string[] = [];
+      if (Array.isArray(analysis.category_breakdown)) {
+        for (const cb of analysis.category_breakdown) {
+          const catName = cb?.category || cb?.name;
+          const weeklyActual = (cb?.this_week ?? 0);
+          const weeklyNorm = (cb?.monthly_average ?? 0) / 4.33;
+          if (weeklyNorm > 10 && weeklyActual >= weeklyNorm * 2) {
+            spikeCats.push(catName);
+          }
+        }
+      }
+
+      if (spikeCats.length > 0) {
+        const topSpike = spikeCats[0];
+        await sendPushToUser(admin, userId, {
+          title: 'Spending Spike',
+          body: `Your ${topSpike} spending is unusually high this week — more than double your average. Tap to review.`,
+          url: '/',
+          tag: 'spending_spike',
+        });
+        triggered.push('spending_spike');
+
+        await admin.from('notification_state').upsert({
+          user_id: userId,
+          last_spending_spike_week: thisWeek,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+      }
+    }
+
+    // ── 5. Surplus Milestone ──
+    // Celebrate when monthly surplus crosses a meaningful threshold
+    const surplus = analysis.surplus ?? 0;
+    const lastSurplusMilestone = state.last_surplus_milestone ?? 0;
+
+    if (surplus > 0) {
+      const currentMilestone = SURPLUS_MILESTONES.filter(m => surplus >= m).pop() ?? 0;
+
+      if (currentMilestone > lastSurplusMilestone) {
+        await sendPushToUser(admin, userId, {
+          title: 'Surplus Milestone',
+          body: `Your monthly surplus has reached £${currentMilestone.toLocaleString()}. You're building real momentum.`,
+          url: '/',
+          tag: 'surplus_milestone',
+        });
+        triggered.push('surplus_milestone');
+
+        await admin.from('notification_state').upsert({
+          user_id: userId,
+          last_surplus_milestone: currentMilestone,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+      }
+    }
+
+    // ── 6. Debt Payoff Countdown ──
+    // Alert when a debt account is < 3 months from being cleared
+    const thisMonth = monthKey(now);
+
+    if (state.last_debt_countdown_month !== thisMonth) {
+      const { data: debtAccounts } = await admin
+        .from('debt_accounts')
+        .select('account_name, outstanding_balance, minimum_payment')
+        .eq('user_id', userId);
+
+      if (debtAccounts?.length) {
+        for (const debt of debtAccounts) {
+          const balance = debt.outstanding_balance ?? 0;
+          const payment = debt.minimum_payment ?? 0;
+          if (balance > 0 && payment > 0) {
+            const monthsLeft = Math.ceil(balance / payment);
+            if (monthsLeft <= 3 && monthsLeft > 0) {
+              await sendPushToUser(admin, userId, {
+                title: 'Debt Freedom Close',
+                body: `${debt.account_name} could be cleared in ~${monthsLeft} month${monthsLeft === 1 ? '' : 's'}. Keep going — you're nearly there.`,
+                url: '/(main)/(tabs)/chat?context=debt_strategy',
+                tag: 'debt_countdown',
+              });
+              triggered.push('debt_countdown');
+
+              await admin.from('notification_state').upsert({
+                user_id: userId,
+                last_debt_countdown_month: thisMonth,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'user_id' });
+              break; // One debt alert per cycle
+            }
+          }
+        }
+      }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════
+    // BEHAVIORAL NUDGES
+    // ═══════════════════════════════════════════════════════════
+
+    // ── 7. Move Reminder ──
+    // Nudge if a move was approved 7+ days ago but no steps completed
+    const lastReminder = state.last_move_reminder_at
+      ? new Date(state.last_move_reminder_at)
+      : null;
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const reminderCooldown = !lastReminder || lastReminder < sevenDaysAgo;
+
+    if (reminderCooldown) {
+      const { data: staleProgress } = await admin
+        .from('plan_progress')
+        .select('move_action, created_at, completed_steps')
+        .eq('user_id', userId)
+        .eq('approved', true);
+
+      if (staleProgress?.length) {
+        const staleMoves = staleProgress.filter(p => {
+          const completedCount = Array.isArray(p.completed_steps) ? p.completed_steps.length : 0;
+          const createdAt = new Date(p.created_at);
+          return completedCount === 0 && createdAt < sevenDaysAgo;
+        });
+
+        if (staleMoves.length > 0) {
+          const moveAction = staleMoves[0].move_action;
+          await sendPushToUser(admin, userId, {
+            title: 'Ready to Start?',
+            body: `You approved "${moveAction}" — tap to take the first step.`,
+            url: '/(main)/(tabs)/chat',
+            tag: 'move_reminder',
+          });
+          triggered.push('move_reminder');
+
+          await admin.from('notification_state').upsert({
+            user_id: userId,
+            last_move_reminder_at: now.toISOString(),
+            updated_at: now.toISOString(),
+          }, { onConflict: 'user_id' });
+        }
+      }
+    }
+
+    // ── 8. Weekly Spending Recap ──
+    // Sunday summary of the week's spending vs budget
+    const isSunday = now.getDay() === 0;
+
+    if (isSunday && state.last_weekly_recap_week !== thisWeek && weeklyBudget > 0) {
+      const pctUsed = Math.round((spentThisWeek / weeklyBudget) * 100);
+      const remaining = Math.max(0, Math.round(weeklyBudget - spentThisWeek));
+      const underOver = spentThisWeek <= weeklyBudget
+        ? `£${remaining.toLocaleString()} under budget`
+        : `£${Math.round(spentThisWeek - weeklyBudget).toLocaleString()} over budget`;
+
+      await sendPushToUser(admin, userId, {
+        title: 'Weekly Recap',
+        body: `You spent £${Math.round(spentThisWeek).toLocaleString()} this week (${pctUsed}% of budget) — ${underOver}.`,
+        url: '/',
+        tag: 'weekly_recap',
+      });
+      triggered.push('weekly_recap');
+
+      await admin.from('notification_state').upsert({
+        user_id: userId,
+        last_weekly_recap_week: thisWeek,
+        updated_at: now.toISOString(),
+      }, { onConflict: 'user_id' });
+    }
+
+    // ── 9. Savings Rate Milestone ──
+    // Celebrate when savings rate crosses 10%, 20%, 30%, 50%
+    const { data: latestScore } = await admin
+      .from('score_history')
+      .select('savings_rate')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const savingsRate = latestScore?.savings_rate ?? 0;
+    const lastSavingsRateMilestone = state.last_savings_rate_milestone ?? 0;
+
+    if (savingsRate > 0) {
+      const currentRateMilestone = SAVINGS_RATE_MILESTONES.filter(m => savingsRate >= m).pop() ?? 0;
+
+      if (currentRateMilestone > lastSavingsRateMilestone) {
+        await sendPushToUser(admin, userId, {
+          title: 'Savings Rate Up',
+          body: `You're now saving ${currentRateMilestone}% of your income. That puts you ahead of most UK households.`,
+          url: '/',
+          tag: 'savings_rate_milestone',
+        });
+        triggered.push('savings_rate_milestone');
+
+        await admin.from('notification_state').upsert({
+          user_id: userId,
+          last_savings_rate_milestone: currentRateMilestone,
+          updated_at: now.toISOString(),
+        }, { onConflict: 'user_id' });
+      }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════
+    // CALENDAR-AWARE / UK-SPECIFIC
+    // ═══════════════════════════════════════════════════════════
+
+    // ── 10. Capital Gains Tax Deadline ──
+    // December alert: CGT reporting deadline is Jan 31st (same as Self Assessment)
+    if (currentMonth === 11 && !state.cgt_deadline_notified_year?.toString().includes(String(now.getFullYear()))) {
+      // Only alert if user has investments with potential gains
+      const { data: investments } = await admin
+        .from('investments')
+        .select('name, current_value, purchase_cost')
+        .eq('user_id', userId);
+
+      const hasGains = investments?.some(inv =>
+        (inv.current_value ?? 0) > (inv.purchase_cost ?? 0)
+      );
+
+      if (hasGains) {
+        await sendPushToUser(admin, userId, {
+          title: 'Capital Gains Tax',
+          body: 'The CGT reporting deadline is January 31st. Review your investment gains and use your £3,000 annual exemption before the tax year ends.',
+          url: '/(main)/(tabs)/chat?context=tax_capital_gains',
+          tag: 'tax_cgt_deadline',
+        });
+        triggered.push('cgt_deadline');
+
+        await admin.from('notification_state').upsert({
+          user_id: userId,
+          cgt_deadline_notified_year: String(now.getFullYear()),
+          updated_at: now.toISOString(),
+        }, { onConflict: 'user_id' });
+      }
+    }
+
+    // ── 11. Pension Annual Allowance ──
+    // March alert: remind to use pension allowance before April 5th
+    if (currentMonth === 2 && !state.pension_allowance_notified_year?.toString().includes(String(now.getFullYear()))) {
+      const { data: pensionAssets } = await admin
+        .from('manual_assets')
+        .select('estimated_value')
+        .eq('user_id', userId)
+        .in('asset_type', ['pension', 'sipp']);
+
+      if (pensionAssets?.length) {
+        const totalPension = pensionAssets.reduce(
+          (sum, a) => sum + (a.estimated_value ?? 0), 0
+        );
+        await sendPushToUser(admin, userId, {
+          title: 'Pension Allowance',
+          body: `You have pension assets of £${Math.round(totalPension).toLocaleString()}. The £60,000 annual allowance resets on April 6th — maximise your tax relief before then.`,
+          url: '/(main)/(tabs)/chat?context=pension_optimisation',
+          tag: 'pension_allowance',
+        });
+        triggered.push('pension_allowance');
+
+        await admin.from('notification_state').upsert({
+          user_id: userId,
+          pension_allowance_notified_year: String(now.getFullYear()),
+          updated_at: now.toISOString(),
+        }, { onConflict: 'user_id' });
+      }
+    }
+
+    // ── 12. Bank of England Rate Decision ──
+    // Alert on MPC announcement days if user has variable-rate savings
+    const todayMMDD = `${String(currentMonth + 1).padStart(2, '0')}-${String(currentDay).padStart(2, '0')}`;
+    const isRateDay = BOE_RATE_DATES_2026.includes(todayMMDD);
+    const currentBoeMonth = monthKey(now);
+
+    if (isRateDay && state.boe_rate_notified_month !== currentBoeMonth) {
+      const { data: savingsAccounts } = await admin
+        .from('savings_accounts')
+        .select('account_name, interest_rate, account_type')
+        .eq('user_id', userId);
+
+      const hasVariableRate = savingsAccounts?.some(
+        a => a.account_type === 'easy_access' || a.account_type === 'other'
+      );
+
+      if (hasVariableRate) {
+        await sendPushToUser(admin, userId, {
+          title: 'Rate Decision Today',
+          body: 'The Bank of England announces its interest rate decision today. Your savings rates may change — review your accounts.',
+          url: '/(main)/(tabs)/chat?context=savings_rates',
+          tag: 'boe_rate_decision',
+        });
+        triggered.push('boe_rate_decision');
+
+        await admin.from('notification_state').upsert({
+          user_id: userId,
+          boe_rate_notified_month: currentBoeMonth,
+          updated_at: now.toISOString(),
+        }, { onConflict: 'user_id' });
+      }
+    }
+
+    // ── 13. Council Tax New Year ──
+    // April alert: new council tax year, bands may change
+    if (currentMonth === 3 && currentDay <= 7 && !state.council_tax_notified_year?.toString().includes(String(now.getFullYear()))) {
+      await sendPushToUser(admin, userId, {
+        title: 'Council Tax Update',
+        body: 'The new council tax year has started. Your band or rate may have changed — check your local authority for updates.',
+        url: '/(main)/(tabs)/chat?context=council_tax',
+        tag: 'council_tax_new_year',
+      });
+      triggered.push('council_tax');
+
+      await admin.from('notification_state').upsert({
+        user_id: userId,
+        council_tax_notified_year: String(now.getFullYear()),
+        updated_at: now.toISOString(),
       }, { onConflict: 'user_id' });
     }
 
