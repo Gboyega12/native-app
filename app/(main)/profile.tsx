@@ -800,78 +800,51 @@ export default function Profile() {
         </Pressable>
       </Modal>
 
-      {/* ── PROFILE — identity, notifications, spending settings ── */}
-      <Text style={s.sectionLabel}>PROFILE</Text>
+      {/* ── NOTIFICATIONS ── */}
+      <Text style={s.sectionLabel}>NOTIFICATIONS</Text>
 
-      <View style={s.groupCard}>
-        <TouchableOpacity
-          style={s.groupRow}
-          onPress={() => {
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            setNotifExpanded(!notifExpanded);
-          }}
-          activeOpacity={0.7}
-        >
-          <Text style={s.groupRowLabel}>Notifications</Text>
-          <Text style={s.groupRowChevron}>{notifExpanded ? '\u2304' : '\u203A'}</Text>
-        </TouchableOpacity>
-
-        {notifExpanded && (
-          <>
-            <View style={s.groupDivider} />
-            {([
-              { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Top moves & spending recap every Monday' },
-              { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Spending updates, nudges & income alerts' },
-            ]).map((item, idx) => (
-              <View key={item.key}>
-                {idx > 0 && <View style={s.groupDivider} />}
-                <View style={s.notifRow}>
-                  <View style={s.notifInfo}>
-                    <View style={s.notifLabelRow}>
-                      <Text style={s.notifLabel}>{item.label}</Text>
-                    </View>
-                    <Text style={s.notifDesc}>{item.desc}</Text>
-                  </View>
-                  <Switch
-                    value={notifPrefs[item.key]}
-                    onValueChange={() => toggleNotifPref(item.key)}
-                    trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-                    thumbColor={notifPrefs[item.key] ? colors.green : colors.thumbOff}
-                  />
-                </View>
-              </View>
-            ))}
-            {webPush.supported && (
-              <>
-                <View style={s.groupDivider} />
-                <View style={s.notifRow}>
-                  <View style={s.notifInfo}>
-                    <Text style={s.notifLabel}>Push notifications</Text>
-                    <Text style={s.notifDesc}>
-                      {webPush.permission === 'denied'
-                        ? 'Blocked in browser settings'
-                        : 'Receive alerts in your browser'}
-                    </Text>
-                  </View>
-                  <Switch
-                    value={webPush.subscribed}
-                    onValueChange={() => {
-                      if (webPush.subscribed) {
-                        webPush.unsubscribe();
-                      } else {
-                        webPush.subscribe();
-                      }
-                    }}
-                    trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-                    thumbColor={webPush.subscribed ? colors.green : colors.thumbOff}
-                    disabled={webPush.loading || webPush.permission === 'denied'}
-                  />
-                </View>
-              </>
-            )}
-          </>
-        )}
-      </View>
+      {([
+        { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Top moves & spending recap every Monday' },
+        { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Spending updates, nudges & income alerts' },
+      ]).map((item, idx) => (
+        <View key={item.key} style={[s.notifRow, idx === 0 && { paddingTop: 0 }]}>
+          <View style={s.notifInfo}>
+            <Text style={s.notifLabel}>{item.label}</Text>
+            <Text style={s.notifDesc}>{item.desc}</Text>
+          </View>
+          <Switch
+            value={notifPrefs[item.key]}
+            onValueChange={() => toggleNotifPref(item.key)}
+            trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+            thumbColor={notifPrefs[item.key] ? colors.green : colors.thumbOff}
+          />
+        </View>
+      ))}
+      {webPush.supported && (
+        <View style={s.notifRow}>
+          <View style={s.notifInfo}>
+            <Text style={s.notifLabel}>Push notifications</Text>
+            <Text style={s.notifDesc}>
+              {webPush.permission === 'denied'
+                ? 'Blocked in browser settings'
+                : 'Receive alerts in your browser'}
+            </Text>
+          </View>
+          <Switch
+            value={webPush.subscribed}
+            onValueChange={() => {
+              if (webPush.subscribed) {
+                webPush.unsubscribe();
+              } else {
+                webPush.subscribe();
+              }
+            }}
+            trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+            thumbColor={webPush.subscribed ? colors.green : colors.thumbOff}
+            disabled={webPush.loading || webPush.permission === 'denied'}
+          />
+        </View>
+      )}
 
       {/* ── APPEARANCE — dark/light mode ── */}
       <Text style={s.sectionLabel}>APPEARANCE</Text>
