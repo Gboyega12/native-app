@@ -1457,6 +1457,21 @@ export default function Home() {
         return fresh;
       });
       setLastSynced(getLastSyncTime());
+
+      // Trigger push notifications for payday, spending limits, tax deadlines
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          fetch('/api/notifications/trigger', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ user_id: userId }),
+          }).catch(() => {}); // Fire and forget
+        }
+      } catch {}
     } catch (err: any) {
       console.warn('[home] Background sync failed:', err?.message);
       setSyncError('Sync failed — pull down to retry');
@@ -2180,7 +2195,122 @@ export default function Home() {
           )}
 
           {/* ══════════════════════════════════════════════
-              YOUR INSIGHTS — inline from Plan page
+              #1 MOVE CARD — standalone hero
+              ══════════════════════════════════════════════ */}
+          {dashboardMoves.length > 0 && (() => {
+            const heroMove = dashboardMoves[0];
+            const heroIdx = moves.indexOf(heroMove);
+            const heroKey = `move-${heroIdx}`;
+            const heroProgress = planProgress[heroKey];
+            const heroActive = !!heroProgress?.approved;
+            const heroSgs = repairDebtSubGoals(heroProgress?.sub_goals || hydrateSubGoals(heroMove, debtAccounts) || [], debtAccounts);
+            const heroSteps = heroMove.steps || [];
+            const heroHasSgs = heroSgs.length > 0;
+            const heroDoneCount = heroHasSgs
+              ? heroSgs.filter((sg: MoveSubGoal) => sg.completedAt).length
+              : (heroProgress?.completed_steps || []).length;
+            const heroTotal = heroHasSgs ? heroSgs.length : heroSteps.length;
+            const heroFraction = heroTotal > 0 ? heroDoneCount / heroTotal : 0;
+            const heroAllDone = heroTotal > 0 && heroDoneCount >= heroTotal;
+            const daysSinceStart = heroProgress?.updated_at
+              ? Math.max(1, Math.floor((Date.now() - new Date(heroProgress.updated_at).getTime()) / 86400000))
+              : 1;
+            const nextStep = heroSteps.find((_: string, idx: number) => !(heroProgress?.completed_steps || []).includes(idx));
+            const nextSg = heroSgs.find((sg: MoveSubGoal) => !sg.completedAt);
+            const heroCtaLabel = (() => {
+              if (!heroActive) return 'Start this move';
+              if (heroAllDone) return 'View completed move';
+              if (nextSg) {
+                const remaining = Math.round(nextSg.currentValue ?? nextSg.startValue);
+                const payment = Math.round(heroMove.monthlyImpact || 0);
+                const target = nextSg.target || 'debt';
+                return payment > 0
+                  ? `Next: pay \u00a3${payment} to ${target}`
+                  : `Next: clear ${target} (\u00a3${remaining} left)`;
+              }
+              return nextStep ? `Next: ${nextStep.length > 30 ? nextStep.slice(0, 30) + '\u2026' : nextStep}` : 'View progress';
+            })();
+            return (
+              <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }} style={{ marginBottom: spacing.md }}>
+                <AnimGlyph delay={0}>
+                  <Card variant={heroActive ? 'active' : 'highlight'}>
+                    {heroActive ? (
+                      <>
+                        <CardTitle color={heroAllDone ? colors.green : colors.accent}>
+                          {heroAllDone ? 'MOVE COMPLETE \u2713' : `MOVE IN PROGRESS \u00B7 Day ${daysSinceStart}`}
+                        </CardTitle>
+                        <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                          {stripMd(heroMove.action)}
+                        </Text>
+                        <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
+                          <View>
+                            <AnimatedNumber value={heroMove.monthlyImpact || 0} prefix={'\u00a3'} style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }} />
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
+                          </View>
+                          <View>
+                            <AnimatedNumber value={heroMove.annualImpact || 0} prefix={'\u00a3'} style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }} />
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
+                          </View>
+                        </View>
+                        {heroTotal > 0 && (
+                          <View style={{ marginTop: 16 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                              <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                <View style={{ width: `${Math.round(heroFraction * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: heroAllDone ? colors.green : colors.accent }} />
+                              </View>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{heroDoneCount}/{heroTotal}</Text>
+                            </View>
+                          </View>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <CardTitle color={colors.green}>YOUR #1 MOVE</CardTitle>
+                        <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                          {stripMd(heroMove.action)}
+                        </Text>
+                        <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
+                          <View>
+                            <AnimatedNumber value={heroMove.monthlyImpact || 0} prefix={'\u00a3'} style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }} />
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
+                          </View>
+                          <View>
+                            <AnimatedNumber value={heroMove.annualImpact || 0} prefix={'\u00a3'} style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }} />
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
+                          </View>
+                        </View>
+                        {heroMove.effort && (
+                          <View style={{ marginTop: 14 }}>
+                            <View style={{ alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, backgroundColor: heroMove.effort === 'low' ? 'rgba(147,130,220,0.12)' : heroMove.effort === 'high' ? 'rgba(76,175,80,0.12)' : 'rgba(150,150,150,0.12)' }}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 10, letterSpacing: 0.5, color: heroMove.effort === 'low' ? '#9382DC' : heroMove.effort === 'high' ? colors.green : colors.dim }}>
+                                {heroMove.effort === 'low' ? 'Quick win' : heroMove.effort === 'high' ? 'Big move' : 'Some effort'}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </>
+                    )}
+                    <TouchableOpacity
+                      style={[s.heroCta, { marginTop: 24 }]}
+                      onPress={() => {
+                        if (heroActive) {
+                          const y = cardPositions.current.moves;
+                          if (y != null) dashScrollRef.current?.scrollTo({ y, animated: true });
+                        } else {
+                          handleStartMove(heroIdx, heroMove);
+                        }
+                      }}
+                    >
+                      <Text style={s.heroCtaText}>{heroCtaLabel}</Text>
+                    </TouchableOpacity>
+                  </Card>
+                </AnimGlyph>
+              </View>
+            );
+          })()}
+
+          {/* ══════════════════════════════════════════════
+              YOUR INSIGHTS — moves section with parent card design
               ══════════════════════════════════════════════ */}
           {(hasActive || hasCompleted || opportunityMoves.length > 0) && (
             <View onLayout={(e) => { cardPositions.current.moves = e.nativeEvent.layout.y; }}>
@@ -2545,22 +2675,30 @@ export default function Home() {
                 </>
               )}
 
-              {/* Opportunity moves */}
+              {/* Opportunity moves — parent card design */}
               {opportunityMoves.length > 0 && (
-                <>
-                  <View style={s.moveSectionHeader}>
-                    <Text style={s.moveSectionLabel}>YOUR INSIGHTS</Text>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green, letterSpacing: 0.3 }}>
-                      {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo potential
-                    </Text>
-                  </View>
-                  {(showAllMoves ? opportunityMoves : opportunityMoves.slice(0, 2)).map((move, seqIdx) => {
+                <Card style={{ marginBottom: spacing.md }}>
+                  <CardTitleRow
+                    title="Your Insights"
+                    right={
+                      <View style={{ backgroundColor: `${colors.green}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green }}>
+                          {'\u00a3'}{Math.round(opportunityMoves.reduce((s, m) => s + (m.monthlyImpact || 0), 0))}/mo
+                        </Text>
+                      </View>
+                    }
+                  />
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginBottom: 12, marginTop: -4 }}>
+                    {opportunityMoves.length} move{opportunityMoves.length !== 1 ? 's' : ''} available {'\u00B7'} tap to explore
+                  </Text>
+                  {/* First 2 moves always visible */}
+                  {opportunityMoves.slice(0, 2).map((move, seqIdx) => {
                     const i = move._sortIdx;
                     const isExpanded = expandedMove === i;
                     const moveKey = `move-${i}`;
                     const providerActions = getProviderActions(move);
                     return (
-                      <Card key={`opp-${i}`} variant="default" style={{ marginBottom: spacing.md }}>
+                      <View key={`opp-${i}`}>
                         <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
                           <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
                             <View style={[s.moveBadge, seqIdx === 0 && { borderColor: colors.green }]}>
@@ -2683,403 +2821,162 @@ export default function Home() {
                             </TouchableOpacity>
                           </View>
                         )}
-                      </Card>
+                      </View>
                     );
                   })}
 
-                  {/* View more button for progressive disclosure */}
-                  {!showAllMoves && opportunityMoves.length > 2 && (
-                    <TouchableOpacity
-                      style={s.viewMoreBtn}
-                      onPress={() => { trackEvent('Show All Moves Toggled'); LayoutAnimation.configureNext(SMOOTH_ANIM); setShowAllMoves(true); }}
-                      activeOpacity={0.7}
-                      accessibilityRole="button"
-                      accessibilityLabel={`View ${opportunityMoves.length - 2} more moves`}
-                    >
-                      <Text style={s.viewMoreText}>View {opportunityMoves.length - 2} more moves</Text>
-                      <Text style={s.viewMoreArrow}>{'\u25BC'}</Text>
-                    </TouchableOpacity>
+                  {/* Collapsible "Other moves" section within parent card */}
+                  {opportunityMoves.length > 2 && (
+                    <>
+                      <TouchableOpacity
+                        onPress={() => { hapticLight(); LayoutAnimation.configureNext(SMOOTH_ANIM); setShowAllMoves(!showAllMoves); }}
+                        activeOpacity={0.7}
+                        style={{ paddingVertical: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+                      >
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.accent, letterSpacing: 0.3 }}>
+                          {showAllMoves ? 'Show less' : `${opportunityMoves.length - 2} more move${opportunityMoves.length - 2 !== 1 ? 's' : ''}`}
+                        </Text>
+                        <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent }}>{showAllMoves ? '\u25B2' : '\u25BC'}</Text>
+                      </TouchableOpacity>
+                      {showAllMoves && opportunityMoves.slice(2).map((move, rawIdx) => {
+                        const seqIdx = rawIdx + 2;
+                        const i = move._sortIdx;
+                        const isExpanded = expandedMove === i;
+                        const providerActions = getProviderActions(move);
+                        return (
+                          <View key={`opp-${i}`}>
+                            <TouchableOpacity onPress={() => setExpandedMove(isExpanded ? null : i)} activeOpacity={0.8}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                                <View style={{ width: 4, height: 28, borderRadius: 2, backgroundColor: colors.accent }} />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text, lineHeight: 22 }} numberOfLines={isExpanded ? undefined : 2}>
+                                    {stripMd(move.action)}
+                                  </Text>
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <View style={{ backgroundColor: `${colors.green}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.green }}>
+                                      {'\u00a3'}{move.monthlyImpact}/mo
+                                    </Text>
+                                  </View>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.dim }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                                </View>
+                              </View>
+                            </TouchableOpacity>
+                            {isExpanded && (
+                              <View style={{ marginLeft: 14, marginBottom: 8 }}>
+                                {move.strategy && <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18, marginBottom: 8 }}>{stripMd(move.strategy)}</Text>}
+                                <TouchableOpacity style={[s.heroCta, { paddingVertical: 10 }]} onPress={() => handleStartMove(i, move)} activeOpacity={0.8}>
+                                  <Text style={[s.heroCtaText, { fontSize: 13 }]}>Start this move</Text>
+                                </TouchableOpacity>
+                              </View>
+                            )}
+                          </View>
+                        );
+                      })}
+                    </>
                   )}
-
-                </>
+                </Card>
               )}
             </View>
           )}
 
           {/* ══════════════════════════════════════════════
-              FOCUS CARD — horizontal snapping pager
+              DAILY SPENDING — standalone card connected to open banking
               ══════════════════════════════════════════════ */}
-          {(() => {
-            const CARD_GAP = 12;
-            const cardWidth = screenWidth - 48; // 24px padding each side
-            const snapInterval = cardWidth + CARD_GAP;
-            const hasMoveCard = dashboardMoves.length > 0;
-            const heroPageCount = hasMoveCard ? 2 : 1;
-            const HERO_MIN_HEIGHT = 280;
-            const scrollProgress = heroScrollX.interpolate({
-              inputRange: [0, snapInterval],
-              outputRange: [0, 1],
-              extrapolate: 'clamp',
-            });
-            const parallaxShift = heroScrollX.interpolate({
-              inputRange: [0, snapInterval],
-              outputRange: [0, 10],
-              extrapolate: 'clamp',
-            });
-            return (
-          <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
-            <AnimGlyph delay={0}>
-              <Animated.ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                scrollEventThrottle={16}
-                onScroll={Animated.event(
-                  [{ nativeEvent: { contentOffset: { x: heroScrollX } } }],
-                  { useNativeDriver: false },
-                )}
-                onMomentumScrollEnd={(e) => {
-                  const page = Math.round(e.nativeEvent.contentOffset.x / snapInterval);
-                  if (page !== heroPage) hapticTick();
-                  setHeroPage(page);
-                }}
-                style={{ marginHorizontal: -24 }}
-                contentContainerStyle={{ paddingHorizontal: 24 }}
-                decelerationRate="fast"
-                snapToInterval={snapInterval}
-                snapToAlignment="start"
-              >
-                {/* ── Page 1: #1 Move (hero) ── */}
-                {hasMoveCard && (() => {
-                  const heroMove = dashboardMoves[0];
-                  const heroIdx = moves.indexOf(heroMove);
-                  const heroKey = `move-${heroIdx}`;
-                  const heroProgress = planProgress[heroKey];
-                  const heroActive = !!heroProgress?.approved;
-                  const heroSgs = repairDebtSubGoals(heroProgress?.sub_goals || hydrateSubGoals(heroMove, debtAccounts) || [], debtAccounts);
-                  const heroSteps = heroMove.steps || [];
-                  const heroHasSgs = heroSgs.length > 0;
-                  const heroDoneCount = heroHasSgs
-                    ? heroSgs.filter((sg: MoveSubGoal) => sg.completedAt).length
-                    : (heroProgress?.completed_steps || []).length;
-                  const heroTotal = heroHasSgs ? heroSgs.length : heroSteps.length;
-                  const heroFraction = heroTotal > 0 ? heroDoneCount / heroTotal : 0;
-                  const heroAllDone = heroTotal > 0 && heroDoneCount >= heroTotal;
-                  const daysSinceStart = heroProgress?.updated_at
-                    ? Math.max(1, Math.floor((Date.now() - new Date(heroProgress.updated_at).getTime()) / 86400000))
-                    : 1;
-                  const nextStep = heroSteps.find((_: string, idx: number) => !(heroProgress?.completed_steps || []).includes(idx));
-                  // Build a mathematical CTA from subGoals when available
-                  const nextSg = heroSgs.find((sg: MoveSubGoal) => !sg.completedAt);
-                  const heroCtaLabel = (() => {
-                    if (!heroActive) return 'Start this move';
-                    if (heroAllDone) return 'View completed move';
-                    if (nextSg) {
-                      const remaining = Math.round(nextSg.currentValue ?? nextSg.startValue);
-                      const payment = Math.round(heroMove.monthlyImpact || 0);
-                      const target = nextSg.target || 'debt';
-                      // e.g. "Next: pay £17 to Amex (£204 left)"
-                      return payment > 0
-                        ? `Next: pay \u00a3${payment} to ${target}`
-                        : `Next: clear ${target} (\u00a3${remaining} left)`;
-                    }
-                    return nextStep ? `Next: ${nextStep.length > 30 ? nextStep.slice(0, 30) + '\u2026' : nextStep}` : 'View progress';
-                  })();
-                  return (
-                  <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
-                    <Card variant={heroActive ? 'active' : 'highlight'} style={{ flex: 1 }}>
-                      <Animated.View style={{ transform: [{ translateX: parallaxShift }], flex: 1 }}>
-                        {heroActive ? (
-                          <>
-                            <CardTitle color={heroAllDone ? colors.green : colors.accent}>
-                              {heroAllDone ? 'MOVE COMPLETE \u2713' : `MOVE IN PROGRESS \u00B7 Day ${daysSinceStart}`}
-                            </CardTitle>
-                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
-                              {stripMd(heroMove.action)}
-                            </Text>
-                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
-                              <View>
-                                <AnimatedNumber
-                                  value={heroMove.monthlyImpact || 0}
-                                  prefix={'\u00a3'}
-                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                                />
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
-                              </View>
-                              <View>
-                                <AnimatedNumber
-                                  value={heroMove.annualImpact || 0}
-                                  prefix={'\u00a3'}
-                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                                />
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
-                              </View>
-                            </View>
-                            {heroTotal > 0 && (
-                              <View style={{ marginTop: 16 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                                  <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
-                                    <View style={{ width: `${Math.round(heroFraction * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: heroAllDone ? colors.green : colors.accent }} />
-                                  </View>
-                                  <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{heroDoneCount}/{heroTotal}</Text>
-                                </View>
-                              </View>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <CardTitle color={colors.green}>YOUR #1 MOVE</CardTitle>
-                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
-                              {stripMd(heroMove.action)}
-                            </Text>
-                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
-                              <View>
-                                <AnimatedNumber
-                                  value={heroMove.monthlyImpact || 0}
-                                  prefix={'\u00a3'}
-                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                                />
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
-                              </View>
-                              <View>
-                                <AnimatedNumber
-                                  value={heroMove.annualImpact || 0}
-                                  prefix={'\u00a3'}
-                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                                />
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
-                              </View>
-                            </View>
-                            {heroMove.effort && (
-                              <View style={{ marginTop: 14 }}>
-                                <View style={{
-                                  alignSelf: 'flex-start',
-                                  paddingHorizontal: 10,
-                                  paddingVertical: 4,
-                                  borderRadius: 12,
-                                  backgroundColor: heroMove.effort === 'low' ? 'rgba(147,130,220,0.12)' : heroMove.effort === 'high' ? 'rgba(76,175,80,0.12)' : 'rgba(150,150,150,0.12)',
-                                }}>
-                                  <Text style={{
-                                    fontFamily: fonts.mono,
-                                    fontSize: 10,
-                                    letterSpacing: 0.5,
-                                    color: heroMove.effort === 'low' ? '#9382DC' : heroMove.effort === 'high' ? colors.green : colors.dim,
-                                  }}>
-                                    {heroMove.effort === 'low' ? 'Quick win' : heroMove.effort === 'high' ? 'Big move' : 'Some effort'}
-                                  </Text>
-                                </View>
-                              </View>
-                            )}
-                          </>
-                        )}
-                      </Animated.View>
-                      <TouchableOpacity
-                        style={[s.heroCta, { marginTop: 24 }]}
-                        onPress={() => {
-                          if (heroActive) {
-                            // Scroll to in-progress section
-                            const y = cardPositions.current.moves;
-                            if (y != null) dashScrollRef.current?.scrollTo({ y, animated: true });
-                          } else {
-                            handleStartMove(heroIdx, heroMove);
-                          }
-                        }}
-                      >
-                        <Text style={s.heroCtaText}>{heroCtaLabel}</Text>
-                      </TouchableOpacity>
-                    </Card>
-                  </View>
-                  );
-                })()}
-
-                {/* ── Horizontal connector dots between cards ── */}
-                {hasMoveCard && (
-                  <View style={{ width: CARD_GAP, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
-                    <HorizontalConnectorDots scrollProgress={scrollProgress} />
-                  </View>
-                )}
-
-                {/* ── Page 2: Budget / Payday ── */}
-                <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
-          {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
-              <Animated.View
-                {...paydayPanResponder.panHandlers}
-                style={{ transform: [{ translateY: paydayTranslateY }], opacity: paydayOpacity, flex: 1 }}
-              >
-              <Card variant="hero" style={{ flex: 1 }}>
-                <Text style={s.heroLabel}>PAYDAY</Text>
-                <Text style={s.heroAction}>
-                  {weeklyCtx.recentIncomeEvents.map((e) =>
-                    `\u00a3${Math.round(e?.amount ?? 0).toLocaleString()}`
-                  ).join(' + ')}{' '}received
-                </Text>
-
-                <View style={{ marginTop: 24, gap: 14 }}>
-                  {(weeklyCtx.committedThisWeek ?? 0) > 0 && (
-                    <View style={s.focusSplitRow}>
-                      <Text style={s.focusSplitLabel}>Bills & essentials</Text>
-                      <Text style={[s.focusSplitValue, { color: colors.dim }]}>
-                        -{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek ?? 0).toLocaleString()}
-                      </Text>
+          <Card variant="hero" style={{ marginBottom: spacing.md }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                  <Text style={[s.heroLabel, { marginBottom: 0 }]}>THIS WEEK</Text>
+                  <TouchableOpacity
+                    onPress={() => setShowWeeklyInfo(true)}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="How is this calculated?"
+                  >
+                    <View style={s.infoIconSmall}>
+                      <Text style={s.infoIconSmallText}>?</Text>
                     </View>
-                  )}
-                  {moves.length > 0 && moves[0].monthlyImpact > 0 && (
-                    <View style={s.focusSplitRow}>
-                      <Text style={s.focusSplitLabel}>{stripMd(moves[0].action)}</Text>
-                      <Text style={[s.focusSplitValue, { color: colors.text2 }]}>
-                        {'\u00a3'}{Math.round(moves[0].monthlyImpact / 4.33).toLocaleString()}/wk
-                      </Text>
-                    </View>
-                  )}
-                  <View style={[s.focusSplitRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 14 }]}>
-                    <Text style={[s.focusSplitLabel, { fontFamily: fonts.semibold, color: colors.text }]}>Safe to spend</Text>
-                    <Text style={[s.focusSplitValue, { fontFamily: fonts.mono, fontSize: 20, color: weeklyHealthy ? colors.text : colors.coral }]}>
-                      {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}/wk
-                    </Text>
-                  </View>
+                  </TouchableOpacity>
                 </View>
-
+                <AnimatedNumber
+                  value={weeklyRemaining}
+                  prefix={'\u00a3'}
+                  style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 38 }]}
+                />
+                <Text style={s.safeToSpendLabel}>left to spend</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <AnimatedNumber
+                  value={spentThisWeek}
+                  prefix={'\u00a3'}
+                  suffix=" spent"
+                  style={s.safeToSpendMeta}
+                />
                 <TouchableOpacity
-                  style={[s.heroCta, { marginTop: 28 }]}
-                  onPress={() => {
-                    dismissIncome();
-                    router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: 'I just got paid. Walk me through what to do.' } });
-                  }}
+                  onPress={() => { setLimitInput(customWeeklyLimit ? String(customWeeklyLimit) : String(Math.round(calculatedWeeklyBudget))); setShowLimitEditor(true); }}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Set custom weekly spending limit"
                 >
-                  <Text style={s.heroCtaText}>Ask Bocy about this</Text>
-                </TouchableOpacity>
-              </Card>
-              </Animated.View>
-          ) : (
-              <Card variant="hero" style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                      <Text style={[s.heroLabel, { marginBottom: 0 }]}>THIS WEEK</Text>
-                      <TouchableOpacity
-                        onPress={() => setShowWeeklyInfo(true)}
-                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                        accessibilityRole="button"
-                        accessibilityLabel="How is this calculated?"
-                      >
-                        <View style={s.infoIconSmall}>
-                          <Text style={s.infoIconSmallText}>?</Text>
-                        </View>
-                      </TouchableOpacity>
-                    </View>
-                    <AnimatedNumber
-                      value={weeklyRemaining}
-                      prefix={'\u00a3'}
-                      style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 38 }]}
-                    />
-                    <Text style={s.safeToSpendLabel}>left to spend</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <AnimatedNumber
-                      value={spentThisWeek}
-                      prefix={'\u00a3'}
-                      suffix=" spent"
-                      style={s.safeToSpendMeta}
-                    />
-                    <TouchableOpacity
-                      onPress={() => { setLimitInput(customWeeklyLimit ? String(customWeeklyLimit) : String(Math.round(calculatedWeeklyBudget))); setShowLimitEditor(true); }}
-                      activeOpacity={0.7}
-                      accessibilityRole="button"
-                      accessibilityLabel="Set custom weekly spending limit"
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                        <Text style={[s.safeToSpendMeta, { textDecorationLine: 'underline', textDecorationStyle: 'dotted' }]}>
-                          of {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}
-                        </Text>
-                        <Text style={{ fontSize: 8, color: colors.dim }}>{'\u270E'}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <View style={[s.safeToSpendBar, { marginTop: 4 }]}>
-                  <BreathingBar
-                    color={weeklyHealthy ? colors.accent : colors.coral}
-                    width={`${weeklyUsedPct}%`}
-                    style={s.safeToSpendBarFill}
-                  />
-                </View>
-
-                {/* Data freshness indicator */}
-                {latestTxDate && (
-                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: (() => {
-                    const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
-                    if (syncDataSource === 'fallback') return txAge >= 2 ? colors.coral : colors.muted;
-                    // Finexer sync succeeded — tx age just means bank hasn't posted new ones
-                    return txAge >= 3 ? colors.amber : colors.muted;
-                  })(), letterSpacing: 0.5, marginTop: 10 }}>
-                    {(() => {
-                      const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
-                      if (syncDataSource === 'fallback') {
-                        // Sync failed, using cached data
-                        if (txAge === 0) return 'Using cached data \u2014 transactions up to date';
-                        if (txAge === 1) return 'Using cached data \u2014 last transaction: yesterday';
-                        return `Using cached data \u2014 last transaction: ${txAge} days ago`;
-                      }
-                      // Finexer sync worked
-                      if (txAge === 0) return 'Transactions up to date';
-                      if (txAge === 1) return 'Bank synced \u2014 latest transaction: yesterday';
-                      return `Bank synced \u2014 latest transaction: ${txAge} days ago`;
-                    })()}
-                  </Text>
-                )}
-
-                {/* Daily spending sparkline */}
-                {dailySpending.length > 1 && (
-                  <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 10 }}>
-                      DAILY SPENDING
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    <Text style={[s.safeToSpendMeta, { textDecorationLine: 'underline', textDecorationStyle: 'dotted' }]}>
+                      of {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}
                     </Text>
-                    <WeeklySparkline days={dailySpending} height={40} />
+                    <Text style={{ fontSize: 8, color: colors.dim }}>{'\u270E'}</Text>
                   </View>
-                )}
-              </Card>
-          )}
-                </View>
-              </Animated.ScrollView>
-            </AnimGlyph>
+                </TouchableOpacity>
+              </View>
+            </View>
 
-            {/* Animated pagination dots */}
-            {heroPageCount > 1 && (
-              <View style={s.dotSeparator}>
-                {Array.from({ length: heroPageCount }).map((_, i) => {
-                  const dotWidth = heroScrollX.interpolate({
-                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
-                    outputRange: [3, 12, 3],
-                    extrapolate: 'clamp',
-                  });
-                  const dotBg = heroScrollX.interpolate({
-                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
-                    outputRange: [colors.border, colors.accent, colors.border],
-                    extrapolate: 'clamp',
-                  });
-                  return (
-                    <Animated.View
-                      key={i}
-                      style={[
-                        s.dot,
-                        { width: dotWidth, backgroundColor: dotBg, borderRadius: 2 },
-                      ]}
-                    />
-                  );
-                })}
+            <View style={[s.safeToSpendBar, { marginTop: 4 }]}>
+              <BreathingBar
+                color={weeklyHealthy ? colors.accent : colors.coral}
+                width={`${weeklyUsedPct}%`}
+                style={s.safeToSpendBarFill}
+              />
+            </View>
+
+            {/* Data freshness indicator */}
+            {latestTxDate && (
+              <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: (() => {
+                const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
+                if (syncDataSource === 'fallback') return txAge >= 2 ? colors.coral : colors.muted;
+                return txAge >= 3 ? colors.amber : colors.muted;
+              })(), letterSpacing: 0.5, marginTop: 10 }}>
+                {(() => {
+                  const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
+                  if (syncDataSource === 'fallback') {
+                    if (txAge === 0) return 'Using cached data \u2014 transactions up to date';
+                    if (txAge === 1) return 'Using cached data \u2014 last transaction: yesterday';
+                    return `Using cached data \u2014 last transaction: ${txAge} days ago`;
+                  }
+                  if (txAge === 0) return 'Transactions up to date';
+                  if (txAge === 1) return 'Bank synced \u2014 latest transaction: yesterday';
+                  return `Bank synced \u2014 latest transaction: ${txAge} days ago`;
+                })()}
+              </Text>
+            )}
+
+            {/* Daily spending sparkline */}
+            {dailySpending.length > 1 && (
+              <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 10 }}>
+                  DAILY SPENDING
+                </Text>
+                <WeeklySparkline days={dailySpending} height={40} />
               </View>
             )}
-          </View>
-            );
-          })()}
+          </Card>
 
           {/* ══════════════════════════════════════════════
-              YOUR INSIGHTS — detected inefficiencies in a parent card
+              HIGHLIGHTS — detected inefficiencies in a parent card
               ══════════════════════════════════════════════ */}
           {insightsData.length > 0 && (
             <Card style={{ marginBottom: spacing.md }}>
               <CardTitleRow
-                title="Your Insights"
+                title="Highlights"
                 right={
                   <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
                     <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
@@ -3402,7 +3299,6 @@ export default function Home() {
                   { label: 'Income', value: income, color: colors.text },
                   { label: 'Essentials', value: nonDiscTotal, color: colors.coral },
                   { label: 'Lifestyle', value: discTotal, color: colors.dim },
-                  { label: 'Savings', value: savingsTotal, color: colors.green },
                   { label: 'Surplus', value: surplusTotal, color: colors.text2 },
                 ].map((row, idx, arr) => (
                   <View

@@ -578,13 +578,13 @@ export default function AccountSetup() {
             <TextInput style={s.modalInput} value={debtName} onChangeText={setDebtName} placeholder="e.g. Barclaycard, Klarna" placeholderTextColor={colors.muted} />
 
             <Text style={s.modalLabel}>Type</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
               {DEBT_TYPES.map((t) => (
                 <TouchableOpacity key={t.value} style={[s.chip, debtType === t.value && s.chipActive]} onPress={() => setDebtType(t.value)} activeOpacity={0.7}>
                   <Text style={[s.chipText, debtType === t.value && s.chipTextActive]}>{t.label}</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
 
             <Text style={s.modalLabel}>Outstanding balance</Text>
             <TextInput style={s.modalInput} value={debtBalance} onChangeText={setDebtBalance} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
@@ -631,13 +631,13 @@ export default function AccountSetup() {
             <TextInput style={s.modalInput} value={savRate} onChangeText={setSavRate} placeholder="e.g. 4.5" placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
 
             <Text style={s.modalLabel}>Type</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
               {SAVINGS_TYPES.map((t) => (
                 <TouchableOpacity key={t.value} style={[s.chip, savType === t.value && s.chipActive]} onPress={() => setSavType(t.value)} activeOpacity={0.7}>
                   <Text style={[s.chipText, savType === t.value && s.chipTextActive]}>{t.label}</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
 
             {savError ? <Text style={s.modalError}>{savError}</Text> : null}
 
@@ -663,13 +663,13 @@ export default function AccountSetup() {
             <TextInput style={s.modalInput} value={invName} onChangeText={setInvName} placeholder="e.g. Vanguard S&P 500" placeholderTextColor={colors.muted} />
 
             <Text style={s.modalLabel}>Asset class</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
               {ASSET_CLASSES.map((t) => (
                 <TouchableOpacity key={t.value} style={[s.chip, invClass === t.value && s.chipActive]} onPress={() => setInvClass(t.value)} activeOpacity={0.7}>
                   <Text style={[s.chipText, invClass === t.value && s.chipTextActive]}>{t.label}</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
 
             {invClass === 'stocks' && (
               <>
@@ -740,13 +740,13 @@ export default function AccountSetup() {
               <Text style={s.tickerHint}>Uses HM Land Registry data to estimate based on recent area sales</Text>
 
               <Text style={s.modalLabel}>Property type</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                 {PROPERTY_TYPES.map((t) => (
                   <TouchableOpacity key={t.value} style={[s.chip, propType === t.value && s.chipActive]} onPress={() => setPropType(t.value)} activeOpacity={0.7}>
                     <Text style={[s.chipText, propType === t.value && s.chipTextActive]}>{t.label}</Text>
                   </TouchableOpacity>
                 ))}
-              </ScrollView>
+              </View>
 
               <Text style={s.modalLabel}>Estimated current value</Text>
               <TextInput style={s.modalInput} value={propValue} onChangeText={setPropValue} placeholder={'\u00a3 0'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
@@ -789,13 +789,13 @@ export default function AccountSetup() {
                   <TextInput style={s.modalInput} value={propMortgageTerm} onChangeText={setPropMortgageTerm} placeholder="e.g. 25" placeholderTextColor={colors.muted} keyboardType="number-pad" />
 
                   <Text style={s.modalLabel}>Mortgage type</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                     {MORTGAGE_TYPES.map((t) => (
                       <TouchableOpacity key={t.value} style={[s.chip, propMortgageType === t.value && s.chipActive]} onPress={() => setPropMortgageType(t.value)} activeOpacity={0.7}>
                         <Text style={[s.chipText, propMortgageType === t.value && s.chipTextActive]}>{t.label}</Text>
                       </TouchableOpacity>
                     ))}
-                  </ScrollView>
+                  </View>
 
                   {propMortgageType === 'fixed' && (
                     <>

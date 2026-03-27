@@ -1043,7 +1043,7 @@ function GoalUpdateCard({
 
 export default function Chat() {
   const router = useRouter();
-  const { prefill } = useLocalSearchParams<{ prefill?: string }>();
+  const { prefill, context: contextParam } = useLocalSearchParams<{ prefill?: string; context?: string }>();
   const { colors } = useTheme();
   const { maxContentWidth, isTablet } = useResponsive();
   const s = useMemo(() => createStyles(colors), [colors]);
@@ -1135,6 +1135,20 @@ export default function Chat() {
       setTimeout(() => inputRef.current?.focus(), 300);
     }
   }, [prefill]);
+
+  // ── Deep link context from push notifications ──
+  useEffect(() => {
+    if (!contextParam) return;
+    const contextMessages: Record<string, string> = {
+      tax_optimisation_isa: 'The ISA deadline is approaching on April 5th. Can you help me maximise my tax-free savings before it expires?',
+      tax_self_assessment: 'The Self Assessment deadline is January 31st. Can you help me with my tax return and any optimisation opportunities?',
+    };
+    const msg = contextMessages[contextParam];
+    if (msg) {
+      setInput(msg);
+      setTimeout(() => inputRef.current?.focus(), 300);
+    }
+  }, [contextParam]);
 
   // ── Voice input — uses full speech-to-speech hook (cross-platform) ──
   // Falls back to Web Speech API on browsers where expo-av isn't available.

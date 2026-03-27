@@ -639,13 +639,13 @@ export default function Profile() {
             <TextInput style={s.modalInput} value={addDebtName} onChangeText={setAddDebtName} placeholder="e.g. Barclaycard, Klarna" placeholderTextColor={colors.muted} />
 
             <Text style={s.modalLabel}>Type</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.debtTypeScroll}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
               {DEBT_TYPES.map((t) => (
                 <TouchableOpacity key={t.value} style={[s.debtTypeChip, addDebtType === t.value && s.debtTypeChipActive]} onPress={() => setAddDebtType(t.value)} activeOpacity={0.7}>
                   <Text style={[s.debtTypeChipText, addDebtType === t.value && s.debtTypeChipTextActive]}>{t.label}</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
 
             <Text style={s.modalLabel}>Outstanding balance</Text>
             <TextInput style={s.modalInput} value={addDebtBalance} onChangeText={setAddDebtBalance} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
@@ -740,13 +740,13 @@ export default function Profile() {
               <TextInput style={s.modalInput} value={addInvName} onChangeText={setAddInvName} placeholder="e.g. Vanguard S&P 500" placeholderTextColor={colors.muted} />
 
               <Text style={s.modalLabel}>Asset class</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.debtTypeScroll}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
                 {ASSET_CLASSES.map((t) => (
                   <TouchableOpacity key={t.value} style={[s.debtTypeChip, addInvClass === t.value && s.debtTypeChipActive]} onPress={() => setAddInvClass(t.value)} activeOpacity={0.7}>
                     <Text style={[s.debtTypeChipText, addInvClass === t.value && s.debtTypeChipTextActive]}>{t.label}</Text>
                   </TouchableOpacity>
                 ))}
-              </ScrollView>
+              </View>
 
               <Text style={s.modalLabel}>Platform <Text style={s.modalOptional}>(optional)</Text></Text>
               <TextInput style={s.modalInput} value={addInvPlatform} onChangeText={setAddInvPlatform} placeholder="e.g. Trading 212, Vanguard" placeholderTextColor={colors.muted} />
@@ -802,34 +802,14 @@ export default function Profile() {
         </Pressable>
       </Modal>
 
-      {/* ── Settings ── */}
-      <Text style={s.sectionLabel}>SETTINGS</Text>
+      {/* ── ACCOUNT ── */}
+      <Text style={s.sectionLabel}>ACCOUNT</Text>
 
       <View style={s.groupCard}>
         <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/identity')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Goals</Text>
+          <Text style={s.groupRowLabel}>Profile</Text>
           <Text style={s.groupRowChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
-
-        <View style={s.groupDivider} />
-
-        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/subscriptions')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Manage subscriptions</Text>
-          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
-
-        <View style={s.groupDivider} />
-
-        <View style={s.groupRow}>
-          <Text style={s.groupRowLabel}>{isDark ? 'Dark mode' : 'Light mode'}</Text>
-          <Switch
-            value={!isDark}
-            onValueChange={() => { trackEvent('Theme Toggled'); toggleTheme(); }}
-            trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-            thumbColor={isDark ? colors.thumbOff : colors.green}
-            testID="profile-theme-toggle"
-          />
-        </View>
 
         <View style={s.groupDivider} />
 
@@ -842,7 +822,7 @@ export default function Profile() {
           activeOpacity={0.7}
         >
           <Text style={s.groupRowLabel}>Notifications</Text>
-          <Text style={s.groupRowChevron}>{notifExpanded ? '\u2039' : '\u203A'}</Text>
+          <Text style={s.groupRowChevron}>{notifExpanded ? '\u2304' : '\u203A'}</Text>
         </TouchableOpacity>
 
         {notifExpanded && (
@@ -900,42 +880,73 @@ export default function Profile() {
             )}
           </>
         )}
+
+        <View style={s.groupDivider} />
+
+        <TouchableOpacity style={s.groupRow} onPress={handleAddAccount} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Linked Accounts</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* ── Feedback + account ── */}
-      <Text style={s.sectionLabel}>SUPPORT</Text>
+      {/* ── PREFERENCES ── */}
+      <Text style={s.sectionLabel}>PREFERENCES</Text>
 
       <View style={s.groupCard}>
+        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/subscriptions')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Spending Settings</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
+
+        <View style={s.groupDivider} />
+
+        <TouchableOpacity style={s.groupRow} onPress={() => router.push('/(main)/identity')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>AI Financial Profile</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
+
+        <View style={s.groupDivider} />
+
+        <View style={s.groupRow}>
+          <Text style={s.groupRowLabel}>Appearance</Text>
+          <Switch
+            value={!isDark}
+            onValueChange={() => { trackEvent('Theme Toggled'); toggleTheme(); }}
+            trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+            thumbColor={isDark ? colors.thumbOff : colors.green}
+            testID="profile-theme-toggle"
+          />
+        </View>
+      </View>
+
+      {/* ── RESOURCES ── */}
+      <Text style={s.sectionLabel}>RESOURCES</Text>
+
+      <View style={s.groupCard}>
+        <TouchableOpacity style={s.groupRow} onPress={() => Linking.openURL('mailto:hello@bocy.io?subject=Support')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Support</Text>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
+
+        <View style={s.groupDivider} />
+
         <TouchableOpacity style={s.groupRow} onPress={() => Linking.openURL('https://www.bocy.io/privacy.html')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Privacy policy</Text>
+          <Text style={s.groupRowLabel}>Privacy Policy</Text>
           <Text style={s.groupRowChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
 
         <View style={s.groupDivider} />
 
         <TouchableOpacity style={s.groupRow} onPress={() => Linking.openURL('https://www.bocy.io/terms.html')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Terms of use</Text>
+          <Text style={s.groupRowLabel}>Terms of Use</Text>
           <Text style={s.groupRowChevron}>{'\u203A'}</Text>
         </TouchableOpacity>
+      </View>
 
-        <View style={s.groupDivider} />
-
-        <TouchableOpacity style={s.groupRow} onPress={() => Linking.openURL('mailto:hello@bocy.io?subject=Feedback')} activeOpacity={0.7}>
-          <Text style={s.groupRowLabel}>Send feedback</Text>
-          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
-
-        <View style={s.groupDivider} />
-
+      {/* ── Logout ── */}
+      <View style={[s.groupCard, { marginTop: 8 }]}>
         <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Sign out of your account" testID="profile-sign-out-button">
-          <Text style={s.groupRowLabel}>Sign out</Text>
-          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
-        </TouchableOpacity>
-
-        <View style={s.groupDivider} />
-
-        <TouchableOpacity style={s.groupRow} onPress={handleDeleteAccount} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Delete your account permanently" testID="profile-delete-account-button">
-          <Text style={[s.groupRowLabel, { color: colors.coral }]}>Delete account</Text>
+          <Text style={[s.groupRowLabel, { color: colors.coral }]}>Logout</Text>
           <Text style={[s.groupRowChevron, { color: colors.coral }]}>{'\u203A'}</Text>
         </TouchableOpacity>
       </View>
