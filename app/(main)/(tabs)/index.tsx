@@ -241,6 +241,7 @@ export default function Home() {
   const [agentInsightsSectionOpen, setAgentInsightsSectionOpen] = useState(false);
   const [showAllInsights, setShowAllInsights] = useState(false);
   const [accountBuckets, setAccountBuckets] = useState<AccountBuckets | null>(null);
+  const [userProperties, setUserProperties] = useState<Array<{ address: string; estimated_value: number; mortgage_balance: number | null; has_mortgage: boolean }>>([]);
   const [justCompleted, setJustCompleted] = useState<string | null>(null); // move key that was just completed
   const userIdRef = useRef<string | null>(null);
 
@@ -1185,23 +1186,33 @@ export default function Home() {
         }
       }
 
-      // Fetch account balances for Net Worth card (non-critical, swallow errors)
+      // Fetch account balances + properties for Net Worth card (non-critical, swallow errors)
       try {
-        const { data: bankRow } = await supabase
-          .from('bank_data')
-          .select('account_balances')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const [{ data: bankRow }, { data: propRows }] = await Promise.all([
+          supabase
+            .from('bank_data')
+            .select('account_balances')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          supabase
+            .from('properties')
+            .select('address, estimated_value, mortgage_balance, has_mortgage')
+            .eq('user_id', user.id),
+        ]);
         if (bankRow?.account_balances && Array.isArray(bankRow.account_balances)) {
           setAccountBuckets(classifyAccounts(bankRow.account_balances));
+        }
+        if (propRows && propRows.length > 0) {
+          setUserProperties(propRows);
         }
       } catch {}
 
       // Trigger background sync if user has any data or a bank connection.
-      // Force-sync when data was previously stale (fallback) to retry Finexer.
-      const shouldForce = syncDataSource === 'fallback';
+      // Always force-sync on first load to ensure open banking data is fresh.
+      // Also force when data was previously stale (fallback) to retry Finexer.
+      const shouldForce = true;
       syncInBackground(user.id, shouldForce);
     } catch (err: any) {
       console.warn('[home] loadData error:', err?.message);
@@ -1286,8 +1297,11 @@ export default function Home() {
       if (result.dataSource === 'fallback' && result.latestTransactionDate) {
         const txAge = Math.floor((Date.now() - new Date(result.latestTransactionDate).getTime()) / (1000 * 60 * 60 * 24));
         if (txAge >= 2) {
-          setSyncError(`Transactions are ${txAge} days old — pull down to retry`);
+          setSyncError(`Transactions are ${txAge} days old — pull down to refresh`);
         }
+      } else if (result.dataSource === 'finexer') {
+        // Finexer sync succeeded — clear any stale error from previous fallback
+        setSyncError(null);
       }
 
       // Update debt accounts: merge synced with any manual debts
@@ -2166,365 +2180,6 @@ export default function Home() {
           )}
 
           {/* ══════════════════════════════════════════════
-              FOCUS CARD — horizontal snapping pager
-              ══════════════════════════════════════════════ */}
-          {(() => {
-            const CARD_GAP = 12;
-            const cardWidth = screenWidth - 48; // 24px padding each side
-            const snapInterval = cardWidth + CARD_GAP;
-            const hasMoveCard = dashboardMoves.length > 0;
-            const heroPageCount = hasMoveCard ? 2 : 1;
-            const HERO_MIN_HEIGHT = 280;
-            const scrollProgress = heroScrollX.interpolate({
-              inputRange: [0, snapInterval],
-              outputRange: [0, 1],
-              extrapolate: 'clamp',
-            });
-            const parallaxShift = heroScrollX.interpolate({
-              inputRange: [0, snapInterval],
-              outputRange: [0, 10],
-              extrapolate: 'clamp',
-            });
-            return (
-          <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
-            <AnimGlyph delay={0}>
-              <Animated.ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                scrollEventThrottle={16}
-                onScroll={Animated.event(
-                  [{ nativeEvent: { contentOffset: { x: heroScrollX } } }],
-                  { useNativeDriver: false },
-                )}
-                onMomentumScrollEnd={(e) => {
-                  const page = Math.round(e.nativeEvent.contentOffset.x / snapInterval);
-                  if (page !== heroPage) hapticTick();
-                  setHeroPage(page);
-                }}
-                style={{ marginHorizontal: -24 }}
-                contentContainerStyle={{ paddingHorizontal: 24 }}
-                decelerationRate="fast"
-                snapToInterval={snapInterval}
-                snapToAlignment="start"
-              >
-                {/* ── Page 1: #1 Move (hero) ── */}
-                {hasMoveCard && (() => {
-                  const heroMove = dashboardMoves[0];
-                  const heroIdx = moves.indexOf(heroMove);
-                  const heroKey = `move-${heroIdx}`;
-                  const heroProgress = planProgress[heroKey];
-                  const heroActive = !!heroProgress?.approved;
-                  const heroSgs = repairDebtSubGoals(heroProgress?.sub_goals || hydrateSubGoals(heroMove, debtAccounts) || [], debtAccounts);
-                  const heroSteps = heroMove.steps || [];
-                  const heroHasSgs = heroSgs.length > 0;
-                  const heroDoneCount = heroHasSgs
-                    ? heroSgs.filter((sg: MoveSubGoal) => sg.completedAt).length
-                    : (heroProgress?.completed_steps || []).length;
-                  const heroTotal = heroHasSgs ? heroSgs.length : heroSteps.length;
-                  const heroFraction = heroTotal > 0 ? heroDoneCount / heroTotal : 0;
-                  const heroAllDone = heroTotal > 0 && heroDoneCount >= heroTotal;
-                  const daysSinceStart = heroProgress?.updated_at
-                    ? Math.max(1, Math.floor((Date.now() - new Date(heroProgress.updated_at).getTime()) / 86400000))
-                    : 1;
-                  const nextStep = heroSteps.find((_: string, idx: number) => !(heroProgress?.completed_steps || []).includes(idx));
-                  // Build a mathematical CTA from subGoals when available
-                  const nextSg = heroSgs.find((sg: MoveSubGoal) => !sg.completedAt);
-                  const heroCtaLabel = (() => {
-                    if (!heroActive) return 'Start this move';
-                    if (heroAllDone) return 'View completed move';
-                    if (nextSg) {
-                      const remaining = Math.round(nextSg.currentValue ?? nextSg.startValue);
-                      const payment = Math.round(heroMove.monthlyImpact || 0);
-                      const target = nextSg.target || 'debt';
-                      // e.g. "Next: pay £17 to Amex (£204 left)"
-                      return payment > 0
-                        ? `Next: pay \u00a3${payment} to ${target}`
-                        : `Next: clear ${target} (\u00a3${remaining} left)`;
-                    }
-                    return nextStep ? `Next: ${nextStep.length > 30 ? nextStep.slice(0, 30) + '\u2026' : nextStep}` : 'View progress';
-                  })();
-                  return (
-                  <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
-                    <Card variant={heroActive ? 'active' : 'highlight'} style={{ flex: 1 }}>
-                      <Animated.View style={{ transform: [{ translateX: parallaxShift }], flex: 1 }}>
-                        {heroActive ? (
-                          <>
-                            <CardTitle color={heroAllDone ? colors.green : colors.accent}>
-                              {heroAllDone ? 'MOVE COMPLETE \u2713' : `MOVE IN PROGRESS \u00B7 Day ${daysSinceStart}`}
-                            </CardTitle>
-                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
-                              {stripMd(heroMove.action)}
-                            </Text>
-                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
-                              <View>
-                                <AnimatedNumber
-                                  value={heroMove.monthlyImpact || 0}
-                                  prefix={'\u00a3'}
-                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                                />
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
-                              </View>
-                              <View>
-                                <AnimatedNumber
-                                  value={heroMove.annualImpact || 0}
-                                  prefix={'\u00a3'}
-                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                                />
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
-                              </View>
-                            </View>
-                            {heroTotal > 0 && (
-                              <View style={{ marginTop: 16 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                                  <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
-                                    <View style={{ width: `${Math.round(heroFraction * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: heroAllDone ? colors.green : colors.accent }} />
-                                  </View>
-                                  <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{heroDoneCount}/{heroTotal}</Text>
-                                </View>
-                              </View>
-                            )}
-                          </>
-                        ) : (
-                          <>
-                            <CardTitle color={colors.green}>YOUR #1 MOVE</CardTitle>
-                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
-                              {stripMd(heroMove.action)}
-                            </Text>
-                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
-                              <View>
-                                <AnimatedNumber
-                                  value={heroMove.monthlyImpact || 0}
-                                  prefix={'\u00a3'}
-                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                                />
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
-                              </View>
-                              <View>
-                                <AnimatedNumber
-                                  value={heroMove.annualImpact || 0}
-                                  prefix={'\u00a3'}
-                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
-                                />
-                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
-                              </View>
-                            </View>
-                            {heroMove.effort && (
-                              <View style={{ marginTop: 14 }}>
-                                <View style={{
-                                  alignSelf: 'flex-start',
-                                  paddingHorizontal: 10,
-                                  paddingVertical: 4,
-                                  borderRadius: 12,
-                                  backgroundColor: heroMove.effort === 'low' ? 'rgba(147,130,220,0.12)' : heroMove.effort === 'high' ? 'rgba(76,175,80,0.12)' : 'rgba(150,150,150,0.12)',
-                                }}>
-                                  <Text style={{
-                                    fontFamily: fonts.mono,
-                                    fontSize: 10,
-                                    letterSpacing: 0.5,
-                                    color: heroMove.effort === 'low' ? '#9382DC' : heroMove.effort === 'high' ? colors.green : colors.dim,
-                                  }}>
-                                    {heroMove.effort === 'low' ? 'Quick win' : heroMove.effort === 'high' ? 'Big move' : 'Some effort'}
-                                  </Text>
-                                </View>
-                              </View>
-                            )}
-                          </>
-                        )}
-                      </Animated.View>
-                      <TouchableOpacity
-                        style={[s.heroCta, { marginTop: 24 }]}
-                        onPress={() => {
-                          if (heroActive) {
-                            // Scroll to in-progress section
-                            const y = cardPositions.current.moves;
-                            if (y != null) dashScrollRef.current?.scrollTo({ y, animated: true });
-                          } else {
-                            handleStartMove(heroIdx, heroMove);
-                          }
-                        }}
-                      >
-                        <Text style={s.heroCtaText}>{heroCtaLabel}</Text>
-                      </TouchableOpacity>
-                    </Card>
-                  </View>
-                  );
-                })()}
-
-                {/* ── Horizontal connector dots between cards ── */}
-                {hasMoveCard && (
-                  <View style={{ width: CARD_GAP, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
-                    <HorizontalConnectorDots scrollProgress={scrollProgress} />
-                  </View>
-                )}
-
-                {/* ── Page 2: Budget / Payday ── */}
-                <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
-          {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
-              <Animated.View
-                {...paydayPanResponder.panHandlers}
-                style={{ transform: [{ translateY: paydayTranslateY }], opacity: paydayOpacity, flex: 1 }}
-              >
-              <Card variant="hero" style={{ flex: 1 }}>
-                <Text style={s.heroLabel}>PAYDAY</Text>
-                <Text style={s.heroAction}>
-                  {weeklyCtx.recentIncomeEvents.map((e) =>
-                    `\u00a3${Math.round(e?.amount ?? 0).toLocaleString()}`
-                  ).join(' + ')}{' '}received
-                </Text>
-
-                <View style={{ marginTop: 24, gap: 14 }}>
-                  {(weeklyCtx.committedThisWeek ?? 0) > 0 && (
-                    <View style={s.focusSplitRow}>
-                      <Text style={s.focusSplitLabel}>Bills & essentials</Text>
-                      <Text style={[s.focusSplitValue, { color: colors.dim }]}>
-                        -{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek ?? 0).toLocaleString()}
-                      </Text>
-                    </View>
-                  )}
-                  {moves.length > 0 && moves[0].monthlyImpact > 0 && (
-                    <View style={s.focusSplitRow}>
-                      <Text style={s.focusSplitLabel}>{stripMd(moves[0].action)}</Text>
-                      <Text style={[s.focusSplitValue, { color: colors.text2 }]}>
-                        {'\u00a3'}{Math.round(moves[0].monthlyImpact / 4.33).toLocaleString()}/wk
-                      </Text>
-                    </View>
-                  )}
-                  <View style={[s.focusSplitRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 14 }]}>
-                    <Text style={[s.focusSplitLabel, { fontFamily: fonts.semibold, color: colors.text }]}>Safe to spend</Text>
-                    <Text style={[s.focusSplitValue, { fontFamily: fonts.mono, fontSize: 20, color: weeklyHealthy ? colors.text : colors.coral }]}>
-                      {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}/wk
-                    </Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  style={[s.heroCta, { marginTop: 28 }]}
-                  onPress={() => {
-                    dismissIncome();
-                    router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: 'I just got paid. Walk me through what to do.' } });
-                  }}
-                >
-                  <Text style={s.heroCtaText}>Ask Bocy about this</Text>
-                </TouchableOpacity>
-              </Card>
-              </Animated.View>
-          ) : (
-              <Card variant="hero" style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                      <Text style={[s.heroLabel, { marginBottom: 0 }]}>THIS WEEK</Text>
-                      <TouchableOpacity
-                        onPress={() => setShowWeeklyInfo(true)}
-                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                        accessibilityRole="button"
-                        accessibilityLabel="How is this calculated?"
-                      >
-                        <View style={s.infoIconSmall}>
-                          <Text style={s.infoIconSmallText}>?</Text>
-                        </View>
-                      </TouchableOpacity>
-                    </View>
-                    <AnimatedNumber
-                      value={weeklyRemaining}
-                      prefix={'\u00a3'}
-                      style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 38 }]}
-                    />
-                    <Text style={s.safeToSpendLabel}>left to spend</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <AnimatedNumber
-                      value={spentThisWeek}
-                      prefix={'\u00a3'}
-                      suffix=" spent"
-                      style={s.safeToSpendMeta}
-                    />
-                    <TouchableOpacity
-                      onPress={() => { setLimitInput(customWeeklyLimit ? String(customWeeklyLimit) : String(Math.round(calculatedWeeklyBudget))); setShowLimitEditor(true); }}
-                      activeOpacity={0.7}
-                      accessibilityRole="button"
-                      accessibilityLabel="Set custom weekly spending limit"
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                        <Text style={[s.safeToSpendMeta, { textDecorationLine: 'underline', textDecorationStyle: 'dotted' }]}>
-                          of {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}
-                        </Text>
-                        <Text style={{ fontSize: 8, color: colors.dim }}>{'\u270E'}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <View style={[s.safeToSpendBar, { marginTop: 4 }]}>
-                  <BreathingBar
-                    color={weeklyHealthy ? colors.accent : colors.coral}
-                    width={`${weeklyUsedPct}%`}
-                    style={s.safeToSpendBarFill}
-                  />
-                </View>
-
-                {/* Data freshness indicator */}
-                {latestTxDate && (
-                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: (() => {
-                    const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
-                    return txAge >= 2 ? colors.coral : colors.muted;
-                  })(), letterSpacing: 0.5, marginTop: 10 }}>
-                    {(() => {
-                      const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
-                      if (txAge === 0) return 'Transactions up to date';
-                      if (txAge === 1) return 'Latest transaction: yesterday';
-                      return `Latest transaction: ${txAge} days ago`;
-                    })()}
-                    {syncDataSource === 'fallback' ? ' \u2014 using your latest transactions' : ''}
-                  </Text>
-                )}
-
-                {/* Daily spending sparkline */}
-                {dailySpending.length > 1 && (
-                  <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
-                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 10 }}>
-                      DAILY SPENDING
-                    </Text>
-                    <WeeklySparkline days={dailySpending} height={40} />
-                  </View>
-                )}
-              </Card>
-          )}
-                </View>
-              </Animated.ScrollView>
-            </AnimGlyph>
-
-            {/* Animated pagination dots */}
-            {heroPageCount > 1 && (
-              <View style={s.dotSeparator}>
-                {Array.from({ length: heroPageCount }).map((_, i) => {
-                  const dotWidth = heroScrollX.interpolate({
-                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
-                    outputRange: [3, 12, 3],
-                    extrapolate: 'clamp',
-                  });
-                  const dotBg = heroScrollX.interpolate({
-                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
-                    outputRange: [colors.border, colors.accent, colors.border],
-                    extrapolate: 'clamp',
-                  });
-                  return (
-                    <Animated.View
-                      key={i}
-                      style={[
-                        s.dot,
-                        { width: dotWidth, backgroundColor: dotBg, borderRadius: 2 },
-                      ]}
-                    />
-                  );
-                })}
-              </View>
-            )}
-          </View>
-            );
-          })()}
-
-          {/* ══════════════════════════════════════════════
               YOUR INSIGHTS — inline from Plan page
               ══════════════════════════════════════════════ */}
           {(hasActive || hasCompleted || opportunityMoves.length > 0) && (
@@ -3052,35 +2707,419 @@ export default function Home() {
           )}
 
           {/* ══════════════════════════════════════════════
-              DETECTED INEFFICIENCIES — moved below insights
+              FOCUS CARD — horizontal snapping pager
+              ══════════════════════════════════════════════ */}
+          {(() => {
+            const CARD_GAP = 12;
+            const cardWidth = screenWidth - 48; // 24px padding each side
+            const snapInterval = cardWidth + CARD_GAP;
+            const hasMoveCard = dashboardMoves.length > 0;
+            const heroPageCount = hasMoveCard ? 2 : 1;
+            const HERO_MIN_HEIGHT = 280;
+            const scrollProgress = heroScrollX.interpolate({
+              inputRange: [0, snapInterval],
+              outputRange: [0, 1],
+              extrapolate: 'clamp',
+            });
+            const parallaxShift = heroScrollX.interpolate({
+              inputRange: [0, snapInterval],
+              outputRange: [0, 10],
+              extrapolate: 'clamp',
+            });
+            return (
+          <View onLayout={(e) => { cardPositions.current.hero = e.nativeEvent.layout.y; }}>
+            <AnimGlyph delay={0}>
+              <Animated.ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                scrollEventThrottle={16}
+                onScroll={Animated.event(
+                  [{ nativeEvent: { contentOffset: { x: heroScrollX } } }],
+                  { useNativeDriver: false },
+                )}
+                onMomentumScrollEnd={(e) => {
+                  const page = Math.round(e.nativeEvent.contentOffset.x / snapInterval);
+                  if (page !== heroPage) hapticTick();
+                  setHeroPage(page);
+                }}
+                style={{ marginHorizontal: -24 }}
+                contentContainerStyle={{ paddingHorizontal: 24 }}
+                decelerationRate="fast"
+                snapToInterval={snapInterval}
+                snapToAlignment="start"
+              >
+                {/* ── Page 1: #1 Move (hero) ── */}
+                {hasMoveCard && (() => {
+                  const heroMove = dashboardMoves[0];
+                  const heroIdx = moves.indexOf(heroMove);
+                  const heroKey = `move-${heroIdx}`;
+                  const heroProgress = planProgress[heroKey];
+                  const heroActive = !!heroProgress?.approved;
+                  const heroSgs = repairDebtSubGoals(heroProgress?.sub_goals || hydrateSubGoals(heroMove, debtAccounts) || [], debtAccounts);
+                  const heroSteps = heroMove.steps || [];
+                  const heroHasSgs = heroSgs.length > 0;
+                  const heroDoneCount = heroHasSgs
+                    ? heroSgs.filter((sg: MoveSubGoal) => sg.completedAt).length
+                    : (heroProgress?.completed_steps || []).length;
+                  const heroTotal = heroHasSgs ? heroSgs.length : heroSteps.length;
+                  const heroFraction = heroTotal > 0 ? heroDoneCount / heroTotal : 0;
+                  const heroAllDone = heroTotal > 0 && heroDoneCount >= heroTotal;
+                  const daysSinceStart = heroProgress?.updated_at
+                    ? Math.max(1, Math.floor((Date.now() - new Date(heroProgress.updated_at).getTime()) / 86400000))
+                    : 1;
+                  const nextStep = heroSteps.find((_: string, idx: number) => !(heroProgress?.completed_steps || []).includes(idx));
+                  // Build a mathematical CTA from subGoals when available
+                  const nextSg = heroSgs.find((sg: MoveSubGoal) => !sg.completedAt);
+                  const heroCtaLabel = (() => {
+                    if (!heroActive) return 'Start this move';
+                    if (heroAllDone) return 'View completed move';
+                    if (nextSg) {
+                      const remaining = Math.round(nextSg.currentValue ?? nextSg.startValue);
+                      const payment = Math.round(heroMove.monthlyImpact || 0);
+                      const target = nextSg.target || 'debt';
+                      // e.g. "Next: pay £17 to Amex (£204 left)"
+                      return payment > 0
+                        ? `Next: pay \u00a3${payment} to ${target}`
+                        : `Next: clear ${target} (\u00a3${remaining} left)`;
+                    }
+                    return nextStep ? `Next: ${nextStep.length > 30 ? nextStep.slice(0, 30) + '\u2026' : nextStep}` : 'View progress';
+                  })();
+                  return (
+                  <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
+                    <Card variant={heroActive ? 'active' : 'highlight'} style={{ flex: 1 }}>
+                      <Animated.View style={{ transform: [{ translateX: parallaxShift }], flex: 1 }}>
+                        {heroActive ? (
+                          <>
+                            <CardTitle color={heroAllDone ? colors.green : colors.accent}>
+                              {heroAllDone ? 'MOVE COMPLETE \u2713' : `MOVE IN PROGRESS \u00B7 Day ${daysSinceStart}`}
+                            </CardTitle>
+                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                              {stripMd(heroMove.action)}
+                            </Text>
+                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.monthlyImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
+                              </View>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.annualImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
+                              </View>
+                            </View>
+                            {heroTotal > 0 && (
+                              <View style={{ marginTop: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                  <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: colors.mintDim, overflow: 'hidden' }}>
+                                    <View style={{ width: `${Math.round(heroFraction * 100)}%`, height: '100%', borderRadius: 2, backgroundColor: heroAllDone ? colors.green : colors.accent }} />
+                                  </View>
+                                  <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.muted }}>{heroDoneCount}/{heroTotal}</Text>
+                                </View>
+                              </View>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <CardTitle color={colors.green}>YOUR #1 MOVE</CardTitle>
+                            <Text style={{ fontFamily: fonts.medium, fontSize: 18, color: colors.text, lineHeight: 28 }}>
+                              {stripMd(heroMove.action)}
+                            </Text>
+                            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16 }}>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.monthlyImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per month</Text>
+                              </View>
+                              <View>
+                                <AnimatedNumber
+                                  value={heroMove.annualImpact || 0}
+                                  prefix={'\u00a3'}
+                                  style={{ fontFamily: fonts.mono, fontSize: 20, color: colors.green, letterSpacing: 0.3 }}
+                                />
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginTop: 4 }}>per year</Text>
+                              </View>
+                            </View>
+                            {heroMove.effort && (
+                              <View style={{ marginTop: 14 }}>
+                                <View style={{
+                                  alignSelf: 'flex-start',
+                                  paddingHorizontal: 10,
+                                  paddingVertical: 4,
+                                  borderRadius: 12,
+                                  backgroundColor: heroMove.effort === 'low' ? 'rgba(147,130,220,0.12)' : heroMove.effort === 'high' ? 'rgba(76,175,80,0.12)' : 'rgba(150,150,150,0.12)',
+                                }}>
+                                  <Text style={{
+                                    fontFamily: fonts.mono,
+                                    fontSize: 10,
+                                    letterSpacing: 0.5,
+                                    color: heroMove.effort === 'low' ? '#9382DC' : heroMove.effort === 'high' ? colors.green : colors.dim,
+                                  }}>
+                                    {heroMove.effort === 'low' ? 'Quick win' : heroMove.effort === 'high' ? 'Big move' : 'Some effort'}
+                                  </Text>
+                                </View>
+                              </View>
+                            )}
+                          </>
+                        )}
+                      </Animated.View>
+                      <TouchableOpacity
+                        style={[s.heroCta, { marginTop: 24 }]}
+                        onPress={() => {
+                          if (heroActive) {
+                            // Scroll to in-progress section
+                            const y = cardPositions.current.moves;
+                            if (y != null) dashScrollRef.current?.scrollTo({ y, animated: true });
+                          } else {
+                            handleStartMove(heroIdx, heroMove);
+                          }
+                        }}
+                      >
+                        <Text style={s.heroCtaText}>{heroCtaLabel}</Text>
+                      </TouchableOpacity>
+                    </Card>
+                  </View>
+                  );
+                })()}
+
+                {/* ── Horizontal connector dots between cards ── */}
+                {hasMoveCard && (
+                  <View style={{ width: CARD_GAP, justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
+                    <HorizontalConnectorDots scrollProgress={scrollProgress} />
+                  </View>
+                )}
+
+                {/* ── Page 2: Budget / Payday ── */}
+                <View style={{ width: cardWidth, minHeight: HERO_MIN_HEIGHT }}>
+          {focusType === 'payday' && weeklyCtx?.recentIncomeEvents ? (
+              <Animated.View
+                {...paydayPanResponder.panHandlers}
+                style={{ transform: [{ translateY: paydayTranslateY }], opacity: paydayOpacity, flex: 1 }}
+              >
+              <Card variant="hero" style={{ flex: 1 }}>
+                <Text style={s.heroLabel}>PAYDAY</Text>
+                <Text style={s.heroAction}>
+                  {weeklyCtx.recentIncomeEvents.map((e) =>
+                    `\u00a3${Math.round(e?.amount ?? 0).toLocaleString()}`
+                  ).join(' + ')}{' '}received
+                </Text>
+
+                <View style={{ marginTop: 24, gap: 14 }}>
+                  {(weeklyCtx.committedThisWeek ?? 0) > 0 && (
+                    <View style={s.focusSplitRow}>
+                      <Text style={s.focusSplitLabel}>Bills & essentials</Text>
+                      <Text style={[s.focusSplitValue, { color: colors.dim }]}>
+                        -{'\u00a3'}{Math.round(weeklyCtx.committedThisWeek ?? 0).toLocaleString()}
+                      </Text>
+                    </View>
+                  )}
+                  {moves.length > 0 && moves[0].monthlyImpact > 0 && (
+                    <View style={s.focusSplitRow}>
+                      <Text style={s.focusSplitLabel}>{stripMd(moves[0].action)}</Text>
+                      <Text style={[s.focusSplitValue, { color: colors.text2 }]}>
+                        {'\u00a3'}{Math.round(moves[0].monthlyImpact / 4.33).toLocaleString()}/wk
+                      </Text>
+                    </View>
+                  )}
+                  <View style={[s.focusSplitRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: 14 }]}>
+                    <Text style={[s.focusSplitLabel, { fontFamily: fonts.semibold, color: colors.text }]}>Safe to spend</Text>
+                    <Text style={[s.focusSplitValue, { fontFamily: fonts.mono, fontSize: 20, color: weeklyHealthy ? colors.text : colors.coral }]}>
+                      {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}/wk
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[s.heroCta, { marginTop: 28 }]}
+                  onPress={() => {
+                    dismissIncome();
+                    router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: 'I just got paid. Walk me through what to do.' } });
+                  }}
+                >
+                  <Text style={s.heroCtaText}>Ask Bocy about this</Text>
+                </TouchableOpacity>
+              </Card>
+              </Animated.View>
+          ) : (
+              <Card variant="hero" style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+                      <Text style={[s.heroLabel, { marginBottom: 0 }]}>THIS WEEK</Text>
+                      <TouchableOpacity
+                        onPress={() => setShowWeeklyInfo(true)}
+                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="How is this calculated?"
+                      >
+                        <View style={s.infoIconSmall}>
+                          <Text style={s.infoIconSmallText}>?</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                    <AnimatedNumber
+                      value={weeklyRemaining}
+                      prefix={'\u00a3'}
+                      style={[s.safeToSpendAmount, !weeklyHealthy && { color: colors.coral }, { fontSize: 38 }]}
+                    />
+                    <Text style={s.safeToSpendLabel}>left to spend</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <AnimatedNumber
+                      value={spentThisWeek}
+                      prefix={'\u00a3'}
+                      suffix=" spent"
+                      style={s.safeToSpendMeta}
+                    />
+                    <TouchableOpacity
+                      onPress={() => { setLimitInput(customWeeklyLimit ? String(customWeeklyLimit) : String(Math.round(calculatedWeeklyBudget))); setShowLimitEditor(true); }}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel="Set custom weekly spending limit"
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                        <Text style={[s.safeToSpendMeta, { textDecorationLine: 'underline', textDecorationStyle: 'dotted' }]}>
+                          of {'\u00a3'}{Math.round(weeklyBudget).toLocaleString()}
+                        </Text>
+                        <Text style={{ fontSize: 8, color: colors.dim }}>{'\u270E'}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={[s.safeToSpendBar, { marginTop: 4 }]}>
+                  <BreathingBar
+                    color={weeklyHealthy ? colors.accent : colors.coral}
+                    width={`${weeklyUsedPct}%`}
+                    style={s.safeToSpendBarFill}
+                  />
+                </View>
+
+                {/* Data freshness indicator */}
+                {latestTxDate && (
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: (() => {
+                    const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
+                    if (syncDataSource === 'fallback') return txAge >= 2 ? colors.coral : colors.muted;
+                    // Finexer sync succeeded — tx age just means bank hasn't posted new ones
+                    return txAge >= 3 ? colors.amber : colors.muted;
+                  })(), letterSpacing: 0.5, marginTop: 10 }}>
+                    {(() => {
+                      const txAge = Math.floor((Date.now() - new Date(latestTxDate).getTime()) / (1000 * 60 * 60 * 24));
+                      if (syncDataSource === 'fallback') {
+                        // Sync failed, using cached data
+                        if (txAge === 0) return 'Using cached data \u2014 transactions up to date';
+                        if (txAge === 1) return 'Using cached data \u2014 last transaction: yesterday';
+                        return `Using cached data \u2014 last transaction: ${txAge} days ago`;
+                      }
+                      // Finexer sync worked
+                      if (txAge === 0) return 'Transactions up to date';
+                      if (txAge === 1) return 'Bank synced \u2014 latest transaction: yesterday';
+                      return `Bank synced \u2014 latest transaction: ${txAge} days ago`;
+                    })()}
+                  </Text>
+                )}
+
+                {/* Daily spending sparkline */}
+                {dailySpending.length > 1 && (
+                  <View style={{ marginTop: 20, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 2, marginBottom: 10 }}>
+                      DAILY SPENDING
+                    </Text>
+                    <WeeklySparkline days={dailySpending} height={40} />
+                  </View>
+                )}
+              </Card>
+          )}
+                </View>
+              </Animated.ScrollView>
+            </AnimGlyph>
+
+            {/* Animated pagination dots */}
+            {heroPageCount > 1 && (
+              <View style={s.dotSeparator}>
+                {Array.from({ length: heroPageCount }).map((_, i) => {
+                  const dotWidth = heroScrollX.interpolate({
+                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
+                    outputRange: [3, 12, 3],
+                    extrapolate: 'clamp',
+                  });
+                  const dotBg = heroScrollX.interpolate({
+                    inputRange: [(i - 1) * snapInterval, i * snapInterval, (i + 1) * snapInterval],
+                    outputRange: [colors.border, colors.accent, colors.border],
+                    extrapolate: 'clamp',
+                  });
+                  return (
+                    <Animated.View
+                      key={i}
+                      style={[
+                        s.dot,
+                        { width: dotWidth, backgroundColor: dotBg, borderRadius: 2 },
+                      ]}
+                    />
+                  );
+                })}
+              </View>
+            )}
+          </View>
+            );
+          })()}
+
+          {/* ══════════════════════════════════════════════
+              YOUR INSIGHTS — detected inefficiencies in a parent card
               ══════════════════════════════════════════════ */}
           {insightsData.length > 0 && (
-            <View style={{ marginBottom: spacing.md }}>
-              <TouchableOpacity style={s.moveSectionHeader} onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setInsightsSectionOpen(!insightsSectionOpen); }} activeOpacity={0.7}>
-                <Text style={s.moveSectionLabel}>DETECTED INEFFICIENCIES</Text>
-                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent, letterSpacing: 0.3 }}>
-                  {'\u00a3'}{Math.round(insightsData.reduce((sum: number, ins: Insight) => sum + ins.annualImpact, 0)).toLocaleString()}/yr impact {insightsSectionOpen ? '\u25B2' : '\u25BC'}
-                </Text>
-              </TouchableOpacity>
-              {insightsSectionOpen && (showAllInsights ? insightsData : insightsData.slice(0, 3)).map((insight: Insight, idx: number) => {
+            <Card style={{ marginBottom: spacing.md }}>
+              <CardTitleRow
+                title="Your Insights"
+                right={
+                  <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
+                      {'\u00a3'}{Math.round(insightsData.reduce((sum: number, ins: Insight) => sum + ins.annualImpact, 0)).toLocaleString()}/yr
+                    </Text>
+                  </View>
+                }
+              />
+              <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 1, marginBottom: 12, marginTop: -4 }}>
+                {insightsData.length} inefficienc{insightsData.length === 1 ? 'y' : 'ies'} detected {'\u00B7'} tap to explore
+              </Text>
+              {/* First 2 insights always visible */}
+              {insightsData.slice(0, 2).map((insight: Insight, idx: number) => {
                 const isExpanded = expandedInsights.has(idx);
                 return (
-                  <TouchableOpacity key={`insight-${idx}`} activeOpacity={0.8} onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setExpandedInsights(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; }); }}>
-                    <Card variant="default" style={{ marginBottom: spacing.sm, borderLeftWidth: 3, borderLeftColor: idx === 0 ? colors.coral : colors.accent }}>
+                  <TouchableOpacity key={`insight-${idx}`} activeOpacity={0.7} onPress={() => {
+                    trackEvent('Insight Tapped', { index: idx, statement: insight.statement?.slice(0, 40) });
+                    hapticLight();
+                    LayoutAnimation.configureNext(SMOOTH_ANIM);
+                    setExpandedInsights(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; });
+                  }}>
+                    <View style={{ paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <View style={{ width: 4, height: 28, borderRadius: 2, backgroundColor: idx === 0 ? colors.coral : colors.accent }} />
                         <View style={{ flex: 1 }}>
                           <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text, lineHeight: 22 }} numberOfLines={isExpanded ? undefined : 2}>
                             {insight.statement}
                           </Text>
                         </View>
-                        <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
-                          <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
-                            {'\u00a3'}{Math.round(insight.annualImpact).toLocaleString()}/yr
-                          </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
+                              {'\u00a3'}{Math.round(insight.annualImpact).toLocaleString()}/yr
+                            </Text>
+                          </View>
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.dim }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
                         </View>
                       </View>
                       {isExpanded && (
-                        <View style={{ marginTop: 8 }}>
+                        <View style={{ marginTop: 8, marginLeft: 14 }}>
                           {insight.longTermImpact != null && insight.longTermImpact > insight.annualImpact && (
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                               <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
@@ -3103,18 +3142,99 @@ export default function Home() {
                               {insight.implication}
                             </Text>
                           )}
+                          <TouchableOpacity
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}
+                            onPress={() => {
+                              trackEvent('Insight Ask Bocy', { statement: insight.statement?.slice(0, 40) });
+                              router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about this: "${insight.statement}"` } });
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent, textDecorationLine: 'underline' }}>Ask Bocy about this</Text>
+                          </TouchableOpacity>
                         </View>
                       )}
-                    </Card>
+                    </View>
                   </TouchableOpacity>
                 );
               })}
-              {insightsSectionOpen && insightsData.length > 3 && !showAllInsights && (
-                <TouchableOpacity onPress={() => { LayoutAnimation.configureNext(SMOOTH_ANIM); setShowAllInsights(true); }} activeOpacity={0.7}>
-                  <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.accent, textAlign: 'center', paddingVertical: 8 }}>View {insightsData.length - 3} more</Text>
-                </TouchableOpacity>
+              {/* Remaining insights in collapsible dropdown */}
+              {insightsData.length > 2 && (
+                <>
+                  <TouchableOpacity
+                    onPress={() => { hapticLight(); LayoutAnimation.configureNext(SMOOTH_ANIM); setInsightsSectionOpen(!insightsSectionOpen); }}
+                    activeOpacity={0.7}
+                    style={{ paddingVertical: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+                  >
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 12, color: colors.accent, letterSpacing: 0.3 }}>
+                      {insightsSectionOpen ? 'Show less' : `${insightsData.length - 2} more insight${insightsData.length - 2 !== 1 ? 's' : ''}`}
+                    </Text>
+                    <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent }}>{insightsSectionOpen ? '\u25B2' : '\u25BC'}</Text>
+                  </TouchableOpacity>
+                  {insightsSectionOpen && insightsData.slice(2).map((insight: Insight, rawIdx: number) => {
+                    const idx = rawIdx + 2;
+                    const isExpanded = expandedInsights.has(idx);
+                    return (
+                      <TouchableOpacity key={`insight-${idx}`} activeOpacity={0.7} onPress={() => {
+                        trackEvent('Insight Tapped', { index: idx, statement: insight.statement?.slice(0, 40) });
+                        hapticLight();
+                        LayoutAnimation.configureNext(SMOOTH_ANIM);
+                        setExpandedInsights(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; });
+                      }}>
+                        <View style={{ paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                            <View style={{ width: 4, height: 28, borderRadius: 2, backgroundColor: colors.accent }} />
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.text, lineHeight: 22 }} numberOfLines={isExpanded ? undefined : 2}>
+                                {insight.statement}
+                              </Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <View style={{ backgroundColor: `${colors.accent}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent }}>
+                                  {'\u00a3'}{Math.round(insight.annualImpact).toLocaleString()}/yr
+                                </Text>
+                              </View>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.dim }}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
+                            </View>
+                          </View>
+                          {isExpanded && (
+                            <View style={{ marginTop: 8, marginLeft: 14 }}>
+                              {insight.longTermImpact != null && insight.longTermImpact > insight.annualImpact && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                                  <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                                    <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
+                                      {'\u00a3'}{Math.round(insight.longTermImpact).toLocaleString()} over 5yr
+                                    </Text>
+                                  </View>
+                                </View>
+                              )}
+                              <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.text2, lineHeight: 18 }}>
+                                {insight.cause}
+                              </Text>
+                              {insight.implication && (
+                                <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.green, lineHeight: 18, marginTop: 6 }}>
+                                  {insight.implication}
+                                </Text>
+                              )}
+                              <TouchableOpacity
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}
+                                onPress={() => {
+                                  router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about this: "${insight.statement}"` } });
+                                }}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.accent, textDecorationLine: 'underline' }}>Ask Bocy about this</Text>
+                              </TouchableOpacity>
+                            </View>
+                          )}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </>
               )}
-            </View>
+            </Card>
           )}
 
           {/* ══════════════════════════════════════════════
@@ -3194,34 +3314,47 @@ export default function Home() {
               {agentInsightsSectionOpen && agentInsights.slice(0, 4).map((ai, idx) => {
                 const confidenceColor = ai.confidence > 0.8 ? colors.green : ai.confidence > 0.5 ? colors.amber : colors.muted;
                 return (
-                  <Card key={`agent-insight-${idx}`} variant="default" style={{ marginBottom: spacing.sm, borderLeftWidth: 3, borderLeftColor: colors.coral }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 22 }}>
-                          {ai.description}
-                        </Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                          {ai.annual_impact > 0 && (
-                            <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
-                              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
-                                {'\u00a3'}{Math.round(ai.annual_impact).toLocaleString()}/yr
+                  <TouchableOpacity
+                    key={`agent-insight-${idx}`}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      trackEvent('Agent Insight Tapped', { type: ai.type, description: ai.description?.slice(0, 40) });
+                      hapticLight();
+                      router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Explain this to me and what I should do: "${ai.description}"` } });
+                    }}
+                  >
+                    <Card variant="default" style={{ marginBottom: spacing.sm, borderLeftWidth: 3, borderLeftColor: colors.coral }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.text, lineHeight: 22 }}>
+                            {ai.description}
+                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                            {ai.annual_impact > 0 && (
+                              <View style={{ backgroundColor: `${colors.coral}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.coral }}>
+                                  {'\u00a3'}{Math.round(ai.annual_impact).toLocaleString()}/yr
+                                </Text>
+                              </View>
+                            )}
+                            <View style={{ backgroundColor: `${confidenceColor}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: confidenceColor }}>
+                                {Math.round(ai.confidence * 100)}% confidence
                               </Text>
                             </View>
-                          )}
-                          <View style={{ backgroundColor: `${confidenceColor}15`, borderRadius: 6, paddingVertical: 2, paddingHorizontal: 8 }}>
-                            <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: confidenceColor }}>
-                              {Math.round(ai.confidence * 100)}% confidence
-                            </Text>
+                            {ai.type && (
+                              <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                                {ai.type}
+                              </Text>
+                            )}
                           </View>
-                          {ai.type && (
-                            <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                              {ai.type}
-                            </Text>
-                          )}
+                          <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent, marginTop: 8 }}>
+                            Tap to ask Bocy {'\u2192'}
+                          </Text>
                         </View>
                       </View>
-                    </View>
-                  </Card>
+                    </Card>
+                  </TouchableOpacity>
                 );
               })}
             </View>
@@ -3674,7 +3807,12 @@ export default function Home() {
               NET WORTH — account allocation breakdown (UHE/SHE only)
               ══════════════════════════════════════════════ */}
           {accountBuckets && (() => {
-            const totalAssets = accountBuckets.cash.total + accountBuckets.savings.total + accountBuckets.isa.total + accountBuckets.investments.total + accountBuckets.pension.total;
+            const propertyEquity = userProperties.reduce((sum, p) => {
+              const equity = p.estimated_value - (p.has_mortgage && p.mortgage_balance ? p.mortgage_balance : 0);
+              return sum + Math.max(0, equity);
+            }, 0);
+            const totalMortgageDebt = userProperties.reduce((sum, p) => sum + (p.has_mortgage && p.mortgage_balance ? p.mortgage_balance : 0), 0);
+            const totalAssets = accountBuckets.cash.total + accountBuckets.savings.total + accountBuckets.isa.total + accountBuckets.investments.total + accountBuckets.pension.total + propertyEquity;
             if (totalAssets <= 0) return null;
             const bucketRows = [
               { label: 'Cash', amount: accountBuckets.cash.total, color: colors.text2, count: accountBuckets.cash.accounts.length },
@@ -3682,6 +3820,7 @@ export default function Home() {
               { label: 'ISA', amount: accountBuckets.isa.total, color: '#9382DC', count: accountBuckets.isa.accounts.length },
               { label: 'Pension', amount: accountBuckets.pension.total, color: colors.amber, count: 0 },
               { label: 'Investments', amount: accountBuckets.investments.total, color: colors.coral, count: accountBuckets.investments.accounts.length },
+              { label: 'Property', amount: propertyEquity, color: '#6BB5E0', count: userProperties.length },
             ].filter(r => r.amount > 0);
             return (
               <Card style={{ marginBottom: spacing.md }}>
@@ -3693,6 +3832,11 @@ export default function Home() {
                     </Text>
                   }
                 />
+                {totalMortgageDebt > 0 && (
+                  <Text style={{ fontFamily: fonts.mono, fontSize: 9, color: colors.muted, letterSpacing: 0.5, marginTop: -4, marginBottom: 4 }}>
+                    Gross property: {'\u00a3'}{Math.round(userProperties.reduce((s, p) => s + p.estimated_value, 0)).toLocaleString()} {'\u00B7'} Mortgage debt: {'\u00a3'}{Math.round(totalMortgageDebt).toLocaleString()}
+                  </Text>
+                )}
                 {/* Allocation bar */}
                 <View style={{ flexDirection: 'row', height: 6, borderRadius: 3, overflow: 'hidden', marginTop: 12, marginBottom: 16 }}>
                   {bucketRows.map((r) => (

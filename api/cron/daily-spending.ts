@@ -107,12 +107,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue;
         }
 
-        // Get this week's transactions from stored CSV
+        // Get this week's transactions from stored CSV (prefer most recently synced rows)
         const { data: bankRows } = await admin
           .from('bank_data')
-          .select('csv_data')
+          .select('csv_data, updated_at')
           .eq('user_id', pref.user_id)
-          .order('created_at', { ascending: false });
+          .order('updated_at', { ascending: false });
 
         if (!bankRows || bankRows.length === 0) {
           results.skipped++;

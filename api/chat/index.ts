@@ -188,6 +188,38 @@ function buildInsightContext(context: Record<string, unknown>): string {
     parts.push(`## Estate Position\nIMPORTANT: These are data-driven observations, not estate planning advice. Recommend the user consults a qualified adviser.\n${lines.join('\n')}`);
   }
 
+  // Property portfolio (user-declared properties with mortgage data)
+  const properties = (context as any).properties as Array<{
+    address: string; postcode: string; estimated_value: number; purchase_price: number | null;
+    property_type: string; equity: number;
+    mortgage: { balance: number; rate: number; years_remaining: number; monthly_payment: number; type: string; fix_end_date: string | null } | null;
+  }> | undefined;
+
+  if (properties && properties.length > 0) {
+    const totalPropertyValue = properties.reduce((s, p) => s + p.estimated_value, 0);
+    const totalEquity = properties.reduce((s, p) => s + p.equity, 0);
+    const totalMortgage = properties.reduce((s, p) => s + (p.mortgage?.balance || 0), 0);
+    const lines = properties.map((p) => {
+      let line = `- ${p.address} (${p.postcode}): ${p.property_type}, valued ~£${p.estimated_value.toLocaleString()}`;
+      if (p.mortgage) {
+        line += `\n  Mortgage: £${p.mortgage.balance.toLocaleString()} at ${p.mortgage.rate}% ${p.mortgage.type}`;
+        if (p.mortgage.monthly_payment) line += `, £${p.mortgage.monthly_payment.toLocaleString()}/mo`;
+        if (p.mortgage.years_remaining) line += `, ${p.mortgage.years_remaining} years left`;
+        if (p.mortgage.fix_end_date) line += ` (fix ends ${p.mortgage.fix_end_date})`;
+        line += `\n  Equity: £${p.equity.toLocaleString()}`;
+      }
+      return line;
+    });
+    parts.push(`## Property Portfolio\nTotal value: £${totalPropertyValue.toLocaleString()} | Total equity: £${totalEquity.toLocaleString()} | Total mortgage: £${totalMortgage.toLocaleString()}\n${lines.join('\n')}\nUse this data for net worth, mortgage optimisation, estate planning, and stamp duty calculations. When mortgage fix ends within 12 months, proactively suggest remortgage research.`);
+  }
+
+  // Estate planning documents status
+  const estateDocs = (context as any).estate_documents as Array<{ type: string; status: string; updated_at: string }> | undefined;
+  if (estateDocs && estateDocs.length > 0) {
+    const lines = estateDocs.map((d) => `- ${d.type.replace(/_/g, ' ')}: ${d.status} (updated ${d.updated_at ? new Date(d.updated_at).toLocaleDateString() : 'N/A'})`);
+    parts.push(`## Estate Planning Documents\n${lines.join('\n')}`);
+  }
+
   // Tax signals from enrichment pipeline (structured transaction-level signals)
   const taxSignals = (context as any).tax_signals as Array<{
     type: string; annualAmount: number; monthlyAmount: number; confidence: number;

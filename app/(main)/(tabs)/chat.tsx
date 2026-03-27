@@ -1534,6 +1534,45 @@ export default function Chat() {
       }
     } catch {}
 
+    // Fetch properties and mortgage data for net worth and estate planning context
+    try {
+      const { data: propertyData } = await supabase
+        .from('properties')
+        .select('address, postcode, estimated_value, purchase_price, property_type, has_mortgage, mortgage_balance, mortgage_rate, mortgage_term_remaining, mortgage_monthly_payment, mortgage_type, mortgage_fix_end_date')
+        .eq('user_id', user.id);
+      if (propertyData && propertyData.length > 0) {
+        (ctx as any).properties = propertyData.map((p: any) => ({
+          address: p.address,
+          postcode: p.postcode,
+          estimated_value: p.estimated_value,
+          purchase_price: p.purchase_price,
+          property_type: p.property_type,
+          equity: p.has_mortgage && p.mortgage_balance
+            ? Math.max(0, p.estimated_value - p.mortgage_balance)
+            : p.estimated_value,
+          mortgage: p.has_mortgage ? {
+            balance: p.mortgage_balance,
+            rate: p.mortgage_rate,
+            years_remaining: p.mortgage_term_remaining,
+            monthly_payment: p.mortgage_monthly_payment,
+            type: p.mortgage_type,
+            fix_end_date: p.mortgage_fix_end_date,
+          } : null,
+        }));
+      }
+    } catch {}
+
+    // Fetch estate planning documents status
+    try {
+      const { data: estateDocData } = await supabase
+        .from('estate_documents')
+        .select('type, status, updated_at')
+        .eq('user_id', user.id);
+      if (estateDocData && estateDocData.length > 0) {
+        (ctx as any).estate_documents = estateDocData;
+      }
+    } catch {}
+
     // Pass savings transaction categories and monthly total from analysis
     if (a?.savings_categories?.length) {
       (ctx as any).savings_categories = a.savings_categories.map((c: any) => ({
