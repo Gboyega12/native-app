@@ -1,40 +1,38 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Animated, Easing,
+  ImageBackground, type ImageSourcePropType,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { hapticTick } from '@/lib/haptics';
-import { colors, fonts, spacing } from '@/theme';
+import { fonts, spacing } from '@/theme';
 import { GlassMockupSpending, GlassMockupChat, GlassMockupNetWorth } from '@/components/Bocy';
 
-// Per-slide gradient stops: [top, mid, bottom]
-const SLIDE_GRADIENTS = [
-  // Warm amber / sand dune
-  ['#C4854C', '#A06E3F', '#8B5E34'],
-  // Deep night sky
-  ['#0A1628', '#122040', '#1B2D4A'],
-  // Rich green leaf
-  ['#2D5A1E', '#3B7324', '#4A8C2A'],
-] as const;
+const IMG_OPTIMISE = require('@/assets/images/education/optimise.jpg') as ImageSourcePropType;
+const IMG_ASK = require('@/assets/images/education/ask.jpg') as ImageSourcePropType;
+const IMG_GROW = require('@/assets/images/education/grow.jpg') as ImageSourcePropType;
 
 const SLIDES = [
   {
     mockup: 'spending' as const,
     title: 'Optimise\nyour money',
     body: 'Net worth, spending, and investments.',
+    image: IMG_OPTIMISE,
   },
   {
     mockup: 'chat' as const,
     title: 'Ask\nanything',
     body: 'Summaries, insights, and advice.',
+    image: IMG_ASK,
   },
   {
     mockup: 'networth' as const,
     title: 'Grow your\nwealth',
     body: 'Forecasting, investing and more.',
     cta: "Let's get started",
+    image: IMG_GROW,
   },
 ];
 
@@ -103,15 +101,6 @@ function SlideContent({ slide, idx, containerWidth, scrollX }: {
   );
 }
 
-/** Interpolate a hex color channel between two values based on an Animated.Value */
-function interpolateColor(scrollX: Animated.Value, width: number, slideIdx: number, colorA: string, colorB: string): Animated.AnimatedInterpolation<string> {
-  return scrollX.interpolate({
-    inputRange: [slideIdx * width, (slideIdx + 1) * width],
-    outputRange: [colorA, colorB],
-    extrapolate: 'clamp',
-  });
-}
-
 export default function Education() {
   const router = useRouter();
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -144,35 +133,39 @@ export default function Education() {
     router.push('/(main)/identity');
   };
 
-  // Scroll-driven gradient color interpolation
-  const gradientColors = containerWidth > 0
-    ? [0, 1, 2].map((stop) => {
-        // For each gradient stop (top/mid/bottom), interpolate across all slides
-        if (SLIDE_GRADIENTS.length <= 1) return SLIDE_GRADIENTS[0][stop];
-        // Build a full input/output range across all slides
-        const inputRange = SLIDE_GRADIENTS.map((_, i) => i * containerWidth);
-        const outputRange = SLIDE_GRADIENTS.map((g) => g[stop]);
-        return scrollX.interpolate({ inputRange, outputRange, extrapolate: 'clamp' });
-      })
-    : SLIDE_GRADIENTS[0];
-
   return (
     <View
       style={styles.container}
       onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
     >
-      {/* Animated gradient background */}
-      <Animated.View style={StyleSheet.absoluteFill}>
-        <LinearGradient
-          colors={gradientColors as any}
-          locations={[0, 0.5, 1]}
-          style={StyleSheet.absoluteFill}
-        />
-      </Animated.View>
+      {/* Background images — stacked, opacity-driven by scroll position */}
+      {SLIDES.map((slide, i) => {
+        const opacity = containerWidth > 0
+          ? scrollX.interpolate({
+              inputRange: [(i - 1) * containerWidth, i * containerWidth, (i + 1) * containerWidth],
+              outputRange: [0, 1, 0],
+              extrapolate: 'clamp',
+            })
+          : i === 0 ? 1 : 0;
 
-      {/* Vignette overlay for premium depth */}
+        return (
+          <Animated.View
+            key={i}
+            style={[StyleSheet.absoluteFill, { opacity }]}
+            pointerEvents="none"
+          >
+            <ImageBackground
+              source={slide.image}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
+          </Animated.View>
+        );
+      })}
+
+      {/* Vignette overlay for text legibility */}
       <LinearGradient
-        colors={['rgba(0,0,0,0.3)', 'transparent', 'rgba(0,0,0,0.25)']}
+        colors={['rgba(0,0,0,0.45)', 'rgba(0,0,0,0.1)', 'rgba(0,0,0,0.5)']}
         locations={[0, 0.4, 1]}
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
@@ -267,7 +260,7 @@ export default function Education() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: SLIDE_GRADIENTS[0][2], // fallback
+    backgroundColor: '#000000',
     maxWidth: 640,
     alignSelf: 'center' as const,
     width: '100%',

@@ -41,6 +41,7 @@ export default [
         NodeJS: "readonly",
         RequestInit: "readonly",
         AbortSignal: "readonly",
+        require: "readonly",
       },
     },
     plugins: {
