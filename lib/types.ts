@@ -497,6 +497,31 @@ export interface SystemMap {
 
 export type DebtTier = 'tier1_high' | 'tier2_medium' | 'tier3_low';
 
+// ── Market Data (Yahoo Finance) ──
+
+export interface MarketQuote {
+  symbol: string;
+  price: number;
+  previousClose: number;
+  change: number;
+  changePercent: number;
+  currency: string;
+  marketState: 'PRE' | 'REGULAR' | 'POST' | 'CLOSED';
+  name: string;
+  lastUpdated: string;
+}
+
+export interface ChartPoint {
+  timestamp: number;
+  close: number;
+}
+
+export interface ChartData {
+  symbol: string;
+  points: ChartPoint[];
+  previousClose: number;
+}
+
 export interface TieredDebtAccount extends DebtAccount {
   tier: DebtTier;
   /** Tier-appropriate language for display */

@@ -40,6 +40,7 @@ export default [
         JSX: "readonly",
         NodeJS: "readonly",
         RequestInit: "readonly",
+        AbortSignal: "readonly",
       },
     },
     plugins: {
