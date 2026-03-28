@@ -60,6 +60,15 @@ export default function Profile() {
   const [notifExpanded, setNotifExpanded] = useState(false);
   const [expandedSection, setExpandedSection] = useState<'accounts' | 'debts' | 'investments' | null>(null);
 
+  // Goals state
+  const [goalsData, setGoalsData] = useState<{
+    current_situation?: string;
+    one_year_goal?: string;
+    two_year_goal?: string;
+    target_amount?: number;
+    goal_timeline?: string;
+  } | null>(null);
+
   const toggleSection = (section: 'accounts' | 'debts' | 'investments') => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpandedSection((prev) => (prev === section ? null : section));
@@ -174,6 +183,16 @@ export default function Profile() {
             checkin_prompts: prefs.checkin_prompts ?? true,
           });
         }
+      } catch {}
+
+      // Load goals
+      try {
+        const { data: goals } = await supabase
+          .from('goals')
+          .select('current_situation, one_year_goal, two_year_goal, target_amount, goal_timeline')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (goals) setGoalsData(goals);
       } catch {}
     } catch (err) {
       console.warn('[profile] loadUser error:', err);
@@ -421,10 +440,11 @@ export default function Profile() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        await supabase.from('notification_preferences').update({
+        await supabase.from('notification_preferences').upsert({
+          user_id: user.id,
           [key]: newVal,
           updated_at: new Date().toISOString(),
-        }).eq('user_id', user.id);
+        }, { onConflict: 'user_id' });
       }
     } catch {}
   };
@@ -506,147 +526,225 @@ export default function Profile() {
         </View>
       </AnimGlyph>
 
-      {/* ── ACCOUNTS — collapsible section ── */}
-      <TouchableOpacity style={s.sectionHeader} onPress={() => toggleSection('accounts')} activeOpacity={0.7}>
-        <Text style={s.sectionLabel}>ACCOUNTS</Text>
-        <Text style={s.sectionCount}>{allAccounts.length}</Text>
-        <Text style={[s.sectionChevron, expandedSection === 'accounts' && s.sectionChevronOpen]}>{'\u203A'}</Text>
-      </TouchableOpacity>
+      {/* ── ACCOUNTS ── */}
+      <Text style={s.sectionLabelSpaced}>ACCOUNTS</Text>
+      <View style={s.groupCard}>
+        <TouchableOpacity style={s.groupRow} onPress={() => toggleSection('accounts')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Connected accounts</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={s.groupRowBadge}>{allAccounts.length}</Text>
+            <Text style={[s.groupRowChevron, expandedSection === 'accounts' && { transform: [{ rotate: '90deg' }] }]}>{'\u203A'}</Text>
+          </View>
+        </TouchableOpacity>
 
-      {expandedSection === 'accounts' && (
-        <>
-          {allAccounts.map((bank, i) => {
-            const displayName = bank.provider_name || (bank.account_type === 'credit' ? `Credit card ${i + 1}` : `Bank account ${i + 1}`);
-            const isBank = bank.account_type !== 'credit';
-            const { daysLeft, expired, expiring } = getConsentStatus(bank.created_at);
-            const statusColor = expired ? colors.coral : expiring ? colors.amber : colors.green;
+        {expandedSection === 'accounts' && (
+          <>
+            {allAccounts.map((bank, i) => {
+              const displayName = bank.provider_name || (bank.account_type === 'credit' ? `Credit card ${i + 1}` : `Bank account ${i + 1}`);
+              const isBank = bank.account_type !== 'credit';
+              const { daysLeft, expired, expiring } = getConsentStatus(bank.created_at);
+              const statusColor = expired ? colors.coral : expiring ? colors.amber : colors.green;
 
-            return (
-              <AnimGlyph key={bank.id} delay={80 + i * 60}>
-                <View style={s.accountRow}>
-                  <View style={[s.accountDot, { backgroundColor: statusColor }]} />
-                  <View style={s.accountInfo}>
-                    <Text style={s.accountName}>{displayName}</Text>
-                    <Text style={s.accountMeta}>
-                      {isBank ? 'Bank' : 'Credit'}
-                      {expired ? ' — expired' : expiring ? ` — ${daysLeft}d left` : ` — ${daysLeft}d remaining`}
-                    </Text>
-                    {!expired && (
-                      <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
-                        <BreathingBar
-                          color={statusColor}
-                          width={`${Math.max(0, Math.min(100, Math.round((daysLeft / CONSENT_DAYS) * 100)))}%`}
-                          style={{ height: '100%', borderRadius: 1.5 }}
-                        />
-                      </View>
+              return (
+                <AnimGlyph key={bank.id} delay={80 + i * 60}>
+                  <View style={s.groupDivider} />
+                  <View style={s.cardItemRow}>
+                    <View style={[s.accountDot, { backgroundColor: statusColor }]} />
+                    <View style={s.accountInfo}>
+                      <Text style={s.accountName}>{displayName}</Text>
+                      <Text style={s.accountMeta}>
+                        {isBank ? 'Bank' : 'Credit'}
+                        {expired ? ' — expired' : expiring ? ` — ${daysLeft}d left` : ` — ${daysLeft}d remaining`}
+                      </Text>
+                      {!expired && (
+                        <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
+                          <BreathingBar
+                            color={statusColor}
+                            width={`${Math.max(0, Math.min(100, Math.round((daysLeft / CONSENT_DAYS) * 100)))}%`}
+                            style={{ height: '100%', borderRadius: 1.5 }}
+                          />
+                        </View>
+                      )}
+                    </View>
+                    {expired ? (
+                      <TouchableOpacity style={s.accountAction} onPress={handleAddAccount} activeOpacity={0.7}>
+                        <Text style={[s.accountActionText, { color: colors.coral }]}>Reconnect</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity
+                        onPress={() => handleRemoveBank(bank.id, displayName)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${displayName} account`}
+                        style={s.accountRemoveBtn}
+                      >
+                        <Text style={s.accountRemove}>Remove</Text>
+                      </TouchableOpacity>
                     )}
                   </View>
-                  {expired ? (
-                    <TouchableOpacity style={s.accountAction} onPress={handleAddAccount} activeOpacity={0.7}>
-                      <Text style={[s.accountActionText, { color: colors.coral }]}>Reconnect</Text>
-                    </TouchableOpacity>
-                  ) : (
+                </AnimGlyph>
+              );
+            })}
+
+            {allAccounts.length === 0 && (
+              <>
+                <View style={s.groupDivider} />
+                <Text style={s.emptyHint}>No accounts connected yet</Text>
+              </>
+            )}
+
+            <View style={s.groupDivider} />
+            <TouchableOpacity style={s.cardAddRow} onPress={handleAddAccount} activeOpacity={0.7} testID="profile-add-account-button" accessibilityRole="button" accessibilityLabel="Add account">
+              <Text style={s.cardAddText}>+ Add account</Text>
+            </TouchableOpacity>
+
+            {connectedBanks.length > 0 && (
+              <Text style={s.footnote}>
+                Open Banking connections expire every 90 days.
+              </Text>
+            )}
+          </>
+        )}
+      </View>
+
+      {/* ── DEBTS ── */}
+      <View style={s.groupCard}>
+        <TouchableOpacity style={s.groupRow} onPress={() => toggleSection('debts')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Debts</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={s.groupRowBadge}>{debtAccounts.length}</Text>
+            <Text style={[s.groupRowChevron, expandedSection === 'debts' && { transform: [{ rotate: '90deg' }] }]}>{'\u203A'}</Text>
+          </View>
+        </TouchableOpacity>
+
+        {expandedSection === 'debts' && (
+          <>
+            {debtAccounts.map((d, idx) => {
+              const bal = d.outstanding_balance || 0;
+              const lim = d.credit_limit || 0;
+              const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
+              const isHigh = util != null && util > 75;
+
+              return (
+                <AnimGlyph key={d.id} delay={80 + idx * 60}>
+                  <View style={s.groupDivider} />
+                  <View style={s.cardItemRow}>
+                    <View style={[s.accountDot, { backgroundColor: isHigh ? colors.coral : colors.dim }]} />
+                    <View style={s.accountInfo}>
+                      <Text style={s.accountName}>{d.account_name}</Text>
+                      <Text style={s.accountMeta}>
+                        {'\u00a3'}{Math.round(bal).toLocaleString()}
+                        {lim > 0 ? ` / \u00a3${Math.round(lim).toLocaleString()} (${util}%)` : ''}
+                        {' — '}
+                        {d.account_type === 'credit_card' ? 'Credit card'
+                          : d.account_type === 'personal_loan' ? 'Loan'
+                          : d.account_type === 'overdraft' ? 'Overdraft'
+                          : d.account_type === 'student_loan' ? 'Student loan'
+                          : d.account_type === 'car_finance' ? 'Car finance'
+                          : d.account_type === 'bnpl' ? 'BNPL'
+                          : d.account_type || 'Debt'}
+                      </Text>
+                      {lim > 0 && util != null && (
+                        <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
+                          <BreathingBar
+                            color={isHigh ? colors.coral : colors.accent}
+                            width={`${Math.min(100, util)}%`}
+                            style={{ height: '100%', borderRadius: 1.5 }}
+                          />
+                        </View>
+                      )}
+                    </View>
                     <TouchableOpacity
-                      onPress={() => handleRemoveBank(bank.id, displayName)}
+                      onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                       accessibilityRole="button"
-                      accessibilityLabel={`Remove ${displayName} account`}
+                      accessibilityLabel={`Remove ${d.account_name} account`}
                       style={s.accountRemoveBtn}
                     >
                       <Text style={s.accountRemove}>Remove</Text>
                     </TouchableOpacity>
-                  )}
-                </View>
-              </AnimGlyph>
-            );
-          })}
-
-          {allAccounts.length === 0 && (
-            <Text style={s.emptyHint}>No accounts connected yet</Text>
-          )}
-
-          <TouchableOpacity style={s.addBtn} onPress={handleAddAccount} activeOpacity={0.7} testID="profile-add-account-button" accessibilityRole="button" accessibilityLabel="Add account">
-            <Text style={s.addBtnText}>+ Add account</Text>
-          </TouchableOpacity>
-
-          {connectedBanks.length > 0 && (
-            <Text style={s.footnote}>
-              Open Banking connections expire every 90 days.
-            </Text>
-          )}
-        </>
-      )}
-
-      {/* ── DEBTS — collapsible section ── */}
-      <TouchableOpacity style={s.sectionHeader} onPress={() => toggleSection('debts')} activeOpacity={0.7}>
-        <Text style={s.sectionLabel}>DEBTS</Text>
-        <Text style={s.sectionCount}>{debtAccounts.length}</Text>
-        <Text style={[s.sectionChevron, expandedSection === 'debts' && s.sectionChevronOpen]}>{'\u203A'}</Text>
-      </TouchableOpacity>
-
-      {expandedSection === 'debts' && (
-        <>
-          {debtAccounts.map((d, idx) => {
-            const bal = d.outstanding_balance || 0;
-            const lim = d.credit_limit || 0;
-            const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
-            const isHigh = util != null && util > 75;
-
-            return (
-              <AnimGlyph key={d.id} delay={80 + idx * 60}>
-                <View style={s.accountRow}>
-                  <View style={[s.accountDot, { backgroundColor: isHigh ? colors.coral : colors.dim }]} />
-                  <View style={s.accountInfo}>
-                    <Text style={s.accountName}>{d.account_name}</Text>
-                    <Text style={s.accountMeta}>
-                      {'\u00a3'}{Math.round(bal).toLocaleString()}
-                      {lim > 0 ? ` / \u00a3${Math.round(lim).toLocaleString()} (${util}%)` : ''}
-                      {' — '}
-                      {d.account_type === 'credit_card' ? 'Credit card'
-                        : d.account_type === 'personal_loan' ? 'Loan'
-                        : d.account_type === 'overdraft' ? 'Overdraft'
-                        : d.account_type === 'student_loan' ? 'Student loan'
-                        : d.account_type === 'car_finance' ? 'Car finance'
-                        : d.account_type === 'bnpl' ? 'BNPL'
-                        : d.account_type || 'Debt'}
-                    </Text>
-                    {lim > 0 && util != null && (
-                      <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
-                        <BreathingBar
-                          color={isHigh ? colors.coral : colors.accent}
-                          width={`${Math.min(100, util)}%`}
-                          style={{ height: '100%', borderRadius: 1.5 }}
-                        />
-                      </View>
-                    )}
                   </View>
-                  <TouchableOpacity
-                    onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${d.account_name} account`}
-                    style={s.accountRemoveBtn}
-                  >
-                    <Text style={s.accountRemove}>Remove</Text>
-                  </TouchableOpacity>
-                </View>
-              </AnimGlyph>
-            );
-          })}
+                </AnimGlyph>
+              );
+            })}
 
-          {debtAccounts.length === 0 && (
-            <Text style={s.emptyHint}>No debts added yet</Text>
-          )}
+            {debtAccounts.length === 0 && (
+              <>
+                <View style={s.groupDivider} />
+                <Text style={s.emptyHint}>No debts added yet</Text>
+              </>
+            )}
 
-          <TouchableOpacity
-            style={s.addBtn}
-            onPress={() => setShowAddDebt(true)}
-            activeOpacity={0.7}
-          >
-            <Text style={s.addBtnText}>+ Add debt</Text>
-          </TouchableOpacity>
-        </>
-      )}
+            <View style={s.groupDivider} />
+            <TouchableOpacity style={s.cardAddRow} onPress={() => setShowAddDebt(true)} activeOpacity={0.7}>
+              <Text style={s.cardAddText}>+ Add debt</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+
+      {/* ── INVESTMENTS ── */}
+      <View style={s.groupCard}>
+        <TouchableOpacity style={s.groupRow} onPress={() => toggleSection('investments')} activeOpacity={0.7}>
+          <Text style={s.groupRowLabel}>Investments</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={s.groupRowBadge}>{investmentAccounts.length}</Text>
+            <Text style={[s.groupRowChevron, expandedSection === 'investments' && { transform: [{ rotate: '90deg' }] }]}>{'\u203A'}</Text>
+          </View>
+        </TouchableOpacity>
+
+        {expandedSection === 'investments' && (
+          <>
+            {investmentAccounts.length > 0 ? (
+              investmentAccounts.map((inv, idx) => {
+                const gain = inv.purchase_cost ? inv.current_value - inv.purchase_cost : null;
+                return (
+                  <AnimGlyph key={inv.id || idx} delay={80 + idx * 60}>
+                    <View style={s.groupDivider} />
+                    <View style={s.cardItemRow}>
+                      <View style={[s.accountDot, { backgroundColor: colors.accent }]} />
+                      <View style={s.accountInfo}>
+                        <Text style={s.accountName}>{inv.name}</Text>
+                        <Text style={s.accountMeta}>
+                          {inv.asset_class.toUpperCase()}
+                          {inv.platform ? ` \u2022 ${inv.platform}` : ''}
+                          {' \u2022 '}
+                          {'\u00a3'}{Math.round(inv.current_value).toLocaleString()}
+                          {gain !== null ? ` (${gain >= 0 ? '+' : ''}\u00a3${Math.round(gain).toLocaleString()})` : ''}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => handleRemoveInvestment(inv.id!, inv.name)}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove ${inv.name} investment`}
+                        style={s.accountRemoveBtn}
+                      >
+                        <Text style={s.accountRemove}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </AnimGlyph>
+                );
+              })
+            ) : (
+              <>
+                <View style={s.groupDivider} />
+                <Text style={s.emptyHint}>No investments added yet</Text>
+              </>
+            )}
+
+            <View style={s.groupDivider} />
+            <View style={s.cardAddRowDouble}>
+              <TouchableOpacity style={s.cardAddBtn} onPress={() => setShowAddInvestment(true)} activeOpacity={0.7}>
+                <Text style={s.cardAddText}>+ Add investment</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.cardAddBtn} onPress={handleCsvImport} activeOpacity={0.7}>
+                <Text style={[s.cardAddText, { color: colors.dim }]}>+ Import CSV</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+      </View>
 
       {/* ── Add debt modal ── */}
       <Modal visible={showAddDebt} transparent animationType="fade" onRequestClose={() => { setAddDebtError(''); setShowAddDebt(false); }}>
@@ -693,71 +791,8 @@ export default function Profile() {
         </Pressable>
       </Modal>
 
-      {/* ── INVESTMENTS — collapsible section ── */}
-      <TouchableOpacity style={s.sectionHeader} onPress={() => toggleSection('investments')} activeOpacity={0.7}>
-        <Text style={s.sectionLabel}>INVESTMENTS</Text>
-        <Text style={s.sectionCount}>{investmentAccounts.length}</Text>
-        <Text style={[s.sectionChevron, expandedSection === 'investments' && s.sectionChevronOpen]}>{'\u203A'}</Text>
-      </TouchableOpacity>
-
-      {expandedSection === 'investments' && (
-        <>
-          {investmentAccounts.length > 0 ? (
-            investmentAccounts.map((inv, idx) => {
-              const gain = inv.purchase_cost ? inv.current_value - inv.purchase_cost : null;
-              const gainColor = gain !== null ? (gain >= 0 ? colors.green : colors.coral) : colors.muted;
-              return (
-                <AnimGlyph key={inv.id || idx} delay={80 + idx * 60}>
-                  <View style={s.accountRow}>
-                    <View style={[s.accountDot, { backgroundColor: colors.accent }]} />
-                    <View style={s.accountInfo}>
-                      <Text style={s.accountName}>{inv.name}</Text>
-                      <Text style={s.accountMeta}>
-                        {inv.asset_class.toUpperCase()}
-                        {inv.platform ? ` \u2022 ${inv.platform}` : ''}
-                        {' \u2022 '}
-                        {'\u00a3'}{Math.round(inv.current_value).toLocaleString()}
-                        {gain !== null ? ` (${gain >= 0 ? '+' : ''}${'\u00a3'}${Math.round(gain).toLocaleString()})` : ''}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => handleRemoveInvestment(inv.id!, inv.name)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove ${inv.name} investment`}
-                      style={s.accountRemoveBtn}
-                    >
-                      <Text style={s.accountRemove}>Remove</Text>
-                    </TouchableOpacity>
-                  </View>
-                </AnimGlyph>
-              );
-            })
-          ) : (
-            <Text style={s.emptyHint}>No investments added yet</Text>
-          )}
-
-          <View style={s.addButtonsRow}>
-            <TouchableOpacity
-              style={s.addBtn}
-              onPress={() => setShowAddInvestment(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={s.addBtnText}>+ Add investment</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.addBtn, { borderColor: colors.accentDim }]}
-              onPress={handleCsvImport}
-              activeOpacity={0.7}
-            >
-              <Text style={[s.addBtnText, { color: colors.dim }]}>+ Import CSV</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
-
       {/* ── Divider between financial sections and settings ── */}
-      <View style={{ height: spacing.xl }} />
+      <View style={{ height: spacing.sm }} />
 
       {/* ── Add investment modal ── */}
       <Modal visible={showAddInvestment} transparent animationType="fade" onRequestClose={() => { setAddInvError(''); setShowAddInvestment(false); }}>
@@ -837,60 +872,86 @@ export default function Profile() {
         </Pressable>
       </Modal>
 
-      {/* ── NOTIFICATIONS ── */}
-      <Text style={s.sectionLabel}>NOTIFICATIONS</Text>
+      {/* ── GOALS ── */}
+      <Text style={s.sectionLabelSpaced}>GOALS</Text>
+      <View style={s.groupCard}>
+        <TouchableOpacity style={s.groupRow} onPress={() => { trackEvent('Edit Goals Tapped'); router.push({ pathname: '/(main)/goals', params: { from: 'profile' } }); }} activeOpacity={0.7}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.groupRowLabel}>Edit goals</Text>
+            {goalsData?.one_year_goal ? (
+              <Text style={s.groupRowDesc}>
+                {goalsData.current_situation?.replace(/_/g, ' ')}
+                {goalsData.one_year_goal ? ` \u2022 ${goalsData.one_year_goal.replace(/_/g, ' ')}` : ''}
+              </Text>
+            ) : (
+              <Text style={s.groupRowDesc}>Set your financial goals</Text>
+            )}
+          </View>
+          <Text style={s.groupRowChevron}>{'\u203A'}</Text>
+        </TouchableOpacity>
+      </View>
 
-      {([
-        { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Top moves & spending recap every Monday' },
-        { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Spending updates, nudges & income alerts' },
-      ]).map((item, idx) => (
-        <View key={item.key} style={[s.notifRow, idx === 0 && { paddingTop: 0 }]}>
-          <View style={s.notifInfo}>
-            <Text style={s.notifLabel}>{item.label}</Text>
-            <Text style={s.notifDesc}>{item.desc}</Text>
+      {/* ── NOTIFICATIONS ── */}
+      <Text style={s.sectionLabelSpaced}>NOTIFICATIONS</Text>
+      <View style={s.groupCard}>
+        {([
+          { key: 'weekly_digest' as const, label: 'Weekly digest', desc: 'Top moves & spending recap every Monday' },
+          { key: 'checkin_prompts' as const, label: 'Check-in prompts', desc: 'Spending updates, nudges & income alerts' },
+        ]).map((item, idx) => (
+          <View key={item.key}>
+            {idx > 0 && <View style={s.groupDivider} />}
+            <View style={s.groupRow}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={s.groupRowLabel}>{item.label}</Text>
+                <Text style={s.groupRowDesc}>{item.desc}</Text>
+              </View>
+              <Switch
+                value={notifPrefs[item.key]}
+                onValueChange={() => toggleNotifPref(item.key)}
+                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+                thumbColor={notifPrefs[item.key] ? colors.green : colors.thumbOff}
+              />
+            </View>
           </View>
-          <Switch
-            value={notifPrefs[item.key]}
-            onValueChange={() => toggleNotifPref(item.key)}
-            trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-            thumbColor={notifPrefs[item.key] ? colors.green : colors.thumbOff}
-          />
-        </View>
-      ))}
-      {webPush.supported && (
-        <View style={s.notifRow}>
-          <View style={s.notifInfo}>
-            <Text style={s.notifLabel}>Push notifications</Text>
-            <Text style={s.notifDesc}>
-              {webPush.permission === 'denied'
-                ? 'Blocked in browser settings'
-                : 'Receive alerts in your browser'}
-            </Text>
-          </View>
-          <Switch
-            value={webPush.subscribed}
-            onValueChange={() => {
-              if (webPush.subscribed) {
-                webPush.unsubscribe();
-              } else {
-                webPush.subscribe();
-              }
-            }}
-            trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-            thumbColor={webPush.subscribed ? colors.green : colors.thumbOff}
-            disabled={webPush.loading || webPush.permission === 'denied'}
-          />
-        </View>
-      )}
+        ))}
+        {webPush.supported && (
+          <>
+            <View style={s.groupDivider} />
+            <View style={s.groupRow}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                <Text style={s.groupRowLabel}>Push notifications</Text>
+                <Text style={s.groupRowDesc}>
+                  {webPush.permission === 'denied'
+                    ? 'Blocked in browser settings'
+                    : 'Receive alerts even when app is closed'}
+                </Text>
+              </View>
+              <Switch
+                value={webPush.subscribed}
+                onValueChange={() => {
+                  if (webPush.subscribed) {
+                    webPush.unsubscribe();
+                  } else {
+                    webPush.subscribe();
+                  }
+                }}
+                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
+                thumbColor={webPush.subscribed ? colors.green : colors.thumbOff}
+                disabled={webPush.loading || webPush.permission === 'denied'}
+              />
+            </View>
+          </>
+        )}
+      </View>
 
       {/* ── APPEARANCE — dark/light mode ── */}
-      <Text style={s.sectionLabel}>APPEARANCE</Text>
+      <Text style={s.sectionLabelSpaced}>APPEARANCE</Text>
 
       <View style={s.groupCard}>
         <View style={s.groupRow}>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={s.groupRowLabel}>{isDark ? 'Dark mode' : 'Light mode'}</Text>
-            <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.muted, marginTop: 2 }}>
+            <Text style={s.groupRowDesc}>
               {isDark ? 'AMOLED-optimised dark theme' : 'Clean light theme'}
             </Text>
           </View>
@@ -905,7 +966,7 @@ export default function Profile() {
       </View>
 
       {/* ── RESOURCES ── */}
-      <Text style={s.sectionLabel}>RESOURCES</Text>
+      <Text style={s.sectionLabelSpaced}>RESOURCES</Text>
 
       <View style={s.groupCard}>
         <TouchableOpacity style={s.groupRow} onPress={() => Linking.openURL('mailto:hello@bocy.io?subject=Support')} activeOpacity={0.7}>
@@ -929,7 +990,7 @@ export default function Profile() {
       </View>
 
       {/* ── Logout & Delete ── */}
-      <View style={[s.groupCard, { marginTop: 8 }]}>
+      <View style={s.groupCard}>
         <TouchableOpacity style={s.groupRow} onPress={handleSignOut} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel="Sign out of your account" testID="profile-sign-out-button">
           <Text style={[s.groupRowLabel, { color: colors.coral }]}>Logout</Text>
           <Text style={[s.groupRowChevron, { color: colors.coral }]}>{'\u203A'}</Text>
@@ -973,56 +1034,57 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   avatarText: { fontFamily: fonts.semibold, fontSize: 22, color: c.bg },
   userName: { fontFamily: fonts.semibold, fontSize: 20, color: c.text, marginBottom: 4 },
   userEmail: { fontFamily: fonts.regular, fontSize: 13, color: c.dim, marginBottom: 12 },
-  // ── Section headers (collapsible) ──
-  sectionHeader: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 14, marginTop: 8,
-  },
-  sectionLabel: {
+  // ── Section label with spacing ──
+  sectionLabelSpaced: {
     fontFamily: fonts.mono, fontSize: 11, letterSpacing: 2, color: c.dim,
-    textTransform: 'uppercase', flex: 1,
-  },
-  sectionCount: {
-    fontFamily: fonts.mono, fontSize: 11, color: c.muted,
-    backgroundColor: c.accentDim, borderRadius: 8,
-    paddingHorizontal: 8, paddingVertical: 2, marginRight: 8,
-    overflow: 'hidden',
-  },
-  sectionChevron: {
-    fontFamily: fonts.regular, fontSize: 18, color: c.muted,
-    transform: [{ rotate: '0deg' }],
-  },
-  sectionChevronOpen: {
-    transform: [{ rotate: '90deg' }],
+    textTransform: 'uppercase', marginTop: spacing.lg, marginBottom: spacing.sm + 4,
+    paddingHorizontal: 4,
   },
 
-  // ── Account rows ──
-  accountRow: {
-    flexDirection: 'row', alignItems: 'center', paddingVertical: 14,
-    borderBottomWidth: 1, borderBottomColor: c.mintDim,
+  // ── Account item rows inside group cards ──
+  cardItemRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 14,
   },
   accountDot: { width: 8, height: 8, borderRadius: 4, marginRight: 12 },
   accountInfo: { flex: 1 },
-  accountName: { fontFamily: fonts.medium, fontSize: 15, color: c.text },
-  accountMeta: { fontFamily: fonts.regular, fontSize: 12, color: c.dim, marginTop: 2 },
+  accountName: { fontFamily: fonts.medium, fontSize: 14, color: c.text },
+  accountMeta: { fontFamily: fonts.regular, fontSize: 11, color: c.dim, marginTop: 2 },
   accountAction: { paddingVertical: 4, paddingHorizontal: 10 },
   accountActionText: { fontFamily: fonts.semibold, fontSize: 12 },
   accountRemoveBtn: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
   accountRemove: { fontFamily: fonts.regular, fontSize: 12, color: c.muted },
 
-  // ── Empty + add ──
+  // ── Empty + add (inside card) ──
   emptyHint: {
     fontFamily: fonts.regular, fontSize: 13, color: c.muted,
-    textAlign: 'center', paddingVertical: 20,
+    textAlign: 'center', paddingVertical: 16, paddingHorizontal: 20,
   },
-  addButtonsRow: { flexDirection: 'row', gap: 10, marginTop: 12, marginBottom: 8 },
-  addBtn: {
-    flex: 1, borderWidth: 1, borderColor: c.accentDim, borderStyle: 'dashed',
-    borderRadius: 12, paddingVertical: 12, alignItems: 'center',
+  cardAddRow: {
+    paddingHorizontal: 20, paddingVertical: 14, alignItems: 'center',
   },
-  addBtnText: { fontFamily: fonts.semibold, fontSize: 13, color: c.accent },
+  cardAddRowDouble: {
+    flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 14, gap: 16,
+    justifyContent: 'center',
+  },
+  cardAddBtn: { flex: 1, alignItems: 'center' },
+  cardAddText: { fontFamily: fonts.semibold, fontSize: 13, color: c.accent },
   footnote: {
     fontFamily: fonts.regular, fontSize: 11, color: c.muted,
-    textAlign: 'center', marginTop: 8, marginBottom: 24,
+    textAlign: 'center', paddingHorizontal: 20, paddingBottom: 14,
+  },
+
+  // ── Badge for counts ──
+  groupRowBadge: {
+    fontFamily: fonts.mono, fontSize: 11, color: c.muted,
+    backgroundColor: c.accentDim, borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 2,
+    overflow: 'hidden',
+  },
+
+  // ── Description text for group rows ──
+  groupRowDesc: {
+    fontFamily: fonts.regular, fontSize: 11, color: c.muted, marginTop: 2,
   },
 
   // ── Grouped card (Settings) ──
@@ -1038,23 +1100,7 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   groupRowChevron: { fontFamily: fonts.regular, fontSize: 18, color: c.muted },
   groupDivider: { height: 1, backgroundColor: c.mintDim, marginHorizontal: 20 },
 
-  // ── Notifications (inside group card) ──
-  notifRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 14,
-  },
-  notifInfo: { flex: 1, marginRight: 12 },
-  notifLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  notifLabel: { fontFamily: fonts.medium, fontSize: 14, color: c.text },
-  notifLabelLocked: { color: c.dim },
-  notifDesc: { fontFamily: fonts.regular, fontSize: 11, color: c.muted, marginTop: 2, lineHeight: 16 },
-  proBadge: {
-    fontFamily: fonts.mono, fontSize: 8, letterSpacing: 1.5, color: c.green,
-    backgroundColor: c.greenDim, borderWidth: 1, borderColor: c.green + '40',
-    borderRadius: 100, paddingVertical: 1, paddingHorizontal: 6, overflow: 'hidden',
-  },
-  notifUpgrade: { paddingVertical: 12, alignItems: 'center' },
-  notifUpgradeText: { fontFamily: fonts.medium, fontSize: 12, color: c.green },
+  // (notification styles now use groupRow/groupRowLabel/groupRowDesc)
 
   // ── Modal ──
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 24 },

@@ -44,7 +44,7 @@ const TIMELINES = [
 
 export default function Goals() {
   const router = useRouter();
-  const { csvData } = useLocalSearchParams<{ csvData: string }>();
+  const { csvData, from } = useLocalSearchParams<{ csvData?: string; from?: string }>();
   const [step, setStep] = useState(0);
   const [situation, setSituation] = useState('');
   const [oneYearGoal, setOneYearGoal] = useState('');
@@ -56,6 +56,29 @@ export default function Goals() {
 
   // Track page view on mount
   useEffect(() => { trackScreen('Goals'); }, []);
+
+  // Preload existing goals when editing from profile
+  useEffect(() => {
+    if (from !== 'profile') return;
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data } = await supabase
+          .from('goals')
+          .select('current_situation, one_year_goal, two_year_goal, target_amount, goal_timeline')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (data) {
+          if (data.current_situation) setSituation(data.current_situation);
+          if (data.one_year_goal) setOneYearGoal(data.one_year_goal);
+          if (data.two_year_goal) setTwoYearGoal(data.two_year_goal);
+          if (data.target_amount) setTargetAmount(String(data.target_amount));
+          if (data.goal_timeline) setGoalTimeline(data.goal_timeline);
+        }
+      } catch {}
+    })();
+  }, [from]);
 
   const handleNext = async () => {
     if (step < TOTAL_STEPS - 1) {
@@ -81,7 +104,11 @@ export default function Goals() {
         if (error) console.warn('[goals] upsert failed:', error.message);
       }
       trackEvent('Goals Completed', { situation, one_year_goal: oneYearGoal, two_year_goal: twoYearGoal, goal_timeline: goalTimeline });
-      router.push({ pathname: '/(main)/processing', params: { csvData } });
+      if (from === 'profile') {
+        router.replace('/(main)/profile');
+      } else {
+        router.push({ pathname: '/(main)/processing', params: { csvData } });
+      }
     } catch {
       setLoading(false);
       window.alert('Could not save your goals. Please try again.');
@@ -187,7 +214,7 @@ export default function Goals() {
             <ActivityIndicator color={colors.bg} />
           ) : (
             <Text style={styles.buttonText}>
-              {step < TOTAL_STEPS - 1 ? 'Next' : 'Start analysis'}
+              {step < TOTAL_STEPS - 1 ? 'Next' : from === 'profile' ? 'Save goals' : 'Start analysis'}
             </Text>
           )}
         </TouchableOpacity>
