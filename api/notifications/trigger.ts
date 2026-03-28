@@ -258,6 +258,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── 2. Spending Limit Warning (50% threshold) ──
+    const thisWeek = isoWeekKey(now);
     if (weeklyBudget > 0 && spentThisWeek > 0) {
       const spentPct = (spentThisWeek / weeklyBudget) * 100;
       // Reset last_spending_pct if we're in a new week
@@ -345,7 +346,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── 4. Unusual Spending Spike ──
     // Alert when any merchant/category this week is 2x its share of weekly average
-    const thisWeek = isoWeekKey(now);
     const discObj = (analysis.discretionary || {}) as Record<string, number>;
     const discEntries = Object.entries(discObj).filter(([k]) => k !== 'total');
 
