@@ -1,428 +1,367 @@
-# Bocy Native App — Rebuild Plan
+# BOCY UI/UX Overhaul — Comprehensive Plan
 
-## Overview
+## Deep Audit Summary
 
-Rebuild the Bocy personal finance advisor as a clean Expo Router + TypeScript + Supabase app.
-Same features as the original, properly structured with no loose ends.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Framework | Expo SDK 54 + Expo Router v6 |
-| Language | TypeScript (strict) |
-| Auth & DB | Supabase (email/password + OAuth) |
-| API Routes | Vercel Serverless Functions |
-| AI | Claude API (Sonnet for chat, Haiku for enrichment) |
-| Banking | TrueLayer Open Banking |
-| Styling | React Native StyleSheet (no external UI library) |
+After auditing every screen (splash, onboarding, education, identity, connect, processing, home, chat, profile, subscriptions, goals, account-setup), here is the comprehensive improvement plan. Organized by screen, prioritized by impact.
 
 ---
 
-## Project Structure
+## 1. EDUCATION SCREEN (Onboarding Carousel) — CRITICAL
 
-```
-native-app/
-├── app/
-│   ├── _layout.tsx              # Root layout: fonts, auth gate, splash
-│   ├── index.tsx                # Entry redirect
-│   ├── (auth)/
-│   │   ├── _layout.tsx          # Auth stack layout
-│   │   ├── sign-in.tsx          # Email/password + OAuth login
-│   │   └── sign-up.tsx          # Registration + email verification
-│   └── (main)/
-│       ├── _layout.tsx          # Main stack layout
-│       ├── welcome.tsx          # Onboarding: intro + name capture
-│       ├── connect.tsx          # Bank connection (TrueLayer / CSV upload)
-│       ├── goals.tsx            # 3-step goal questionnaire
-│       ├── processing.tsx       # Transaction analysis pipeline
-│       ├── results.tsx          # Full analysis results display
-│       ├── profile.tsx          # User settings, sign out, delete account
-│       ├── history.tsx          # Past analyses timeline
-│       └── (tabs)/
-│           ├── _layout.tsx      # Bottom tab bar (Home, Plan, Chat)
-│           ├── index.tsx        # Home: dashboard with latest analysis
-│           ├── plan.tsx         # Money moves ranked by impact
-│           └── chat.tsx         # AI advisor chat
-├── api/
-│   ├── truelayer/
-│   │   └── callback.js          # TrueLayer OAuth callback + tx fetch + Supabase persist
-│   ├── claude/
-│   │   └── enrich.js            # AI enrichment of move descriptions
-│   ├── chat/
-│   │   └── index.js             # Conversational AI with financial context
-│   └── delete-account/
-│       └── index.js             # Account + data deletion
-├── lib/
-│   ├── supabase.ts              # Supabase client (SecureStore on native, localStorage on web)
-│   ├── truelayer.ts             # TrueLayer auth URL builder + CSV extractor
-│   ├── enrichment-engine.ts     # Core financial analysis engine (rewritten in TS)
-│   ├── archetypes.ts            # 10 financial personality archetypes + traits
-│   ├── move-engine.ts           # UKPF flowchart positioning + goal alignment
-│   ├── merchant-db.ts           # Merchant matching database
-│   ├── constants.ts             # UK benchmarks, essential categories
-│   └── types.ts                 # Shared TypeScript interfaces
-├── components/
-│   └── ErrorBoundary.tsx        # React error boundary for crash recovery
-├── theme/
-│   └── index.ts                 # Colors, fonts, spacing, radius
-├── assets/
-│   └── fonts/
-│       └── SpaceMono-Regular.ttf
-├── app.json                     # Expo config
-├── package.json
-├── tsconfig.json
-├── vercel.json                  # Vercel deployment config
-├── .env.example                 # Environment variable template
-└── .gitignore
-```
+### Problems Identified
+1. **Fake gradient** — `GradientBg` uses two solid `<View>` blocks (50/50 split) with a 35% opacity overlay. Creates a hard visible horizontal line at the midpoint. Looks amateur.
+2. **No color transition on swipe** — Background snaps instantly via `SLIDE_BG[currentPage]` in the render. No interpolation during the scroll gesture. When dragging between slides, background stays frozen until `onMomentumScrollEnd` fires.
+3. **Glass mockups float on cheap background** — The glass cards are well-designed but sit on the fake gradient, undermining the whole screen.
+4. **CTA button too subtle** — `rgba(255,255,255,0.2)` with 0.3 border. Low contrast, easy to miss.
+
+### Plan
+
+**A. Install `expo-linear-gradient`**
+- Add dependency
+- Replace `GradientBg` with `<LinearGradient>` for real smooth gradients
+
+**B. Animated background color transitions tied to scroll position**
+- Use `scrollX.interpolate()` to blend between slide background colors during swipe
+- Interpolate each color channel (R, G, B) independently across the `scrollX` input range
+- Colors morph fluidly during drag gesture, not just on snap
+- Implementation: render 3 overlapping `<LinearGradient>` layers, each with opacity driven by `scrollX` interpolation (opacity 0→1→0 for each slide's range). This avoids RGB string interpolation issues with RN Animated.
+
+**C. Refine gradient palette**
+- Richer, more premium gradient pairs:
+  - Slide 1: `#D4956A` → `#6B3A1F` (warm gold → deep amber)
+  - Slide 2: `#0F1B33` → `#1A3A5C` (deep indigo → midnight blue)
+  - Slide 3: `#1B4D2E` → `#3A8C4A` (forest → emerald)
+- Add a subtle dark vignette overlay (radial dark edges) for depth
+
+**D. Enhance CTA button**
+- Final slide ("Let's get started"): solid white button with dark text — clear primary CTA
+- "Next" slides: increase opacity to `rgba(255,255,255,0.3)` bg, `rgba(255,255,255,0.5)` border
+- Add subtle scale animation on press (0.97 → 1.0)
+
+**E. Performance**
+- Ensure `useNativeDriver: true` where possible
+- Three overlapping gradient layers is lightweight (static Views with animated opacity)
+
+### Files Changed
+- `package.json` — add `expo-linear-gradient`
+- `app/(main)/education.tsx` — rewrite gradient system, enhance button
 
 ---
 
-## Supabase Schema (Fresh Project)
+## 2. PROFILE SCREEN — HIGH PRIORITY
 
-### Table: `goals`
-```sql
-CREATE TABLE goals (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-  current_situation TEXT NOT NULL,
-  one_year_goal TEXT NOT NULL,
-  two_year_goal TEXT NOT NULL,
-  target_amount NUMERIC,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  UNIQUE(user_id)
-);
+### Problems Identified
+1. **Flat information dump** — ACCOUNT section shows banks, debts, and investments as one continuous list. With 3 banks + 2 debts + 4 investments = 9+ rows of dots/text with no visual hierarchy. Looks rowdy and overwhelming.
+2. **No progressive disclosure** — Everything visible at once. No grouping, no collapse/expand.
+3. **Inconsistent section patterns** — ACCOUNT = raw rows, NOTIFICATIONS = toggles, RESOURCES = links. No shared component language.
+4. **"+ Add account"/"+ Add debt" dashed buttons feel disconnected** — Sit between unrelated content.
+5. **No icons or nav affordances** — Unlike RESOURCES which has link behavior, ACCOUNT items have no visual cue for interactivity.
 
-ALTER TABLE goals ENABLE ROW LEVEL SECURITY;
+### Plan
 
-CREATE POLICY "Users can read own goals"
-  ON goals FOR SELECT USING (auth.uid() = user_id);
+**A. Progressive disclosure with collapsible sections**
+Restructure the ACCOUNT mega-section into distinct expandable rows:
 
-CREATE POLICY "Users can insert own goals"
-  ON goals FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own goals"
-  ON goals FOR UPDATE USING (auth.uid() = user_id);
+```
+[wallet-outline]     Connected Accounts    3         [chevron]
+[card-outline]       Debts                 £4,200    [chevron]
+[trending-up]        Investments           £24,180   [chevron]
+[notifications]      Notifications                   [chevron]
+[moon-outline]       Appearance            Dark      [chevron]
+─────────────────────────────────────────────────────
+[help-circle]        Support                         [chevron]
+[shield-outline]     Privacy                         [chevron]
+[document-text]      Terms                           [chevron]
 ```
 
-### Table: `analyses`
-```sql
-CREATE TABLE analyses (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-  archetype TEXT NOT NULL,
-  decision_score INTEGER NOT NULL,
-  monthly_income NUMERIC NOT NULL,
-  monthly_spending NUMERIC NOT NULL,
-  surplus NUMERIC NOT NULL,
-  non_discretionary JSONB DEFAULT '{}',
-  discretionary JSONB DEFAULT '{}',
-  income_sources JSONB DEFAULT '[]',
-  top_move JSONB DEFAULT '{}',
-  all_moves JSONB DEFAULT '[]',
-  behavioral_patterns JSONB DEFAULT '[]',
-  goal_context JSONB,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+Each row: icon + label + optional value/badge + chevron. Tapping expands inline to show contents + add button. Uniform pattern across ALL sections.
 
-ALTER TABLE analyses ENABLE ROW LEVEL SECURITY;
+**B. Shared `ProfileRow` component**
+Single component used everywhere:
+- Left: Ionicon
+- Center: label + optional subtitle
+- Right: value badge / switch / chevron (variant prop)
+- Consistent 56px height, padding, border treatment
 
-CREATE POLICY "Users can read own analyses"
-  ON analyses FOR SELECT USING (auth.uid() = user_id);
+**C. Expanded state design**
+When a row expands (e.g., "Connected Accounts"):
+- Smooth `LayoutAnimation` slide-down
+- Show compact cards for each connected item (status dot, name, meta, action)
+- "+" add button at bottom of expanded section
+- Collapse other expanded sections (accordion behavior)
 
-CREATE POLICY "Users can insert own analyses"
-  ON analyses FOR INSERT WITH CHECK (auth.uid() = user_id);
-```
+**D. Remove section headers**
+- Kill "ACCOUNT", "NOTIFICATIONS", "APPEARANCE", "RESOURCES" labels
+- The icon + label rows ARE the sections now
+- Use subtle dividers between logical groups (accounts group / settings group / resources group)
 
-### Table: `bank_data` (NEW — fixes CSV persistence + mobile TrueLayer flow)
-```sql
-CREATE TABLE bank_data (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  connection_id TEXT UNIQUE NOT NULL,
-  csv_data TEXT NOT NULL,
-  source TEXT NOT NULL DEFAULT 'truelayer',
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+**E. Visual refinements**
+- Avatar section: subtle surface card background
+- Logout: bottom of screen, muted text, no card treatment
+- Delete account: red text, separate from logout, with confirmation
 
-ALTER TABLE bank_data ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "Users can read own bank data"
-  ON bank_data FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Service role can insert bank data"
-  ON bank_data FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Users can delete own bank data"
-  ON bank_data FOR DELETE USING (auth.uid() = user_id);
-```
+### Files Changed
+- `app/(main)/profile.tsx` — full restructure
+- `components/ProfileRow.tsx` — new shared component
 
 ---
 
-## TrueLayer Flow (Fixed for Mobile)
+## 3. CHAT SCREEN — HIGH PRIORITY
 
-The original used `window.opener.postMessage()` which only works in browser popups.
-New flow works on both mobile and web:
+### Problems Identified
+1. **12-word hard limit too restrictive** — System prompt says "EVERY reply MUST be 12 words or fewer." Complex financial answers get truncated into meaningless fragments. Users asking for explanations get "want me to dig in?" when they already asked to dig in.
+2. **`MAX_BUBBLES = 2` hard cap on client** — Even when the system prompt allows exceptions for "detailed breakdowns", the client-side constant truncates everything to 2 bubbles regardless.
+3. **`max_tokens: 180`** — API ceiling too low for any meaningful detailed response.
+4. **No visual explanations** — Pure text. No charts, spending breakdowns, or visual cards. This is a financial app where numbers are the core value.
+5. **No transaction visibility in chat** — System prompt has transaction context but chat never shows recent transactions, spending trends, or breakdowns visually.
+6. **Memory is session-only** — Chat resets on app restart. No persistence.
+7. **No external link handling** — Can't open URLs or navigate to app screens from chat.
 
-```
-1. App generates a unique connection_id (UUID)
-2. App opens TrueLayer auth URL with state=connection_id
-   → Uses WebBrowser.openAuthSessionAsync on mobile
-   → Uses window.open on web
-3. User authorizes → TrueLayer redirects to /api/truelayer/callback?code=...&state=connection_id
-4. Callback server:
-   a. Exchanges code for access token
-   b. Fetches all accounts + cards + transactions
-   c. Converts to CSV
-   d. Saves CSV to bank_data table (using service role, keyed by connection_id)
-   e. Redirects to bocy://callback?connection_id=xxx&status=success
-5. App detects redirect:
-   → Mobile: openAuthSessionAsync resolves with the redirect URL
-   → Web: message listener or polling
-6. App fetches CSV from bank_data table using connection_id
-7. App passes CSV to goals screen
-```
+### Plan
 
----
+**A. Dynamic response constraints (API-side: `api/chat/index.ts`)**
+- Increase `max_tokens` from 180 → 512
+- Modify system prompt word limit to a TIERED system:
+  - **Quick replies** (greetings, confirmations, yes/no): ≤15 words (keep the punchy WhatsApp vibe)
+  - **Standard answers** (lookups, single-number responses): ≤30 words
+  - **Detailed breakdowns** (user explicitly asks "explain", "break down", "walk me through", "how does", "step by step", multi-part questions): up to 100 words, structured with **bold** key numbers
+  - **Action results** (tool use confirmations): ≤20 words
+- The existing `detectConversationMode()` function already classifies messages — wire it into the system prompt dynamically
+- Keep the conversational tone rules — those are excellent. Just remove the hard 12-word ceiling.
 
-## Screen-by-Screen Specification
+**B. Increase client-side bubble limits (`chat.tsx`)**
+- Change `MAX_BUBBLES` from 2 → 5
+- Change `CHUNK_WORD_THRESHOLD` from 12 → 20
+- This allows the AI's longer responses to render properly when sent
 
-### Phase 1: Auth Flow
+**C. Visual cards in chat (new: `ChatCard` components)**
+Create inline visual components rendered inside chat:
+- **SpendingCard**: Horizontal bar chart of top 5 categories with £ amounts
+- **TransactionListCard**: Compact scrollable list of recent transactions
+- **ComparisonCard**: This month vs last month side-by-side
+- **ProgressCard**: Plan/goal progress bar with numbers
+- **NumberCard**: Large hero number with label + trend arrow (e.g., "NET WORTH £24,180 ↑8.2%")
 
-#### Sign In (`(auth)/sign-in.tsx`)
-- Email + password fields
-- "Sign in" primary button
-- Google OAuth button, Apple OAuth button
-- Link to sign-up
-- Error display with user-friendly messages
-- On success: auth gate redirects to welcome (no name) or tabs (has name)
+**Implementation approach:**
+- API returns structured JSON blocks using a delimiter syntax: `:::chart-type {"data":{...}} :::`
+- Client `Markdown` renderer detects these blocks and renders the `ChatCard` component
+- Add 2-3 new tools to the API so Claude can emit structured visual data:
+  - `render_spending_breakdown` — returns category bars
+  - `render_transaction_list` — returns recent transactions
+  - `render_comparison` — returns period comparison
 
-#### Sign Up (`(auth)/sign-up.tsx`)
-- Email + password fields (min 6 chars validation)
-- "Sign up" button
-- Email verification sent → confirmation screen
-- "Resend email" option
-- Link back to sign-in
+**D. Chat memory persistence**
+- Save conversation history to `AsyncStorage` keyed by user ID
+- On mount, load last 30 messages as initial state
+- Show session separators ("Today", "Yesterday", "Mar 25")
+- Cap stored history at 50 messages
+- Clear on logout
+- Feed last 10 messages as context to the API (already partially done)
 
-### Phase 2: Onboarding
+**E. External link & deep link handling**
+- URLs in responses → tappable with `Linking.openURL()`
+- App screen references ("check your profile", "see your subscriptions") → inline buttons that call `router.push()`
+- Add a `navigate_to_screen` tool so Claude can suggest navigation
 
-#### Welcome (`(main)/welcome.tsx`)
-- Step 1: Intro screen — Bocy branding, value proposition, 3 key benefits
-- Step 2: Name capture — first + last name inputs
-- Saves full_name to `supabase.auth.updateUser({ data: { full_name } })`
-- Navigate to connect screen
+**F. Suggested question chips**
+- Show 3-4 contextual chips above input when chat is empty or after each response
+- Chips change based on financial state:
+  - After payday: "How should I split this paycheck?"
+  - High spending: "What am I overspending on?"
+  - Has surplus: "What should I do with my surplus?"
+  - Default: "How am I doing?", "Break down my spending", "What's my net worth?"
+- Chips disappear once user starts typing
 
-### Phase 3: Data Connection
-
-#### Connect (`(main)/connect.tsx`)
-- Two paths:
-  1. **TrueLayer**: Generates connection_id → opens auth URL → waits for callback → fetches CSV from bank_data
-  2. **CSV Upload**: File picker → validate CSV format → pass forward
-- Trust indicators (FCA regulated, read-only access, data on device)
-- Loading state while waiting for TrueLayer callback
-- Error handling for both paths (invalid CSV, auth failure, network errors)
-
-### Phase 4: Analysis Pipeline
-
-#### Goals (`(main)/goals.tsx`)
-- 3-step questionnaire with progress indicator
-- Step 1: Current situation (5 options + "other" text input)
-  - In debt, Breaking even, Saving slowly, Saving well, Other
-- Step 2: One-year goal (6 options + custom)
-  - Clear debt, Emergency fund, Savings target, Reduce spending, Invest, Other
-- Step 3: Two-year goal (6 options + custom + target amount)
-  - Buy home, Go freelance, Financial freedom, Clear all debt, Grow investments, Other
-- **Upsert** (not insert) to Supabase goals table — uses onConflict: 'user_id'
-- Navigate to processing with csvData
-
-#### Processing (`(main)/processing.tsx`)
-- 5-step animated progress with sequential fade-in:
-  1. Reading your transactions
-  2. Recognising merchants
-  3. Spotting patterns in your spending
-  4. Aligning with your goals
-  5. Building your recommendations
-- Wrapped in ErrorBoundary for crash recovery
-- Runs enrichment engine on CSV data (client-side)
-- Fetches goals from Supabase, runs move engine
-- Optional Claude enrichment of move descriptions (graceful fallback if API fails)
-- Saves complete analysis to analyses table
-- Navigate to results
-
-#### Results (`(main)/results.tsx`)
-- Financial overview: income, spending, surplus (color-coded)
-- Budget breakdown: discretionary vs non-discretionary
-- Top move highlighted with strategy + steps
-- Goal trajectory with timeline (months to reach goal)
-- Additional moves list
-- Archetype card with emoji + description
-- Decision score (0-100) with verdict (Strong/Balanced/Needs Attention/At Risk)
-- "Go to dashboard" + "Run new analysis" buttons
-
-### Phase 5: Main App (Tabs)
-
-#### Home (`(main)/(tabs)/index.tsx`)
-- Fetch latest analysis + goals on mount
-- Loading skeleton while fetching
-- Dashboard cards: monthly income, spending, surplus
-- Archetype display with emoji
-- Top money move summary
-- Quick links: run new analysis, update goals
-- Empty state if no analysis exists yet
-
-#### Plan (`(main)/(tabs)/plan.tsx`)
-- All moves from latest analysis, ranked by annual impact
-- Expandable cards: action title, monthly/annual savings, effort badge
-- Expanded view: strategy, numbered implementation steps, expected effect
-- Monthly surplus display (color-coded)
-- Goal context if available
-- Debt help resources section:
-  - StepChange (https://www.stepchange.org)
-  - Citizens Advice (https://www.citizensadvice.org.uk/debt-and-money)
-- Empty state if no analysis exists
-
-#### Chat (`(main)/(tabs)/chat.tsx`)
-- Message bubbles (user right-aligned accent, assistant left-aligned surface)
-- Loads latest analysis + goals context on mount
-- Sends context + message history to /api/chat
-- 4 suggested starter questions when chat is empty:
-  - "How can I save more?"
-  - "Am I spending too much on food?"
-  - "What should I prioritise first?"
-  - "How do I build an emergency fund?"
-- Typing indicator ("Thinking...")
-- Keyboard-avoiding layout (iOS)
-- Error handling for API failures
-
-### Phase 6: Supporting Screens
-
-#### Profile (`(main)/profile.tsx`)
-- Avatar circle with user initials
-- Name + email display
-- Menu items:
-  - Add Account → navigate to connect
-  - Goals → navigate to goals
-  - Report a Bug → email to support@bocy.app
-  - Notifications → "Coming soon"
-  - Agreements → "Coming soon"
-- Security section (collapsible):
-  - Sign out → clear session → redirect to sign-in
-  - Delete account → confirmation dialog → POST /api/delete-account → sign out
-
-#### History (`(main)/history.tsx`)
-- FlatList of all analyses, newest first
-- Each card: formatted date, income, spending, surplus, decision score
-- Color-coded amounts (mint for income, coral for spending)
-- Empty state message
+### Files Changed
+- `api/chat/index.ts` — increase max_tokens, modify system prompt tiers, add visual tools
+- `app/(main)/(tabs)/chat.tsx` — increase MAX_BUBBLES/CHUNK_WORD_THRESHOLD, add memory, add suggested chips, add chat card rendering
+- `components/ChatCard.tsx` — new visual card components
+- `lib/markdown.tsx` — extend parser for `:::type {...} :::` blocks
 
 ---
 
-## API Contracts
+## 4. SPLASH SCREEN — LOW PRIORITY (Already Clean)
 
-### POST `/api/chat`
-```
-Request:  { messages: [{ role, content }], context: { monthly_income, monthly_spending, surplus, archetype, goals, top_move } }
-Response: { success: boolean, text: string }
-Model: claude-sonnet-4-5-20250929
-System: Bocy UK personal finance advisor persona
-```
+### Current State
+Minimal black background, "BOCY" text reveal with animated underline bar. Well-executed.
 
-### POST `/api/claude/enrich`
-```
-Request:  { prompt: string, max_tokens?: number }
-Response: { success: boolean, text: string }
-Model: claude-haiku-4-5-20251001
-```
+### Minor Improvements
+- Add subtle breathing glow on underline bar (pulsing opacity 0.6→1.0) for life
+- Ensure no white flash on transition to sign-in
+- **No major changes needed**
 
-### GET `/api/truelayer/callback?code=...&state=connection_id`
-```
-Flow:
-1. Exchange code for token
-2. Fetch accounts + cards + transactions (12 months)
-3. Convert to CSV
-4. Save to bank_data table (keyed by connection_id from state param)
-5. Redirect to bocy://callback?connection_id=xxx&status=success
-```
-
-### POST `/api/delete-account`
-```
-Headers:  Authorization: Bearer <supabase_jwt>
-Flow:
-1. Verify JWT with anon client
-2. Delete from analyses, goals, bank_data (admin client)
-3. Delete auth user (admin client)
-Response: { success: boolean }
-```
+### Files Changed
+- `app/(auth)/splash.tsx` — minor animation addition
 
 ---
 
-## Environment Variables
+## 5. SIGN-IN / SIGN-UP — MEDIUM PRIORITY
 
-### App (.env — git-ignored)
-```
-EXPO_PUBLIC_SUPABASE_URL=https://imofcovytgqykwbgiujq.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imltb2Zjb3Z5dGdxeWt3YmdpdWpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExODE3MzAsImV4cCI6MjA4Njc1NzczMH0.RFsiyptebEYzzGHRYPfqUHRyu94Gik_-vFP57VlccaE
-EXPO_PUBLIC_TRUELAYER_REDIRECT_URI=https://app.bocy.io/api/truelayer/callback
-```
+### Problems
+1. Generic form layout without personality
+2. No visual brand presence (no Bocy character)
+3. Google OAuth could be more prominent
 
-### Vercel Dashboard (serverless functions)
-```
-TRUELAYER_CLIENT_ID=bocymoneypersonality-a01ae4
-TRUELAYER_CLIENT_SECRET=<from TrueLayer console>
-CLAUDE_API_KEY=<from Anthropic console>
-SUPABASE_URL=https://imofcovytgqykwbgiujq.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=<from Supabase dashboard>
-EXPO_PUBLIC_SUPABASE_ANON_KEY=<same as app .env>
-```
+### Plan
+- Add small Bocy face above the form (consistent brand)
+- Make "Continue with Google" the primary CTA (larger, filled) — most users prefer OAuth
+- Email/password as secondary option below a divider
+- Subtle entrance animation (fade + slide up)
+
+### Files Changed
+- `app/(auth)/sign-in.tsx` — add Bocy, reorder CTAs
+- `app/(auth)/sign-up.tsx` — match sign-in treatment
 
 ---
 
-## Implementation Order
+## 6. IDENTITY SCREEN (Onboarding Questions) — MEDIUM PRIORITY
 
-1. **Scaffold** — Expo project, dependencies, config files, theme, types
-2. **Supabase** — Client setup, migration SQL file
-3. **Lib** — merchant-db, constants, archetypes, enrichment-engine, move-engine (all TS)
-4. **Components** — ErrorBoundary
-5. **Auth screens** — root layout with auth gate, sign-in, sign-up
-6. **Onboarding** — welcome, connect (TrueLayer + CSV)
-7. **Analysis flow** — goals, processing, results
-8. **Tabs** — home dashboard, plan, chat
-9. **Supporting** — profile, history
-10. **API routes** — chat, enrich, callback (with bank_data persist), delete-account
-11. **Config** — vercel.json, .env.example, .gitignore
+### Problems
+1. 8 screens of questions with no progress indicator
+2. All option cards look the same weight — no hierarchy
 
----
+### Plan
+- Add thin progress bar at top (step X of 8)
+- Subtle micro-animations on card selection (scale pulse 1.0→1.05→1.0)
+- Consider combining housing + household into one screen (reduce to 7 steps)
 
-## Key Improvements Over Original
-
-1. **TypeScript throughout** — all lib files converted from JS to TS with proper interfaces
-2. **Shared types** — single types.ts for all data shapes (Transaction, Analysis, Goal, Move, etc.)
-3. **TrueLayer flow fixed** — CSV persisted to Supabase, deep link redirect instead of postMessage
-4. **CSV persistence** — bank_data table prevents data loss if app crashes mid-flow
-5. **Goals upsert** — uses onConflict instead of insert to prevent unique constraint violations
-6. **Error boundaries** — processing/results screens wrapped to prevent white-screen crashes
-7. **Graceful Claude fallback** — if enrichment API fails, moves still display without AI rewriting
-8. **RLS on all tables** — row-level security with ON DELETE CASCADE for clean user deletion
-9. **Proper loading states** — skeleton/spinner on every async operation
-10. **No dead code** — every file serves a purpose
-11. **Consistent styling** — all screens use theme constants, no magic numbers
+### Files Changed
+- `app/(main)/identity.tsx` — add progress bar, selection animations
 
 ---
 
-## Setup Checklist (User Actions Required)
+## 7. HOME SCREEN — MEDIUM PRIORITY
 
-### Supabase Dashboard
-- [ ] Run the SQL migration (all 3 tables + RLS policies)
-- [ ] Auth > URL Configuration: Add `bocy://` as redirect URL
-- [ ] Auth > Providers: Enable Google and/or Apple (optional)
+### Problems
+1. **Banner fatigue** — Multiple banners stack (offline, connection warning, income, review nudge, learning signal). Wall of banners before content.
+2. **Move cards too complex** — Math boxes, trajectory bands, sub-goals all visible. Overwhelming for new users.
+3. **Category breakdowns dense** — Expandable transactions within expandable categories within expandable sections.
 
-### TrueLayer Console
-- [ ] Register redirect URI: `https://app.bocy.io/api/truelayer/callback`
+### Plan
 
-### Vercel Dashboard
-- [ ] Set all 5 environment variables listed above
-- [ ] Connect the native-app GitHub repo for auto-deploy
+**A. Banner consolidation**
+- Max 1 banner at a time. Priority: offline > connection warning > income > review nudge
+- Non-critical signals (learning) become auto-dismissing toasts
+- Smooth slide-in/out transitions
+
+**B. Move cards progressive disclosure**
+- Default collapsed: title + monthly/annual impact + effort badge only
+- "See the math" and trajectory hidden behind tap
+- Sub-goals hidden until move started
+
+**C. Spending section simplification**
+- Show top 3 categories only when collapsed, "See all" to expand
+- Each category: name + amount + simple bar (no inline transactions)
+- Transaction detail in bottom sheet, not inline
+
+### Files Changed
+- `app/(main)/(tabs)/index.tsx` — banner logic, card collapse defaults
+
+---
+
+## 8. CONNECT SCREEN — LOW PRIORITY
+
+### Minor Improvements
+- Add trust copy: "Bank-grade encryption", "Read-only access"
+- "Upload statement" option more visible (many users fear Open Banking)
+
+### Files Changed
+- `app/(main)/connect.tsx` — copy additions
+
+---
+
+## 9. PROCESSING SCREEN — LOW PRIORITY
+
+### Minor Improvements
+- Friendlier step descriptions:
+  - "Scanning transactions" → "Reading your spending"
+  - "Enriching transactions" → "Understanding your merchants"
+  - "Detecting optimisation opportunities" → "Finding ways to save"
+- Add timeout + error state for stuck processing
+
+### Files Changed
+- `app/(main)/processing.tsx` — copy updates
+
+---
+
+## 10. WELCOME SCREEN — LOW PRIORITY
+
+### Minor Improvements
+- Clear focus state on name input (accent border)
+- Benefits section: icon + text pattern instead of numbers
+
+### Files Changed
+- `app/(main)/welcome.tsx` — input styling, benefits layout
+
+---
+
+## 11. SUBSCRIPTIONS SCREEN — LOW PRIORITY
+
+### Minor Improvements
+- Total monthly subscription spend at top
+- Group by: active / detected / cancelled
+- Add "Annual cost" display
+
+### Files Changed
+- `app/(main)/subscriptions.tsx` — layout additions
+
+---
+
+## Implementation Phases
+
+### Phase 1 — Visual Foundation (Critical, do first)
+| # | Task | Files | Effort |
+|---|------|-------|--------|
+| 1 | Install `expo-linear-gradient` | `package.json` | Small |
+| 2 | Education screen gradient overhaul + animated transitions | `education.tsx` | Medium |
+| 3 | Profile screen progressive disclosure restructure | `profile.tsx`, new `ProfileRow.tsx` | Large |
+
+### Phase 2 — Chat Intelligence
+| # | Task | Files | Effort |
+|---|------|-------|--------|
+| 4 | Dynamic response constraints + increase max_tokens | `api/chat/index.ts` | Medium |
+| 5 | Increase client bubble limits + suggested chips | `chat.tsx` | Small |
+| 6 | Chat visual cards (spending, transactions, comparison) | new `ChatCard.tsx`, `markdown.tsx` | Large |
+| 7 | Chat memory persistence | `chat.tsx` | Medium |
+
+### Phase 3 — Screen Polish
+| # | Task | Files | Effort |
+|---|------|-------|--------|
+| 8 | Home banner consolidation | `index.tsx` | Medium |
+| 9 | Home move card progressive disclosure | `index.tsx` | Medium |
+| 10 | Sign-in/sign-up brand presence | `sign-in.tsx`, `sign-up.tsx` | Small |
+| 11 | Identity progress bar | `identity.tsx` | Small |
+
+### Phase 4 — Refinements
+| # | Task | Files | Effort |
+|---|------|-------|--------|
+| 12 | Splash breathing glow | `splash.tsx` | Tiny |
+| 13 | Welcome screen polish | `welcome.tsx` | Tiny |
+| 14 | Connect trust signals | `connect.tsx` | Tiny |
+| 15 | Processing copy | `processing.tsx` | Tiny |
+| 16 | Subscriptions grouping | `subscriptions.tsx` | Small |
+
+---
+
+## New Components Needed
+
+| Component | Purpose |
+|-----------|---------|
+| `ProfileRow` | Shared row for profile screen (icon + label + right element) |
+| `ChatCard` | Base wrapper for inline chat visuals |
+| `ChatCardSpending` | Bar chart for spending categories |
+| `ChatCardTransactions` | Compact transaction list |
+| `ChatCardComparison` | Side-by-side period metrics |
+| `ChatCardProgress` | Goal/plan progress bar |
+| `ChatCardNumber` | Hero number with trend |
+
+---
+
+## Design Principles Applied
+
+Per BOCY design system:
+- **Clarity over complexity** — Progressive disclosure everywhere, show less by default
+- **Data → insight → action** — Chat cards turn numbers into visuals into tappable actions
+- **Trust-first design** — Connect screen trust signals, profile consent health bars
+- **Calm, premium UI** — Real gradients, subtle animations, no visual noise
+- **Minimal but powerful** — Fewer visible elements, same (or more) functionality
