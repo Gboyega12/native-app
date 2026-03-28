@@ -12,7 +12,17 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"**/*.{ts,tsx,js,cjs,json}\" --ignore-path .gitignore",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,cjs,json}\" --ignore-path .gitignore",
-    "analyze": "expo export --platform web && source-map-explorer dist/_expo/static/js/web/*.js"
+    "analyze": "expo export --platform web && source-map-explorer dist/_expo/static/js/web/*.js",
+    "build:ios:dev": "eas build --platform ios --profile development",
+    "build:ios:preview": "eas build --platform ios --profile preview",
+    "build:ios:prod": "eas build --platform ios --profile production",
+    "build:android:dev": "eas build --platform android --profile development",
+    "build:android:preview": "eas build --platform android --profile preview",
+    "build:android:prod": "eas build --platform android --profile production",
+    "submit:ios": "eas submit --platform ios --profile production --latest",
+    "submit:android": "eas submit --platform android --profile production --latest",
+    "update:preview": "eas update --branch preview",
+    "update:production": "eas update --branch production"
   },
   "dependencies": {
     "@expo-google-fonts/poppins": "^0.4.1",
