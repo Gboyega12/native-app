@@ -1,7 +1,8 @@
 import React, { useMemo, useState, createContext, useContext } from 'react';
-import { Text, View, StyleSheet } from 'react-native';
+import { Text, View, StyleSheet, Linking } from 'react-native';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
+import { useRouter } from 'expo-router';
 
 interface Props {
   children: string;
@@ -159,15 +160,32 @@ function Paragraph({ text, isLast }: { text: string; isLast: boolean }) {
   );
 }
 
+/** Safe URL check — only allow http/https and bocy:// deep links */
+function isSafeUrl(url: string): boolean {
+  return /^https?:\/\//.test(url) || /^bocy:\/\//.test(url);
+}
+
+function handleLinkPress(url: string) {
+  if (!isSafeUrl(url)) return;
+  if (url.startsWith('bocy://')) {
+    // Deep link: bocy://profile → /(main)/profile
+    const screen = url.replace('bocy://', '');
+    // Router navigation is handled by the component tree — use Linking for now
+    Linking.openURL(url).catch(() => {});
+  } else {
+    Linking.openURL(url).catch(() => {});
+  }
+}
+
 /**
- * Parse inline markdown: **bold**, *italic*, `code`
+ * Parse inline markdown: **bold**, *italic*, `code`, [text](url)
  * Returns an array of <Text> nodes.
  */
 function Inline({ text }: { text: string }) {
   const s = useMdStyles();
   const parts: React.ReactNode[] = [];
-  // Regex matches **bold**, *italic*, or `code` (non-greedy)
-  const rx = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
+  // Regex matches [link](url), **bold**, *italic*, or `code` (non-greedy)
+  const rx = /(\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
   let last = 0;
   let match: RegExpExecArray | null;
 
@@ -177,20 +195,34 @@ function Inline({ text }: { text: string }) {
       parts.push(text.slice(last, match.index));
     }
 
-    if (match[2]) {
-      // **bold**
+    if (match[2] && match[3]) {
+      // [text](url) — markdown link
+      const linkText = match[2];
+      const linkUrl = match[3];
       parts.push(
-        <Text key={match.index} style={s.bold}>{match[2]}</Text>,
-      );
-    } else if (match[3]) {
-      // *italic*
-      parts.push(
-        <Text key={match.index} style={s.italic}>{match[3]}</Text>,
+        <Text
+          key={match.index}
+          style={s.link}
+          onPress={() => handleLinkPress(linkUrl)}
+          accessibilityRole="link"
+        >
+          {linkText}
+        </Text>,
       );
     } else if (match[4]) {
+      // **bold**
+      parts.push(
+        <Text key={match.index} style={s.bold}>{match[4]}</Text>,
+      );
+    } else if (match[5]) {
+      // *italic*
+      parts.push(
+        <Text key={match.index} style={s.italic}>{match[5]}</Text>,
+      );
+    } else if (match[6]) {
       // `code`
       parts.push(
-        <Text key={match.index} style={s.code}>{match[4]}</Text>,
+        <Text key={match.index} style={s.code}>{match[6]}</Text>,
       );
     }
 
@@ -227,6 +259,10 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 13,
     backgroundColor: c.accentDim,
     color: c.accent,
+  },
+  link: {
+    color: c.accent,
+    textDecorationLine: 'underline',
   },
   listRow: {
     flexDirection: 'row',

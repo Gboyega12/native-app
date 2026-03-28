@@ -58,6 +58,12 @@ export default function Profile() {
     checkin_prompts: true,
   });
   const [notifExpanded, setNotifExpanded] = useState(false);
+  const [expandedSection, setExpandedSection] = useState<'accounts' | 'debts' | 'investments' | null>(null);
+
+  const toggleSection = (section: 'accounts' | 'debts' | 'investments') => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedSection((prev) => (prev === section ? null : section));
+  };
   const [userId, setUserId] = useState<string | undefined>();
   const webPush = useWebPush(userId);
 
@@ -500,127 +506,146 @@ export default function Profile() {
         </View>
       </AnimGlyph>
 
-      {/* ── ACCOUNT — connected banks, debts, investments ── */}
-      <Text style={s.sectionLabel}>ACCOUNT</Text>
+      {/* ── ACCOUNTS — collapsible section ── */}
+      <TouchableOpacity style={s.sectionHeader} onPress={() => toggleSection('accounts')} activeOpacity={0.7}>
+        <Text style={s.sectionLabel}>ACCOUNTS</Text>
+        <Text style={s.sectionCount}>{allAccounts.length}</Text>
+        <Text style={[s.sectionChevron, expandedSection === 'accounts' && s.sectionChevronOpen]}>{'\u203A'}</Text>
+      </TouchableOpacity>
 
-      {allAccounts.map((bank, i) => {
-        const displayName = bank.provider_name || (bank.account_type === 'credit' ? `Credit card ${i + 1}` : `Bank account ${i + 1}`);
-        const isBank = bank.account_type !== 'credit';
-        const { daysLeft, expired, expiring } = getConsentStatus(bank.created_at);
-        const statusColor = expired ? colors.coral : expiring ? colors.amber : colors.green;
+      {expandedSection === 'accounts' && (
+        <>
+          {allAccounts.map((bank, i) => {
+            const displayName = bank.provider_name || (bank.account_type === 'credit' ? `Credit card ${i + 1}` : `Bank account ${i + 1}`);
+            const isBank = bank.account_type !== 'credit';
+            const { daysLeft, expired, expiring } = getConsentStatus(bank.created_at);
+            const statusColor = expired ? colors.coral : expiring ? colors.amber : colors.green;
 
-        return (
-          <AnimGlyph key={bank.id} delay={80 + i * 60}>
-            <View style={s.accountRow}>
-              <View style={[s.accountDot, { backgroundColor: statusColor }]} />
-              <View style={s.accountInfo}>
-                <Text style={s.accountName}>{displayName}</Text>
-                <Text style={s.accountMeta}>
-                  {isBank ? 'Bank' : 'Credit'}
-                  {expired ? ' — expired' : expiring ? ` — ${daysLeft}d left` : ` — ${daysLeft}d remaining`}
-                </Text>
-                {/* Consent health bar */}
-                {!expired && (
-                  <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
-                    <BreathingBar
-                      color={statusColor}
-                      width={`${Math.max(0, Math.min(100, Math.round((daysLeft / CONSENT_DAYS) * 100)))}%`}
-                      style={{ height: '100%', borderRadius: 1.5 }}
-                    />
+            return (
+              <AnimGlyph key={bank.id} delay={80 + i * 60}>
+                <View style={s.accountRow}>
+                  <View style={[s.accountDot, { backgroundColor: statusColor }]} />
+                  <View style={s.accountInfo}>
+                    <Text style={s.accountName}>{displayName}</Text>
+                    <Text style={s.accountMeta}>
+                      {isBank ? 'Bank' : 'Credit'}
+                      {expired ? ' — expired' : expiring ? ` — ${daysLeft}d left` : ` — ${daysLeft}d remaining`}
+                    </Text>
+                    {!expired && (
+                      <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
+                        <BreathingBar
+                          color={statusColor}
+                          width={`${Math.max(0, Math.min(100, Math.round((daysLeft / CONSENT_DAYS) * 100)))}%`}
+                          style={{ height: '100%', borderRadius: 1.5 }}
+                        />
+                      </View>
+                    )}
                   </View>
-                )}
-              </View>
-              {expired ? (
-                <TouchableOpacity style={s.accountAction} onPress={handleAddAccount} activeOpacity={0.7}>
-                  <Text style={[s.accountActionText, { color: colors.coral }]}>Reconnect</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  onPress={() => handleRemoveBank(bank.id, displayName)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove ${displayName} account`}
-                  style={s.accountRemoveBtn}
-                >
-                  <Text style={s.accountRemove}>Remove</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </AnimGlyph>
-        );
-      })}
+                  {expired ? (
+                    <TouchableOpacity style={s.accountAction} onPress={handleAddAccount} activeOpacity={0.7}>
+                      <Text style={[s.accountActionText, { color: colors.coral }]}>Reconnect</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => handleRemoveBank(bank.id, displayName)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${displayName} account`}
+                      style={s.accountRemoveBtn}
+                    >
+                      <Text style={s.accountRemove}>Remove</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </AnimGlyph>
+            );
+          })}
 
-      {/* Debt accounts — compact rows */}
-      {debtAccounts.map((d, idx) => {
-        const bal = d.outstanding_balance || 0;
-        const lim = d.credit_limit || 0;
-        const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
-        const isHigh = util != null && util > 75;
+          {allAccounts.length === 0 && (
+            <Text style={s.emptyHint}>No accounts connected yet</Text>
+          )}
 
-        return (
-          <AnimGlyph key={d.id} delay={160 + idx * 60}>
-            <View style={s.accountRow}>
-              <View style={[s.accountDot, { backgroundColor: isHigh ? colors.coral : colors.dim }]} />
-              <View style={s.accountInfo}>
-                <Text style={s.accountName}>{d.account_name}</Text>
-                <Text style={s.accountMeta}>
-                  {'\u00a3'}{Math.round(bal).toLocaleString()}
-                  {lim > 0 ? ` / \u00a3${Math.round(lim).toLocaleString()} (${util}%)` : ''}
-                  {' — '}
-                  {d.account_type === 'credit_card' ? 'Credit card'
-                    : d.account_type === 'personal_loan' ? 'Loan'
-                    : d.account_type === 'overdraft' ? 'Overdraft'
-                    : d.account_type === 'student_loan' ? 'Student loan'
-                    : d.account_type === 'car_finance' ? 'Car finance'
-                    : d.account_type === 'bnpl' ? 'BNPL'
-                    : d.account_type || 'Debt'}
-                </Text>
-                {/* Utilization bar for debt with credit limit */}
-                {lim > 0 && util != null && (
-                  <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
-                    <BreathingBar
-                      color={isHigh ? colors.coral : colors.accent}
-                      width={`${Math.min(100, util)}%`}
-                      style={{ height: '100%', borderRadius: 1.5 }}
-                    />
-                  </View>
-                )}
-              </View>
-              <TouchableOpacity
-                onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove ${d.account_name} account`}
-                style={s.accountRemoveBtn}
-              >
-                <Text style={s.accountRemove}>Remove</Text>
-              </TouchableOpacity>
-            </View>
-          </AnimGlyph>
-        );
-      })}
+          <TouchableOpacity style={s.addBtn} onPress={handleAddAccount} activeOpacity={0.7} testID="profile-add-account-button" accessibilityRole="button" accessibilityLabel="Add account">
+            <Text style={s.addBtnText}>+ Add account</Text>
+          </TouchableOpacity>
 
-      {!hasAccounts && (
-        <Text style={s.emptyHint}>No accounts connected yet</Text>
+          {connectedBanks.length > 0 && (
+            <Text style={s.footnote}>
+              Open Banking connections expire every 90 days.
+            </Text>
+          )}
+        </>
       )}
 
-      <View style={s.addButtonsRow}>
-        <TouchableOpacity style={s.addBtn} onPress={handleAddAccount} activeOpacity={0.7} testID="profile-add-account-button" accessibilityRole="button" accessibilityLabel="Add account">
-          <Text style={s.addBtnText}>+ Add account</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.addBtn, { borderColor: colors.accentDim }]}
-          onPress={() => setShowAddDebt(true)}
-          activeOpacity={0.7}
-        >
-          <Text style={[s.addBtnText, { color: colors.dim }]}>+ Add debt</Text>
-        </TouchableOpacity>
-      </View>
+      {/* ── DEBTS — collapsible section ── */}
+      <TouchableOpacity style={s.sectionHeader} onPress={() => toggleSection('debts')} activeOpacity={0.7}>
+        <Text style={s.sectionLabel}>DEBTS</Text>
+        <Text style={s.sectionCount}>{debtAccounts.length}</Text>
+        <Text style={[s.sectionChevron, expandedSection === 'debts' && s.sectionChevronOpen]}>{'\u203A'}</Text>
+      </TouchableOpacity>
 
-      {connectedBanks.length > 0 && (
-        <Text style={s.footnote}>
-          Open Banking connections expire every 90 days.
-        </Text>
+      {expandedSection === 'debts' && (
+        <>
+          {debtAccounts.map((d, idx) => {
+            const bal = d.outstanding_balance || 0;
+            const lim = d.credit_limit || 0;
+            const util = lim > 0 ? Math.round((bal / lim) * 100) : null;
+            const isHigh = util != null && util > 75;
+
+            return (
+              <AnimGlyph key={d.id} delay={80 + idx * 60}>
+                <View style={s.accountRow}>
+                  <View style={[s.accountDot, { backgroundColor: isHigh ? colors.coral : colors.dim }]} />
+                  <View style={s.accountInfo}>
+                    <Text style={s.accountName}>{d.account_name}</Text>
+                    <Text style={s.accountMeta}>
+                      {'\u00a3'}{Math.round(bal).toLocaleString()}
+                      {lim > 0 ? ` / \u00a3${Math.round(lim).toLocaleString()} (${util}%)` : ''}
+                      {' — '}
+                      {d.account_type === 'credit_card' ? 'Credit card'
+                        : d.account_type === 'personal_loan' ? 'Loan'
+                        : d.account_type === 'overdraft' ? 'Overdraft'
+                        : d.account_type === 'student_loan' ? 'Student loan'
+                        : d.account_type === 'car_finance' ? 'Car finance'
+                        : d.account_type === 'bnpl' ? 'BNPL'
+                        : d.account_type || 'Debt'}
+                    </Text>
+                    {lim > 0 && util != null && (
+                      <View style={{ height: 3, borderRadius: 1.5, backgroundColor: colors.border, overflow: 'hidden', marginTop: 8 }}>
+                        <BreathingBar
+                          color={isHigh ? colors.coral : colors.accent}
+                          width={`${Math.min(100, util)}%`}
+                          style={{ height: '100%', borderRadius: 1.5 }}
+                        />
+                      </View>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => handleRemoveDebtAccount(d.id, d.account_name)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${d.account_name} account`}
+                    style={s.accountRemoveBtn}
+                  >
+                    <Text style={s.accountRemove}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              </AnimGlyph>
+            );
+          })}
+
+          {debtAccounts.length === 0 && (
+            <Text style={s.emptyHint}>No debts added yet</Text>
+          )}
+
+          <TouchableOpacity
+            style={s.addBtn}
+            onPress={() => setShowAddDebt(true)}
+            activeOpacity={0.7}
+          >
+            <Text style={s.addBtnText}>+ Add debt</Text>
+          </TouchableOpacity>
+        </>
       )}
 
       {/* ── Add debt modal ── */}
@@ -668,59 +693,71 @@ export default function Profile() {
         </Pressable>
       </Modal>
 
-      {/* ── Investments (within Account section) ── */}
-      {investmentAccounts.length > 0 ? (
-        investmentAccounts.map((inv, idx) => {
-          const gain = inv.purchase_cost ? inv.current_value - inv.purchase_cost : null;
-          const gainPct = inv.purchase_cost && inv.purchase_cost > 0 ? ((gain! / inv.purchase_cost) * 100).toFixed(1) : null;
-          const gainColor = gain !== null ? (gain >= 0 ? colors.green : colors.coral) : colors.muted;
-          return (
-            <AnimGlyph key={inv.id || idx} delay={80 + idx * 60}>
-              <View style={s.accountRow}>
-                <View style={[s.accountDot, { backgroundColor: colors.accent }]} />
-                <View style={s.accountInfo}>
-                  <Text style={s.accountName}>{inv.name}</Text>
-                  <Text style={s.accountMeta}>
-                    {inv.asset_class.toUpperCase()}
-                    {inv.platform ? ` \u2022 ${inv.platform}` : ''}
-                    {' \u2022 '}
-                    {'\u00a3'}{Math.round(inv.current_value).toLocaleString()}
-                    {gain !== null ? ` (${gain >= 0 ? '+' : ''}${'\u00a3'}${Math.round(gain).toLocaleString()})` : ''}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => handleRemoveInvestment(inv.id!, inv.name)}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove ${inv.name} investment`}
-                  style={s.accountRemoveBtn}
-                >
-                  <Text style={s.accountRemove}>Remove</Text>
-                </TouchableOpacity>
-              </View>
-            </AnimGlyph>
-          );
-        })
-      ) : (
-        <Text style={s.emptyHint}>No investments added yet</Text>
+      {/* ── INVESTMENTS — collapsible section ── */}
+      <TouchableOpacity style={s.sectionHeader} onPress={() => toggleSection('investments')} activeOpacity={0.7}>
+        <Text style={s.sectionLabel}>INVESTMENTS</Text>
+        <Text style={s.sectionCount}>{investmentAccounts.length}</Text>
+        <Text style={[s.sectionChevron, expandedSection === 'investments' && s.sectionChevronOpen]}>{'\u203A'}</Text>
+      </TouchableOpacity>
+
+      {expandedSection === 'investments' && (
+        <>
+          {investmentAccounts.length > 0 ? (
+            investmentAccounts.map((inv, idx) => {
+              const gain = inv.purchase_cost ? inv.current_value - inv.purchase_cost : null;
+              const gainColor = gain !== null ? (gain >= 0 ? colors.green : colors.coral) : colors.muted;
+              return (
+                <AnimGlyph key={inv.id || idx} delay={80 + idx * 60}>
+                  <View style={s.accountRow}>
+                    <View style={[s.accountDot, { backgroundColor: colors.accent }]} />
+                    <View style={s.accountInfo}>
+                      <Text style={s.accountName}>{inv.name}</Text>
+                      <Text style={s.accountMeta}>
+                        {inv.asset_class.toUpperCase()}
+                        {inv.platform ? ` \u2022 ${inv.platform}` : ''}
+                        {' \u2022 '}
+                        {'\u00a3'}{Math.round(inv.current_value).toLocaleString()}
+                        {gain !== null ? ` (${gain >= 0 ? '+' : ''}${'\u00a3'}${Math.round(gain).toLocaleString()})` : ''}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleRemoveInvestment(inv.id!, inv.name)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${inv.name} investment`}
+                      style={s.accountRemoveBtn}
+                    >
+                      <Text style={s.accountRemove}>Remove</Text>
+                    </TouchableOpacity>
+                  </View>
+                </AnimGlyph>
+              );
+            })
+          ) : (
+            <Text style={s.emptyHint}>No investments added yet</Text>
+          )}
+
+          <View style={s.addButtonsRow}>
+            <TouchableOpacity
+              style={s.addBtn}
+              onPress={() => setShowAddInvestment(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={s.addBtnText}>+ Add investment</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.addBtn, { borderColor: colors.accentDim }]}
+              onPress={handleCsvImport}
+              activeOpacity={0.7}
+            >
+              <Text style={[s.addBtnText, { color: colors.dim }]}>+ Import CSV</Text>
+            </TouchableOpacity>
+          </View>
+        </>
       )}
 
-      <View style={s.addButtonsRow}>
-        <TouchableOpacity
-          style={s.addBtn}
-          onPress={() => setShowAddInvestment(true)}
-          activeOpacity={0.7}
-        >
-          <Text style={s.addBtnText}>+ Add investment</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.addBtn, { borderColor: colors.accentDim }]}
-          onPress={handleCsvImport}
-          activeOpacity={0.7}
-        >
-          <Text style={[s.addBtnText, { color: colors.dim }]}>+ Import CSV</Text>
-        </TouchableOpacity>
-      </View>
+      {/* ── Divider between financial sections and settings ── */}
+      <View style={{ height: spacing.xl }} />
 
       {/* ── Add investment modal ── */}
       <Modal visible={showAddInvestment} transparent animationType="fade" onRequestClose={() => { setAddInvError(''); setShowAddInvestment(false); }}>
@@ -936,10 +973,26 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   avatarText: { fontFamily: fonts.semibold, fontSize: 22, color: c.bg },
   userName: { fontFamily: fonts.semibold, fontSize: 20, color: c.text, marginBottom: 4 },
   userEmail: { fontFamily: fonts.regular, fontSize: 13, color: c.dim, marginBottom: 12 },
-  // ── Section labels ──
+  // ── Section headers (collapsible) ──
+  sectionHeader: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 14, marginTop: 8,
+  },
   sectionLabel: {
     fontFamily: fonts.mono, fontSize: 11, letterSpacing: 2, color: c.dim,
-    textTransform: 'uppercase', marginBottom: 12, marginTop: 8,
+    textTransform: 'uppercase', flex: 1,
+  },
+  sectionCount: {
+    fontFamily: fonts.mono, fontSize: 11, color: c.muted,
+    backgroundColor: c.accentDim, borderRadius: 8,
+    paddingHorizontal: 8, paddingVertical: 2, marginRight: 8,
+    overflow: 'hidden',
+  },
+  sectionChevron: {
+    fontFamily: fonts.regular, fontSize: 18, color: c.muted,
+    transform: [{ rotate: '0deg' }],
+  },
+  sectionChevronOpen: {
+    transform: [{ rotate: '90deg' }],
   },
 
   // ── Account rows ──

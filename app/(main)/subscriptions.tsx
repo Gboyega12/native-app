@@ -197,41 +197,67 @@ export default function Subscriptions() {
             </View>
           </View>
 
-          {/* Subscription list */}
-          {subs.map((sub, i) => (
-            <View key={i} style={[s.subCard, i === subs.length - 1 && { marginBottom: spacing.xxl }]}>
-              <View style={s.subRow}>
-                <View style={s.subInfo}>
-                  <Text style={s.subMerchant}>{sub.merchant}</Text>
-                  <View style={s.subMeta}>
-                    <Text style={s.subCategory}>{sub.category}</Text>
-                    {sub.fromMoves && (
-                      <View style={s.cuttableBadge}>
-                        <Text style={s.cuttableBadgeText}>Cuttable</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-                <View style={s.subCost}>
-                  <Text style={s.subAmount}>
-                    {'\u00a3'}{sub.monthly}
-                  </Text>
-                  <Text style={s.subFreq}>/mo</Text>
-                </View>
-              </View>
+          {/* Subscription list — grouped by category */}
+          {(() => {
+            // Group subs by category
+            const groups: Record<string, SubItem[]> = {};
+            for (const sub of subs) {
+              const key = sub.category || 'Other';
+              if (!groups[key]) groups[key] = [];
+              groups[key].push(sub);
+            }
+            const categoryKeys = Object.keys(groups);
+            const showHeaders = categoryKeys.length > 1;
 
-              {/* Action row */}
-              <View style={s.subActions}>
-                <TouchableOpacity
-                  style={s.askBocyBtn}
-                  onPress={() => askBocy(sub.merchant)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={s.askBocyText}>Ask Bocy to help cancel</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          ))}
+            return categoryKeys.map((cat, catIdx) => {
+              const catSubs = groups[cat];
+              const catTotal = catSubs.reduce((sum, sub) => sum + sub.monthly, 0);
+              const isLastGroup = catIdx === categoryKeys.length - 1;
+              return (
+                <View key={cat}>
+                  {showHeaders && (
+                    <View style={s.categoryHeader}>
+                      <Text style={s.categoryLabel}>{cat.toUpperCase()}</Text>
+                      <Text style={s.categoryDot}>{'\u00B7'}</Text>
+                      <Text style={s.categoryTotal}>{'\u00a3'}{catTotal}/mo</Text>
+                    </View>
+                  )}
+                  {catSubs.map((sub, i) => (
+                    <View key={`${cat}-${i}`} style={[s.subCard, isLastGroup && i === catSubs.length - 1 && { marginBottom: spacing.xxl }]}>
+                      <View style={s.subRow}>
+                        <View style={s.subInfo}>
+                          <Text style={s.subMerchant}>{sub.merchant}</Text>
+                          <View style={s.subMeta}>
+                            {!showHeaders && <Text style={s.subCategory}>{sub.category}</Text>}
+                            {sub.fromMoves && (
+                              <View style={s.cuttableBadge}>
+                                <Text style={s.cuttableBadgeText}>Cuttable</Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                        <View style={s.subCost}>
+                          <Text style={s.subAmount}>
+                            {'\u00a3'}{sub.monthly}
+                          </Text>
+                          <Text style={s.subFreq}>/mo</Text>
+                        </View>
+                      </View>
+                      <View style={s.subActions}>
+                        <TouchableOpacity
+                          style={s.askBocyBtn}
+                          onPress={() => askBocy(sub.merchant)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={s.askBocyText}>Ask Bocy to help cancel</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              );
+            });
+          })()}
         </>
       )}
     </ScrollView>
@@ -349,6 +375,31 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
     fontSize: 12,
     color: c.dim,
     marginTop: 2,
+  },
+
+  // Category group headers
+  categoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  categoryLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    letterSpacing: 2,
+    color: c.text2,
+  },
+  categoryDot: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.muted,
+  },
+  categoryTotal: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: c.text2,
   },
 
   // Subscription card

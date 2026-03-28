@@ -2,20 +2,21 @@ import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Animated, Easing,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { hapticTick } from '@/lib/haptics';
 import { colors, fonts, spacing } from '@/theme';
 import { GlassMockupSpending, GlassMockupChat, GlassMockupNetWorth } from '@/components/Bocy';
 
-// Per-slide nature gradient backgrounds (simulated with layered Views)
-const SLIDE_BG = [
+// Per-slide gradient stops: [top, mid, bottom]
+const SLIDE_GRADIENTS = [
   // Warm amber / sand dune
-  { top: '#C4854C', bottom: '#8B5E34' },
+  ['#C4854C', '#A06E3F', '#8B5E34'],
   // Deep night sky
-  { top: '#0A1628', bottom: '#1B2D4A' },
+  ['#0A1628', '#122040', '#1B2D4A'],
   // Rich green leaf
-  { top: '#2D5A1E', bottom: '#4A8C2A' },
+  ['#2D5A1E', '#3B7324', '#4A8C2A'],
 ] as const;
 
 const SLIDES = [
@@ -36,21 +37,6 @@ const SLIDES = [
     cta: "Let's get started",
   },
 ];
-
-// Simulated gradient bg with two layered Views (top/bottom color halves + blend)
-function GradientBg({ top, bottom }: { top: string; bottom: string }) {
-  return (
-    <View style={StyleSheet.absoluteFill}>
-      <View style={{ flex: 1, backgroundColor: top }} />
-      <View style={{ flex: 1, backgroundColor: bottom }} />
-      {/* Blend overlay for smoother transition */}
-      <View style={[StyleSheet.absoluteFill, {
-        backgroundColor: bottom,
-        opacity: 0.35,
-      }]} />
-    </View>
-  );
-}
 
 function SlideContent({ slide, idx, containerWidth, scrollX }: {
   slide: typeof SLIDES[number]; idx: number; containerWidth: number; scrollX: Animated.Value;
@@ -117,6 +103,15 @@ function SlideContent({ slide, idx, containerWidth, scrollX }: {
   );
 }
 
+/** Interpolate a hex color channel between two values based on an Animated.Value */
+function interpolateColor(scrollX: Animated.Value, width: number, slideIdx: number, colorA: string, colorB: string): Animated.AnimatedInterpolation<string> {
+  return scrollX.interpolate({
+    inputRange: [slideIdx * width, (slideIdx + 1) * width],
+    outputRange: [colorA, colorB],
+    extrapolate: 'clamp',
+  });
+}
+
 export default function Education() {
   const router = useRouter();
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -149,15 +144,39 @@ export default function Education() {
     router.push('/(main)/identity');
   };
 
-  const bg = SLIDE_BG[currentPage];
+  // Scroll-driven gradient color interpolation
+  const gradientColors = containerWidth > 0
+    ? [0, 1, 2].map((stop) => {
+        // For each gradient stop (top/mid/bottom), interpolate across all slides
+        if (SLIDE_GRADIENTS.length <= 1) return SLIDE_GRADIENTS[0][stop];
+        // Build a full input/output range across all slides
+        const inputRange = SLIDE_GRADIENTS.map((_, i) => i * containerWidth);
+        const outputRange = SLIDE_GRADIENTS.map((g) => g[stop]);
+        return scrollX.interpolate({ inputRange, outputRange, extrapolate: 'clamp' });
+      })
+    : SLIDE_GRADIENTS[0];
 
   return (
     <View
       style={styles.container}
       onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}
     >
-      {/* Nature gradient background */}
-      <GradientBg top={bg.top} bottom={bg.bottom} />
+      {/* Animated gradient background */}
+      <Animated.View style={StyleSheet.absoluteFill}>
+        <LinearGradient
+          colors={gradientColors as any}
+          locations={[0, 0.5, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
+
+      {/* Vignette overlay for premium depth */}
+      <LinearGradient
+        colors={['rgba(0,0,0,0.3)', 'transparent', 'rgba(0,0,0,0.25)']}
+        locations={[0, 0.4, 1]}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
 
       {/* Skip button */}
       {!isLast && (
@@ -248,7 +267,7 @@ export default function Education() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: SLIDE_BG[0].bottom, // fallback
+    backgroundColor: SLIDE_GRADIENTS[0][2], // fallback
     maxWidth: 640,
     alignSelf: 'center' as const,
     width: '100%',
@@ -331,14 +350,18 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     borderRadius: 100,
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.35)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.5)',
+    shadowColor: '#fff',
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 0 },
   },
   buttonText: {
     fontFamily: fonts.semibold,
-    fontSize: 16,
+    fontSize: 17,
     color: '#FFFFFF',
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
   },
 });

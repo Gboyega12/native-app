@@ -257,6 +257,16 @@ export default function Home() {
     }).catch(() => setNotifBannerDismissed(false));
   }, []);
 
+  // Banner priority queue — show max 1 banner at a time
+  // Priority: offline (P0) > connection_warning (P1) > notification_promo (P2)
+  const showConnectionBanner = !!connectionWarning && !connectionDismissed;
+  const showNotifBanner = webPush.supported && !webPush.subscribed && webPush.permission !== 'denied' && !notifBannerDismissed;
+  const activeBanner: 'offline' | 'connection' | 'notification' | null =
+    !isOnline ? 'offline'
+    : showConnectionBanner ? 'connection'
+    : showNotifBanner ? 'notification'
+    : null;
+
   // Custom weekly spending limit
   const [customWeeklyLimit, setCustomWeeklyLimit] = useState<number | null>(null);
   const [showLimitEditor, setShowLimitEditor] = useState(false);
@@ -2078,8 +2088,8 @@ export default function Home() {
         )}
       </View>
 
-      {/* ── Offline banner ── */}
-      {!isOnline && (
+      {/* ── Banners (max 1 at a time via priority queue) ── */}
+      {activeBanner === 'offline' && (
         <View style={[s.connectionBanner, { borderColor: colors.muted }]}>
           <View style={s.connectionBannerBody}>
             <Text style={[s.connectionBannerText, { color: colors.muted }]}>You're offline — data may be stale</Text>
@@ -2087,8 +2097,7 @@ export default function Home() {
         </View>
       )}
 
-      {/* ── Connection warning ── */}
-      {connectionWarning && !connectionDismissed && (
+      {activeBanner === 'connection' && connectionWarning && (
         <Card variant="default" style={{ marginBottom: spacing.lg, borderLeftWidth: 3, borderLeftColor: colors.amber }}>
           <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }} onPress={() => router.push({ pathname: '/(main)/connect', params: { from: 'banner', banks: connectionWarning.banks.join(',') } })} activeOpacity={0.8}>
             <View style={{ flex: 1 }}>
@@ -2983,7 +2992,7 @@ export default function Home() {
           {/* ══════════════════════════════════════════════
               NOTIFICATION BANNER — encourage push notifications
               ══════════════════════════════════════════════ */}
-          {webPush.supported && !webPush.subscribed && webPush.permission !== 'denied' && !notifBannerDismissed && (
+          {activeBanner === 'notification' && (
             <Card variant="compact" style={{ marginBottom: spacing.md }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                 <View style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 1.5, borderColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>

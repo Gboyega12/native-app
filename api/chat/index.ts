@@ -489,6 +489,26 @@ const TOOLS: ToolDefinition[] = [
       required: ['reason', 'new_situation', 'new_one_year_goal', 'new_two_year_goal'],
     },
   },
+  {
+    name: 'navigate_to_screen',
+    description:
+      'Navigate the user to a specific screen in the app. Use this when the user asks to go somewhere, or when suggesting they check a specific section. Examples: "take me to my profile", "show my subscriptions", "let me edit my identity". Renders as a tappable card in chat.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        screen: {
+          type: 'string',
+          description: 'The screen to navigate to.',
+          enum: ['profile', 'subscriptions', 'connect', 'identity', 'education'],
+        },
+        label: {
+          type: 'string',
+          description: 'Display label for the navigation card. E.g. "Go to Profile", "View Subscriptions".',
+        },
+      },
+      required: ['screen', 'label'],
+    },
+  },
 ];
 
 // ── Main handler ──
@@ -817,6 +837,14 @@ async function executeTool(name: string, input: Record<string, unknown>, userId:
   }
   if (name === 'show_income_summary') {
     return executeIncomeSummary(userId);
+  }
+  if (name === 'navigate_to_screen') {
+    const screen = (input.screen as string) || 'profile';
+    const label = (input.label as string) || `Go to ${screen}`;
+    return {
+      response: { success: true, screen, label },
+      action: { type: 'navigate', screen, label },
+    };
   }
   return { response: { error: 'Unknown tool' }, action: null };
 }

@@ -15,6 +15,10 @@ export default function Welcome() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [firstNameFocused, setFirstNameFocused] = useState(false);
+  const [lastNameFocused, setLastNameFocused] = useState(false);
+  const [firstNameTouched, setFirstNameTouched] = useState(false);
+  const firstNameError = firstNameTouched && !firstName.trim();
 
   // Track page view on mount
   useEffect(() => { trackScreen('Welcome'); }, []);
@@ -82,21 +86,37 @@ export default function Welcome() {
         <Text style={styles.title}>What should{'\n'}Bocy call you?</Text>
 
         <View style={styles.form}>
+          <View>
+            <TextInput
+              style={[
+                styles.input,
+                firstNameFocused && styles.inputFocused,
+                firstNameError && styles.inputError,
+              ]}
+              placeholder="First name"
+              placeholderTextColor={colors.muted}
+              autoCapitalize="words"
+              value={firstName}
+              onChangeText={setFirstName}
+              onFocus={() => setFirstNameFocused(true)}
+              onBlur={() => { setFirstNameFocused(false); setFirstNameTouched(true); }}
+            />
+            {firstNameError && (
+              <Text style={styles.errorText}>Please enter your first name</Text>
+            )}
+          </View>
           <TextInput
-            style={styles.input}
-            placeholder="First name"
-            placeholderTextColor={colors.muted}
-            autoCapitalize="words"
-            value={firstName}
-            onChangeText={setFirstName}
-          />
-          <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              lastNameFocused && styles.inputFocused,
+            ]}
             placeholder="Last name (optional)"
             placeholderTextColor={colors.muted}
             autoCapitalize="words"
             value={lastName}
             onChangeText={setLastName}
+            onFocus={() => setLastNameFocused(true)}
+            onBlur={() => setLastNameFocused(false)}
           />
         </View>
 
@@ -220,6 +240,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     fontSize: 16,
     color: colors.text,
+  },
+  inputFocused: {
+    borderColor: colors.accent,
+    borderWidth: 1.5,
+  },
+  inputError: {
+    borderColor: colors.coral,
+    borderWidth: 1.5,
+  },
+  errorText: {
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    color: colors.coral,
+    marginTop: 4,
+    marginLeft: 4,
   },
   button: {
     backgroundColor: colors.accent,

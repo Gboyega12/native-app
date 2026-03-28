@@ -10,6 +10,7 @@ export default function Splash() {
   const wordOpacity = useRef(new Animated.Value(0)).current;
   const lineWidth   = useRef(new Animated.Value(0)).current;
   const exitOpacity = useRef(new Animated.Value(1)).current;
+  const glowOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     trackScreen('Splash');
@@ -32,6 +33,24 @@ export default function Splash() {
       }).start();
     }, 700);
 
+    // Phase 2b: Brand glow pulse (single breathing pulse after text appears)
+    const glowTimer = setTimeout(() => {
+      Animated.sequence([
+        Animated.timing(glowOpacity, {
+          toValue: 1,
+          duration: 750,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowOpacity, {
+          toValue: 0,
+          duration: 750,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, 1100); // starts after text fade-in completes (300ms delay + 800ms)
+
     // Exit + navigate
     const exitTimer = setTimeout(() => {
       Animated.timing(exitOpacity, {
@@ -46,6 +65,7 @@ export default function Splash() {
 
     return () => {
       clearTimeout(lineTimer);
+      clearTimeout(glowTimer);
       clearTimeout(exitTimer);
     };
   }, []);
@@ -57,7 +77,11 @@ export default function Splash() {
 
   return (
     <Animated.View style={[s.container, { opacity: exitOpacity }]} testID="splash-screen">
-      <Animated.Text style={[s.brand, { opacity: wordOpacity }]}>
+      <Animated.Text style={[s.brand, {
+        opacity: wordOpacity,
+        textShadowColor: '#fff',
+        textShadowRadius: glowOpacity.interpolate({ inputRange: [0, 1], outputRange: [0, 30] }),
+      }]}>
         BOCY
       </Animated.Text>
       <Animated.View style={[s.line, { width: animatedLineWidth }]} />
