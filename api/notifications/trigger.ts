@@ -260,7 +260,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── 2. Spending Limit Warning (50% threshold) ──
     if (weeklyBudget > 0 && spentThisWeek > 0) {
       const spentPct = (spentThisWeek / weeklyBudget) * 100;
-      const lastSpendingPct = state.last_spending_pct ?? 0;
+      // Reset last_spending_pct if we're in a new week
+      const lastSpendingPctWeek = state.last_spending_pct_week ?? '';
+      const lastSpendingPct = lastSpendingPctWeek === thisWeek ? (state.last_spending_pct ?? 0) : 0;
 
       if (spentPct >= 50 && lastSpendingPct < 50) {
         const remaining = Math.max(0, Math.round(weeklyBudget - spentThisWeek));
@@ -275,6 +277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await admin.from('notification_state').upsert({
           user_id: userId,
           last_spending_pct: Math.round(spentPct),
+          last_spending_pct_week: thisWeek,
           updated_at: now.toISOString(),
         }, { onConflict: 'user_id' });
       }

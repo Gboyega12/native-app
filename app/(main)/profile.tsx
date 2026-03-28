@@ -60,13 +60,13 @@ export default function Profile() {
   const [notifExpanded, setNotifExpanded] = useState(false);
   const [expandedSection, setExpandedSection] = useState<'accounts' | 'debts' | 'investments' | null>(null);
 
-  // Goals state
-  const [goalsData, setGoalsData] = useState<{
-    current_situation?: string;
-    one_year_goal?: string;
-    two_year_goal?: string;
-    target_amount?: number;
-    goal_timeline?: string;
+  // Identity/goals state
+  const [identityData, setIdentityData] = useState<{
+    work_setup?: string;
+    household?: string;
+    housing?: string;
+    priorities?: string[];
+    risk_appetite?: string;
   } | null>(null);
 
   const toggleSection = (section: 'accounts' | 'debts' | 'investments') => {
@@ -185,14 +185,14 @@ export default function Profile() {
         }
       } catch {}
 
-      // Load goals
+      // Load identity data
       try {
-        const { data: goals } = await supabase
-          .from('goals')
-          .select('current_situation, one_year_goal, two_year_goal, target_amount, goal_timeline')
+        const { data: identity } = await supabase
+          .from('user_identity')
+          .select('work_setup, household, housing, priorities, risk_appetite')
           .eq('user_id', user.id)
           .maybeSingle();
-        if (goals) setGoalsData(goals);
+        if (identity) setIdentityData(identity);
       } catch {}
     } catch (err) {
       console.warn('[profile] loadUser error:', err);
@@ -878,10 +878,10 @@ export default function Profile() {
         <TouchableOpacity style={s.groupRow} onPress={() => { trackEvent('Edit Goals Tapped'); router.push({ pathname: '/(main)/goals', params: { from: 'profile' } }); }} activeOpacity={0.7}>
           <View style={{ flex: 1 }}>
             <Text style={s.groupRowLabel}>Edit goals</Text>
-            {goalsData?.one_year_goal ? (
+            {identityData?.work_setup ? (
               <Text style={s.groupRowDesc}>
-                {goalsData.current_situation?.replace(/_/g, ' ')}
-                {goalsData.one_year_goal ? ` \u2022 ${goalsData.one_year_goal.replace(/_/g, ' ')}` : ''}
+                {identityData.work_setup?.replace(/_/g, ' ')}
+                {identityData.priorities?.length ? ` \u2022 ${identityData.priorities.map(p => p.replace(/_/g, ' ')).join(', ')}` : ''}
               </Text>
             ) : (
               <Text style={s.groupRowDesc}>Set your financial goals</Text>

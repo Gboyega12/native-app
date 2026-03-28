@@ -4,17 +4,23 @@
 
 const GA_ID = 'G-9M5YQ6864E';
 
+const isDev = typeof window !== 'undefined' &&
+  (window.location?.hostname === 'localhost' || window.location?.hostname === '127.0.0.1');
+
 function gtag(...args: unknown[]) {
   if (typeof window === 'undefined') return;
   const w = window as any;
   if (typeof w.gtag === 'function') {
+    if (isDev) console.debug('[GA]', ...args);
     w.gtag(...args);
+  } else if (isDev) {
+    console.warn('[GA] gtag not available — script may not have loaded. Check ad-blockers or CSP.');
   }
 }
 
 /** Track a page/screen view */
 export function gaPageView(pagePath: string, pageTitle?: string) {
-  gtag('config', GA_ID, {
+  gtag('event', 'page_view', {
     page_path: pagePath,
     page_title: pageTitle || pagePath,
   });
