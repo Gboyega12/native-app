@@ -62,7 +62,8 @@ const BOE_RATE_DATES_2026 = [
 ];
 
 async function sendPushToUser(
-  admin: ReturnType<typeof createClient>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: ReturnType<typeof createClient<any>>,
   userId: string,
   notification: { title: string; body: string; url?: string; tag: string },
 ) {
@@ -142,7 +143,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.json({ success: false, error: 'vapid_not_configured', triggered: [] });
   }
 
-  const admin = createClient(supabaseUrl, serviceKey);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = createClient<any>(supabaseUrl, serviceKey);
   const triggered: string[] = [];
 
   try {

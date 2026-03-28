@@ -587,7 +587,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 interface ToolAction {
   type: string;
-  data: Record<string, unknown>;
+  data?: Record<string, unknown>;
+  screen?: string;
+  label?: string;
 }
 
 interface ToolResult {

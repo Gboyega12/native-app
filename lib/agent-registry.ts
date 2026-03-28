@@ -515,7 +515,6 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
     ],
     validateOutput: validateGrowthAgent,
   },
-};
 
   frontend_designer: {
     id: 'frontend_designer',
@@ -541,7 +540,6 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
       return { valid: errors.length === 0, errors };
     },
   },
-
   product_designer: {
     id: 'product_designer',
     name: 'Product Designer Agent',
