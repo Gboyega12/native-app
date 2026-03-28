@@ -6,6 +6,7 @@ import {
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { gaPageView, gaEvent } from '@/lib/ga';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyHero } from '@/components/Bocy';
 
@@ -21,7 +22,7 @@ export default function Welcome() {
   const firstNameError = firstNameTouched && !firstName.trim();
 
   // Track page view on mount
-  useEffect(() => { trackScreen('Welcome'); }, []);
+  useEffect(() => { trackScreen('Welcome'); gaPageView('/onboarding/welcome', 'Welcome'); }, []);
 
   const handleContinue = async () => {
     if (!firstName.trim()) return;
@@ -31,6 +32,7 @@ export default function Welcome() {
       const { error } = await supabase.auth.updateUser({ data: { full_name: fullName } });
       if (error) throw error;
       trackEvent('Onboarding Name Saved');
+      gaEvent('onboarding_name_saved', { step: 'welcome' });
       router.replace('/(main)/education');
     } catch {
       setLoading(false);

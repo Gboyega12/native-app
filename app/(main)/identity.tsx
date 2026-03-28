@@ -6,6 +6,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen, setUserProperty } from '@/lib/mixpanel';
+import { gaPageView, gaEvent } from '@/lib/ga';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { AnimGlyph } from '@/components/Card';
 import { hapticLight } from '@/lib/haptics';
@@ -175,7 +176,7 @@ export default function Identity() {
   const [dependents, setDependents] = useState<string[]>([]);
 
   // Track page view on mount
-  useEffect(() => { trackScreen('Identity'); }, []);
+  useEffect(() => { trackScreen('Identity'); gaPageView('/onboarding/identity', 'Identity'); }, []);
 
   const selections = [workSetup, household, housing, experience, incomeBand, priorities, events, risk, dependents];
   const setters = [setWorkSetup, setHousehold, setHousing, setExperience, setIncomeBand, setPriorities, setEvents, setRisk, setDependents];

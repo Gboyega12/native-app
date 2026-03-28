@@ -10,6 +10,7 @@ import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { registerServiceWorker } from '@/lib/register-sw';
 import { initMixpanel, resetMixpanel } from '@/lib/mixpanel';
 import { initSentryClient, setSentryUser, clearSentryUser } from '@/lib/sentry';
+import { gaSetUserId, gaPageView, gaEvent } from '@/lib/ga';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
 import AppDataProvider from '@/providers/AppDataProvider';
@@ -133,6 +134,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       initMixpanel(session.user.id, session.user.email).catch((e) =>
         console.warn('[Layout] initMixpanel error:', e),
       );
+      gaSetUserId(session.user.id);
+      gaEvent('login', { method: 'session_restore' });
     }
   }, [session?.user?.id]);
 
@@ -227,54 +230,63 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       }
 
       // Route to the correct onboarding step (or dashboard) based on DB state.
-      const name = session.user.user_metadata?.full_name;
-      if (!name) {
-        setRouted(session.user.id, '/(main)/welcome');
-        router.replace('/(main)/welcome');
-      } else {
-        void (async () => {
-          try {
-            const { data } = await supabase
-              .from('user_identity')
-              .select('user_id')
-              .eq('user_id', session.user.id)
-              .maybeSingle();
-            if (data) {
-              // Identity exists — check analyses. Default to dashboard on
-              // any error or ambiguity. Only route to connect when the query
-              // SUCCEEDS and returns confirmed zero rows.
-              const { data: rows, error: analysisError } = await supabase
-                .from('analyses')
-                .select('id')
-                .eq('user_id', session.user.id)
-                .order('created_at', { ascending: false })
-                .limit(1);
+      // Check analyses FIRST — this is the most definitive signal that the user
+      // completed onboarding. Avoids false negatives from stale JWTs or metadata
+      // not being populated on new devices (e.g. PWA install, different browser).
+      void (async () => {
+        try {
+          const { data: rows, error: analysisError } = await supabase
+            .from('analyses')
+            .select('id')
+            .eq('user_id', session.user.id)
+            .order('created_at', { ascending: false })
+            .limit(1);
 
-              if (!analysisError && rows && rows.length === 0) {
-                // Confirmed zero analyses — route to connect
-                setRouted(session.user.id, '/(main)/connect');
-                router.replace('/(main)/connect');
-              } else {
-                // Has analyses OR query failed — go to dashboard
-                // Backfill durable flag so future cold starts skip DB queries
-                if (typeof window !== 'undefined' && rows && rows.length > 0) {
-                  localStorage.setItem('bocy_onboarding_done', 'true');
-                }
-                setRouted(session.user.id, '/(main)/(tabs)');
-                router.replace('/(main)/(tabs)');
-              }
-            } else {
-              // No identity yet — start education flow
-              setRouted(session.user.id, '/(main)/education');
-              router.replace('/(main)/education');
+          if (!analysisError && rows && rows.length > 0) {
+            // Has analyses — user completed onboarding. Go straight to dashboard.
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('bocy_onboarding_done', 'true');
             }
-          } catch {
-            // DB error — default to dashboard, never education/connect
+            setRouted(session.user.id, '/(main)/(tabs)');
+            router.replace('/(main)/(tabs)');
+            return;
+          }
+
+          // No analyses — determine which onboarding step they're on.
+          const name = session.user.user_metadata?.full_name;
+          if (!name) {
+            setRouted(session.user.id, '/(main)/welcome');
+            router.replace('/(main)/welcome');
+            return;
+          }
+
+          const { data: identityData } = await supabase
+            .from('user_identity')
+            .select('user_id')
+            .eq('user_id', session.user.id)
+            .maybeSingle();
+
+          if (!identityData) {
+            setRouted(session.user.id, '/(main)/education');
+            router.replace('/(main)/education');
+            return;
+          }
+
+          // Identity exists but no analyses — route to connect
+          if (!analysisError && rows && rows.length === 0) {
+            setRouted(session.user.id, '/(main)/connect');
+            router.replace('/(main)/connect');
+          } else {
+            // Query failed — default to dashboard
             setRouted(session.user.id, '/(main)/(tabs)');
             router.replace('/(main)/(tabs)');
           }
-        })();
-      }
+        } catch {
+          // DB error — default to dashboard, never education/connect
+          setRouted(session.user.id, '/(main)/(tabs)');
+          router.replace('/(main)/(tabs)');
+        }
+      })();
     }
   }, [session, ready, segments]);
 

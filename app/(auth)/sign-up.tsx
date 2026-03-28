@@ -6,6 +6,7 @@ import {
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { gaPageView, gaEvent } from '@/lib/ga';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function SignUp() {
@@ -19,7 +20,7 @@ export default function SignUp() {
   const [resending, setResending] = useState(false);
 
   // Track page view on mount
-  useEffect(() => { trackScreen('Sign Up'); }, []);
+  useEffect(() => { trackScreen('Sign Up'); gaPageView('/sign-up', 'Sign Up'); }, []);
 
   const handleSignUp = async () => {
     if (!email.trim() || !password.trim()) {

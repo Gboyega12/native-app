@@ -8,6 +8,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { getFinexerConsentUrl } from '@/lib/finexer';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { gaPageView, gaEvent } from '@/lib/ga';
 import { colors, fonts, spacing, radius } from '@/theme';
 import SkeletonLine from '@/components/Skeleton';
 import { invalidateSyncCache } from '@/lib/sync-coordinator';

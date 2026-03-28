@@ -62,6 +62,24 @@ function detectConversationMode(userMessage: string): ConversationMode {
 // inheritance, or wrapper allocation — so we can inject the tax_estate agent's
 // analysis into the chat context for more accurate answers.
 
+// ── Windfall / Bonus Detection ──
+// Detects when the user mentions receiving a lump sum, bonus, tax refund, inheritance,
+// or other one-off cash inflow — so we can trigger proactive discovery questions
+// before giving optimisation advice.
+
+function isWindfallQuery(userMessage: string): boolean {
+  const msg = userMessage.toLowerCase();
+  const patterns = [
+    /\bbonus\b/, /\bwindfall\b/, /\blump\s*sum\b/, /\binheritance\b/, /\binherited\b/,
+    /\btax\s*refund\b/, /\bredundancy\b/, /\bredundancy\s*pay\b/, /\bseverance\b/,
+    /\bpayout\b/, /\bpay\s*out\b/, /\bgot\s+£?\d/, /\breceived?\s+£?\d/,
+    /\bcame?\s+into\s+£?\d/, /\bextra\s+£?\d/, /\b£\d[\d,]*k?\s+(?:bonus|extra|cheque|check)/,
+    /\bwhat\s+(?:should|do|can)\s+i\s+do\s+with\b/, /\bhow\s+(?:should|to|best)\s+(?:i\s+)?(?:use|optimise|optimize|invest|spend|allocate)\b/,
+    /\boptimis[ez]\b.*£/, /\ballocat[ei]\b.*£/,
+  ];
+  return patterns.some((p) => p.test(msg));
+}
+
 function isTaxEstateQuery(userMessage: string): boolean {
   const msg = userMessage.toLowerCase();
   const taxPatterns = [
@@ -231,6 +249,35 @@ function buildInsightContext(context: Record<string, unknown>): string {
     if (lines.length > 0) {
       parts.push(`## Detected Tax-Relevant Transactions\n${lines.join('\n')}`);
     }
+  }
+
+  // Growth report context (latest growth insights from growth agent)
+  const growthReport = (context as any).growth_report as {
+    headline: string;
+    system_progress: { net_improvement: number; drivers: string[] };
+    key_insights: Array<{ insight: string; impact: number }>;
+    forward_outlook: { projected_gain: number; time_horizon: string };
+    next_actions: Array<{ action: string; impact: number }>;
+  } | undefined;
+
+  if (growthReport) {
+    const lines = [`Headline: ${growthReport.headline}`];
+    if (growthReport.system_progress.net_improvement !== 0) {
+      lines.push(`Net improvement: £${growthReport.system_progress.net_improvement.toLocaleString()}/yr`);
+    }
+    if (growthReport.system_progress.drivers.length > 0) {
+      lines.push(`Drivers: ${growthReport.system_progress.drivers.join('; ')}`);
+    }
+    if (growthReport.forward_outlook.projected_gain > 0) {
+      lines.push(`Projected gain: £${growthReport.forward_outlook.projected_gain.toLocaleString()} over ${growthReport.forward_outlook.time_horizon}`);
+    }
+    if (growthReport.next_actions.length > 0) {
+      lines.push('Next actions:');
+      for (const a of growthReport.next_actions.slice(0, 3)) {
+        lines.push(`  - ${a.action} (£${a.impact.toLocaleString()}/yr)`);
+      }
+    }
+    parts.push(`## Growth Report (reference when discussing progress, trajectory, or "how am I doing?")\n${lines.join('\n')}`);
   }
 
   return parts.length > 0 ? '\n\n' + parts.join('\n\n') : '';
@@ -534,6 +581,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Tax/estate intent detection — enables richer tax context in responses
   const isTaxQuery = isTaxEstateQuery(lastUserMsg);
 
+  // Windfall/bonus detection — triggers proactive discovery questions
+  const isWindfall = isWindfallQuery(lastUserMsg);
+
   // Phase 5D: Build insight context for proactive injection
   const insightContext = context ? buildInsightContext(context) : '';
 
@@ -546,10 +596,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       + `Recommend the user consults a qualified tax adviser or financial planner before acting.]`;
   }
 
+  let windfallGuidance = '';
+  if (isWindfall) {
+    windfallGuidance = `\n\n[WINDFALL/BONUS DETECTED — The user has mentioned a lump sum, bonus, or one-off cash inflow.
+
+CRITICAL: Do NOT immediately suggest how to allocate this money. You MUST first ask discovery questions to understand their full picture. Ask ONE question at a time in a conversational way.
+
+Discovery questions to work through (ask the most relevant one first based on what you already know from their profile):
+
+1. LIQUIDITY NEEDS: "Do you need any of this money in the next 3-6 months? Any big purchases or bills coming up?"
+2. EMERGENCY BUFFER: Check their current buffer. If inadequate: "Your buffer is currently £X — want to top that up first before we optimise the rest?"
+3. DEBT POSITION: If they have high-interest debt: "You've got £X on your [card]. Clearing that first would save you £Y/yr in interest. Want to factor that in?"
+4. TAX POSITION: "Are you a basic, higher, or additional rate taxpayer? That changes which wrappers make sense." (If you already know from their income data, skip this.)
+5. ISA/PENSION STATUS: "Have you used any of your ISA allowance this tax year? And do you have a workplace pension you could top up?" (Reference tax_estate data if available.)
+6. TIME HORIZON: "What's your goal for the remaining money — short-term (1-2 years) or longer-term growth?"
+
+After gathering answers, THEN provide a specific, numbered allocation breakdown using their actual tax rates, allowances, and wrapper availability. Reference the UK tax year (ends 5 April), ISA allowance (£20,000), pension annual allowance (£60,000), CGT allowance (£3,000), and any salary sacrifice opportunities.
+
+Frame it as: "Based on what you've told me, here's how I'd split that £X..." with specific £ amounts for each bucket.]`;
+  }
+
   const systemPrompt = buildSystemPrompt(context) +
     (insightContext ? insightContext : '') +
     (conversationMode !== 'general' ? `\n\n[Detected conversation mode: ${conversationMode}]` : '') +
-    taxQueryGuidance;
+    taxQueryGuidance +
+    windfallGuidance;
 
   const apiMessages = messages.map((m) => {
     // If message has an image attachment, build multimodal content for Claude
@@ -1845,6 +1916,28 @@ Tools:
   }
 
   // ── Payday mode ──
+  // ── Growth Agent (always active) ──
+  prompt += `\n\nGROWTH MINDSET (always active):`;
+  prompt += `\n- You are not just a financial tracker — you actively help users GROW their wealth over time.`;
+  prompt += `\n- Celebrate wins: When metrics improve (score up, spending down, surplus growing), acknowledge it. "Your score went up 3 points since last month — that's real progress."`;
+  prompt += `\n- Forward-looking: Always connect current actions to future outcomes. "If you keep this up, that's £X/yr toward your goal."`;
+  prompt += `\n- When a user completes a recommended move, celebrate the milestone: "Nice one — that move saves you £X/yr. Your system just got stronger."`;
+  prompt += `\n- Periodically (every few conversations), proactively share one insight from the growth report or agent recommendations. Don't wait to be asked.`;
+  prompt += `\n- Frame everything as system improvement, not restriction. "Optimise" not "cut back". "Deploy" not "save". "Build" not "limit".`;
+
+  // ── UK Tax Optimisation Intelligence (always active) ──
+  prompt += `\n\nUK TAX OPTIMISATION (always consider — this is a core differentiator):`;
+  prompt += `\n- Tax year ends 5 April. If within 60 days of year-end, proactively flag "use it or lose it" allowances.`;
+  prompt += `\n- ISA allowance: £20,000/yr. Mention remaining allowance when discussing savings or investments.`;
+  prompt += `\n- Pension annual allowance: £60,000/yr (or 100% of earnings if lower). Higher/additional rate taxpayers get 40%/45% relief.`;
+  prompt += `\n- CGT annual exempt amount: £3,000. Flag when discussing selling investments or crypto.`;
+  prompt += `\n- Salary sacrifice: If employer offers it, pension contributions save NI (13.8% employer, 8% employee) on top of income tax relief.`;
+  prompt += `\n- Marriage allowance: £1,260 transferable for basic rate couples where one earns under £12,570.`;
+  prompt += `\n- Dividend allowance: £500/yr tax-free. Relevant for investors outside ISA/pension.`;
+  prompt += `\n- When ANY user discusses savings, investments, or surplus allocation, ALWAYS consider tax wrapper efficiency first.`;
+  prompt += `\n- For high earners (£50k+): flag the High Income Child Benefit Charge, pension tapering (£260k+), and 60% effective tax trap (£100k-£125,140).`;
+  prompt += `\n- NEVER recommend specific products. State the maths: "Putting £X in a pension vs GIA saves £Y/yr in tax at your rate."`;
+
   if (ctx.payday_context) {
     const pc = ctx.payday_context as Record<string, unknown>;
     if ((pc.incomeArrivedThisWeek as boolean) && (pc.incomeEvents as unknown[])?.length) {

@@ -28,6 +28,9 @@ import { WeeklySparkline } from '@/components/Charts';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { gaPageView, gaEvent } from '@/lib/ga';
+import { getActiveMilestone, type MilestoneContent } from '@/lib/milestones';
+import { getAchievement, type Achievement } from '@/lib/achievements';
 import { useAppData } from '@/hooks/useAppData';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { formatTimeAgo, formatTxDateAge } from '@/lib/date-utils';
@@ -102,6 +105,12 @@ export default function Home() {
   const [verificationStatus, setVerificationStatus] = useState<'draft' | 'verifying' | 'verified' | null>(null);
   const verifyPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dismissCache = useRef<Record<string, string>>({});
+
+  // ── Milestone & Achievement celebration state ──
+  const [activeMilestone, setActiveMilestone] = useState<MilestoneContent | null>(null);
+  const [dismissedMilestones, setDismissedMilestones] = useState<Set<string>>(new Set());
+  const [achievementToast, setAchievementToast] = useState<Achievement | null>(null);
+  const achievementFade = useRef(new Animated.Value(0)).current;
 
   // Review modal animation
   const reviewModalFade = useRef(new Animated.Value(0)).current;
@@ -1002,6 +1011,7 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       trackScreen('Home');
+      gaPageView('/home', 'Home');
       // Invalidate cached sync so returning from connect screen always fetches fresh data
       invalidateSyncCache();
       loadData();
@@ -1021,6 +1031,85 @@ export default function Home() {
       return () => unsub();
     }, [])
   );
+
+  // ── Milestone & achievement checking ──
+  useEffect(() => {
+    if (!analysis) return;
+    // Check milestones based on days since first analysis
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        // Get first analysis date
+        const { data: firstAnalysis } = await supabase
+          .from('analyses')
+          .select('created_at')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (!firstAnalysis) return;
+
+        const daysSince = Math.floor((Date.now() - new Date(firstAnalysis.created_at).getTime()) / (1000 * 60 * 60 * 24));
+
+        // Load dismissed milestones from AsyncStorage
+        const dismissedJson = await AsyncStorage.getItem('dismissed_milestones');
+        const dismissed = new Set<string>(dismissedJson ? JSON.parse(dismissedJson) : []);
+        setDismissedMilestones(dismissed);
+
+        const milestone = getActiveMilestone(daysSince, analysis, dismissed);
+        if (milestone) {
+          setActiveMilestone(milestone);
+          trackEvent('Milestone Shown', { milestone_id: milestone.id, day: milestone.day });
+        }
+
+        // Check for new unnotified achievements
+        const { data: newAchievements } = await supabase
+          .from('user_achievements')
+          .select('achievement_key')
+          .eq('user_id', user.id)
+          .eq('notified', false)
+          .limit(1);
+
+        if (newAchievements && newAchievements.length > 0) {
+          const ach = getAchievement(newAchievements[0].achievement_key);
+          if (ach) {
+            setAchievementToast(ach);
+            achievementFade.setValue(0);
+            Animated.sequence([
+              Animated.timing(achievementFade, { toValue: 1, duration: 400, useNativeDriver: true }),
+              Animated.delay(4000),
+              Animated.timing(achievementFade, { toValue: 0, duration: 400, useNativeDriver: true }),
+            ]).start(() => setAchievementToast(null));
+
+            trackEvent('Achievement Unlocked', { achievement_key: ach.key, name: ach.name });
+            hapticSuccess();
+
+            // Mark as notified
+            await supabase
+              .from('user_achievements')
+              .update({ notified: true })
+              .eq('user_id', user.id)
+              .eq('achievement_key', newAchievements[0].achievement_key);
+          }
+        }
+      } catch (e) {
+        // Non-critical — don't block dashboard
+      }
+    })();
+  }, [analysis?.decision_score]);
+
+  const dismissMilestone = useCallback(async (id: string) => {
+    hapticLight();
+    setActiveMilestone(null);
+    const updated = new Set(dismissedMilestones);
+    updated.add(id);
+    setDismissedMilestones(updated);
+    await AsyncStorage.setItem('dismissed_milestones', JSON.stringify([...updated]));
+    trackEvent('Milestone Dismissed', { milestone_id: id });
+  }, [dismissedMilestones]);
 
   // Merge budget adjustments into an analysis object
   const mergeAdjustments = (base: Analysis, adjustments: any[]): Analysis => {
@@ -2120,6 +2209,47 @@ export default function Home() {
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
+        </Card>
+      )}
+
+      {/* ── Milestone Card ── */}
+      {activeMilestone && analysis && (
+        <Card variant="default" style={{ marginBottom: spacing.lg, borderLeftWidth: 3, borderLeftColor: colors.accent }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontFamily: fonts.mono, fontSize: 10, color: colors.accent, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 }}>
+                DAY {activeMilestone.day}
+              </Text>
+              <Text style={{ fontFamily: fonts.semibold, fontSize: 16, color: colors.text, marginBottom: 6 }}>
+                {activeMilestone.title}
+              </Text>
+              <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.dim, lineHeight: 20, marginBottom: activeMilestone.detail ? 4 : 12 }}>
+                {activeMilestone.insight}
+              </Text>
+              {activeMilestone.detail && (
+                <Text style={{ fontFamily: fonts.regular, fontSize: 13, color: colors.muted, lineHeight: 18, marginBottom: 12 }}>
+                  {activeMilestone.detail}
+                </Text>
+              )}
+              <TouchableOpacity
+                style={{ backgroundColor: colors.accent, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 100, alignSelf: 'flex-start' }}
+                onPress={() => {
+                  trackEvent('Milestone CTA Tapped', { milestone_id: activeMilestone.id });
+                  hapticLight();
+                  if (activeMilestone.ctaRoute === 'chat') {
+                    router.push('/(main)/(tabs)/chat');
+                  }
+                  dismissMilestone(activeMilestone.id);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={{ fontFamily: fonts.semibold, fontSize: 13, color: colors.bg }}>{activeMilestone.cta}</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity onPress={() => dismissMilestone(activeMilestone.id)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Text style={{ fontFamily: fonts.medium, fontSize: 14, color: colors.muted }}>{'\u2715'}</Text>
+            </TouchableOpacity>
+          </View>
         </Card>
       )}
 
@@ -4317,6 +4447,35 @@ export default function Home() {
     </Modal>
 
     {analysis && <Walkthrough visible={showWalkthrough} onDismiss={dismissWalkthrough} scrollRef={dashScrollRef} cardPositions={cardPositions} router={router} />}
+
+    {/* ── Achievement Toast ── */}
+    {achievementToast && (
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute', bottom: 100, left: spacing.lg, right: spacing.lg,
+          opacity: achievementFade, alignItems: 'center',
+        }}
+      >
+        <View style={{
+          backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.accent,
+          borderRadius: radius.xl, paddingVertical: spacing.md, paddingHorizontal: spacing.lg,
+          flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+          shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12,
+        }}>
+          <View style={{
+            width: 36, height: 36, borderRadius: 18, backgroundColor: `${colors.accent}20`,
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Text style={{ fontSize: 16, color: colors.accent, fontFamily: fonts.mono }}>{achievementToast.icon}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: fonts.semibold, fontSize: 14, color: colors.text }}>{achievementToast.name}</Text>
+            <Text style={{ fontFamily: fonts.regular, fontSize: 12, color: colors.dim }}>{achievementToast.description}</Text>
+          </View>
+        </View>
+      </Animated.View>
+    )}
     </View>
   );
 }

@@ -4,6 +4,7 @@ import { useRouter, useLocalSearchParams, useNavigation } from 'expo-router';
 import { CommonActions } from '@react-navigation/native';
 import { supabase } from '@/lib/supabase';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { gaPageView, gaEvent } from '@/lib/ga';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
@@ -119,6 +120,7 @@ function ProcessingInner() {
 
   useEffect(() => {
     trackScreen('Processing');
+    gaPageView('/onboarding/processing', 'Processing');
     runAnalysis();
 
     // Show a reassurance message if analysis takes > 45s
@@ -603,6 +605,11 @@ function ProcessingInner() {
         move_count: allMoves.length,
         segment: result.segment,
       });
+      gaEvent('onboarding_complete', {
+        transaction_count: result.enrichedTransactions.length,
+        move_count: allMoves.length,
+        segment: result.segment,
+      });
 
       // Show personalised first insight — user navigates manually
       const firstInsight = buildFirstInsight(identityData, result.profile, topMove);
@@ -658,7 +665,10 @@ function ProcessingInner() {
           </View>
         </View>
 
-        <Text style={styles.insightTitle}>Your plan is ready</Text>
+        <Text style={styles.insightTitle}>You're all set!</Text>
+        <Text style={[styles.insightText, { marginBottom: spacing.sm }]}>
+          Onboarding complete. Bocy is now working for you 24/7.
+        </Text>
         <Text style={styles.insightText}>{insight}</Text>
 
         {/* Key stats row */}

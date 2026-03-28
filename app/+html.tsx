@@ -34,6 +34,15 @@ export default function Root({ children }: PropsWithChildren) {
         {/* Prevent text size adjustment on orientation change */}
         <meta name="format-detection" content="telephone=no" />
 
+        {/* ── Google Analytics (GA4) ── */}
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-9M5YQ6864E" />
+        <script dangerouslySetInnerHTML={{ __html: `
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', 'G-9M5YQ6864E');
+        ` }} />
+
         <ScrollViewStyleReset />
 
         {/* Body scrolling disabled for RN ScrollView */}

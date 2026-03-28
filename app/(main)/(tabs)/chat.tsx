@@ -20,6 +20,7 @@ import { classifyAccounts, detectHighEarnerCohort } from '@/lib/account-classifi
 import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo';
 import { useVoiceConversation, type VoiceState } from '@/lib/use-voice-conversation';
 import { trackEvent, trackScreen } from '@/lib/mixpanel';
+import { gaPageView, gaEvent } from '@/lib/ga';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');
@@ -1242,6 +1243,7 @@ export default function Chat() {
   useFocusEffect(
     useCallback(() => {
       trackScreen('Chat');
+      gaPageView('/chat', 'Chat');
       loadContext();
       const unsub = onSyncComplete((result) => {
         if (!result?.analysis) return;
@@ -1828,6 +1830,20 @@ export default function Chat() {
       }
     } catch {}
 
+    // ── Growth report context (always inject when available) ──
+    try {
+      const { data: growthData } = await supabase
+        .from('growth_reports')
+        .select('report')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (growthData?.report) {
+        (ctx as any).growth_report = growthData.report;
+      }
+    } catch {}
+
     setContext(ctx);
 
     // ── Check if payday check-in was already dismissed ──
@@ -2229,6 +2245,7 @@ export default function Chat() {
     if ((!text.trim() && !attachment) || loading) return;
     hapticLight();
     trackEvent('Chat Message Sent', { source: _source, hasAttachment: !!attachment });
+    gaEvent('chat_message_sent', { source: _source });
 
     // Build message content — include attachment description if present
     let messageContent = text.trim();
