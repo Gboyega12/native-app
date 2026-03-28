@@ -29,7 +29,7 @@
     "expo-document-picker": "~14.0.8",
     "expo-font": "~14.0.11",
     "expo-haptics": "^55.0.8",
-    "expo-linear-gradient": "^55.0.10-canary-20260327-0789fbc",
+    "expo-linear-gradient": "~14.0.1",
     "expo-linking": "~8.0.11",
     "expo-router": "~6.0.23",
     "expo-splash-screen": "~31.0.13",
