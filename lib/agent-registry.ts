@@ -11,7 +11,9 @@ export type AgentId =
   | 'risk_investment'
   | 'tax_estate'
   | 'wealth_manager'
-  | 'growth';
+  | 'growth'
+  | 'frontend_designer'
+  | 'product_designer';
 
 // ── Tool identifiers (from decision-engine-tools.json) ──
 
@@ -47,7 +49,9 @@ export type SkillId =
   | 'growth_product'
   | 'tax_optimisation'
   | 'estate_planning'
-  | 'quant_models';
+  | 'quant_models'
+  | 'frontend_design'
+  | 'product_design';
 
 // ── Agent output schemas (for contract validation) ──
 
@@ -513,6 +517,57 @@ export const AGENT_REGISTRY: Record<AgentId, AgentDefinition> = {
   },
 };
 
+  frontend_designer: {
+    id: 'frontend_designer',
+    name: 'Frontend Designer Agent',
+    role: 'UI implementation engine — visual polish, animations, responsiveness, design system compliance',
+    requiredTools: [],
+    optionalTools: [],
+    skills: ['frontend_design', 'app_behaviour', 'tone'],
+    dependsOn: ['product_designer'],
+    hardRules: [
+      'All spacing must use theme tokens — no magic numbers',
+      'All colors must reference the semantic color system',
+      'Animations must be smooth on low-end Android',
+      'Every component must handle empty, loading, error, and success states',
+      'Must follow Nothing Phone dot-matrix aesthetic',
+      'Must pass WCAG AA contrast ratios',
+    ],
+    validateOutput: (output: unknown) => {
+      const errors: string[] = [];
+      const o = output as Record<string, unknown>;
+      if (!o || typeof o !== 'object') return { valid: false, errors: ['Output must be an object'] };
+      if (typeof o.component !== 'string') errors.push('component name must be a string');
+      return { valid: errors.length === 0, errors };
+    },
+  },
+
+  product_designer: {
+    id: 'product_designer',
+    name: 'Product Designer Agent',
+    role: 'UX strategy engine — user flows, information architecture, behavioral design, progressive disclosure',
+    requiredTools: [],
+    optionalTools: [],
+    skills: ['product_design', 'app_behaviour', 'bocy_philosophy', 'user_cohorts'],
+    dependsOn: [],
+    hardRules: [
+      'Every screen must have ONE clear primary action',
+      'Progressive disclosure by default — never show a wall of information',
+      'Minimum viable steps — merge screens where possible',
+      'Empty states must be welcoming, not nagging',
+      'Must reduce friction at every decision point',
+      'All flows must be completable in under 3 taps for the primary action',
+    ],
+    validateOutput: (output: unknown) => {
+      const errors: string[] = [];
+      const o = output as Record<string, unknown>;
+      if (!o || typeof o !== 'object') return { valid: false, errors: ['Output must be an object'] };
+      if (typeof o.flow !== 'string') errors.push('flow description must be a string');
+      return { valid: errors.length === 0, errors };
+    },
+  },
+};
+
 // ── Execution order (topologically sorted) ──
 
 export const EXECUTION_ORDER: AgentId[] = [
@@ -523,6 +578,8 @@ export const EXECUTION_ORDER: AgentId[] = [
   'tax_estate',
   'wealth_manager',
   'growth',
+  'product_designer',
+  'frontend_designer',
 ];
 
 // ── Helper: get all tools an agent needs ──
