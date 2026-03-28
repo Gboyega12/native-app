@@ -32,9 +32,9 @@ const paydayFingerprint = (pc: any): string => {
 
 
 /** Word-count threshold — messages longer than this get split into chunks */
-const CHUNK_WORD_THRESHOLD = 12;
+const CHUNK_WORD_THRESHOLD = 17;
 /** Hard cap on chat bubbles per assistant message — keeps replies conversational */
-const MAX_BUBBLES = 2;
+const MAX_BUBBLES = 4;
 
 /** Determine Bocy's mood from the latest chat message content */
 function getChatMood(lastMsg: string | undefined, baseMood: BocyMood, isLoading: boolean): BocyMood {
