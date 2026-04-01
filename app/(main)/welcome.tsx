@@ -5,8 +5,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
-import { gaPageView, gaEvent } from '@/lib/ga';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { BocyHero } from '@/components/Bocy';
 
@@ -21,9 +19,6 @@ export default function Welcome() {
   const [firstNameTouched, setFirstNameTouched] = useState(false);
   const firstNameError = firstNameTouched && !firstName.trim();
 
-  // Track page view on mount
-  useEffect(() => { trackScreen('Welcome'); gaPageView('/onboarding/welcome', 'Welcome'); }, []);
-
   const handleContinue = async () => {
     if (!firstName.trim()) return;
     setLoading(true);
@@ -31,8 +26,6 @@ export default function Welcome() {
       const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
       const { error } = await supabase.auth.updateUser({ data: { full_name: fullName } });
       if (error) throw error;
-      trackEvent('Onboarding Name Saved');
-      gaEvent('onboarding_name_saved', { step: 'welcome' });
       router.replace('/(main)/education');
     } catch {
       setLoading(false);
@@ -67,7 +60,7 @@ export default function Welcome() {
             <BenefitItem num="03" text="Guides you through each step" />
           </View>
 
-          <TouchableOpacity style={styles.button} onPress={() => { trackEvent('Onboarding Get Started'); setStep(1); }} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.button} onPress={() => { setStep(1); }} activeOpacity={0.8}>
             <Text style={styles.buttonText}>Get started</Text>
           </TouchableOpacity>
         </View>

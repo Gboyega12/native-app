@@ -5,8 +5,6 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
-import { gaPageView, gaEvent } from '@/lib/ga';
 import { hapticTick } from '@/lib/haptics';
 import { fonts, spacing } from '@/theme';
 import { GlassMockupSpending, GlassMockupChat, GlassMockupNetWorth } from '@/components/Bocy';
@@ -111,8 +109,6 @@ export default function Education() {
   const bottomEnter = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    trackScreen('Education');
-    gaPageView('/onboarding/education', 'Education');
     Animated.timing(bottomEnter, { toValue: 1, duration: 700, delay: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
   }, []);
 
@@ -120,10 +116,8 @@ export default function Education() {
 
   const handleNext = () => {
     if (isLast) {
-      trackEvent('Education Completed', { slides_viewed: currentPage + 1 });
       router.push('/(main)/identity');
     } else {
-      trackEvent('Education Slide Viewed', { slide: currentPage + 1 });
       const nextPage = currentPage + 1;
       setCurrentPage(nextPage);
       (scrollRef.current as any)?.scrollTo({ x: nextPage * containerWidth, animated: true });
@@ -131,7 +125,6 @@ export default function Education() {
   };
 
   const handleSkip = () => {
-    trackEvent('Education Skipped', { skipped_at_slide: currentPage });
     router.push('/(main)/identity');
   };
 

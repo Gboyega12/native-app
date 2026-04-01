@@ -15,7 +15,6 @@ import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
 import { BocyFace } from '@/components/Bocy';
 import type { Analysis, RecurringItem } from '@/lib/types';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
 
 type SubItem = {
   merchant: string;
@@ -118,12 +117,11 @@ export default function Subscriptions() {
     setRefreshing(false);
   };
 
-  useFocusEffect(useCallback(() => { trackScreen('Subscriptions'); loadSubs(); }, []));
+  useFocusEffect(useCallback(() => { loadSubs(); }, []));
 
   const onRefresh = () => { setRefreshing(true); loadSubs(); };
 
   const askBocy = (merchant: string) => {
-    trackEvent('Ask Bocy From Subscription', { merchant });
     router.push({
       pathname: '/(main)/(tabs)/chat',
       params: { prefill: `How do I cancel or downgrade my ${merchant} subscription? What alternatives are there?` },

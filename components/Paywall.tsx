@@ -8,7 +8,6 @@ import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { supabase } from '@/lib/supabase';
 import { useSubscription } from '@/lib/subscription';
-import { trackEvent } from '@/lib/mixpanel';
 
 const FEATURES = [
   { label: 'Personalised action plan', desc: 'Step-by-step moves ranked by impact on your finances' },
@@ -34,14 +33,12 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
   const [selectedPrice, setSelectedPrice] = useState<'monthly' | 'yearly'>('monthly');
 
   const handleDismiss = () => {
-    trackEvent('Paywall Dismissed');
     onClose();
   };
 
   // Reset state whenever modal opens so stale loading/error don't stick
   useEffect(() => {
     if (visible) {
-      trackEvent('Paywall Shown');
       setLoading(false);
       setError(null);
     }
@@ -69,7 +66,6 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
 
   // ── Stripe Checkout redirect ──
   const handleSubscribe = async () => {
-    trackEvent('Subscribe Tapped', { plan: selectedPrice });
     setLoading(true);
     setError(null);
     try {
@@ -96,7 +92,6 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       clearTimeout(timeout);
 
       if (!res.ok) {
-        trackEvent('Subscribe Failed', { plan: selectedPrice });
         const text = await res.text().catch(() => '');
         let msg = 'Unable to start checkout. Please try again.';
         try { msg = JSON.parse(text).error || msg; } catch {}
@@ -107,7 +102,6 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       const data = await res.json();
 
       if (!data.url) {
-        trackEvent('Subscribe Failed', { plan: selectedPrice });
         showError(data.error || 'Unable to start checkout. Please try again.');
         return;
       }
@@ -115,7 +109,6 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
       window.location.href = data.url;
       return; // page is navigating away; don't touch state
     } catch (err: any) {
-      trackEvent('Subscribe Failed', { plan: selectedPrice });
       console.warn('[Paywall] Checkout error:', err);
       const msg = err?.name === 'AbortError'
         ? 'Request timed out. Please try again.'
@@ -174,7 +167,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
             <View style={s.priceToggle}>
               <TouchableOpacity
                 style={[s.priceOption, selectedPrice === 'monthly' && s.priceOptionActive]}
-                onPress={() => { trackEvent('Paywall Price Toggled', { plan: 'monthly' }); setSelectedPrice('monthly'); }}
+                onPress={() => { setSelectedPrice('monthly'); }}
                 activeOpacity={0.7}
               >
                 <Text style={[s.priceAmount, selectedPrice !== 'monthly' && s.priceAmountInactive]}>
@@ -186,7 +179,7 @@ export default function Paywall({ visible, onClose, feature }: PaywallProps) {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.priceOption, selectedPrice === 'yearly' && s.priceOptionActive]}
-                onPress={() => { trackEvent('Paywall Price Toggled', { plan: 'yearly' }); setSelectedPrice('yearly'); }}
+                onPress={() => { setSelectedPrice('yearly'); }}
                 activeOpacity={0.7}
               >
                 <Text style={[s.priceAmount, selectedPrice !== 'yearly' && s.priceAmountInactive]}>

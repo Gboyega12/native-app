@@ -8,7 +8,6 @@ import { supabase } from '@/lib/supabase';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import type { Investment, InvestmentAssetClass, SavingsAccount } from '@/lib/types';
 
 // ── Constants ──

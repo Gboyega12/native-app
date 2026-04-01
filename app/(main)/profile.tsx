@@ -9,8 +9,6 @@ import { supabase } from '@/lib/supabase';
 import { fonts, spacing, radius, type ThemeColors } from '@/theme';
 import { useTheme } from '@/lib/theme-context';
 import { useResponsive } from '@/lib/responsive';
-import { useWebPush } from '@/lib/web-push';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { AnimGlyph, BreathingBar } from '@/components/Card';
 import type { Investment, InvestmentAssetClass } from '@/lib/types';
 
@@ -74,7 +72,6 @@ export default function Profile() {
     setExpandedSection((prev) => (prev === section ? null : section));
   };
   const [userId, setUserId] = useState<string | undefined>();
-  const webPush = useWebPush(userId);
 
   // Add debt modal state
   const [showAddDebt, setShowAddDebt] = useState(false);
@@ -126,7 +123,6 @@ export default function Profile() {
   ];
 
   useEffect(() => {
-    trackScreen('Profile');
     loadUser();
   }, []);
 
@@ -200,7 +196,6 @@ export default function Profile() {
   };
 
   const handleRemoveBank = async (bankId: string, label: string) => {
-    trackEvent('Bank Removed');
     const confirmed = window.confirm(`Remove ${label}?\n\nThis will disconnect this account and remove its data. You can reconnect later.`);
     if (!confirmed) return;
     try {
@@ -216,7 +211,6 @@ export default function Profile() {
   };
 
   const handleRemoveDebtAccount = async (debtId: string, label: string) => {
-    trackEvent('Debt Account Removed');
     const confirmed = window.confirm(`Remove ${label}?\n\nThis will remove this account from your profile.`);
     if (!confirmed) return;
     try {
@@ -232,7 +226,6 @@ export default function Profile() {
   };
 
   const handleAddAccount = () => {
-    trackEvent('Add Bank Tapped');
     router.push({ pathname: '/(main)/connect', params: { from: 'profile' } });
   };
 
@@ -263,7 +256,6 @@ export default function Profile() {
         .from('investments').insert(newInv).select().maybeSingle();
       if (insertErr) { setAddInvError(insertErr.message); setAddInvSaving(false); return; }
 
-      trackEvent('Investment Added', { asset_class: addInvClass });
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setInvestmentAccounts((prev) => [inserted as Investment, ...prev]);
 
@@ -276,7 +268,6 @@ export default function Profile() {
   };
 
   const handleRemoveInvestment = async (invId: string, label: string) => {
-    trackEvent('Investment Removed');
     const confirmed = window.confirm(`Remove ${label}?\n\nThis will remove this investment from your profile.`);
     if (!confirmed) return;
     try {
@@ -350,7 +341,6 @@ export default function Profile() {
       const { data: inserted, error } = await supabase.from('investments').insert(toInsert).select();
       if (error) { window.alert(`Import failed: ${error.message}`); setCsvImporting(false); return; }
 
-      trackEvent('Investments CSV Imported', { count: inserted?.length || 0 });
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setInvestmentAccounts((prev) => [...(inserted as Investment[]), ...prev]);
       setCsvRows([]);
@@ -412,8 +402,6 @@ export default function Profile() {
         return;
       }
 
-      trackEvent('Debt Account Added', { type: addDebtType });
-
       // Optimistic UI update
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setDebtAccounts((prev) => [...prev, inserted]);
@@ -435,7 +423,6 @@ export default function Profile() {
 
   const toggleNotifPref = async (key: keyof typeof notifPrefs) => {
     const newVal = !notifPrefs[key];
-    trackEvent('Notification Toggled', { type: key, enabled: newVal });
     setNotifPrefs((prev) => ({ ...prev, [key]: newVal }));
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -458,7 +445,6 @@ export default function Profile() {
 
 
   const handleSignOut = async () => {
-    trackEvent('Sign Out');
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -875,7 +861,7 @@ export default function Profile() {
       {/* ── GOALS ── */}
       <Text style={s.sectionLabelSpaced}>GOALS</Text>
       <View style={s.groupCard}>
-        <TouchableOpacity style={s.groupRow} onPress={() => { trackEvent('Edit Goals Tapped'); router.push({ pathname: '/(main)/goals', params: { from: 'profile' } }); }} activeOpacity={0.7}>
+        <TouchableOpacity style={s.groupRow} onPress={() => { router.push({ pathname: '/(main)/goals', params: { from: 'profile' } }); }} activeOpacity={0.7}>
           <View style={{ flex: 1 }}>
             <Text style={s.groupRowLabel}>Edit goals</Text>
             {identityData?.work_setup ? (
@@ -914,34 +900,6 @@ export default function Profile() {
             </View>
           </View>
         ))}
-        {webPush.supported && (
-          <>
-            <View style={s.groupDivider} />
-            <View style={s.groupRow}>
-              <View style={{ flex: 1, marginRight: 12 }}>
-                <Text style={s.groupRowLabel}>Push notifications</Text>
-                <Text style={s.groupRowDesc}>
-                  {webPush.permission === 'denied'
-                    ? 'Blocked in browser settings'
-                    : 'Receive alerts even when app is closed'}
-                </Text>
-              </View>
-              <Switch
-                value={webPush.subscribed}
-                onValueChange={() => {
-                  if (webPush.subscribed) {
-                    webPush.unsubscribe();
-                  } else {
-                    webPush.subscribe();
-                  }
-                }}
-                trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
-                thumbColor={webPush.subscribed ? colors.green : colors.thumbOff}
-                disabled={webPush.loading || webPush.permission === 'denied'}
-              />
-            </View>
-          </>
-        )}
       </View>
 
       {/* ── APPEARANCE — dark/light mode ── */}
@@ -957,7 +915,7 @@ export default function Profile() {
           </View>
           <Switch
             value={!isDark}
-            onValueChange={() => { trackEvent('Theme Toggled'); toggleTheme(); }}
+            onValueChange={() => { toggleTheme(); }}
             trackColor={{ false: colors.trackOff, true: colors.green + '60' }}
             thumbColor={isDark ? colors.thumbOff : colors.green}
             testID="profile-theme-toggle"

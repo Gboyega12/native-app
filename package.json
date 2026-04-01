@@ -29,7 +29,6 @@
     "@expo/vector-icons": "^15.0.3",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/netinfo": "^12.0.1",
-    "@sentry/node": "^10.43.0",
     "@sentry/react": "^10.43.0",
     "@supabase/supabase-js": "^2.95.3",
     "expo": "~54.0.33",
@@ -55,8 +54,6 @@
     "react-native-uuid": "^2.0.2",
     "react-native-web": "^0.21.2",
     "sanitize-html": "^2.17.1",
-    "stripe": "^20.4.0",
-    "web-push": "^3.6.7",
     "zod": "^4.3.6"
   },
   "devDependencies": {

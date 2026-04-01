@@ -5,7 +5,6 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { AnimGlyph } from '@/components/Card';
 import { hapticLight } from '@/lib/haptics';
@@ -163,8 +162,6 @@ export default function Goals() {
   const [risk, setRisk] = useState<string>('');
   const [dependents, setDependents] = useState<string[]>([]);
 
-  useEffect(() => { trackScreen('Goals'); }, []);
-
   // Preload existing identity data when editing from profile
   useEffect(() => {
     if (!isEdit) return;
@@ -268,7 +265,6 @@ export default function Goals() {
       saveAndContinue();
       return;
     }
-    trackEvent('Goals Step Completed', { step: step + 1 });
     animateStep(step + 1);
   };
 
@@ -348,14 +344,6 @@ export default function Goals() {
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
       }
-      trackEvent('Goals Saved', {
-        from: isEdit ? 'profile' : 'onboarding',
-        work_setup: workSetup,
-        household,
-        housing,
-        financial_experience: experience,
-        risk_appetite: risk,
-      });
       if (isEdit) {
         router.replace('/(main)/profile');
       } else {

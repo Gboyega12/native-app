@@ -5,8 +5,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
-import { gaPageView, gaEvent } from '@/lib/ga';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function SignUp() {
@@ -18,9 +16,6 @@ export default function SignUp() {
   const [error, setError] = useState('');
   const [verificationSent, setVerificationSent] = useState(false);
   const [resending, setResending] = useState(false);
-
-  // Track page view on mount
-  useEffect(() => { trackScreen('Sign Up'); gaPageView('/sign-up', 'Sign Up'); }, []);
 
   const handleSignUp = async () => {
     if (!email.trim() || !password.trim()) {
@@ -43,10 +38,8 @@ export default function SignUp() {
     setLoading(false);
     if (authError) {
       setError(authError.message);
-      trackEvent('Sign Up Failed', { method: 'email' });
     } else {
       setVerificationSent(true);
-      trackEvent('Sign Up', { method: 'email' });
     }
   };
 
@@ -62,9 +55,7 @@ export default function SignUp() {
     if (oauthError) {
       setError(oauthError.message);
       setGoogleLoading(false);
-      trackEvent('Sign Up Failed', { method: 'google' });
     } else {
-      trackEvent('Sign Up', { method: 'google' });
     }
   };
 

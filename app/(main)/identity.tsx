@@ -5,8 +5,6 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { trackEvent, trackScreen, setUserProperty } from '@/lib/mixpanel';
-import { gaPageView, gaEvent } from '@/lib/ga';
 import { colors, fonts, spacing, radius } from '@/theme';
 import { AnimGlyph } from '@/components/Card';
 import { hapticLight } from '@/lib/haptics';
@@ -175,9 +173,6 @@ export default function Identity() {
   const [risk, setRisk] = useState<string>('');
   const [dependents, setDependents] = useState<string[]>([]);
 
-  // Track page view on mount
-  useEffect(() => { trackScreen('Identity'); gaPageView('/onboarding/identity', 'Identity'); }, []);
-
   const selections = [workSetup, household, housing, experience, incomeBand, priorities, events, risk, dependents];
   const setters = [setWorkSetup, setHousehold, setHousing, setExperience, setIncomeBand, setPriorities, setEvents, setRisk, setDependents];
 
@@ -243,8 +238,6 @@ export default function Identity() {
       saveAndContinue();
       return;
     }
-    const screenLabels = ['work_setup', 'household', 'housing', 'experience', 'priorities', 'events', 'risk', 'dependents'];
-    trackEvent('Identity Step Completed', { step: screenLabels[step], step_number: step + 1 });
     animateStep(step + 1);
   };
 
@@ -320,18 +313,6 @@ export default function Identity() {
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
       }
-      trackEvent('Identity Completed', {
-        work_setup: workSetup,
-        household,
-        housing,
-        financial_experience: experience,
-        risk_appetite: risk,
-      });
-      setUserProperty('work_setup', workSetup);
-      setUserProperty('household', household);
-      setUserProperty('housing', housing);
-      setUserProperty('financial_experience', experience);
-      setUserProperty('risk_appetite', risk);
       router.push('/(main)/connect');
     } catch (err: any) {
       console.warn('[identity] Save failed:', err?.message);

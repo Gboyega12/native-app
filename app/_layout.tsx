@@ -8,9 +8,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
 import { registerServiceWorker } from '@/lib/register-sw';
-import { initMixpanel, resetMixpanel } from '@/lib/mixpanel';
 import { initSentryClient, setSentryUser, clearSentryUser } from '@/lib/sentry';
-import { gaSetUserId, gaPageView, gaEvent } from '@/lib/ga';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import UpdateBanner from '@/components/UpdateBanner';
 import AppDataProvider from '@/providers/AppDataProvider';
@@ -81,7 +79,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
         // Only clear analytics/routing on explicit sign-out — not on transient
         // null sessions from TOKEN_REFRESHED or INITIAL_SESSION events.
         if (event === 'SIGNED_OUT') {
-          resetMixpanel();
           clearSentryUser();
           setRouted(null);
           if (typeof window !== 'undefined') {
@@ -131,11 +128,6 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (session?.user?.id) {
       registerServiceWorker();
-      initMixpanel(session.user.id, session.user.email).catch((e) =>
-        console.warn('[Layout] initMixpanel error:', e),
-      );
-      gaSetUserId(session.user.id);
-      gaEvent('login', { method: 'session_restore' });
     }
   }, [session?.user?.id]);
 

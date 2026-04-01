@@ -27,15 +27,12 @@ import { DashboardSkeleton } from '@/components/Skeleton';
 import { WeeklySparkline } from '@/components/Charts';
 import Walkthrough, { useWalkthrough } from '@/components/Walkthrough';
 import InsightModal from '@/components/InsightModal';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
-import { gaPageView, gaEvent } from '@/lib/ga';
 import { getActiveMilestone, type MilestoneContent } from '@/lib/milestones';
 import { getAchievement, type Achievement } from '@/lib/achievements';
 import { useAppData } from '@/hooks/useAppData';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { formatTimeAgo, formatTxDateAge } from '@/lib/date-utils';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { useWebPush } from '@/lib/web-push';
 
 // Cache the beforeinstallprompt event for the install modal
 if (typeof window !== 'undefined') {
@@ -257,7 +254,6 @@ export default function Home() {
 
   // Web push & notification banner
   const [notifBannerDismissed, setNotifBannerDismissed] = useState(true);
-  const webPush = useWebPush(userIdRef.current ?? undefined);
 
   // Hydrate notification banner dismiss state
   useEffect(() => {
@@ -269,7 +265,7 @@ export default function Home() {
   // Banner priority queue — show max 1 banner at a time
   // Priority: offline (P0) > connection_warning (P1) > notification_promo (P2)
   const showConnectionBanner = !!connectionWarning && !connectionDismissed;
-  const showNotifBanner = webPush.supported && !webPush.subscribed && webPush.permission !== 'denied' && !notifBannerDismissed;
+  const showNotifBanner = false;
   const activeBanner: 'offline' | 'connection' | 'notification' | null =
     !isOnline ? 'offline'
     : showConnectionBanner ? 'connection'
@@ -1011,7 +1007,6 @@ export default function Home() {
   useFocusEffect(
     useCallback(() => {
       trackScreen('Home');
-      gaPageView('/home', 'Home');
       // Invalidate cached sync so returning from connect screen always fetches fresh data
       invalidateSyncCache();
       loadData();
@@ -3146,7 +3141,6 @@ export default function Home() {
                 style={{ backgroundColor: colors.accent, borderRadius: 100, paddingVertical: 10, alignItems: 'center', marginTop: 14 }}
                 onPress={() => {
                   trackEvent('Notification Banner CTA');
-                  webPush.subscribe();
                   setNotifBannerDismissed(true);
                   AsyncStorage.setItem('dismiss:notif_banner', 'true').catch(() => {});
                 }}

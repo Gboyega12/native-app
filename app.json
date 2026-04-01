@@ -24,7 +24,7 @@
       "themeColor": "#000000"
     },
     "ios": {
-      "bundleIdentifier": "com.bocy.app",
+      "bundleIdentifier": "com.app.bocy",
       "buildNumber": "1",
       "supportsTablet": false,
       "config": {

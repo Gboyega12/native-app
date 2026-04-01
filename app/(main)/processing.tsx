@@ -3,8 +3,6 @@ import { View, Text, Animated, StyleSheet, Easing, TouchableOpacity } from 'reac
 import { useRouter, useLocalSearchParams, useNavigation } from 'expo-router';
 import { CommonActions } from '@react-navigation/native';
 import { supabase } from '@/lib/supabase';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
-import { gaPageView, gaEvent } from '@/lib/ga';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
@@ -120,7 +118,6 @@ function ProcessingInner() {
 
   useEffect(() => {
     trackScreen('Processing');
-    gaPageView('/onboarding/processing', 'Processing');
     runAnalysis();
 
     // Show a reassurance message if analysis takes > 45s
@@ -602,11 +599,6 @@ function ProcessingInner() {
         monthly_income: Math.round(result.profile.monthly.income),
         monthly_spending: Math.round(result.profile.monthly.spending),
         surplus: Math.round(result.profile.monthly.surplus),
-        move_count: allMoves.length,
-        segment: result.segment,
-      });
-      gaEvent('onboarding_complete', {
-        transaction_count: result.enrichedTransactions.length,
         move_count: allMoves.length,
         segment: result.segment,
       });

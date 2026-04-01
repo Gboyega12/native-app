@@ -5,8 +5,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
-import { gaPageView, gaEvent } from '@/lib/ga';
 import { colors, fonts, spacing, radius } from '@/theme';
 
 export default function SignIn() {
@@ -19,8 +17,6 @@ export default function SignIn() {
   const [emailConfirmed, setEmailConfirmed] = useState(false);
 
   useEffect(() => {
-    trackScreen('Sign In');
-    gaPageView('/sign-in', 'Sign In');
     if (typeof window !== 'undefined') {
       if (sessionStorage.getItem('_emailConfirmed')) {
         sessionStorage.removeItem('_emailConfirmed');
@@ -45,11 +41,7 @@ export default function SignIn() {
       setError(authError.message === 'Invalid login credentials'
         ? 'Wrong email or password. Please try again.'
         : authError.message);
-      trackEvent('Sign In Failed', { method: 'email' });
-      gaEvent('login_failed', { method: 'email' });
     } else {
-      trackEvent('Sign In', { method: 'email' });
-      gaEvent('login', { method: 'email' });
     }
   };
 
@@ -65,9 +57,7 @@ export default function SignIn() {
     if (oauthError) {
       setError(oauthError.message);
       setGoogleLoading(false);
-      trackEvent('Sign In Failed', { method: 'google' });
     } else {
-      trackEvent('Sign In', { method: 'google' });
     }
   };
 

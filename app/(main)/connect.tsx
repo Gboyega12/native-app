@@ -7,8 +7,6 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import { getFinexerConsentUrl } from '@/lib/finexer';
 import { supabase } from '@/lib/supabase';
-import { trackEvent, trackScreen } from '@/lib/mixpanel';
-import { gaPageView, gaEvent } from '@/lib/ga';
 import { colors, fonts, spacing, radius } from '@/theme';
 import SkeletonLine from '@/components/Skeleton';
 import { invalidateSyncCache } from '@/lib/sync-coordinator';
@@ -77,8 +75,6 @@ export default function Connect() {
   const totalBanksToReconnect = pendingBanks.length + reconnectedCount;
   const isMultiReconnect = totalBanksToReconnect > 1;
 
-  // Track page view on mount
-  useEffect(() => { trackScreen('Connect', { from: isFromProfile ? 'profile' : 'onboarding', banks: totalBanksToReconnect }); }, []);
 
   // On mount: restore state, count bank_data rows, and guard against re-connection
   useEffect(() => {
@@ -213,7 +209,6 @@ export default function Connect() {
   };
 
   const handleConnectionSuccess = (csvData: string, _label: string) => {
-    trackEvent('Bank Connect Success', { method: _label });
     // Onboarding: single account connect → proceed straight to analysis
     clearConnectState();
     const source = _label === 'Bank account' ? 'bank' : 'csv';
@@ -221,7 +216,6 @@ export default function Connect() {
   };
 
   const handleOpenBanking = async () => {
-    trackEvent('Bank Connect Started', { method: 'open_banking' });
     setLoading(true);
     setErrorMsg('');
     setStatusMsg('Connecting to your bank...');
@@ -254,7 +248,6 @@ export default function Connect() {
   };
 
   const handleCSVUpload = async () => {
-    trackEvent('Bank Connect Started', { method: 'csv_upload' });
     setLoadingCSV(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -298,7 +291,6 @@ export default function Connect() {
   };
 
   const handlePDFUpload = async () => {
-    trackEvent('Bank Connect Started', { method: 'pdf_upload' });
     setLoadingPDF(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
