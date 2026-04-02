@@ -42,9 +42,9 @@ export default function Welcome() {
           </View>
 
           <Text style={styles.tagline}>MEET BOCY</Text>
-          <Text style={styles.title}>Your personal{'\n'}finance companion</Text>
+          <Text style={styles.title}>Your money,{'\n'}working harder</Text>
           <Text style={styles.subtitle}>
-            Always watching, always working for you.
+            Bocy spots what's costing you and shows you how to fix it.
           </Text>
 
           {/* Dot separator */}
@@ -55,9 +55,9 @@ export default function Welcome() {
           </View>
 
           <View style={styles.benefits}>
-            <BenefitItem num="01" text="Finds the smartest move you can make right now" />
-            <BenefitItem num="02" text="Builds a plan ranked by real impact" />
-            <BenefitItem num="03" text="Guides you through each step" />
+            <BenefitItem num="01" text="Spots hidden costs — overpaying on debt, fees you don't need, savings sitting idle" />
+            <BenefitItem num="02" text="Ranks every fix by how much it saves you" />
+            <BenefitItem num="03" text="Walks you through each one, step by step" />
           </View>
 
           <TouchableOpacity style={styles.button} onPress={() => { setStep(1); }} activeOpacity={0.8}>

@@ -57,7 +57,7 @@ export default function Splash() {
         easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
       }).start(() => {
-        router.replace('/(auth)/sign-in');
+        router.replace('/(auth)/intro');
       });
     }, 2800);
 
