@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, Easing } from 'react-native';
 import { useRouter } from 'expo-router';
-import { colors, fonts, spacing, radius } from '@/theme';
+import { colors, fonts, spacing } from '@/theme';
 import { BocyHero } from '@/components/Bocy';
 
 export default function Intro() {
@@ -18,17 +18,15 @@ export default function Intro() {
   const ctaOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const stagger = 120;
-    const dur = 500;
+    const stagger = 150;
+    const dur = 520;
     const ease = Easing.out(Easing.cubic);
 
-    // Hero
     Animated.parallel([
       Animated.timing(heroOpacity, { toValue: 1, duration: dur, delay: 100, easing: ease, useNativeDriver: true }),
       Animated.timing(heroScale, { toValue: 1, duration: dur, delay: 100, easing: ease, useNativeDriver: true }),
     ]).start();
 
-    // Headline + subline
     Animated.parallel([
       Animated.timing(headlineOpacity, { toValue: 1, duration: dur, delay: 100 + stagger, easing: ease, useNativeDriver: true }),
       Animated.timing(headlineY, { toValue: 0, duration: dur, delay: 100 + stagger, easing: ease, useNativeDriver: true }),
@@ -36,13 +34,11 @@ export default function Intro() {
 
     Animated.timing(sublineOpacity, { toValue: 1, duration: dur, delay: 100 + stagger * 2, easing: ease, useNativeDriver: true }).start();
 
-    // Benefits
     Animated.parallel([
       Animated.timing(benefitsOpacity, { toValue: 1, duration: dur, delay: 100 + stagger * 3, easing: ease, useNativeDriver: true }),
       Animated.timing(benefitsY, { toValue: 0, duration: dur, delay: 100 + stagger * 3, easing: ease, useNativeDriver: true }),
     ]).start();
 
-    // CTA
     Animated.timing(ctaOpacity, { toValue: 1, duration: dur, delay: 100 + stagger * 4, easing: ease, useNativeDriver: true }).start();
   }, []);
 
@@ -54,7 +50,7 @@ export default function Intro() {
           <BocyHero mood="happy" animate />
         </Animated.View>
 
-        {/* Headline */}
+        {/* Headline block */}
         <Animated.View style={{ opacity: headlineOpacity, transform: [{ translateY: headlineY }] }}>
           <Text style={s.tagline}>MEET BOCY</Text>
           <Text style={s.headline}>Your money,{'\n'}working harder</Text>
@@ -62,21 +58,31 @@ export default function Intro() {
 
         {/* Subline */}
         <Animated.Text style={[s.subline, { opacity: sublineOpacity }]}>
-          Bocy connects to your bank, spots what's costing you, and shows you exactly how to fix it.
+          Bocy connects to your bank, spots what's costing{'\n'}you, and shows you exactly how to fix it.
         </Animated.Text>
 
-        {/* Dot separator */}
+        {/* Dot-matrix separator */}
         <View style={s.dotSeparator}>
           {Array.from({ length: 5 }).map((_, i) => (
             <View key={i} style={s.dot} />
           ))}
         </View>
 
-        {/* Benefit pills */}
+        {/* Benefit pills — progressive disclosure */}
         <Animated.View style={[s.benefits, { opacity: benefitsOpacity, transform: [{ translateY: benefitsY }] }]}>
-          <BenefitItem num="01" text="Spots hidden costs — overpaying on debt, fees you don't need, savings sitting idle" />
-          <BenefitItem num="02" text="Ranks every fix by how much it saves you" />
-          <BenefitItem num="03" text="Walks you through each one, step by step" />
+          <BenefitItem
+            num="01"
+            text="Spots hidden costs"
+            detail="Overpaying on debt, unnecessary fees, savings sitting idle"
+          />
+          <BenefitItem
+            num="02"
+            text="Ranks every fix by how much it saves you"
+          />
+          <BenefitItem
+            num="03"
+            text="Walks you through each one, step by step"
+          />
         </Animated.View>
 
         {/* CTAs */}
@@ -109,11 +115,14 @@ export default function Intro() {
   );
 }
 
-function BenefitItem({ num, text }: { num: string; text: string }) {
+function BenefitItem({ num, text, detail }: { num: string; text: string; detail?: string }) {
   return (
     <View style={s.benefitRow}>
       <Text style={s.benefitNum}>{num}</Text>
-      <Text style={s.benefitText}>{text}</Text>
+      <View style={s.benefitContent}>
+        <Text style={s.benefitText}>{text}</Text>
+        {detail && <Text style={s.benefitDetail}>{detail}</Text>}
+      </View>
     </View>
   );
 }
@@ -153,6 +162,10 @@ const s = StyleSheet.create({
     lineHeight: 36,
     marginBottom: spacing.md,
     letterSpacing: -0.3,
+    // Letterpress: subtle inset shadow effect
+    textShadowColor: 'rgba(255,255,255,0.06)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 0,
   },
   subline: {
     fontFamily: fonts.regular,
@@ -191,12 +204,21 @@ const s = StyleSheet.create({
     width: 32,
     marginTop: 3,
   },
+  benefitContent: {
+    flex: 1,
+  },
   benefitText: {
     fontFamily: fonts.regular,
     fontSize: 15,
     color: colors.text2,
-    flex: 1,
     lineHeight: 22,
+  },
+  benefitDetail: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.muted,
+    lineHeight: 19,
+    marginTop: 2,
   },
   primaryButton: {
     backgroundColor: colors.accent,

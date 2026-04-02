@@ -55,7 +55,7 @@ export default function Welcome() {
           </View>
 
           <View style={styles.benefits}>
-            <BenefitItem num="01" text="Spots hidden costs — overpaying on debt, fees you don't need, savings sitting idle" />
+            <BenefitItem num="01" text="Spots hidden costs" detail="Overpaying on debt, unnecessary fees, savings sitting idle" />
             <BenefitItem num="02" text="Ranks every fix by how much it saves you" />
             <BenefitItem num="03" text="Walks you through each one, step by step" />
           </View>
@@ -132,11 +132,14 @@ export default function Welcome() {
   );
 }
 
-function BenefitItem({ num, text }: { num: string; text: string }) {
+function BenefitItem({ num, text, detail }: { num: string; text: string; detail?: string }) {
   return (
     <View style={styles.benefitRow}>
       <Text style={styles.benefitNum}>{num}</Text>
-      <Text style={styles.benefitText}>{text}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.benefitText}>{text}</Text>
+        {detail && <Text style={styles.benefitDetail}>{detail}</Text>}
+      </View>
     </View>
   );
 }
@@ -176,6 +179,9 @@ const styles = StyleSheet.create({
     lineHeight: 36,
     marginBottom: spacing.md,
     letterSpacing: -0.3,
+    textShadowColor: 'rgba(255,255,255,0.06)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 0,
   },
   subtitle: {
     fontFamily: fonts.regular,
@@ -218,8 +224,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 15,
     color: colors.text2,
-    flex: 1,
     lineHeight: 22,
+  },
+  benefitDetail: {
+    fontFamily: fonts.regular,
+    fontSize: 13,
+    color: colors.muted,
+    lineHeight: 19,
+    marginTop: 2,
   },
   form: {
     marginBottom: spacing.xl,
