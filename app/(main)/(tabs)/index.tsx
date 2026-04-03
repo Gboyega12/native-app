@@ -166,7 +166,6 @@ export default function Home() {
   }, [incomeFingerprint]);
 
   const dismissConnection = () => {
-    trackEvent('Connection Warning Dismissed');
     setConnectionDismissed(true);
     if (connectionWarning) {
       const fp = connectionWarning.banks.sort().join(',');
@@ -205,7 +204,6 @@ export default function Home() {
   }, [!!analysis]);
 
   const toggleMove = (idx: number) => {
-    trackEvent('Move Toggled', { move_index: idx });
     hapticMedium();
     LayoutAnimation.configureNext(SMOOTH_ANIM);
     setExpandedMoves((prev) => {
@@ -701,7 +699,6 @@ export default function Home() {
     if (allOverrides.length === 0) { setShowReviewModal(false); return; }
 
     const aiCount = aiConfirmed.size + Object.keys(aiOverrides).length;
-    trackEvent('Unified Review Saved', { categories: allOverrides.length, aiConfirmed: aiCount, manualCategorised: Object.keys(catAssignments).length });
     setSavingReview(true);
 
     try {
@@ -928,7 +925,6 @@ export default function Home() {
 
 
   const doRemoveIncomeSource = async (sourceName: string) => {
-    trackEvent('Income Source Removed');
     setRemovingSource(sourceName);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -965,7 +961,6 @@ export default function Home() {
   };
 
   const handleDeleteMove = (move: Move) => {
-    trackEvent('Move Deleted');
     const doDelete = async () => {
       if (!analysis) return;
       const updatedMoves = (analysis.all_moves || []).filter(m => m.action !== move.action);
@@ -1057,7 +1052,6 @@ export default function Home() {
         const milestone = getActiveMilestone(daysSince, analysis, dismissed);
         if (milestone) {
           setActiveMilestone(milestone);
-          trackEvent('Milestone Shown', { milestone_id: milestone.id, day: milestone.day });
         }
 
         // Check for new unnotified achievements
@@ -1079,7 +1073,6 @@ export default function Home() {
               Animated.timing(achievementFade, { toValue: 0, duration: 400, useNativeDriver: true }),
             ]).start(() => setAchievementToast(null));
 
-            trackEvent('Achievement Unlocked', { achievement_key: ach.key, name: ach.name });
             hapticSuccess();
 
             // Mark as notified
@@ -1103,7 +1096,6 @@ export default function Home() {
     updated.add(id);
     setDismissedMilestones(updated);
     await AsyncStorage.setItem('dismissed_milestones', JSON.stringify([...updated]));
-    trackEvent('Milestone Dismissed', { milestone_id: id });
   }, [dismissedMilestones]);
 
   // Merge budget adjustments into an analysis object
@@ -1329,7 +1321,6 @@ export default function Home() {
 
   // Pull-to-refresh handler — force a fresh Finexer fetch
   const onRefresh = useCallback(async () => {
-    trackEvent('Home Refreshed');
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -1593,7 +1584,6 @@ export default function Home() {
   const commitmentLabel = (c: string) => c === 'one_time' ? 'One-off' : c === 'short_term' ? 'Few months' : 'Ongoing';
 
   const togglePlanStep = (key: string, stepIndex: number, moveAction: string, totalSteps?: number) => {
-    trackEvent('Plan Step Toggled', { action: moveAction, step: stepIndex });
     setPlanProgress((prev) => {
       const row = prev[key] || { move_key: key, move_action: moveAction, approved: true, completed_steps: [] };
       const steps = [...row.completed_steps];
@@ -1623,7 +1613,6 @@ export default function Home() {
   };
 
   const handleStartMove = async (index: number, move: Move) => {
-    trackEvent('Move Started', { action: move.action });
     const uid = userIdRef.current;
     if (!uid) return;
     const key = `move-${index}`;
@@ -1642,7 +1631,6 @@ export default function Home() {
   };
 
   const handleStopMove = async (index: number) => {
-    trackEvent('Move Stopped');
     const uid = userIdRef.current;
     if (!uid) return;
     const key = `move-${index}`;
@@ -1834,7 +1822,6 @@ export default function Home() {
   };
 
   const handleRemovePlan = async (planId: string) => {
-    trackEvent('Plan Deleted');
     const uid = userIdRef.current;
     if (!uid) return;
     LayoutAnimation.configureNext(SMOOTH_ANIM);
@@ -2021,7 +2008,6 @@ export default function Home() {
 
   // Save / reset custom weekly limit
   const saveCustomLimit = () => {
-    trackEvent('Weekly Limit Set');
     const val = parseFloat(limitInput);
     if (!isNaN(val) && val > 0) {
       setCustomWeeklyLimit(val);
@@ -2031,7 +2017,6 @@ export default function Home() {
     }
   };
   const resetCustomLimit = () => {
-    trackEvent('Weekly Limit Reset');
     setCustomWeeklyLimit(null);
     AsyncStorage.removeItem('custom_weekly_limit').catch(() => {});
     setShowLimitEditor(false);
@@ -2149,7 +2134,7 @@ export default function Home() {
           </View>
           <TouchableOpacity
             style={s.menuButton}
-            onPress={() => { trackEvent('Profile Opened'); router.push('/(main)/profile'); }}
+            onPress={() => { router.push('/(main)/profile'); }}
             accessibilityRole="button"
             accessibilityLabel="Open profile menu"
           >
@@ -2229,7 +2214,6 @@ export default function Home() {
               <TouchableOpacity
                 style={{ backgroundColor: colors.accent, paddingVertical: 10, paddingHorizontal: 20, borderRadius: 100, alignSelf: 'flex-start' }}
                 onPress={() => {
-                  trackEvent('Milestone CTA Tapped', { milestone_id: activeMilestone.id });
                   hapticLight();
                   if (activeMilestone.ctaRoute === 'chat') {
                     router.push('/(main)/(tabs)/chat');
@@ -2318,7 +2302,6 @@ export default function Home() {
                 setAiOverrides({});
                 setAiExpandedKey(null);
                 setShowReviewModal(true);
-                trackEvent('Review Modal Opened', { aiSuggested: aiSuggestedGroups.length, unresolved: unresolvedGroups.length });
               }}
               activeOpacity={0.7}
               accessibilityRole="button"
@@ -2571,7 +2554,7 @@ export default function Home() {
                               );
                             })}
                             {/* Ask Bocy button */}
-                            <TouchableOpacity style={{ marginTop: 16, paddingVertical: 10, alignItems: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.accent }} onPress={() => { trackEvent('Ask Bocy From Move'); router.push('/(main)/(tabs)/chat'); }} activeOpacity={0.7}>
+                            <TouchableOpacity style={{ marginTop: 16, paddingVertical: 10, alignItems: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.accent }} onPress={() => { router.push('/(main)/(tabs)/chat'); }} activeOpacity={0.7}>
                               <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.accent }}>Ask Bocy about this</Text>
                             </TouchableOpacity>
                             {/* Delete plan button */}
@@ -2730,7 +2713,7 @@ export default function Home() {
                                 );
                               });
                             })()}
-                            <TouchableOpacity style={[s.heroCta, { marginTop: 16, paddingVertical: 12 }]} onPress={() => { trackEvent('Ask Bocy From Move'); router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } }); }}>
+                            <TouchableOpacity style={[s.heroCta, { marginTop: 16, paddingVertical: 12 }]} onPress={() => { router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } }); }}>
                               <Text style={s.heroCtaText}>Ask Bocy about this</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={{ marginTop: 12, alignItems: 'center', paddingVertical: 8 }} onPress={() => handleStopMove(i)}>
@@ -2951,7 +2934,7 @@ export default function Home() {
                               </View>
                             )}
 
-                            <TouchableOpacity style={{ borderWidth: 1, borderColor: colors.accentDim, borderRadius: 100, paddingVertical: 12, alignItems: 'center', marginBottom: 8 }} onPress={() => { trackEvent('Ask Bocy From Move'); router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } }); }}>
+                            <TouchableOpacity style={{ borderWidth: 1, borderColor: colors.accentDim, borderRadius: 100, paddingVertical: 12, alignItems: 'center', marginBottom: 8 }} onPress={() => { router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about: "${stripMd(move.action)}"` } }); }}>
                               <Text style={{ fontFamily: fonts.medium, fontSize: 13, color: colors.text }}>Ask Bocy about this</Text>
                             </TouchableOpacity>
 
@@ -3140,7 +3123,6 @@ export default function Home() {
               <TouchableOpacity
                 style={{ backgroundColor: colors.accent, borderRadius: 100, paddingVertical: 10, alignItems: 'center', marginTop: 14 }}
                 onPress={() => {
-                  trackEvent('Notification Banner CTA');
                   setNotifBannerDismissed(true);
                   AsyncStorage.setItem('dismiss:notif_banner', 'true').catch(() => {});
                 }}
@@ -3174,7 +3156,6 @@ export default function Home() {
                 const isExpanded = expandedInsights.has(idx);
                 return (
                   <TouchableOpacity key={`insight-${idx}`} activeOpacity={0.7} onPress={() => {
-                    trackEvent('Insight Tapped', { index: idx, statement: insight.statement?.slice(0, 40) });
                     hapticLight();
                     LayoutAnimation.configureNext(SMOOTH_ANIM);
                     setExpandedInsights(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; });
@@ -3223,7 +3204,6 @@ export default function Home() {
                           <TouchableOpacity
                             style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12 }}
                             onPress={() => {
-                              trackEvent('Insight Ask Bocy', { statement: insight.statement?.slice(0, 40) });
                               router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Tell me more about this: "${insight.statement}"` } });
                             }}
                             activeOpacity={0.7}
@@ -3254,7 +3234,6 @@ export default function Home() {
                     const isExpanded = expandedInsights.has(idx);
                     return (
                       <TouchableOpacity key={`insight-${idx}`} activeOpacity={0.7} onPress={() => {
-                        trackEvent('Insight Tapped', { index: idx, statement: insight.statement?.slice(0, 40) });
                         hapticLight();
                         LayoutAnimation.configureNext(SMOOTH_ANIM);
                         setExpandedInsights(prev => { const next = new Set(prev); if (next.has(idx)) next.delete(idx); else next.add(idx); return next; });
@@ -3396,7 +3375,6 @@ export default function Home() {
                     key={`agent-insight-${idx}`}
                     activeOpacity={0.7}
                     onPress={() => {
-                      trackEvent('Agent Insight Tapped', { type: ai.type, description: ai.description?.slice(0, 40) });
                       hapticLight();
                       router.push({ pathname: '/(main)/(tabs)/chat', params: { prefill: `Explain this to me and what I should do: "${ai.description}"` } });
                     }}
@@ -4417,7 +4395,6 @@ export default function Home() {
                     (window as any).__pwaInstallPrompt.prompt();
                     const result = await (window as any).__pwaInstallPrompt.userChoice;
                     if (result.outcome === 'accepted') {
-                      trackEvent('App Installed', { source: 'modal' });
                     }
                   } catch {}
                   (window as any).__pwaInstallPrompt = null;

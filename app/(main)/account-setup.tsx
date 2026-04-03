@@ -178,7 +178,6 @@ export default function AccountSetup() {
       const { data: inserted, error } = await supabase.from('debt_accounts').insert(newDebt).select().maybeSingle();
       if (error) { setDebtError(error.message); setDebtSaving(false); return; }
 
-      trackEvent('Debt Account Added (Setup)', { type: debtType });
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setDebts((prev) => [...prev, inserted]);
       setDebtStatus('added');
@@ -212,7 +211,6 @@ export default function AccountSetup() {
       const { data: inserted, error } = await supabase.from('savings_accounts').insert(newSav).select().maybeSingle();
       if (error) { setSavError(error.message); setSavSaving(false); return; }
 
-      trackEvent('Savings Account Added (Setup)', { type: savType });
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setSavings((prev) => [...prev, inserted as SavingsAccount]);
       setSavingsStatus('added');
@@ -249,7 +247,6 @@ export default function AccountSetup() {
       const { data: inserted, error } = await supabase.from('investments').insert(newInv).select().maybeSingle();
       if (error) { setInvError(error.message); setInvSaving(false); return; }
 
-      trackEvent('Investment Added (Setup)', { asset_class: invClass });
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setInvestments((prev) => [...prev, inserted as Investment]);
       setInvestmentStatus('added');
@@ -347,7 +344,6 @@ export default function AccountSetup() {
       const { data: inserted, error } = await supabase.from('properties').insert(newProp).select().maybeSingle();
       if (error) { setPropError(error.message); setPropSaving(false); return; }
 
-      trackEvent('Property Added (Setup)', { type: propType, has_mortgage: propHasMortgage });
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setProperties((prev) => [...prev, inserted as Property]);
       setPropertyStatus('added');
@@ -362,12 +358,6 @@ export default function AccountSetup() {
     if (typeof window !== 'undefined') {
       localStorage.setItem('bocy_account_setup_done', 'true');
     }
-    trackEvent('Account Setup Complete', {
-      debts: debts.length,
-      savings: savings.length,
-      investments: investments.length,
-      properties: properties.length,
-    });
     router.replace('/(main)/(tabs)');
   };
 
@@ -398,7 +388,6 @@ export default function AccountSetup() {
   // ── Section renderer ──
 
   const handleConnectOpenBanking = (type: 'credit_card' | 'savings') => {
-    trackEvent('Open Banking Connect (Setup)', { type });
     router.push({ pathname: '/(main)/connect', params: { accountType: type, returnTo: 'account-setup' } });
   };
 

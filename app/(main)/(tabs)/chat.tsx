@@ -1105,7 +1105,6 @@ export default function Chat() {
     (typeof Audio !== 'undefined' || !!window.speechSynthesis);
 
   const handleSpeak = async (msgIndex: number, text: string) => {
-    trackEvent('TTS Played');
     // If already speaking this message, stop
     if (speakingMsgIdx === msgIndex) {
       stopSpeechRef.current?.();
@@ -1156,7 +1155,6 @@ export default function Chat() {
   const voiceSupported = voiceConversationSupported || webSpeechAvailable;
 
   const toggleVoice = () => {
-    trackEvent('Voice Toggled');
     // Prefer cross-platform speech-to-speech hook
     if (voiceConversationSupported) {
       toggleVoiceConversation();
@@ -1899,7 +1897,6 @@ export default function Chat() {
   // ── Handle plan approval (via server API) ──
 
   const handleApprovePlan = async (msgIndex: number, actionIndex: number) => {
-    trackEvent('Plan Approved From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'plan_proposed') return;
@@ -1990,7 +1987,6 @@ export default function Chat() {
   // ── Handle plan dismissal (via server API) ──
 
   const handleDismissPlan = async (msgIndex: number, actionIndex: number) => {
-    trackEvent('Plan Dismissed From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action) return;
@@ -2031,7 +2027,6 @@ export default function Chat() {
   // ── Handle plan deletion (remove an already-approved plan) ──
 
   const handleDeletePlan = (msgIndex: number, actionIndex: number) => {
-    trackEvent('Plan Deleted From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'plan_proposed' || action.status !== 'approved') return;
@@ -2082,7 +2077,6 @@ export default function Chat() {
   // ── Handle budget item deletion ──
 
   const handleDeleteBudgetItem = (msgIndex: number, actionIndex: number) => {
-    trackEvent('Budget Item Deleted From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'budget_item_saved') return;
@@ -2133,7 +2127,6 @@ export default function Chat() {
   // ── Handle goal update acceptance ──
 
   const handleAcceptGoalUpdate = async (msgIndex: number, actionIndex: number) => {
-    trackEvent('Goals Updated From Chat');
     const msg = messages[msgIndex];
     const action = msg?.actions?.[actionIndex];
     if (!action || action.type !== 'goal_update_proposed') return;
@@ -2199,7 +2192,6 @@ export default function Chat() {
   };
 
   const handleKeepGoals = (msgIndex: number, actionIndex: number) => {
-    trackEvent('Goals Kept From Chat');
     const updated = [...messages];
     const updatedActions = [...(updated[msgIndex].actions || [])];
     updatedActions[actionIndex] = { ...updatedActions[actionIndex], status: 'dismissed' };
@@ -2241,7 +2233,6 @@ export default function Chat() {
   const sendMessage = async (text: string, _source: 'text' | 'voice' | 'suggestion' = 'text') => {
     if ((!text.trim() && !attachment) || loading) return;
     hapticLight();
-    trackEvent('Chat Message Sent', { source: _source, hasAttachment: !!attachment });
 
     // Build message content — include attachment description if present
     let messageContent = text.trim();
@@ -2448,7 +2439,6 @@ export default function Chat() {
   // ── Retry last failed message ──
 
   const retryLastMessage = () => {
-    trackEvent('Chat Message Retried');
     setError(null);
     // Remove the failed assistant message, re-send the last user message
     const withoutLastAssistant = messages.slice(0, -1);
@@ -2462,7 +2452,6 @@ export default function Chat() {
   // ── Clear conversation ──
 
   const clearChat = async () => {
-    trackEvent('Chat Cleared');
     stopSpeechRef.current?.();
     stopSpeaking();
     setSpeakingMsgIdx(null);
@@ -2561,7 +2550,7 @@ export default function Chat() {
               {/* Voice Orb — the hero CTA */}
               <VoiceOrb
                 listening={listening || voiceState === 'processing' || voiceState === 'thinking' || voiceState === 'speaking'}
-                onPress={voiceSupported ? toggleVoice : () => { trackEvent('Text Input Toggled'); setShowTextInput(true); setTimeout(() => inputRef.current?.focus(), 100); }}
+                onPress={voiceSupported ? toggleVoice : () => { setShowTextInput(true); setTimeout(() => inputRef.current?.focus(), 100); }}
                 disabled={loading && voiceState === 'idle'}
               />
 
@@ -2577,7 +2566,7 @@ export default function Chat() {
               {!listening && (
                 <TouchableOpacity
                   style={s.typeToggle}
-                  onPress={() => { trackEvent('Text Input Toggled'); setShowTextInput(!showTextInput); if (!showTextInput) setTimeout(() => inputRef.current?.focus(), 100); }}
+                  onPress={() => { setShowTextInput(!showTextInput); if (!showTextInput) setTimeout(() => inputRef.current?.focus(), 100); }}
                   activeOpacity={0.7}
                 >
                   <Text style={s.typeToggleText}>{showTextInput ? 'Hide keyboard' : 'Type instead'}</Text>
@@ -2634,7 +2623,7 @@ export default function Chat() {
                     <TouchableOpacity
                       key={i}
                       style={s.suggestedChip}
-                      onPress={() => { trackEvent('Suggested Question Tapped', { question: q }); sendMessage(q, 'suggestion'); }}
+                      onPress={() => { sendMessage(q, 'suggestion'); }}
                       activeOpacity={0.7}
                     >
                       <Text style={s.suggestedChipText}>{q}</Text>
@@ -2777,7 +2766,7 @@ export default function Chat() {
                 <TouchableOpacity
                   key={qi}
                   style={s.followUpChip}
-                  onPress={() => { trackEvent('Suggested Question Tapped', { question: q }); sendMessage(q, 'suggestion'); }}
+                  onPress={() => { sendMessage(q, 'suggestion'); }}
                   activeOpacity={0.7}
                 >
                   <Text style={s.followUpChipText}>{q}</Text>

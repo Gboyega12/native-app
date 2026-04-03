@@ -594,15 +594,6 @@ function ProcessingInner() {
         ).length,
       } as any;
 
-      trackEvent('Analysis Completed', {
-        transaction_count: result.enrichedTransactions.length,
-        monthly_income: Math.round(result.profile.monthly.income),
-        monthly_spending: Math.round(result.profile.monthly.spending),
-        surplus: Math.round(result.profile.monthly.surplus),
-        move_count: allMoves.length,
-        segment: result.segment,
-      });
-
       // Show personalised first insight — user navigates manually
       const firstInsight = buildFirstInsight(identityData, result.profile, topMove);
       setPlanStats({
@@ -613,7 +604,6 @@ function ProcessingInner() {
       setInsight(firstInsight || 'Your personalised action plan is ready.');
       // User will tap the button to navigate
     } catch (err: any) {
-      trackEvent('Analysis Failed', { error: err.message });
       setError(err.message || 'Analysis failed. Please try again.');
     }
   };

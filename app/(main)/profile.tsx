@@ -75,6 +75,7 @@ export default function Profile() {
 
   // Add debt modal state
   const [showAddDebt, setShowAddDebt] = useState(false);
+  const [debtStep, setDebtStep] = useState(0); // 0=identity, 1=amounts, 2=terms
   const [addDebtName, setAddDebtName] = useState('');
   const [addDebtType, setAddDebtType] = useState('credit_card');
   const [addDebtBalance, setAddDebtBalance] = useState('');
@@ -103,14 +104,16 @@ export default function Profile() {
   const [csvImporting, setCsvImporting] = useState(false);
 
   const DEBT_TYPES = [
-    { value: 'credit_card', label: 'Credit card' },
-    { value: 'personal_loan', label: 'Personal loan' },
-    { value: 'overdraft', label: 'Overdraft' },
-    { value: 'student_loan', label: 'Student loan' },
-    { value: 'car_finance', label: 'Car finance' },
-    { value: 'bnpl', label: 'Buy now pay later' },
-    { value: 'other', label: 'Other' },
+    { value: 'credit_card', label: 'Credit card', icon: '💳', placeholder: 'e.g. Barclaycard Visa' },
+    { value: 'personal_loan', label: 'Personal loan', icon: '🏦', placeholder: 'e.g. Lloyds loan' },
+    { value: 'overdraft', label: 'Overdraft', icon: '📊', placeholder: 'e.g. Monzo overdraft' },
+    { value: 'student_loan', label: 'Student loan', icon: '🎓', placeholder: 'e.g. Plan 2' },
+    { value: 'car_finance', label: 'Car finance', icon: '🚗', placeholder: 'e.g. PCP deal' },
+    { value: 'bnpl', label: 'BNPL', icon: '🛒', placeholder: 'e.g. Klarna, Clearpay' },
+    { value: 'other', label: 'Other', icon: '📄', placeholder: 'e.g. Family loan' },
   ];
+  const showLimitField = addDebtType === 'credit_card' || addDebtType === 'overdraft';
+  const selectedDebtTypeInfo = DEBT_TYPES.find((t) => t.value === addDebtType);
 
   const ASSET_CLASSES: { value: InvestmentAssetClass; label: string }[] = [
     { value: 'stocks', label: 'Stocks' },
@@ -414,6 +417,7 @@ export default function Profile() {
       setAddDebtRate('');
       setAddDebtMinPayment('');
       setAddDebtError('');
+      setDebtStep(0);
       setShowAddDebt(false);
     } catch (err: any) {
       setAddDebtError('Something went wrong. Please try again.');
@@ -662,9 +666,14 @@ export default function Profile() {
             )}
 
             <View style={s.groupDivider} />
-            <TouchableOpacity style={s.cardAddRow} onPress={() => setShowAddDebt(true)} activeOpacity={0.7}>
-              <Text style={s.cardAddText}>+ Add debt</Text>
-            </TouchableOpacity>
+            <View style={s.cardAddRowDouble}>
+              <TouchableOpacity style={s.cardAddBtn} onPress={handleAddAccount} activeOpacity={0.7}>
+                <Text style={s.cardAddText}>+ Connect via bank</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.cardAddBtn} onPress={() => setShowAddDebt(true)} activeOpacity={0.7}>
+                <Text style={[s.cardAddText, { color: colors.dim }]}>+ Add manually</Text>
+              </TouchableOpacity>
+            </View>
           </>
         )}
       </View>
@@ -732,47 +741,209 @@ export default function Profile() {
         )}
       </View>
 
-      {/* ── Add debt modal ── */}
-      <Modal visible={showAddDebt} transparent animationType="fade" onRequestClose={() => { setAddDebtError(''); setShowAddDebt(false); }}>
-        <Pressable style={s.modalOverlay} onPress={() => { setAddDebtError(''); setShowAddDebt(false); }}>
+      {/* ── Add debt modal (stepped form) ── */}
+      <Modal visible={showAddDebt} transparent animationType="fade" onRequestClose={() => { setAddDebtError(''); setDebtStep(0); setShowAddDebt(false); }}>
+        <Pressable style={s.modalOverlay} onPress={() => { setAddDebtError(''); setDebtStep(0); setShowAddDebt(false); }}>
           <Pressable style={s.modalContent} onPress={() => {}}>
-            <View style={s.modalHeader}>
-              <Text style={s.modalTitle}>Add debt</Text>
-              <TouchableOpacity style={s.modalCloseIcon} onPress={() => { setAddDebtError(''); setShowAddDebt(false); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={s.modalDesc}>Track debts not connected via Open Banking.</Text>
-
-            <Text style={s.modalLabel}>Account name</Text>
-            <TextInput style={s.modalInput} value={addDebtName} onChangeText={setAddDebtName} placeholder="e.g. Barclaycard, Klarna" placeholderTextColor={colors.muted} />
-
-            <Text style={s.modalLabel}>Type</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
-              {DEBT_TYPES.map((t) => (
-                <TouchableOpacity key={t.value} style={[s.debtTypeChip, addDebtType === t.value && s.debtTypeChipActive]} onPress={() => setAddDebtType(t.value)} activeOpacity={0.7}>
-                  <Text style={[s.debtTypeChipText, addDebtType === t.value && s.debtTypeChipTextActive]}>{t.label}</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Header with back/close */}
+              <View style={s.modalHeader}>
+                {debtStep > 0 ? (
+                  <TouchableOpacity onPress={() => { setAddDebtError(''); setDebtStep((p) => p - 1); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Text style={{ fontFamily: fonts.regular, fontSize: 20, color: colors.accent }}>{'\u2039'}</Text>
+                  </TouchableOpacity>
+                ) : <View />}
+                <TouchableOpacity style={s.modalCloseIcon} onPress={() => { setAddDebtError(''); setDebtStep(0); setShowAddDebt(false); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Text style={s.modalCloseIconText}>{'\u2715'}</Text>
                 </TouchableOpacity>
-              ))}
-            </View>
+              </View>
 
-            <Text style={s.modalLabel}>Outstanding balance</Text>
-            <TextInput style={s.modalInput} value={addDebtBalance} onChangeText={setAddDebtBalance} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+              {/* Step indicator dots */}
+              <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: spacing.lg }}>
+                {[0, 1, 2].map((i) => (
+                  <View key={i} style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: i === debtStep ? colors.accent : colors.border }} />
+                ))}
+              </View>
 
-            <Text style={s.modalLabel}>Credit limit <Text style={s.modalOptional}>(optional)</Text></Text>
-            <TextInput style={s.modalInput} value={addDebtLimit} onChangeText={setAddDebtLimit} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+              {/* ── Step 0: Identity ── */}
+              {debtStep === 0 && (
+                <>
+                  <Text style={s.modalTitle}>What type of debt?</Text>
+                  <Text style={[s.modalDesc, { marginBottom: spacing.lg }]}>Select the type, then name it.</Text>
 
-            <Text style={s.modalLabel}>Interest rate <Text style={s.modalOptional}>(optional)</Text></Text>
-            <TextInput style={s.modalInput} value={addDebtRate} onChangeText={setAddDebtRate} placeholder="e.g. 22.9" placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+                  {/* Type cards */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: spacing.lg }}>
+                    {DEBT_TYPES.map((t) => (
+                      <TouchableOpacity
+                        key={t.value}
+                        style={[s.debtTypeCard, addDebtType === t.value && s.debtTypeCardActive]}
+                        onPress={() => setAddDebtType(t.value)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={{ fontSize: 20, marginBottom: 4 }}>{t.icon}</Text>
+                        <Text style={[s.debtTypeCardLabel, addDebtType === t.value && s.debtTypeCardLabelActive]}>{t.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
 
-            <Text style={s.modalLabel}>Minimum payment <Text style={s.modalOptional}>(optional)</Text></Text>
-            <TextInput style={s.modalInput} value={addDebtMinPayment} onChangeText={setAddDebtMinPayment} placeholder={'\u00a3 0.00'} placeholderTextColor={colors.muted} keyboardType="decimal-pad" />
+                  {/* Account name */}
+                  <Text style={s.modalLabel}>Account name</Text>
+                  <TextInput
+                    style={s.modalInput}
+                    value={addDebtName}
+                    onChangeText={setAddDebtName}
+                    placeholder={selectedDebtTypeInfo?.placeholder || 'e.g. Barclaycard'}
+                    placeholderTextColor={colors.muted}
+                  />
 
-            {addDebtError ? <Text style={s.modalError}>{addDebtError}</Text> : null}
+                  {addDebtError ? <Text style={s.modalError}>{addDebtError}</Text> : null}
 
-            <TouchableOpacity style={s.modalSaveBtn} onPress={handleSaveDebt} disabled={addDebtSaving} activeOpacity={0.8}>
-              {addDebtSaving ? <ActivityIndicator color={colors.bg} size="small" /> : <Text style={s.modalSaveBtnText}>Save</Text>}
-            </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.modalSaveBtn, !addDebtName.trim() && { opacity: 0.5 }]}
+                    onPress={() => {
+                      if (!addDebtName.trim()) { setAddDebtError('Please enter an account name.'); return; }
+                      setAddDebtError('');
+                      setDebtStep(1);
+                    }}
+                    disabled={!addDebtName.trim()}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.modalSaveBtnText}>Next</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* ── Step 1: Amounts ── */}
+              {debtStep === 1 && (
+                <>
+                  <Text style={s.modalTitle}>How much?</Text>
+                  <Text style={[s.modalDesc, { marginBottom: spacing.lg }]}>
+                    Enter the outstanding balance{showLimitField ? ' and credit limit' : ''}.
+                  </Text>
+
+                  {/* Outstanding balance with £ prefix */}
+                  <Text style={s.modalLabel}>Outstanding balance</Text>
+                  <View style={s.prefixInputWrap}>
+                    <Text style={s.prefixSymbol}>{'\u00a3'}</Text>
+                    <TextInput
+                      style={s.prefixInput}
+                      value={addDebtBalance}
+                      onChangeText={setAddDebtBalance}
+                      placeholder="0.00"
+                      placeholderTextColor={colors.muted}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+
+                  {/* Credit limit — only for credit_card and overdraft */}
+                  {showLimitField && (
+                    <>
+                      <Text style={s.modalLabel}>Credit limit <Text style={s.modalOptional}>(optional)</Text></Text>
+                      <View style={s.prefixInputWrap}>
+                        <Text style={s.prefixSymbol}>{'\u00a3'}</Text>
+                        <TextInput
+                          style={s.prefixInput}
+                          value={addDebtLimit}
+                          onChangeText={setAddDebtLimit}
+                          placeholder="0.00"
+                          placeholderTextColor={colors.muted}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+
+                      {/* Live utilisation bar */}
+                      {(() => {
+                        const bal = parseFloat(addDebtBalance) || 0;
+                        const lim = parseFloat(addDebtLimit) || 0;
+                        if (bal > 0 && lim > 0) {
+                          const pct = Math.min(100, Math.round((bal / lim) * 100));
+                          const isHigh = pct >= 75;
+                          return (
+                            <View style={{ marginTop: 8, marginBottom: 4 }}>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                                <Text style={{ fontFamily: fonts.regular, fontSize: 11, color: colors.dim }}>Utilisation</Text>
+                                <Text style={{ fontFamily: fonts.mono, fontSize: 11, color: isHigh ? colors.coral : colors.accent }}>{pct}%</Text>
+                              </View>
+                              <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.border, overflow: 'hidden' }}>
+                                <View style={{ width: `${pct}%`, height: '100%', borderRadius: 2, backgroundColor: isHigh ? colors.coral : colors.accent }} />
+                              </View>
+                            </View>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </>
+                  )}
+
+                  {addDebtError ? <Text style={s.modalError}>{addDebtError}</Text> : null}
+
+                  <TouchableOpacity
+                    style={[s.modalSaveBtn, !(parseFloat(addDebtBalance) > 0) && { opacity: 0.5 }]}
+                    onPress={() => {
+                      const bal = parseFloat(addDebtBalance);
+                      if (isNaN(bal) || bal <= 0) { setAddDebtError('Please enter a valid balance.'); return; }
+                      setAddDebtError('');
+                      setDebtStep(2);
+                    }}
+                    disabled={!(parseFloat(addDebtBalance) > 0)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.modalSaveBtnText}>Next</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {/* ── Step 2: Terms (optional) ── */}
+              {debtStep === 2 && (
+                <>
+                  <Text style={s.modalTitle}>Extra details</Text>
+                  <Text style={[s.modalDesc, { marginBottom: spacing.lg }]}>Optional — helps Bocy give better advice.</Text>
+
+                  {/* Interest rate with % suffix */}
+                  <Text style={s.modalLabel}>Interest rate <Text style={s.modalOptional}>(optional)</Text></Text>
+                  <View style={s.prefixInputWrap}>
+                    <TextInput
+                      style={[s.prefixInput, { flex: 1 }]}
+                      value={addDebtRate}
+                      onChangeText={setAddDebtRate}
+                      placeholder="e.g. 22.9"
+                      placeholderTextColor={colors.muted}
+                      keyboardType="decimal-pad"
+                    />
+                    <Text style={s.suffixSymbol}>%</Text>
+                  </View>
+
+                  {/* Minimum payment with £ prefix */}
+                  <Text style={s.modalLabel}>Minimum payment <Text style={s.modalOptional}>(optional)</Text></Text>
+                  <View style={s.prefixInputWrap}>
+                    <Text style={s.prefixSymbol}>{'\u00a3'}</Text>
+                    <TextInput
+                      style={s.prefixInput}
+                      value={addDebtMinPayment}
+                      onChangeText={setAddDebtMinPayment}
+                      placeholder="0.00"
+                      placeholderTextColor={colors.muted}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+
+                  {addDebtError ? <Text style={s.modalError}>{addDebtError}</Text> : null}
+
+                  <TouchableOpacity style={s.modalSaveBtn} onPress={handleSaveDebt} disabled={addDebtSaving} activeOpacity={0.8}>
+                    {addDebtSaving ? <ActivityIndicator color={colors.bg} size="small" /> : <Text style={s.modalSaveBtnText}>Save</Text>}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={{ alignItems: 'center', paddingVertical: 12 }}
+                    onPress={() => { setAddDebtRate(''); setAddDebtMinPayment(''); handleSaveDebt(); }}
+                    disabled={addDebtSaving}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ fontFamily: fonts.regular, fontSize: 14, color: colors.dim }}>Skip and save</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -1085,4 +1256,30 @@ const createStyles = (c: ThemeColors) => StyleSheet.create({
   debtTypeChipActive: { backgroundColor: c.accentDim, borderColor: c.accent },
   debtTypeChipText: { fontFamily: fonts.medium, fontSize: 12, color: c.dim },
   debtTypeChipTextActive: { color: c.accent },
+
+  // ── Stepped debt form ──
+  debtTypeCard: {
+    width: '30%' as any, minWidth: 90, backgroundColor: c.bg, borderWidth: 1, borderColor: c.border,
+    borderRadius: radius.md, paddingVertical: 14, paddingHorizontal: 8,
+    alignItems: 'center' as const,
+  },
+  debtTypeCardActive: { backgroundColor: c.accentDim, borderColor: c.accent },
+  debtTypeCardLabel: { fontFamily: fonts.medium, fontSize: 11, color: c.dim, textAlign: 'center' as const },
+  debtTypeCardLabelActive: { color: c.accent },
+  prefixInputWrap: {
+    flexDirection: 'row' as const, alignItems: 'center' as const,
+    backgroundColor: c.bg, borderWidth: 1, borderColor: c.border, borderRadius: 12,
+    overflow: 'hidden' as const,
+  },
+  prefixSymbol: {
+    fontFamily: fonts.medium, fontSize: 14, color: c.muted,
+    paddingLeft: 12, paddingRight: 4,
+  },
+  suffixSymbol: {
+    fontFamily: fonts.medium, fontSize: 14, color: c.muted,
+    paddingRight: 12, paddingLeft: 4,
+  },
+  prefixInput: {
+    flex: 1, padding: 12, fontFamily: fonts.regular, fontSize: 14, color: c.text,
+  },
 });
