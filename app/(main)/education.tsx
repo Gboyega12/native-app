@@ -13,24 +13,26 @@ const IMG_OPTIMISE = require('@/assets/images/education/optimise.jpg') as ImageS
 const IMG_ASK = require('@/assets/images/education/ask.jpg') as ImageSourcePropType;
 const IMG_GROW = require('@/assets/images/education/grow.jpg') as ImageSourcePropType;
 
+// Post-sign-up education — the "what you'll get" after connecting your bank.
+// Complements the pre-auth intro which covers the "why" (problem → solution).
 const SLIDES = [
   {
     mockup: 'spending' as const,
-    title: 'Optimise\nyour money',
-    body: 'Net worth, spending, and investments.',
+    title: 'See where\nevery £ goes',
+    body: 'Automatic spending breakdowns, surplus tracking, and personalised weekly budgets.',
     image: IMG_OPTIMISE,
   },
   {
     mockup: 'chat' as const,
-    title: 'Ask\nanything',
-    body: 'Summaries, insights, and advice.',
+    title: 'Ask Bocy\nanything',
+    body: 'Get instant answers about your finances — from tax questions to debt strategy.',
     image: IMG_ASK,
   },
   {
     mockup: 'networth' as const,
-    title: 'Grow your\nwealth',
-    body: 'Forecasting, investing and more.',
-    cta: "Let's get started",
+    title: 'Grow your\nnet worth',
+    body: 'Ranked savings actions, investment tracking, and real-time progress milestones.',
+    cta: "Connect your bank",
     image: IMG_GROW,
   },
 ];

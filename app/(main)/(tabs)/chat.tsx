@@ -19,6 +19,7 @@ import { solveBudgetAllocation } from '@/lib/budget-solver';
 import { classifyAccounts, detectHighEarnerCohort } from '@/lib/account-classifier';
 import { simulateHouseholdCashflow, estimateVolatility } from '@/lib/monte-carlo';
 import { useVoiceConversation, type VoiceState } from '@/lib/use-voice-conversation';
+import { trackScreen } from '@/lib/analytics';
 
 /** Strip markdown bold/italic markers from text that will be rendered with plain <Text> */
 const stripMd = (s?: string | null) => (s || '').replace(/\*\*/g, '');

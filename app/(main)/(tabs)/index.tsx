@@ -33,6 +33,7 @@ import { useAppData } from '@/hooks/useAppData';
 import EnrichmentEngine from '@/lib/enrichment-engine';
 import { formatTimeAgo, formatTxDateAge } from '@/lib/date-utils';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { trackScreen } from '@/lib/analytics';
 
 // Cache the beforeinstallprompt event for the install modal
 if (typeof window !== 'undefined') {

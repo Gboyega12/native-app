@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { colors, fonts, spacing, radius } from '@/theme';
 import type { Analysis, Goals, BudgetCategory } from '@/lib/types';
+import { trackScreen } from '@/lib/analytics';
 
 const STEPS = [
   'Scanning transactions',
